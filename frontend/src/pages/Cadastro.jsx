@@ -5,12 +5,28 @@ import { useNavigate } from 'react-router-dom'
 
 export default function Cadastro(){
   const nav = useNavigate()
-  const [form,setForm]=useState({nome:'',email:'',senha:'',tipo:'cliente'})
+  const [form,setForm]=useState({nome:'',email:'',senha:'',tipo:'cliente', telefone:''})
   const [confirm,setConfirm]=useState('')
   const [showPass,setShowPass]=useState(false)
   const [showConfirm,setShowConfirm]=useState(false)
   const [err,setErr]=useState('')
   const [loading,setLoading]=useState(false)
+
+  // máscara BR simples: (11) 99999-9999 ou (11) 9999-9999
+  function formatBRPhone(v){
+    const d = (v || '').replace(/\D/g,'').slice(0,11)
+    if (d.length <= 2) return d
+    if (d.length <= 6) return `(${d.slice(0,2)}) ${d.slice(2)}`
+    if (d.length <= 10) return `(${d.slice(0,2)}) ${d.slice(2,6)}-${d.slice(6)}`
+    return `(${d.slice(0,2)}) ${d.slice(2,7)}-${d.slice(7)}`
+  }
+  function normalizeToE164BR(v){
+    const d = (v || '').replace(/\D/g,'')
+    if (!d) return ''
+    if (d.startsWith('55')) return d // já em E.164 (sem +)
+    if (d.length === 10 || d.length === 11) return '55' + d // DDD + número
+    return d // deixa como está (ex.: outro país), backend pode validar
+  }
 
   // validações simples
   const emailOk = useMemo(() => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim()), [form.email])
@@ -27,18 +43,29 @@ export default function Cadastro(){
   const matchOk = form.senha && confirm && form.senha === confirm
   const nomeOk = form.nome.trim().length >= 2
 
-  const disabled = loading || !nomeOk || !emailOk || !senhaOk || !matchOk
+  // telefone é OPCIONAL, mas se preenchido precisa estar plausível
+  const phoneDigits = (form.telefone || '').replace(/\D/g,'')
+  const phoneOk = useMemo(() => {
+    if (!phoneDigits) return true // opcional
+    // aceita local BR 10/11 dígitos OU E.164 BR (55 + 10/11 = 12/13 dígitos)
+    if (phoneDigits.startsWith('55')) return phoneDigits.length === 12 || phoneDigits.length === 13
+    return phoneDigits.length === 10 || phoneDigits.length === 11
+  }, [phoneDigits])
+
+  const disabled = loading || !nomeOk || !emailOk || !senhaOk || !matchOk || !phoneOk
 
   async function submit(e){
     e.preventDefault(); setErr('')
     if (disabled) return
     setLoading(true)
     try {
+      const telefoneNorm = normalizeToE164BR(form.telefone.trim())
       const payload = {
         nome: form.nome.trim(),
         email: form.email.trim(),
         senha: form.senha,
-        tipo: form.tipo
+        tipo: form.tipo,
+        ...(telefoneNorm ? { telefone: telefoneNorm } : {}) // envia só se informado
       }
       const { token, user } = await Api.register(payload)
       saveToken(token); saveUser(user)
@@ -77,6 +104,23 @@ export default function Cadastro(){
           required
         />
         {!emailOk && form.email && <small className="muted">Informe um e-mail válido.</small>}
+
+        {/* Telefone (WhatsApp) - opcional */}
+        <input
+          className="input"
+          type="tel"
+          inputMode="tel"
+          placeholder="Telefone (WhatsApp) com DDD — ex: (11) 99999-9999"
+          value={formatBRPhone(form.telefone)}
+          onChange={e=>setForm({...form, telefone:e.target.value})}
+          autoComplete="tel"
+        />
+        {!phoneOk && form.telefone && (
+          <small className="muted">Informe um telefone válido com DDD. Ex.: (11) 99999-9999</small>
+        )}
+        <small className="muted">
+          O telefone é opcional, mas necessário para receber lembretes via WhatsApp.
+        </small>
 
         {/* Senha + força + mostrar/ocultar */}
         <div className="row" style={{ gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>

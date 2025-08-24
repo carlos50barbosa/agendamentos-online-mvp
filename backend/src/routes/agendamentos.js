@@ -122,8 +122,8 @@ router.post('/', auth, isCliente, async (req, res) => {
     // ===== Lembretes agendados (WhatsApp) - Cliente =====
     // 1 dia antes e 15 minutos antes (apenas se ainda não passou)
     const now = Date.now();
-    const t1 = new Date(inicioDate.getTime() - 2 * 60 * 60 * 1000); // -24h
-    const t2 = new Date(inicioDate.getTime() - 1 * 60 * 1000);      // -15m
+    const t1 = new Date(inicioDate.getTime() - 24 * 60 * 60 * 1000); // -24h
+    const t2 = new Date(inicioDate.getTime() - 15 * 60 * 1000);      // -15m
 
     const hora = brTime(inicioDate.toISOString());
     const data = brDate(inicioDate.toISOString());

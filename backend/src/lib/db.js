@@ -1,13 +1,13 @@
-import mysql from 'mysql2/promise';
-import dotenv from 'dotenv'; dotenv.config();
+// backend/src/db.js
+import mysql from 'mysql2/promise'
+import { config } from './config.js'
 
 export const pool = mysql.createPool({
-  host: process.env.MYSQL_HOST || 'localhost',
-  user: process.env.MYSQL_USER || 'root',
-  password: process.env.MYSQL_PASSWORD || '',
-  database: process.env.MYSQL_DATABASE || 'agendamentos',
+  host: config.db.host,
+  port: config.db.port,
+  user: config.db.user,
+  password: config.db.pass,
+  database: config.db.name,
   waitForConnections: true,
   connectionLimit: 10,
-  queueLimit: 0,
-  timezone: 'Z'
-});
+})

@@ -1,178 +1,200 @@
-import 'dotenv/config';
+// backend/src/lib/notifications.js
+import nodemailer from 'nodemailer';
+import fetch from 'node-fetch';
 
-// src/lib/notifications.js
-// ESM — Node >= 18 (fetch global)
-// Exports: notifyEmail, notifyWhatsapp, scheduleWhatsApp, initNotifications
-
-/* ===================== Utils ===================== */
-function normalizePhone(raw) {
-  if (!raw) return null;
-  const digits = String(raw).replace(/\D/g, "");
-  // ajuste se quiser forçar país: if (!digits.startsWith('55')) return null;
-  return digits.length >= 10 ? digits : null;
-}
-
-/* ===================== Email ===================== */
-// Envia e-mail via SMTP (se SMTP_* estiver configurado). Caso contrário, apenas loga (MVP).
+/* =========================
+ *  E-MAIL
+ * ========================= */
 export async function notifyEmail(to, subject, html) {
-  if (!to) return; // sem destinatário = no-op
-  const { SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM } = process.env;
-
-  if (!SMTP_HOST) {
-    console.log("[notifyEmail] (dev) sem SMTP configurado. to=%s subject=%s", to, subject);
-    return;
-  }
-
   try {
-    // import dinâmico para não exigir dependência em todos os ambientes
-    const nodemailer = (await import("nodemailer")).default;
+    if (!to) return { skipped: true, reason: 'missing_to' };
+
+    const { SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM } = process.env;
+    if (!SMTP_HOST || !SMTP_PORT || !SMTP_USER || !SMTP_PASS) {
+      console.warn('[notifyEmail] SMTP nÃ£o configurado; skip');
+      return { skipped: true, reason: 'smtp_not_configured' };
+    }
+
     const transporter = nodemailer.createTransport({
       host: SMTP_HOST,
-      port: Number(SMTP_PORT ?? 587),
-      secure: String(SMTP_PORT) === "465",
-      auth: SMTP_USER ? { user: SMTP_USER, pass: SMTP_PASS } : undefined,
+      port: Number(SMTP_PORT || 587),
+      secure: Number(SMTP_PORT) === 465,
+      auth: { user: SMTP_USER, pass: SMTP_PASS }
     });
 
-    await transporter.sendMail({
-      from: SMTP_FROM || SMTP_USER,
+    const info = await transporter.sendMail({
+      from: SMTP_FROM || 'Agendamentos <no-reply@agendamentos.local>',
       to,
       subject,
-      html,
+      html
     });
-  } catch (err) {
-    console.error("[notifyEmail] falha ao enviar:", err?.message || err);
-    // não propaga erro para não quebrar o fluxo do MVP
+
+    return { ok: true, messageId: info.messageId };
+  } catch (e) {
+    console.error('[notifyEmail] erro:', e.message);
+    return { ok: false, error: e.message };
   }
 }
 
-/* ===================== WhatsApp Cloud API ===================== */
-async function sendWhatsApp({ to, message, template }) {
-  const PHONE_NUMBER_ID = process.env.WA_PHONE_NUMBER_ID;
-  const TOKEN = process.env.WA_TOKEN;
 
-  if (!PHONE_NUMBER_ID || !TOKEN) {
-    console.log("[notifyWhatsapp] (dev) sem WA_PHONE_NUMBER_ID/WA_TOKEN. to=%s msg=%s", to, message);
-    return;
-  }
-
-  const url = `https://graph.facebook.com/v21.0/${PHONE_NUMBER_ID}/messages`;
-  const headers = {
-    Authorization: `Bearer ${TOKEN}`,
-    "Content-Type": "application/json",
-  };
-
-  let body;
-
-  if (template) {
-    // Envio por template aprovado
-    // template: { name, lang?: 'pt_BR', params?: [{type:'text', text:'...'}] }
-    body = {
-      messaging_product: "whatsapp",
-      to,
-      type: "template",
-      template: {
-        name: template.name,
-        language: { code: template.lang || "pt_BR" },
-        components: template.params?.length
-          ? [{ type: "body", parameters: template.params }]
-          : [],
-      },
-    };
-  } else if (process.env.WA_TEMPLATE_NAME) {
-    // Fallback: usa template com 1 variável, jogando a mensagem como {{1}}
-    body = {
-      messaging_product: "whatsapp",
-      to,
-      type: "template",
-      template: {
-        name: process.env.WA_TEMPLATE_NAME,
-        language: { code: "pt_BR" },
-        components: [{ type: "body", parameters: [{ type: "text", text: message }] }],
-      },
-    };
-  } else {
-    // Texto simples — só funciona com sessão ativa (<24h desde última msg do usuário)
-    body = {
-      messaging_product: "whatsapp",
-      to,
-      type: "text",
-      text: { body: message },
-    };
-  }
-
-  const r = await fetch(url, { method: "POST", headers, body: JSON.stringify(body) });
-  const json = await r.json().catch(() => ({}));
-  if (!r.ok) {
-    const errMsg = json?.error?.message || JSON.stringify(json) || "wa_send_failed";
-    throw new Error(errMsg);
-  }
-  return json;
+/* =========================
+ *  WHATSAPP (Cloud API)
+ * ========================= */
+function normalizeBRPhone(p) {
+  if (!p) return null;
+  const only = String(p).replace(/\D/g, '');
+  if (only.startsWith('55')) return only;
+  return '55' + only;
 }
 
-// Envio imediato (mensagem curta). Assinatura compatível com seu routes:
-// notifyWhatsapp(mensagem, telefone?)
-export async function notifyWhatsapp(message, to) {
-  if (!message || !to) return; // sem telefone = no-op
-  const phone = normalizePhone(to);
-  if (!phone) return;
+const policyErrorCodes = new Set([470, 131047, 131056]); // janela/template
 
-  try {
-    await sendWhatsApp({ to: phone, message });
-  } catch (err) {
-    console.error("[notifyWhatsapp] falha ao enviar:", err?.message || err);
-    // não propaga para não quebrar o fluxo
-  }
-}
-
-/* ===================== Scheduler em memória ===================== */
-// Bem simples para MVP. Para produção, troque por BullMQ/Redis.
-const JOBS = new Map(); // id -> timeout
-let COUNTER = 0;
-
-function schedule(fn, whenISO, idHint = "job") {
-  const when = new Date(whenISO);
-  const delay = Math.max(0, when.getTime() - Date.now());
-  const id = `${idHint}:${++COUNTER}:${when.toISOString()}`;
-  const to = setTimeout(async () => {
-    try { await fn(); }
-    finally {
-      clearTimeout(to);
-      JOBS.delete(id);
-    }
-  }, delay);
-  JOBS.set(id, to);
-  return id;
+async function sendWA(baseUrl, token, payload) {
+  const r = await fetch(baseUrl, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(payload)
+  });
+  const data = await r.json().catch(() => ({}));
+  return { ok: r.ok, data };
 }
 
 /**
- * Agenda um WhatsApp para o futuro.
- * Payload compatível com o front:
- *   { to, scheduledAt, message, metadata?, template? }
+ * notifyWhatsapp(message, toPhone, options?)
+ * options:
+ *  - type: 'text' | 'template'
+ *  - templateName, templateLang
+ *  - fallbackToTemplate: boolean (tenta template se texto falhar por polÃ­tica)
  */
-export async function scheduleWhatsApp({ to, scheduledAt, message, metadata, template }) {
-  const phone = normalizePhone(to);
-  if (!phone) throw new Error("invalid_phone");
+export async function notifyWhatsapp(message, toPhone, options = {}) {
+  try {
+    if (!message || !toPhone) return { skipped: true, reason: 'missing_params' };
+
+    const TOKEN = process.env.WA_TOKEN || process.env.WHATSAPP_TOKEN;
+    const PHONE_NUMBER_ID = process.env.WA_PHONE_NUMBER_ID || process.env.WHATSAPP_PHONE_NUMBER_ID;
+    const API_VER = process.env.WA_API_VERSION || 'v22.0';
+
+    if (!TOKEN || !PHONE_NUMBER_ID) {
+      console.warn('[notifyWhatsapp] WA_TOKEN/WA_PHONE_NUMBER_ID nÃ£o configurados; skip');
+      return { skipped: true, reason: 'wa_not_configured' };
+    }
+
+    const to = normalizeBRPhone(toPhone);
+    const baseUrl = `https://graph.facebook.com/${API_VER}/${PHONE_NUMBER_ID}/messages`;
+
+    const wantTemplate = options.type === 'template';
+    const templateName = options.templateName || process.env.WA_TEMPLATE_NAME;
+    const templateLang = options.templateLang || process.env.WA_TEMPLATE_LANG || 'pt_BR';
+    const fallbackToTemplate = options.fallbackToTemplate ?? true;
+
+    // Se pediu template explicitamente
+    if (wantTemplate) {
+      if (!templateName) {
+        return { ok: false, error: 'template_name_missing' };
+      }
+      const payload = {
+        messaging_product: 'whatsapp',
+        to,
+        type: 'template',
+        template: { name: templateName, language: { code: templateLang } }
+      };
+      const r = await sendWA(baseUrl, TOKEN, payload);
+      if (!r.ok) console.error('[notifyWhatsapp] Template error:', r.data);
+      return r.ok ? { ok: true, data: r.data, usedTemplate: templateName } :
+                    { ok: false, error: r.data?.error?.message || 'wa_template_failed', raw: r.data };
+    }
+
+    // Primeiro tenta TEXTO
+    const textPayload = {
+      messaging_product: 'whatsapp',
+      to,
+      type: 'text',
+      text: { body: message }
+    };
+    const r1 = await sendWA(baseUrl, TOKEN, textPayload);
+    if (r1.ok) return { ok: true, data: r1.data };
+
+    // Se falhou por polÃ­tica (janela de 24h) e temos template â†’ fallback
+    const err = r1.data?.error;
+    const code = Number(err?.code);
+    if (fallbackToTemplate && templateName && policyErrorCodes.has(code)) {
+      const tplPayload = {
+        messaging_product: 'whatsapp',
+        to,
+        type: 'template',
+        template: { name: templateName, language: { code: templateLang } }
+      };
+      const r2 = await sendWA(baseUrl, TOKEN, tplPayload);
+      if (!r2.ok) console.error('[notifyWhatsapp] Template fallback error:', r2.data);
+      return r2.ok ? { ok: true, data: r2.data, usedTemplate: templateName } :
+                     { ok: false, error: r2.data?.error?.message || 'wa_template_failed', raw: r2.data };
+    }
+
+    console.error('[notifyWhatsapp] Graph error:', r1.data);
+    return { ok: false, error: err?.message || 'wa_send_failed', raw: r1.data };
+  } catch (e) {
+    console.error('[notifyWhatsapp] erro:', e);
+    return { ok: false, error: e.message };
+  }
+}
+
+
+/* =========================
+ *  AGENDAMENTO IN-MEMORY
+ *  (sem persistÃªncia; some no restart)
+ * ========================= */
+let nextTimerId = 1;
+const timers = new Map(); // id -> timeout
+
+/**
+ * Agenda um WhatsApp para o futuro usando setTimeout.
+ * Retorna Promise (para suportar `.catch(...)` no seu cÃ³digo).
+ *  - Se scheduledAt <= agora, envia imediatamente.
+ *  - NÃƒO persiste se o processo reiniciar.
+ */
+export async function scheduleWhatsApp({ to, scheduledAt, message, metadata }) {
+  if (!to || !scheduledAt || !message) {
+    return Promise.reject(new Error('missing_params'));
+  }
 
   const when = new Date(scheduledAt);
-  if (isNaN(when.getTime())) throw new Error("invalid_scheduledAt");
+  if (Number.isNaN(when.getTime())) {
+    return Promise.reject(new Error('invalid_datetime'));
+  }
 
-  const jobId = schedule(
-    () => sendWhatsApp({ to: phone, message, template }),
-    when.toISOString(),
-    `wa:${metadata?.kind || "generic"}:${phone}`
-  );
+  const delay = when.getTime() - Date.now();
 
-  return { ok: true, jobId, scheduledAt: when.toISOString() };
+  // Envia agora se jÃ¡ passou
+  if (delay <= 0) {
+    const r = await notifyWhatsapp(message, to);
+    return { ok: true, sentNow: true, result: r };
+  }
+
+  const id = nextTimerId++;
+  const timeout = setTimeout(async () => {
+    try {
+      await notifyWhatsapp(message, to);
+    } catch (e) {
+      console.error('[scheduleWhatsApp] envio agendado falhou:', e);
+    } finally {
+      timers.delete(id);
+    }
+  }, delay);
+
+  timers.set(id, timeout);
+  return { ok: true, id, scheduledAt: when.toISOString(), meta: metadata || null };
 }
 
-export function initNotifications() {
-  console.log("[notifications] in-memory scheduler pronto");
-}
-
-// --- no final do arquivo: backend/src/lib/notifications.js ---
-
-// Envio imediato (usa a mesma lógica interna do módulo)
-export async function sendWhatsAppDirect({ to, message, template }) {
-  // Reaproveita a função interna que já fala com a Cloud API
-  return await sendWhatsApp({ to, message, template });
+/** Cancela um envio agendado (opcional) */
+export function cancelScheduledWhatsApp(id) {
+  const t = timers.get(id);
+  if (t) {
+    clearTimeout(t);
+    timers.delete(id);
+    return { ok: true, canceled: true };
+  }
+  return { ok: false, canceled: false, reason: 'not_found' };
 }

@@ -1,15 +1,15 @@
 // backend/src/routes/notifications.js
 import express from "express";
 import { auth } from "../middleware/auth.js";
-import { scheduleWhatsApp, sendWhatsAppDirect } from "../lib/notifications.js";
+import { scheduleWhatsApp } from "../lib/notifications.js";
 
 const router = express.Router();
 
 /**
- * Agenda envio de WhatsApp para o futuro.
+ * 📅 Agenda envio de WhatsApp para o futuro.
  * Body:
  *  - to: string (telefone com DDI, ex: 55XXXXXXXXXXX)
- *  - scheduledAt: ISO string
+ *  - scheduledAt: ISO string (data futura)
  *  - message?: string
  *  - template?: { name: string, lang?: 'pt_BR', params?: [{type:'text', text:string}] }
  *  - metadata?: any
@@ -29,14 +29,14 @@ router.post("/whatsapp/schedule", auth, async (req, res) => {
 });
 
 /**
- * Envio imediato (sem agendar) — ideal para testes rápidos.
+ * ⚡ Envio imediato (sem agendamento) — ideal para testes rápidos.
  * Body:
  *  - to: string (telefone com DDI, ex: 55XXXXXXXXXXX)
  *  - message?: string
  *  - template?: { name, lang?: 'pt_BR', params?: [{type:'text', text:string}] }
  *
  * Observações:
- *  - Se você enviar apenas "message", fora da janela de 24h a Meta pode bloquear.
+ *  - Se enviar apenas "message", fora da janela de 24h a Meta pode bloquear.
  *  - Para garantir entrega fora da janela, use "template" aprovado.
  */
 router.post("/whatsapp/send", auth, async (req, res) => {
