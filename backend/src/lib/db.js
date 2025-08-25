@@ -1,4 +1,4 @@
-// backend/src/db.js
+// backend/src/lib/db.js
 import mysql from 'mysql2/promise'
 import { config } from './config.js'
 
