@@ -1,5 +1,6 @@
 // src/pages/NovoAgendamento.jsx
 import React, { useEffect, useMemo, useState, useCallback, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import { Api } from "../utils/api";
 import { getUser } from "../utils/auth";
 
@@ -246,6 +247,7 @@ const EstablishmentCard = ({ est, selected, onSelect }) => (
 /* =================== Página Principal =================== */
 export default function NovoAgendamento() {
   const user = getUser();
+  const nav = useNavigate();
   const liveRef = useRef(null);
 
   const [state, setState] = useState({
@@ -624,6 +626,10 @@ export default function NovoAgendamento() {
 
   // Confirmar
   const confirmBooking = useCallback(async () => {
+    if (!getUser()) {
+      nav('/login-cliente');
+      return;
+    }
     if (!selectedSlot || !serviceId || !selectedService) return;
 
     if (DateHelpers.isPastSlot(selectedSlot.datetime)) {
@@ -719,6 +725,7 @@ export default function NovoAgendamento() {
     loadSlots,
     showToast,
     verifyBookingCreated,
+    nav,
   ]);
 
   /* ====== Handlers ====== */
