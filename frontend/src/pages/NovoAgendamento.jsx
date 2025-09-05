@@ -386,22 +386,39 @@ export default function NovoAgendamento() {
           if (t >= start && t < end) keys.add(minuteISO(a.inicio));
         });
       }
-    } catch {}
+    } catch (e) {
+      // silencioso; não deve quebrar UI por causa de falha de leitura
+    }
 
     // agendamentos do estabelecimento
+    // try {
+    //   if (typeof Api.agendamentosEstabelecimento === "function") {
+    //     const est = await Api.agendamentosEstabelecimento();
+    //     (est || []).forEach((a) => {
+    //       if (!isActiveStatus(a.status)) return;
+    //       const t = +new Date(a.inicio);
+    //       if (t >= start && t < end) keys.add(minuteISO(a.inicio));
+    //     });
+    //   }
+    // } catch {}
+
     try {
-      if (typeof Api.agendamentosEstabelecimento === "function") {
+      if (user?.tipo === 'estabelecimento' && typeof Api.agendamentosEstabelecimento === "function") {
         const est = await Api.agendamentosEstabelecimento();
         (est || []).forEach((a) => {
-          if (!isActiveStatus(a.status)) return;
-          const t = +new Date(a.inicio);
+          const t = new Date(a.inicio);
           if (t >= start && t < end) keys.add(minuteISO(a.inicio));
         });
       }
-    } catch {}
+    } catch (e) {
+      // se for 403 (Forbidden), ignorar — rota é restrita a estabelecimento
+      if (!String(e?.message || '').includes('HTTP 403')) {
+        // outros erros também não devem quebrar a UI
+      }
+    }
 
     return Array.from(keys);
-  }, [currentWeek]);
+  }, [currentWeek, user?.tipo]);
 
   /* ====== Carregar Slots ====== */
   const loadSlots = useCallback(async () => {

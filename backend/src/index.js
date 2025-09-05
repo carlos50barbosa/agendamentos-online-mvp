@@ -12,6 +12,7 @@ import estabelecimentosRoutes from './routes/estabelecimentos.js';
 import notificationsRouter from './routes/notifications.js'; // opcional
 import notifyRouter from './routes/notify.js'; // rota de teste de notificações
 
+
 const app = express();
 
 app.set('trust proxy', 1);

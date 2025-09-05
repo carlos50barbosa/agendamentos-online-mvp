@@ -19,4 +19,25 @@ rsync -avz --delete dist/ /var/www/agendamentosonline.com/
 sudo nginx -t && sudo systemctl reload nginx
 
 # se mudou path/env do backend:
-pm2 reload agendamentos-api --update-env
+pm2 reload agendamento-api --update-env
+
+---------------------------------------------
+
+ATUALIZAR VIA GITHUB:
+
+# 1) Conecte por SSH
+ssh usuario@SEU_SERVIDOR
+
+# 2) Vá até a pasta do site
+cd /opt/apps/agendamentos-online-mvp
+
+# (opcional) confira a branch atual
+git branch --show-current
+
+# 3) Atualize do repositório
+git fetch --all --prune
+git pull --ff-only   # ou: git pull origin main  (troque 'main' se usar outra branch)
+
+# 4) sair (se quiser)
+exit
+
