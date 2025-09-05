@@ -94,7 +94,7 @@ export default function App(){
       <Header/>
       <div className="container">
         <Routes>
-          <Route path="/" element={<div className="card"><h2>MVP pronto</h2><p>Faça login para continuar.</p></div>} />
+          <Route path="/" element={<NovoAgendamento/>} />
           <Route path="/login-cliente" element={<LoginCliente/>}/>
           <Route path="/login-estabelecimento" element={<LoginEstabelecimento/>}/>
           <Route path="/cadastro" element={<Cadastro/>}/>
