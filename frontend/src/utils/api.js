@@ -1,5 +1,5 @@
 // src/utils/api.js
-import { getToken } from './auth';
+import { getToken, logout } from './auth';
 
 // Base robusta:
 // 1) Usa VITE_API_URL (produção recomendada)
@@ -72,6 +72,22 @@ async function req(path, opt = {}) {
     err.data = data;
     err.text = text;
     err.url = join(BASE, path);
+
+    // Se o token expirou (ou outro 401), limpa sessão e redireciona para login
+    const tokenStillPresent = !!token;
+    const isAuthRoute = isPublicAuth;
+    if (res.status === 401 && tokenStillPresent && !isAuthRoute) {
+      try { logout(); } catch {}
+      try {
+        const msg = (data && (data.message || data.error)) || 'Sua sessão expirou. Faça login novamente.';
+        localStorage.setItem('session_message', String(msg).toLowerCase().includes('expir')
+          ? 'Sua sessão expirou. Faça login novamente.'
+          : 'Seu acesso não é mais válido. Faça login novamente.');
+      } catch {}
+      if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/login')) {
+        window.location.assign('/login');
+      }
+    }
     throw err;
   }
 

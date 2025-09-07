@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { Api } from "../utils/api";
 
 export default function ServicosEstabelecimento() {
@@ -45,6 +46,25 @@ export default function ServicosEstabelecimento() {
       }
     })();
   }, []);
+
+  // Banner de teste/plano: placeholder apenas no front usando localStorage
+  const [trialInfo, setTrialInfo] = useState(null);
+  useEffect(() => {
+    try {
+      const plan = localStorage.getItem("plan_current") || "starter";
+      let end = localStorage.getItem("trial_end");
+      if (!end) {
+        const d = new Date(); d.setDate(d.getDate() + 14); end = d.toISOString();
+        localStorage.setItem("trial_end", end);
+      }
+      setTrialInfo({ plan, end });
+    } catch {}
+  }, []);
+  const trialDaysLeft = useMemo(() => {
+    if (!trialInfo?.end) return 0;
+    const diff = new Date(trialInfo.end).getTime() - Date.now();
+    return Math.max(0, Math.ceil(diff / 86400000));
+  }, [trialInfo]);
 
   // Helpers de preço (BRL)
   const formatBRL = (centavos) =>
@@ -147,6 +167,28 @@ export default function ServicosEstabelecimento() {
 
   return (
     <div className="grid" style={{ gap: 16 }}>
+      {trialInfo && trialInfo.plan === 'starter' && (
+        trialDaysLeft > 0 ? (
+          <div className="card box--highlight" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+            <div className="row" style={{ gap: 8, alignItems: 'center' }}>
+              <div className="brand__logo" aria-hidden>AO</div>
+              <div>
+                <strong>Teste grátis ativo</strong>
+                <div className="small muted">{trialDaysLeft} {trialDaysLeft === 1 ? 'dia restante' : 'dias restantes'}</div>
+              </div>
+            </div>
+            <Link className="btn btn--primary btn--sm" to="/planos">Experimentar Pro</Link>
+          </div>
+        ) : (
+          <div className="card" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, borderColor: '#fde68a', background: '#fffbeb' }}>
+            <div>
+              <strong>Seu período de teste terminou</strong>
+              <div className="small muted">Desbloqueie WhatsApp, relatórios avançados e mais com o Pro.</div>
+            </div>
+            <Link className="btn btn--outline btn--sm" to="/planos">Conhecer planos</Link>
+          </div>
+        )
+      )}
       {/* Toast */}
       {toast && <div className={`toast ${toast.type}`}>{toast.msg}</div>}
 

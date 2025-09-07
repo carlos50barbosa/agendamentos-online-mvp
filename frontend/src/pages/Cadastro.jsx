@@ -82,10 +82,18 @@ export default function Cadastro(){
   }
 
   return (
-    <div className="card">
-      <h2 style={{ marginBottom: 12 }}>Criar conta</h2>
+    <div className="auth">
+      <div className="auth-wrap">
+        <div className="card auth-card">
+          <div className="auth-hero">
+            <div className="brand__logo" aria-hidden>AO</div>
+            <div>
+              <h2 style={{ margin: 0 }}>Criar conta</h2>
+              <small>Leva menos de 2 minutos</small>
+            </div>
+          </div>
 
-      <form onSubmit={submit} className="grid" style={{ gap: 10 }}>
+      <form onSubmit={submit} className="grid" style={{ gap: 10, marginTop: 10 }}>
         <input
           className="input"
           placeholder="Nome"
@@ -183,7 +191,7 @@ export default function Cadastro(){
           </select>
         </label>
 
-        <div className="row" style={{ gap: 8, justifyContent: 'flex-end', marginTop: 4 }}>
+        <div className="auth-actions" style={{ marginTop: 4 }}>
           <button type="submit" className="btn btn--primary" disabled={disabled}>
             {loading ? <span className="spinner" /> : 'Criar conta'}
           </button>
@@ -194,12 +202,14 @@ export default function Cadastro(){
             className="box"
             role="alert"
             aria-live="polite"
-            style={{ borderColor: '#7f1d1d', color: '#fecaca' }}
+            style={{ borderColor: '#7f1d1d', color: '#991b1b', background: '#fef2f2' }}
           >
             Erro: {err}
           </div>
         )}
       </form>
+        </div>
+      </div>
     </div>
   )
 }

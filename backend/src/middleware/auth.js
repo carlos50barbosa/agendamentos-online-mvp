@@ -10,6 +10,9 @@ export function auth(req, res, next) {
     req.user = payload;
     next();
   } catch (e) {
+    if (e && e.name === 'TokenExpiredError') {
+      return res.status(401).json({ error: 'token_expired' });
+    }
     return res.status(401).json({ error: 'token_invalid' });
   }
 }

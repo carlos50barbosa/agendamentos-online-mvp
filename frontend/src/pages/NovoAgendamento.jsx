@@ -1,6 +1,6 @@
 // src/pages/NovoAgendamento.jsx
 import React, { useEffect, useMemo, useState, useCallback, useRef } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { Api } from "../utils/api";
 import { getUser } from "../utils/auth";
 
@@ -8,21 +8,36 @@ import { getUser } from "../utils/auth";
 const TZ = Intl.DateTimeFormat().resolvedOptions().timeZone || "America/Sao_Paulo";
 
 const DateHelpers = {
+  // Parse de 'YYYY-MM-DD' como data local (evita UTC) ou mantém Date
+  parseLocal: (dateish) => {
+    if (dateish instanceof Date) return new Date(dateish);
+    if (typeof dateish === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateish)){
+      const [y,m,d] = dateish.split('-').map(Number);
+      return new Date(y, m-1, d, 0, 0, 0, 0);
+    }
+    return new Date(dateish);
+  },
+  formatLocalISO: (date) => {
+    const y = date.getFullYear();
+    const m = String(date.getMonth()+1).padStart(2,'0');
+    const d = String(date.getDate()).padStart(2,'0');
+    return `${y}-${m}-${d}`;
+  },
   weekStartISO: (d = new Date()) => {
-    const date = new Date(d);
+    const date = DateHelpers.parseLocal(d);
     const day = date.getDay(); // 0=Dom
     const diff = (day + 6) % 7; // 1=Seg
     date.setHours(0, 0, 0, 0);
     date.setDate(date.getDate() - diff);
-    return date.toISOString().slice(0, 10);
+    return DateHelpers.formatLocalISO(date);
   },
   toISODate: (d) => {
-    const date = new Date(d);
+    const date = DateHelpers.parseLocal(d);
     date.setHours(0, 0, 0, 0);
-    return date.toISOString().slice(0, 10);
+    return DateHelpers.formatLocalISO(date);
   },
   addDays: (d, n) => {
-    const date = new Date(d);
+    const date = DateHelpers.parseLocal(d);
     date.setDate(date.getDate() + n);
     return date;
   },
@@ -31,14 +46,49 @@ const DateHelpers = {
     date.setMinutes(date.getMinutes() + n);
     return date;
   },
-  addWeeksISO: (iso, n) => DateHelpers.toISODate(DateHelpers.addDays(new Date(iso), n * 7)),
+  addWeeksISO: (iso, n) => DateHelpers.toISODate(DateHelpers.addDays(DateHelpers.parseLocal(iso), n * 7)),
   sameYMD: (a, b) => a.slice(0, 10) === b.slice(0, 10),
   weekDays: (isoMonday) => {
-    const base = new Date(isoMonday);
+    const base = DateHelpers.parseLocal(isoMonday);
     return Array.from({ length: 7 }).map((_, i) => {
       const d = DateHelpers.addDays(base, i);
       return { iso: DateHelpers.toISODate(d), date: d };
     });
+  },
+  firstOfMonthISO: (d = new Date()) => {
+    const dt = DateHelpers.parseLocal(d);
+    dt.setDate(1);
+    dt.setHours(0,0,0,0);
+    return DateHelpers.formatLocalISO(dt);
+  },
+  addMonths: (d, n) => {
+    const dt = DateHelpers.parseLocal(d);
+    const day = dt.getDate();
+    dt.setDate(1);
+    dt.setMonth(dt.getMonth() + n);
+    const lastDay = new Date(dt.getFullYear(), dt.getMonth() + 1, 0).getDate();
+    dt.setDate(Math.min(day, lastDay));
+    return dt;
+  },
+  monthGrid: (monthStartIso) => {
+    // Retorna 6 linhas x 7 colunas começando na segunda-feira
+    const first = DateHelpers.parseLocal(monthStartIso);
+    first.setDate(1);
+    const firstWeekday = (first.getDay() + 6) % 7; // 0=Seg
+    const start = DateHelpers.addDays(first, -firstWeekday);
+    const cells = [];
+    for(let i=0;i<42;i++){
+      const d = DateHelpers.addDays(start, i);
+      const iso = DateHelpers.toISODate(d);
+      const inMonth = d.getMonth() === first.getMonth();
+      cells.push({ iso, inMonth, date: d });
+    }
+    return cells;
+  },
+  isSameMonth: (isoA, isoB) => {
+    const a = DateHelpers.parseLocal(isoA);
+    const b = DateHelpers.parseLocal(isoB);
+    return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth();
   },
   formatWeekLabel: (isoMonday) => {
     const days = DateHelpers.weekDays(isoMonday);
@@ -67,7 +117,7 @@ const DateHelpers = {
 
 // Semana [Monday 00:00, next Monday 00:00)
 const weekRangeMs = (isoMonday) => {
-  const start = new Date(isoMonday); start.setHours(0,0,0,0);
+  const start = DateHelpers.parseLocal(isoMonday); start.setHours(0,0,0,0);
   const end = new Date(start); end.setDate(end.getDate() + 7);
   return { start: +start, end: +end };
 };
@@ -276,9 +326,34 @@ export default function NovoAgendamento() {
     density: "compact",
     forceBusy: [], // overlay para casos que o backend não devolve ainda
   });
+  const [estQuery, setEstQuery] = useState("");
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  // Inicializa estQuery a partir de ?q= da URL e reage a mudanças no histórico
+  useEffect(() => {
+    const q = (searchParams.get('q') || '').trim();
+    if (q !== estQuery) setEstQuery(q);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
+
+  // Inicializa/normaliza a semana a partir de ?week=YYYY-MM-DD
+  // Sempre força a segunda-feira correspondente
+  useEffect(() => {
+    const w = (searchParams.get('week') || '').trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(w)) {
+      let norm = w;
+      try { norm = DateHelpers.weekStartISO(new Date(w)); } catch {}
+      if (norm !== state.currentWeek) {
+        setState((p) => ({ ...p, currentWeek: norm }));
+      }
+    }
+  }, [searchParams, state.currentWeek]);
 
   const [modal, setModal] = useState({ isOpen: false, isSaving: false });
   const [toast, setToast] = useState(null);
+  const [viewMode] = useState('month'); // por ora, mês é o padrão
+  const [monthStart, setMonthStart] = useState(() => DateHelpers.firstOfMonthISO(new Date()));
+  const [selectedDate, setSelectedDate] = useState(null); // YYYY-MM-DD
 
   const {
     establishments, services, establishmentId, serviceId,
@@ -296,6 +371,11 @@ export default function NovoAgendamento() {
     () => establishments.find((e) => String(e.id) === establishmentId),
     [establishments, establishmentId]
   );
+  const filteredEstablishments = useMemo(() => {
+    const q = estQuery.trim().toLowerCase();
+    if (!q) return establishments;
+    return establishments.filter((e) => String(e?.nome || e?.name || "").toLowerCase().includes(q));
+  }, [establishments, estQuery]);
 
   // Passo da grade
   const stepMinutes = useMemo(() => {
@@ -328,6 +408,28 @@ export default function NovoAgendamento() {
     return () => clearTimeout(t);
   }, []);
 
+  // Copiar link compartilhável (preserva q, estabelecimento e servico)
+  const copyShareLink = useCallback(async () => {
+    try{
+      const sp = new URLSearchParams(searchParams);
+      // Garante que os parâmetros atuais estão refletidos
+      if (estQuery && estQuery.trim()) sp.set('q', estQuery.trim()); else sp.delete('q');
+      if (state.establishmentId) sp.set('estabelecimento', String(state.establishmentId)); else sp.delete('estabelecimento');
+      if (state.serviceId) sp.set('servico', String(state.serviceId)); else sp.delete('servico');
+      if (state.currentWeek) sp.set('week', String(state.currentWeek)); else sp.delete('week');
+      const url = `${window.location.origin}/novo${sp.toString() ? `?${sp.toString()}` : ''}`;
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(url);
+      } else {
+        const ta = document.createElement('textarea');
+        ta.value = url; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta);
+      }
+      showToast('info', 'Link copiado para a área de transferência.');
+    }catch{
+      showToast('error', 'Não foi possível copiar o link.');
+    }
+  }, [searchParams, estQuery, state.establishmentId, state.serviceId, state.currentWeek, showToast]);
+
   /* ====== Carregar Estabelecimentos ====== */
   useEffect(() => {
     (async () => {
@@ -343,11 +445,24 @@ export default function NovoAgendamento() {
     })();
   }, [showToast]);
 
+  // Se vier ?estabelecimento= na URL, seleciona automaticamente após carregar a lista
+  useEffect(() => {
+    const estParam = (searchParams.get('estabelecimento') || '').trim();
+    if (establishments.length && estParam && estParam !== state.establishmentId) {
+      setState((p) => ({ ...p, establishmentId: estParam, serviceId: "", slots: [], selectedSlot: null }));
+    }
+  }, [establishments, searchParams, state.establishmentId]);
+
   /* ====== Carregar Serviços quando escolher Estabelecimento ====== */
   useEffect(() => {
     (async () => {
       if (!establishmentId) {
         setState((p) => ({ ...p, services: [], serviceId: "", slots: [], selectedSlot: null }));
+        try{
+          const sp = new URLSearchParams(searchParams);
+          sp.delete('servico');
+          setSearchParams(sp, { replace: true });
+        }catch{}
         return;
       }
       try {
@@ -359,12 +474,24 @@ export default function NovoAgendamento() {
           slots: [],
           selectedSlot: null,
         }));
+
+        // Se veio ?servico= na URL e existir na lista, seleciona automaticamente
+        try{
+          const svcParam = (searchParams.get('servico') || '').trim();
+          if (svcParam && Array.isArray(list) && list.some((s) => String(s.id) === svcParam)) {
+            setState((p) => ({ ...p, serviceId: svcParam }));
+          } else {
+            const sp = new URLSearchParams(searchParams);
+            sp.delete('servico');
+            setSearchParams(sp, { replace: true });
+          }
+        }catch{}
       } catch {
         setState((p) => ({ ...p, services: [], serviceId: "", slots: [], selectedSlot: null }));
         showToast("error", "Não foi possível carregar os serviços.");
       }
     })();
-  }, [establishmentId, showToast]);
+  }, [establishmentId, showToast, searchParams, setSearchParams]);
 
   /* ====== Normalização de slots ====== */
   const normalizeSlots = useCallback((data) => {
@@ -736,14 +863,34 @@ export default function NovoAgendamento() {
   ]);
 
   /* ====== Handlers ====== */
-  const handleEstablishmentClick = (est) =>
+  const handleEstablishmentClick = (est) => {
     setState((p) => ({ ...p, establishmentId: String(est.id), serviceId: "", slots: [], selectedSlot: null }));
+    try{
+      const sp = new URLSearchParams(searchParams);
+      sp.set('estabelecimento', String(est.id));
+      setSearchParams(sp, { replace: true });
+    }catch{}
+  };
 
-  const handleServiceClick = (svc) =>
+  const handleServiceClick = (svc) => {
     setState((p) => ({ ...p, serviceId: String(svc.id), slots: [], selectedSlot: null }));
+    try{
+      const sp = new URLSearchParams(searchParams);
+      sp.set('servico', String(svc.id));
+      setSearchParams(sp, { replace: true });
+    }catch{}
+  };
 
-  const handleWeekChange = (newWeek) =>
-    setState((p) => ({ ...p, currentWeek: newWeek, selectedSlot: null }));
+  const handleWeekChange = (newWeek) => {
+    let norm = newWeek;
+    try { norm = DateHelpers.weekStartISO(new Date(newWeek)); } catch {}
+    setState((p) => ({ ...p, currentWeek: norm, selectedSlot: null }));
+    try{
+      const sp = new URLSearchParams(searchParams);
+      if (norm) sp.set('week', String(norm)); else sp.delete('week');
+      setSearchParams(sp, { replace: true });
+    }catch{}
+  };
 
   const handleSlotSelect = (slot) =>
     setState((p) => ({ ...p, selectedSlot: slot }));
@@ -776,6 +923,25 @@ export default function NovoAgendamento() {
   const isOwner = user?.tipo === "estabelecimento";
   const step = !establishmentId && !isOwner ? 1 : !serviceId ? 2 : 3;
 
+  // Ao clicar num dia do mês, define a semana correspondente e marca o dia
+  const handlePickDay = useCallback((isoDay) => {
+    setSelectedDate(isoDay);
+    const wk = DateHelpers.weekStartISO(isoDay);
+    if (wk !== currentWeek) setState((p) => ({ ...p, currentWeek: wk }));
+  }, [currentWeek]);
+
+  // Quando o mês visível contém hoje, pré-seleciona o dia atual se nada estiver selecionado
+  useEffect(() => {
+    const todayIso = DateHelpers.toISODate(new Date());
+    if (DateHelpers.isSameMonth(todayIso, monthStart)) {
+      if (!selectedDate || !DateHelpers.isSameMonth(selectedDate, monthStart)) {
+        setSelectedDate(todayIso);
+        const wk = DateHelpers.weekStartISO(todayIso);
+        if (wk !== currentWeek) setState((p) => ({ ...p, currentWeek: wk }));
+      }
+    }
+  }, [monthStart, selectedDate, currentWeek]);
+
   return (
     <div className="grid" style={{ gap: 12 }}>
       {toast && <Toast type={toast.type} message={toast.message} onDismiss={() => setToast(null)} />}
@@ -807,6 +973,9 @@ export default function NovoAgendamento() {
           </div>
           <div className="row" style={{ gap: 8 }}>
             <DensityToggle value={density} onChange={(v) => setState((p) => ({ ...p, density: v }))} />
+            <button className="btn btn--outline btn--sm" onClick={copyShareLink} title="Copiar link desta seleção">
+              Copiar link
+            </button>
           </div>
         </div>
 
@@ -814,8 +983,25 @@ export default function NovoAgendamento() {
         {step === 1 && (
           <>
             <p className="muted" style={{ marginTop: 0 }}>Escolha um estabelecimento:</p>
+            <div className="row" style={{ gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
+              <input
+                className="input"
+                type="search"
+                placeholder="Buscar estabelecimento…"
+                value={estQuery}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setEstQuery(v);
+                  const sp = new URLSearchParams(searchParams);
+                  if (v && v.trim()) sp.set('q', v.trim());
+                  else sp.delete('q');
+                  setSearchParams(sp, { replace: true });
+                }}
+                style={{ minWidth: 240 }}
+              />
+            </div>
             <div className="row-wrap">
-              {establishments.map((est) => (
+              {filteredEstablishments.map((est) => (
                 <EstablishmentCard
                   key={est.id}
                   est={est}
@@ -823,6 +1009,9 @@ export default function NovoAgendamento() {
                   onSelect={handleEstablishmentClick}
                 />
               ))}
+              {filteredEstablishments.length === 0 && (
+                <div className="empty small" style={{ width: '100%' }}>Nenhum estabelecimento encontrado.</div>
+              )}
             </div>
           </>
         )}
@@ -836,7 +1025,15 @@ export default function NovoAgendamento() {
               </div>
               <button
                 className="btn btn--outline btn--sm"
-                onClick={() => setState((p) => ({ ...p, establishmentId: "", services: [], serviceId: "", slots: [], selectedSlot: null }))}
+                onClick={() => {
+                  setState((p) => ({ ...p, establishmentId: "", services: [], serviceId: "", slots: [], selectedSlot: null }));
+                  try{
+                    const sp = new URLSearchParams(searchParams);
+                    sp.delete('estabelecimento');
+                    sp.delete('servico');
+                    setSearchParams(sp, { replace: true });
+                  }catch{}
+                }}
               >
                 Trocar
               </button>
@@ -859,7 +1056,7 @@ export default function NovoAgendamento() {
           </>
         )}
 
-        {/* Passo 3 — Horários */}
+        {/* Passo 3 — Calendário mensal e horários do dia */}
         {step === 3 && (
           <>
             <div className="row spread" style={{ alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 6 }}>
@@ -905,6 +1102,47 @@ export default function NovoAgendamento() {
               </details>
             </div>
 
+            {/* Calendário mensal */}
+            <div className="month card" style={{ padding: 8, marginBottom: 8 }}>
+              <div className="row spread" style={{ alignItems: 'center', marginBottom: 6 }}>
+                <div className="row" style={{ gap: 6, alignItems: 'center' }}>
+                  <button className="btn btn--sm" aria-label="Mês anterior" onClick={() => setMonthStart(DateHelpers.firstOfMonthISO(DateHelpers.addMonths(monthStart, -1)))}>◀</button>
+                  <strong>{new Date(monthStart + 'T00:00:00').toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })}</strong>
+                  <button className="btn btn--sm" aria-label="Próximo mês" onClick={() => setMonthStart(DateHelpers.firstOfMonthISO(DateHelpers.addMonths(monthStart, 1)))}>▶</button>
+                </div>
+                <button
+                  className="btn btn--outline btn--sm"
+                  onClick={() => {
+                    const todayIso = DateHelpers.toISODate(new Date());
+                    setMonthStart(DateHelpers.firstOfMonthISO(todayIso));
+                    setSelectedDate(todayIso);
+                    const wk = DateHelpers.weekStartISO(todayIso);
+                    if (wk !== currentWeek) setState((p) => ({ ...p, currentWeek: wk }));
+                  }}
+                >
+                  Hoje
+                </button>
+              </div>
+              <div className="month__grid">
+                {["S", "T", "Q", "Q", "S", "S", "D"].map((d) => (
+                  <div key={d} className="month__dow muted">{d}</div>
+                ))}
+                {DateHelpers.monthGrid(monthStart).map(({ iso, inMonth, date }) => {
+                  const isToday = DateHelpers.sameYMD(iso, DateHelpers.toISODate(new Date()));
+                  const isSelected = selectedDate && DateHelpers.sameYMD(selectedDate, iso);
+                  return (
+                    <button
+                      key={iso}
+                      className={`month__day${inMonth ? '' : ' is-dim'}${isToday ? ' is-today' : ''}${isSelected ? ' is-selected' : ''}`}
+                      onClick={() => handlePickDay(iso)}
+                      title={date.toLocaleDateString('pt-BR')}
+                    >
+                      {date.getDate()}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
 
             {/* Erro de carga */}
             {error && (
@@ -929,44 +1167,34 @@ export default function NovoAgendamento() {
               </div>
             )}
 
-            {/* Calendário — Colunas com cabeçalho dentro (evita desalinhamento) */}
-            <div className={`calendar ${density === "compact" ? "calendar--compact" : ""}`}>
-              {/* Desktop: grid 7 colunas | Mobile: carrossel horizontal com snap */}
-              <div className="calendar__inner">
-                {daysToRender.map(({ iso, date }) => {
-                  const isToday = DateHelpers.sameYMD(iso, DateHelpers.toISODate(new Date()));
-                  const dayLabel = new Intl.DateTimeFormat("pt-BR", {
-                    weekday: "short", day: "2-digit", month: "2-digit",
-                  }).format(date).replace(/\.$/, "");
-                  const daySlots = (groupedSlots.grouped[iso] || []).filter(isSlotVisible);
-
-                  return (
-                    <section key={iso} className="day-col" aria-label={dayLabel}>
-                      <header className={`day-col__header ${isToday ? "is-today" : ""}`}>
-                        <div className="day-col__title">{dayLabel}</div>
-                      </header>
-
-                      <div className={`day-col__slots ${density === "compact" ? "slots--grid" : "slots--list"}`}>
-                        {loading ? (
-                          Array.from({ length: 8 }).map((_, i) => <div key={i} className="shimmer pill" />)
-                        ) : daySlots.length === 0 ? (
-                          <div className="empty-dot" title="Sem horários" />
-                        ) : (
-                          daySlots.map((slot) => (
-                            <SlotButton
-                              key={slot.datetime}
-                              slot={slot}
-                              isSelected={selectedSlot?.datetime === slot.datetime}
-                              onClick={() => handleSlotSelect(slot)}
-                              density={density}
-                            />
-                          ))
-                        )}
-                      </div>
-                    </section>
-                  );
-                })}
-              </div>
+            {/* Horários do dia selecionado */}
+            <div className="card" style={{ marginTop: 8 }}>
+              <h3 style={{ marginTop: 0, marginBottom: 8 }}>
+                {selectedDate
+                  ? new Date(selectedDate + 'T00:00:00').toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' })
+                  : 'Selecione uma data'}
+              </h3>
+              {selectedDate ? (
+                <div className={density === 'compact' ? 'slots--grid' : 'slots--list'}>
+                  {loading ? (
+                    Array.from({ length: 8 }).map((_, i) => <div key={i} className="shimmer pill" />)
+                  ) : ((groupedSlots.grouped[selectedDate] || []).filter(isSlotVisible)).length === 0 ? (
+                    <div className="empty">Sem horários para este dia.</div>
+                  ) : (
+                    groupedSlots.grouped[selectedDate].filter(isSlotVisible).map((slot) => (
+                      <SlotButton
+                        key={slot.datetime}
+                        slot={slot}
+                        isSelected={selectedSlot?.datetime === slot.datetime}
+                        onClick={() => handleSlotSelect(slot)}
+                        density={density}
+                      />
+                    ))
+                  )}
+                </div>
+              ) : (
+                <div className="empty">Escolha uma data no calendário acima.</div>
+              )}
             </div>
 
             {/* Rodapé ações */}

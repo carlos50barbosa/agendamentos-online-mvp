@@ -11,9 +11,12 @@ import ServicosEstabelecimento from './pages/ServicosEstabelecimento.jsx';
 import NovoAgendamento from './pages/NovoAgendamento.jsx';
 import EstabelecimentosList from './pages/EstabelecimentosList.jsx';
 import { IconUser, IconMenu, IconHome, IconPlus, IconGear, IconHelp, IconLogout, IconList, IconChevronLeft, IconChevronRight } from './components/Icons.jsx';
+import Modal from './components/Modal.jsx';
+import Loading from './pages/Loading.jsx';
 import Configuracoes from './pages/Configuracoes.jsx';
 import Ajuda from './pages/Ajuda.jsx';
 import Relatorios from './pages/Relatorios.jsx';
+import Planos from './pages/Planos.jsx';
 
 function Sidebar({ open }){
   const nav = useNavigate();
@@ -21,6 +24,8 @@ function Sidebar({ open }){
 
   const [scrolled, setScrolled] = useState(false);
   const [el, setEl] = useState(null);
+  const [logoutOpen, setLogoutOpen] = useState(false);
+  const [planLabel, setPlanLabel] = useState('');
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 2);
@@ -33,6 +38,18 @@ function Sidebar({ open }){
       try { el.scrollTop = 0; } catch {}
     }
   }, [open, el]);
+
+  useEffect(() => {
+    try{
+      if (user?.tipo === 'estabelecimento'){
+        const p = (localStorage.getItem('plan_current') || 'starter').toLowerCase();
+        if (p === 'pro' || p === 'premium') setPlanLabel(p.toUpperCase());
+        else setPlanLabel('');
+      } else {
+        setPlanLabel('');
+      }
+    }catch{}
+  }, [user?.tipo]);
 
   return (
     <aside className={`sidebar ${scrolled ? 'is-scrolled' : ''}`} ref={setEl}>
@@ -60,6 +77,16 @@ function Sidebar({ open }){
                   {user?.email && <div className="profilebox__sub">{user.email}</div>}
                 </div>
               </div>
+              {planLabel && (
+                <div className="row" style={{ gap: 6 }}>
+                  <div
+                    className={`badge ${planLabel === 'PREMIUM' ? 'badge--premium' : 'badge--pro'}`}
+                    title="Plano atual"
+                  >
+                    {planLabel}
+                  </div>
+                </div>
+              )}
 
               <div className="sidelist">
                 <div className="sidelist__section">
@@ -94,6 +121,13 @@ function Sidebar({ open }){
                         <span>Serviços</span>
                       </NavLink>
                       <NavLink
+                        to="/planos"
+                        className={({isActive}) => `sidelist__item${isActive ? ' active' : ''}`}
+                      >
+                        <IconList className="sidelist__icon" aria-hidden="true" />
+                        <span>Planos</span>
+                      </NavLink>
+                      <NavLink
                         to="/relatorios"
                         className={({isActive}) => `sidelist__item${isActive ? ' active' : ''}`}
                       >
@@ -122,11 +156,33 @@ function Sidebar({ open }){
                   </NavLink>
                   <button
                     className="sidelist__item sidelist__item--danger"
-                    onClick={() => { logout(); nav('/'); }}
+                    onClick={() => setLogoutOpen(true)}
                   >
                     <IconLogout className="sidelist__icon" aria-hidden="true" />
                     <span>Sair</span>
                   </button>
+                  {logoutOpen && (
+                    <Modal
+                      title="Sair da conta"
+                      onClose={() => setLogoutOpen(false)}
+                      actions={[
+                        <button key="cancel" className="btn btn--outline" onClick={() => setLogoutOpen(false)}>Cancelar</button>,
+                        <button
+                          key="confirm"
+                          className="btn btn--danger"
+                          onClick={() => {
+                            setLogoutOpen(false);
+                            try { logout(); } catch {}
+                            nav('/loading?type=logout&next=/', { replace: true });
+                          }}
+                        >
+                          Sair
+                        </button>,
+                      ]}
+                    >
+                      <p>Tem certeza que deseja sair?</p>
+                    </Modal>
+                  )}
                 </div>
               </div>
             </>
@@ -175,8 +231,10 @@ export default function App(){
             <Route path="/servicos" element={<ServicosEstabelecimento/>}/>
             <Route path="/novo" element={<NovoAgendamento/>}/>
             <Route path="/configuracoes" element={<Configuracoes/>}/>
+            <Route path="/loading" element={<Loading/>}/>
             <Route path="/ajuda" element={<Ajuda/>}/>
             <Route path="/relatorios" element={<Relatorios/>}/>
+            <Route path="/planos" element={<Planos/>}/>
           </Routes>
         </div>
       </main>

@@ -16,7 +16,7 @@ export default function LoginCliente(){
     try{
       const { token, user } = await Api.login(email.trim(), senha)
       if(user?.tipo!=='cliente') throw new Error('tipo_incorreto')
-      saveToken(token); saveUser(user); nav('/cliente')
+      saveToken(token); saveUser(user); nav('/loading?type=login&next=/cliente')
     }catch(e){
       setErr(
         e?.message==='tipo_incorreto'
@@ -31,10 +31,18 @@ export default function LoginCliente(){
   const disabled = !email || !senha || loading
 
   return (
-    <div className="card">
-      <h2 style={{ marginBottom: 12 }}>Login do Cliente</h2>
+    <div className="auth">
+      <div className="auth-wrap">
+        <div className="card auth-card">
+          <div className="auth-hero">
+            <div className="brand__logo" aria-hidden>AO</div>
+            <div>
+              <h2 style={{ margin: 0 }}>Login do Cliente</h2>
+              <small>Acesse seus agendamentos</small>
+            </div>
+          </div>
 
-      <form onSubmit={submit} className="row" style={{ gap: 10, flexWrap: 'wrap' }}>
+      <form onSubmit={submit} className="row" style={{ gap: 10, flexWrap: 'wrap', marginTop: 10 }}>
         <input
           className="input"
           type="email"
@@ -77,11 +85,13 @@ export default function LoginCliente(){
           className="box"
           role="alert"
           aria-live="polite"
-          style={{ marginTop: 10, borderColor: '#7f1d1d', color: '#fecaca' }}
+          style={{ marginTop: 10, borderColor: '#7f1d1d', color: '#991b1b', background: '#fef2f2' }}
         >
           Erro: {err}
         </div>
       )}
+        </div>
+      </div>
     </div>
   )
 }

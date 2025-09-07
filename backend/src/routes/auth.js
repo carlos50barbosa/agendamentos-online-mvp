@@ -31,7 +31,8 @@ router.post('/register', async (req, res) => {
     if (!secret) return res.status(500).json({ error: 'server_config', message: 'JWT_SECRET ausente.' });
 
     const user = { id: r.insertId, nome, email, telefone: telefone || null, tipo };
-    const token = jwt.sign({ id: user.id, nome, email, tipo }, secret, { expiresIn: '7d' });
+    // Expira em 10 horas
+    const token = jwt.sign({ id: user.id, nome, email, tipo }, secret, { expiresIn: '10h' });
     res.json({ token, user });
   } catch (e) {
     console.error('[auth/register] erro:', e);
@@ -67,7 +68,8 @@ router.post('/login', async (req, res) => {
     if (!secret) return res.status(500).json({ error: 'server_config', message: 'JWT_SECRET ausente.' });
 
     const payload = { id: u.id, nome: u.nome, email: u.email, tipo: u.tipo || 'cliente' };
-    const token = jwt.sign(payload, secret, { expiresIn: '7d' });
+    // Expira em 10 horas
+    const token = jwt.sign(payload, secret, { expiresIn: '10h' });
 
     const user = { id: u.id, nome: u.nome, email: u.email, telefone: u.telefone, tipo: u.tipo || 'cliente' };
     return res.json({ ok: true, token, user });

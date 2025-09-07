@@ -140,6 +140,16 @@ body{
 }
 
 /* =======================
+   Spinner (usado em botões e na splash)
+   ======================= */
+.spinner{
+  width: 18px; height: 18px; border: 2px solid rgba(0,0,0,.15);
+  border-top-color: var(--brand); border-radius: 50%; display: inline-block;
+  animation: spin .8s linear infinite; vertical-align: middle;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* =======================
    Mini Cards (Estabelecimentos/Serviços)
    ======================= */
 .mini-card{
@@ -207,6 +217,57 @@ body{
 /* Links padrão */
 a, a:visited { color: var(--text); text-decoration: none; opacity: .9; }
 a:hover { opacity: 1; text-decoration: underline; }
+
+/* =======================
+   Calendário Mensal (novo)
+   ======================= */
+.month__grid{
+  display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px;
+}
+.month__dow{ text-align: center; font-size: 11px; }
+.month__day{
+  height: 38px; border: 1px solid var(--border); border-radius: 8px;
+  background: #fff; cursor: pointer; display: grid; place-items: center;
+  transition: transform .08s ease, box-shadow .12s ease, background .12s ease;
+}
+.month__day.is-dim{ opacity: .45; }
+.month__day.is-today{ position: relative; font-weight: 600; background: #f8fbff; border-color: var(--brand-200); outline: 2px solid var(--brand-200); }
+.month__day.is-today::after{
+  content:""; position:absolute; bottom:6px; width:6px; height:6px; border-radius:50%; background: var(--brand);
+}
+.month__day.is-selected{ background: var(--brand-100); box-shadow: 0 0 0 1px var(--brand-200) inset; }
+.month__day:not(.is-dim):hover{ transform: translateY(-1px); box-shadow: 0 6px 18px rgba(0,0,0,.08); }
+.month__day:not(.is-dim):active{ transform: translateY(0); box-shadow: 0 2px 8px rgba(0,0,0,.06); }
+.month__day:focus-visible{ outline: none; box-shadow: var(--ring-shadow); }
+
+/* =======================
+   Pricing (Planos)
+   ======================= */
+.pricing-grid{ display:grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap:12px; }
+.pricing-card{
+  background:#fff; border:1px solid var(--border); border-radius:12px; padding:12px; display:flex; flex-direction:column; gap:10px;
+}
+.pricing-card.is-featured{ outline:2px solid var(--brand); box-shadow:0 12px 30px rgba(37,99,235,.15); }
+.pricing-header{ display:flex; flex-direction:column; gap:2px; }
+.pricing-title{ font-weight:700; font-size:16px; }
+.price{ display:flex; align-items:baseline; gap:4px; }
+.price .currency{ opacity:.7; }
+.price .amount{ font-size:28px; font-weight:800; letter-spacing:-.02em; }
+.price .period{ font-size:12px; color: var(--muted); }
+.features{ list-style:none; padding:0; margin:0; display:grid; gap:6px; }
+
+/* =======================
+   Auth (Login/Cadastro)
+   ======================= */
+.auth{ display:grid; place-items:center; min-height: 68dvh; }
+.auth-wrap{ width:min(560px, 92vw); display:grid; gap:12px; }
+.auth-hero{ display:flex; align-items:center; gap:10px; }
+.auth-hero .brand__logo{ width:42px; height:42px; font-size:14px; }
+.auth-hero h2{ margin:0; }
+.auth-hero small{ color:var(--muted); }
+.auth-card{ padding:16px; }
+.auth-actions{ display:flex; justify-content:flex-end; gap:8px; }
+.auth-alt{ text-align:center; color:var(--muted); }
 
 /* Header / Nav simples */
 .header {
@@ -385,6 +446,18 @@ button:focus-visible, a:focus-visible, select:focus-visible, input:focus-visible
   color: #92400e;
 }
 
+/* Badges de plano */
+.badge--pro{
+  background:#eff6ff;         /* azul bem claro */
+  border-color:#bfdbfe;       /* azul claro */
+  color:#1e3a8a;              /* azul escuro */
+}
+.badge--premium{
+  background:#fffbeb;         /* dourado/âmbar claro */
+  border-color:#fcd34d;       /* dourado médio */
+  color:#92400e;              /* âmbar escuro */
+}
+
 /* Botão de cancelar: aceita .danger (do seu JSX) e também a convenção .btn--danger */
 button.danger,
 .btn--danger{
@@ -425,28 +498,35 @@ button.danger:disabled,
    - Em telas pequenas, habilita scroll horizontal suave na tabela.
    - Mantém tipografia legível e evita “quebrar” a linha de data/hora. */
 @media (max-width: 760px){
-  /* Elimina scroll lateral: tabela ocupa 100% e quebra conteúdo */
-  .card{ overflow-x: hidden; }
-  .card > table{
-    display: table;
-    width: 100%;
-    table-layout: auto; /* deixa o navegador ajustar colunas */
-  }
-  /* Reduz paddings e permite quebra por padrão */
+  /* Em telas estreitas: o card vira um contêiner rolável horizontalmente
+     para evitar corte. A tabela mantém seu tamanho natural. */
+  .card{ overflow-x: auto; -webkit-overflow-scrolling: touch; touch-action: pan-x; overscroll-behavior-x: contain; }
+  /* Deixe a largura da tabela ditada pelo conteúdo para garantir overflow */
+  .card > table{ min-width: 520px; width: max-content; }
+
+  /* Reduz paddings e permite quebra por padrão onde couber */
   .card > table thead th,
   .card > table tbody td{ padding: 8px 8px; white-space: normal; }
-  /* Mantém "Quando" estreito e em uma linha */
+  /* Mantém "Quando" e "Status" em linha única para caber melhor */
   .card > table thead th:nth-child(2),
-  .card > table tbody td:nth-child(2){ white-space: nowrap; }
-  /* Status: badge em uma linha */
+  .card > table tbody td:nth-child(2),
   .card > table thead th:nth-child(3),
   .card > table tbody td:nth-child(3){ white-space: nowrap; }
   /* Ações: permitir encolher; remove width forçada e deixa quebrar se necessário */
   .card > table th:last-child,
   .card > table td:last-child{ width: auto; white-space: normal; }
   .card > table td:first-child{ word-break: break-word; }
-  /* Botão de cancelar compacto */
+  /* Botão de cancelar ainda mais compacto no mobile */
   .card > table td:last-child .btn{ padding: 4px 8px; font-size: 12px; }
+  /* Badges um pouco menores para caber melhor */
+  .badge{ font-size: 11px; padding: 3px 8px; }
+}
+
+/* Telefones muito pequenos: se ainda houver corte, esconda apenas a coluna de ações,
+   preservando informação principal (serviço, estabelecimento, data e status). */
+@media (max-width: 360px){
+  .card > table th:last-child,
+  .card > table td:last-child{ display: none; }
 }
 /* ===== DashboardCliente — largura reduzida no desktop ===== */
 .dashboard-narrow{
@@ -657,7 +737,7 @@ button.danger:disabled,
   .container{ margin-top: 8px; }
 }
 
-/* =======================
+/* =======================  
    Mobile: barra inferior (somente ícones)
    ======================= */
 @media (max-width: 780px){
