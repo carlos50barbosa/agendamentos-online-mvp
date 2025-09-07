@@ -143,6 +143,7 @@ body{
    Mini Cards (Estabelecimentos/Serviços)
    ======================= */
 .mini-card{
+  display:block;
   min-width:220px; max-width:320px; flex:1 1 220px;
   border:1px solid var(--border); border-radius:12px;
   padding:10px; background:#fff; cursor:pointer;
@@ -161,15 +162,27 @@ body{
   display:flex; gap:12px; align-items:center; margin-top:8px;
 }
 
+/* ===== Novo Agendamento — UX enxuta ===== */
+.filters > summary{
+  cursor: pointer;
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 10px; border: 1px solid var(--border);
+  border-radius: 10px; background: #fff; user-select: none;
+}
+.filters[open] > summary{ background: var(--brand-100); box-shadow: 0 0 0 1px var(--brand-200) inset; }
+.filters__content{ margin-top: 8px; display: flex; flex-direction: column; gap: 8px; }
+.appointment-summary{ display: flex; align-items: center; gap: 6px; font-size: 14px; }
+
 /* =======================
    Calendário — desktop grid / mobile carrossel
    ======================= */
-.calendar{ margin-top:8px; }
+.calendar{ margin-top:8px; overflow-x:auto; }
 .calendar__inner{
   display:grid; gap:8px;
   grid-template-columns:repeat(7, minmax(160px, 1fr));
 }
-@media (max-width: 900px){
+/* Muda para carrossel abaixo da largura mínima necessária para 7 colunas de 160px + gaps (~1168px) */
+@media (max-width: 1180px){
   .calendar__inner{
     display:flex; gap:8px; overflow-x:auto; padding-bottom:4px;
     scroll-snap-type:x mandatory;
@@ -204,6 +217,39 @@ a:hover { opacity: 1; text-decoration: underline; }
 .nav a { padding: 6px 8px; border-radius: 8px; }
 .nav a.active { background: rgba(59,130,246,.15); border: 1px solid var(--primary); }
 .nav .logout { margin-left: 8px; }
+
+/* =======================
+   User menu (header)
+   ======================= */
+.userbox{ position:relative; }
+.userbtn{
+  display:flex; align-items:center; gap:8px;
+  border:1px solid var(--border); background:#fff; color:var(--text);
+  border-radius:999px; padding:6px 10px; cursor:pointer;
+}
+.userbtn:hover{ background:var(--hover); }
+.userbtn__icon{ opacity:.85; color: var(--muted); }
+.userbtn__name{ font-size:14px; max-width:180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.userbtn__caret{ opacity:.7; color: var(--muted); }
+
+.usermenu{
+  position:absolute; right:0; top:calc(100% + 6px); z-index:40;
+  min-width:220px; background:#fff; border:1px solid var(--border);
+  border-radius:12px; box-shadow:0 10px 30px rgba(0,0,0,.12);
+  padding:6px; display:flex; flex-direction:column; gap:2px;
+}
+.usermenu.usermenu--left{ right: auto; left: 0; }
+.usermenu__item{
+  display:flex; align-items:center; gap:10px;
+  border:0; background:transparent; color:inherit;
+  text-align:left; padding:8px 10px; border-radius:8px; cursor:pointer;
+}
+.usermenu__item:hover{ background:var(--hover); text-decoration:none; }
+.usermenu__item--danger{ color:#b91c1c; }
+.usermenu__icon{ width:18px; text-align:center; opacity:.9; color: var(--muted); }
+
+/* Ícones padrão (quando usados dentro de .toast, .userbtn, .usermenu, etc.) */
+.toast .toast-icon{ color: var(--muted); }
 
 
 /* Slots — grid compacto / lista confortável */
@@ -379,15 +425,28 @@ button.danger:disabled,
    - Em telas pequenas, habilita scroll horizontal suave na tabela.
    - Mantém tipografia legível e evita “quebrar” a linha de data/hora. */
 @media (max-width: 760px){
+  /* Elimina scroll lateral: tabela ocupa 100% e quebra conteúdo */
+  .card{ overflow-x: hidden; }
   .card > table{
-    display: block;
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
+    display: table;
+    width: 100%;
+    table-layout: auto; /* deixa o navegador ajustar colunas */
   }
+  /* Reduz paddings e permite quebra por padrão */
   .card > table thead th,
-  .card > table tbody td{
-    white-space: nowrap;
-  }
+  .card > table tbody td{ padding: 8px 8px; white-space: normal; }
+  /* Mantém "Quando" estreito e em uma linha */
+  .card > table thead th:nth-child(2),
+  .card > table tbody td:nth-child(2){ white-space: nowrap; }
+  /* Status: badge em uma linha */
+  .card > table thead th:nth-child(3),
+  .card > table tbody td:nth-child(3){ white-space: nowrap; }
+  /* Ações: permitir encolher; remove width forçada e deixa quebrar se necessário */
+  .card > table th:last-child,
+  .card > table td:last-child{ width: auto; white-space: normal; }
+  .card > table td:first-child{ word-break: break-word; }
+  /* Botão de cancelar compacto */
+  .card > table td:last-child .btn{ padding: 4px 8px; font-size: 12px; }
 }
 /* ===== DashboardCliente — largura reduzida no desktop ===== */
 .dashboard-narrow{
@@ -484,4 +543,177 @@ button.danger:disabled,
   max-width: 1100px;
   margin: 12px auto;
   padding: 0 12px;
+}
+
+/* =======================
+   Layout com barra lateral esquerda
+   ======================= */
+.app-shell{
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  min-height: 100dvh;      /* deixa crescer além do viewport quando necessário */
+}
+.app-shell.is-collapsed{ grid-template-columns: 0 1fr; }
+.sidebar{
+  position: sticky; top: 0; align-self: stretch;
+  height: 100%; max-height: 100%; overflow-y: auto;
+  background: #E0E7EF;
+  border-right: 1px solid var(--border);
+  display: flex; flex-direction: column;
+  transform: translateX(0); transition: transform .18s ease;
+}
+.sidebar__inner{
+  display: flex; flex-direction: column; gap: 12px; align-items: stretch;
+  padding: 12px; height: 100%;
+  justify-content: flex-start; /* agrupado, sem espaço exagerado */
+}
+.app-shell.is-collapsed .sidebar{ transform: translateX(-100%); }
+.mainnav--vertical{ display: flex; flex-direction: column; gap: 8px; flex: 0 0 auto; align-items: stretch; }
+.app-main{ background: var(--bg); min-width: 0; }
+
+/* Toggle da sidebar */
+.sidebar-toggle{
+  position: fixed; top: 50%; left: 12px; z-index: 70;
+  width: 36px; height: 36px; border-radius: 999px;
+  border: 1px solid var(--border); background: #fff; cursor: pointer;
+  display: grid; place-items: center; color: var(--muted);
+  box-shadow: 0 6px 18px rgba(0,0,0,.06);
+  transform: translateY(-50%);
+}
+.app-shell.sidebar-open .sidebar-toggle{ left: 268px; }
+.sidebar-toggle__icon{ width: 18px; height: 18px; }
+
+/* Overlay para mobile quando sidebar aberta */
+.sidebar-overlay{ display: none; }
+
+/* Bloco do perfil no topo da sidebar */
+.profilebox{
+  display:flex; align-items:center; gap:10px;
+  border:1px solid var(--border); background:#fff; border-radius:12px;
+  padding:10px;
+}
+.profilebox__icon{ color: var(--muted); }
+.profilebox__name{ font-weight:600; font-size:14px; }
+.profilebox__sub{ color: var(--muted); font-size:12px; display:none; }
+
+/* Lista lateral de navegação */
+.sidelist{ display:flex; flex-direction:column; gap:10px; }
+.sidelist__item{
+  display:flex; align-items:center; gap:10px;
+  padding:8px 10px; border-radius:8px; border:0; background:transparent;
+  color:inherit; text-decoration:none; cursor:pointer; text-align:left;
+  width: 100%;
+}
+.sidelist__section{ display:flex; flex-direction:column; gap:4px; }
+.sidelist__heading{ font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); padding:2px 6px; }
+.sidelist__item:hover{ background: var(--hover); }
+.sidelist__item.active{ background: var(--brand-100); box-shadow:0 0 0 1px var(--brand-200) inset; }
+.sidelist__item--danger{ color:#b91c1c; }
+.sidelist__icon{ width:18px; text-align:center; color: var(--muted); }
+
+/* Em telas pequenas, a sidebar vira topo (stack) */
+@media (max-width: 780px){
+  .app-shell{ grid-template-columns: 1fr; }
+  /* Garante que todos os filhos da grid ocupem a mesma coluna, evitando criação de colunas implícitas */
+  .app-shell > .sidebar,
+  .app-shell > .sidebar-toggle,
+  .app-shell > .sidebar-overlay,
+  .app-shell > .app-main{ grid-column: 1 / -1; }
+  .sidebar{
+    position: fixed; left: 0; top: 0; z-index: 60;
+    width: 260px; height: 100dvh; border-right: 1px solid var(--border);
+  }
+  .app-shell.sidebar-open .sidebar-overlay{
+    display: block; position: fixed; inset: 0; z-index: 55; background: rgba(0,0,0,.25);
+  }
+  .sidebar-toggle{ left: 12px; top: 50%; transform: translateY(-50%); }
+  .app-shell.sidebar-open .sidebar-toggle{ left: 268px; } /* junto da borda da sidebar */
+  .app-main{ min-height: 100dvh; }
+  /* Sidebar: garantir navegação no topo */
+  .sidebar__inner{ display:flex; flex-direction: column; justify-content: flex-start; align-items: stretch; padding: 12px; height: 100dvh; overflow-y:auto; }
+  .brand{ display:flex; align-items:center; gap:10px; flex: 0 0 auto; }
+  .mainnav--vertical{ display:flex; flex-direction: column; gap: 8px; margin-top: 8px; flex: 0 0 auto; }
+  .profilebox{ margin: 10px 0; min-height: 56px; flex: 0 0 auto; }
+  .sidelist{ display:flex; flex-direction: column; gap:10px; flex: 0 0 auto; }
+  /* Topbar compacto e em linha */
+  .app-topbar__inner{ flex-direction: row; align-items: baseline; gap: 8px; }
+}
+
+/* Topbar simples no conteúdo */
+.app-topbar{
+  position: sticky; top: 0; z-index: 30;
+  background: rgba(255,255,255,.92); backdrop-filter: saturate(160%) blur(8px);
+  border-bottom: 1px solid var(--border);
+}
+.app-topbar__inner{
+  max-width: 1100px; margin: 0 auto; padding: 10px 12px;
+  display: flex; flex-direction: column; line-height: 1.1;
+}
+.app-topbar__inner strong{ font-size: 16px; }
+.app-topbar__inner small{ font-size: 11px; color: var(--muted); }
+
+@media (max-width: 780px){
+  .app-topbar__inner{ padding: 10px 16px; }
+  .container{ margin-top: 8px; }
+}
+
+/* =======================
+   Mobile: barra inferior (somente ícones)
+   ======================= */
+@media (max-width: 780px){
+  /* Evita overflow horizontal no mobile */
+  html, body, #root{ width: 100%; max-width: 100%; overflow-x: hidden; }
+  .app-shell, .app-main, .container, .app-topbar, .app-topbar__inner, .app-header, .app-header__inner, .dashboard-narrow{
+    width: 100%; max-width: 100%; overflow-x: hidden;
+  }
+  .app-shell, .app-main, .container{ min-width: 0; }
+  .dashboard-narrow{ min-width: 0; }
+
+  /* Sidebar vira uma barra fixa no rodapé */
+  .sidebar{
+    position: fixed; left: 0; right: 0; bottom: 0; top: auto;
+    width: 100%; height: 64px;
+    border-right: 0; border-top: 1px solid var(--border);
+    background: #fff; z-index: 60;
+    transform: none; overflow: visible;
+  }
+  /* Garante que a navegação da sidebar apareça no mobile (sobrepõe regras do header) */
+  .sidebar .mainnav{
+    display: flex !important;
+    position: static;
+    left: auto; right: auto; top: auto;
+    background: transparent; border: 0; padding: 0;
+    gap: 8px;
+  }
+  /* Organiza conteúdo horizontalmente */
+  .sidebar__inner{
+    height: 100%; padding: 6px 10px;
+    display: flex; flex-direction: row; align-items: center; justify-content: space-around;
+    gap: 0; overflow: visible; /* evita clipar ícones */
+  }
+  /* Esconde elementos não essenciais na barra */
+  .brand,
+  .profilebox,
+  .sidelist__heading{ display: none !important; }
+  /* Navegação vira horizontal */
+  .mainnav--vertical{ flex-direction: row; align-items: center; width: 100%; }
+  .sidelist{ flex-direction: row; gap: 8px; align-items: center; width: 100%; justify-content: space-around; }
+  .sidelist__section{ display: flex; flex-direction: row; gap: 8px; }
+  .sidelist__item{
+    width: auto; padding: 6px; border-radius: 10px;
+    display: inline-flex; align-items: center; justify-content: center;
+    min-width: 44px; min-height: 44px; /* alvo de toque acessível */
+  }
+  .sidelist__item{ color: var(--text) !important; }
+  /* Mostra só o ícone */
+  .sidelist__item > span{ display: none; }
+  .sidelist__icon{ width: 24px; height: 24px; display: block; color: var(--text); flex-shrink: 0; stroke: currentColor; stroke-width: 2.2; }
+  .sidelist__item svg{ display: block; }
+  /* Esconde controles do drawer no mobile */
+  .sidebar-toggle,
+  .sidebar-overlay{ display: none !important; }
+  /* Garante que a barra inferior não suma com .is-collapsed */
+  .app-shell.is-collapsed .sidebar{ transform: none; }
+  /* Reserva espaço para a barra não cobrir o conteúdo */
+  .app-main{ padding-bottom: 72px; }
 }

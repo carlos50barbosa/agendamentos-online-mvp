@@ -1,5 +1,6 @@
 // src/pages/NovoAgendamento.jsx
 import React, { useEffect, useMemo, useState, useCallback, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import { Api } from "../utils/api";
 import { getUser } from "../utils/auth";
 
@@ -236,17 +237,30 @@ const ServiceCard = ({ service, selected, onSelect }) => {
   );
 };
 
-const EstablishmentCard = ({ est, selected, onSelect }) => (
-  <div className={`mini-card ${selected ? "mini-card--selected" : ""}`} onClick={() => onSelect(est)}>
-    <div className="mini-card__title">{est.name}</div>
-    {est.email && <div className="mini-card__meta"><span>{est.email}</span></div>}
-  </div>
-);
+const EstablishmentCard = ({ est, selected, onSelect }) => {
+  const displayName = est?.nome || est?.name || est?.fantasia || est?.razao_social || "Estabelecimento";
+  return (
+    <div className={`mini-card ${selected ? "mini-card--selected" : ""}`} onClick={() => onSelect(est)}>
+      <div className="mini-card__title">{displayName}</div>
+    </div>
+  );
+};
 
 /* =================== Página Principal =================== */
 export default function NovoAgendamento() {
   const user = getUser();
   const liveRef = useRef(null);
+  const nav = useNavigate();
+
+  // Redireciona estabelecimentos para seu dashboard
+  useEffect(() => {
+    if (user?.tipo === 'estabelecimento') {
+      nav('/estab', { replace: true });
+    }
+  }, [user?.tipo, nav]);
+  if (user?.tipo === 'estabelecimento') {
+    return <div className="container"><div className="empty">Redirecionando…</div></div>;
+  }
 
   const [state, setState] = useState({
     establishments: [],
@@ -750,6 +764,14 @@ export default function NovoAgendamento() {
 
   const weekLabel = DateHelpers.formatWeekLabel(currentWeek);
 
+  // Reordenar colunas da semana para começar pelo dia atual (se pertencer à semana atual)
+  const daysToRender = useMemo(() => {
+    const list = DateHelpers.weekDays(currentWeek);
+    const todayIso = DateHelpers.toISODate(new Date());
+    const idx = list.findIndex(({ iso }) => DateHelpers.sameYMD(iso, todayIso));
+    return idx > 0 ? [...list.slice(idx), ...list.slice(0, idx)] : list;
+  }, [currentWeek]);
+
   /* ====== UI por passos ====== */
   const isOwner = user?.tipo === "estabelecimento";
   const step = !establishmentId && !isOwner ? 1 : !serviceId ? 2 : 3;
@@ -763,9 +785,25 @@ export default function NovoAgendamento() {
         <div className="row spread" style={{ marginBottom: 8, alignItems: "center" }}>
           <div>
             <h2 style={{ margin: 0 }}>Novo Agendamento</h2>
-            <small className="muted">
-              Semana: {weekLabel} • Fuso: {TZ} • Janela: 07:00–22:00
-            </small>
+            <div className="row" style={{ gap: 6, alignItems: "center" }}>
+              <button
+                className="btn btn--sm"
+                aria-label="Semana anterior"
+                onClick={() => handleWeekChange(DateHelpers.addWeeksISO(currentWeek, -1))}
+              >
+                ◀
+              </button>
+              <small className="muted" title={`Fuso: ${TZ} • Janela: 07:00–22:00`}>
+                Semana: {weekLabel}
+              </small>
+              <button
+                className="btn btn--sm"
+                aria-label="Próxima semana"
+                onClick={() => handleWeekChange(DateHelpers.addWeeksISO(currentWeek, 1))}
+              >
+                ▶
+              </button>
+            </div>
           </div>
           <div className="row" style={{ gap: 8 }}>
             <DensityToggle value={density} onChange={(v) => setState((p) => ({ ...p, density: v }))} />
@@ -834,39 +872,39 @@ export default function NovoAgendamento() {
                   {servicePrice !== "R$\u00A00,00" ? ` • ${servicePrice}` : ""}
                 </span>
               </div>
-
-              <div className="row" style={{ gap: 8, marginLeft: "auto" }}>
-                <label className="label">
-                  <span>Início da semana</span>
-                  <input
-                    type="date"
-                    value={currentWeek}
-                    onChange={(e) => handleWeekChange(DateHelpers.toISODate(e.target.value))}
-                    className="input"
-                    title="Segunda-feira da semana"
-                  />
-                </label>
-
-                <div className="row" style={{ alignItems: "center", gap: 10 }}>
-                  <label className="switch">
-                    <input type="checkbox" checked={filters.onlyAvailable} onChange={() => handleFilterToggle("onlyAvailable")} />
-                    <span>Somente disponíveis</span>
+              <details className="filters" style={{ marginLeft: "auto" }}>
+                <summary>Filtros</summary>
+                <div className="filters__content">
+                  <label className="label">
+                    <span>Início da semana</span>
+                    <input
+                      type="date"
+                      value={currentWeek}
+                      onChange={(e) => handleWeekChange(DateHelpers.toISODate(e.target.value))}
+                      className="input"
+                      title="Segunda-feira da semana"
+                    />
                   </label>
-                  <label className="switch">
-                    <input type="checkbox" checked={filters.hidePast} onChange={() => handleFilterToggle("hidePast")} />
-                    <span>Ocultar passados</span>
-                  </label>
+                  <div className="row" style={{ alignItems: "center", gap: 10 }}>
+                    <label className="switch">
+                      <input type="checkbox" checked={filters.onlyAvailable} onChange={() => handleFilterToggle("onlyAvailable")} />
+                      <span>Somente disponíveis</span>
+                    </label>
+                    <label className="switch">
+                      <input type="checkbox" checked={filters.hidePast} onChange={() => handleFilterToggle("hidePast")} />
+                      <span>Ocultar passados</span>
+                    </label>
+                  </div>
+                  <div className="row" style={{ gap: 6, flexWrap: "wrap", marginTop: 6 }} role="group" aria-label="Período do dia">
+                    <Chip active={filters.timeRange === "all"} onClick={() => handleTimeRange("all")} title="Todos os horários">Todos</Chip>
+                    <Chip active={filters.timeRange === "morning"} onClick={() => handleTimeRange("morning")} title="Manhã (07–12)">Manhã</Chip>
+                    <Chip active={filters.timeRange === "afternoon"} onClick={() => handleTimeRange("afternoon")} title="Tarde (12–18)">Tarde</Chip>
+                    <Chip active={filters.timeRange === "evening"} onClick={() => handleTimeRange("evening")} title="Noite (18–22)">Noite</Chip>
+                  </div>
                 </div>
-              </div>
+              </details>
             </div>
 
-            {/* Filtro período */}
-            <div className="row" style={{ gap: 6, flexWrap: "wrap" }} role="group" aria-label="Período do dia">
-              <Chip active={filters.timeRange === "all"} onClick={() => handleTimeRange("all")} title="Todos os horários">Todos</Chip>
-              <Chip active={filters.timeRange === "morning"} onClick={() => handleTimeRange("morning")} title="Manhã (07–12)">Manhã</Chip>
-              <Chip active={filters.timeRange === "afternoon"} onClick={() => handleTimeRange("afternoon")} title="Tarde (12–18)">Tarde</Chip>
-              <Chip active={filters.timeRange === "evening"} onClick={() => handleTimeRange("evening")} title="Noite (18–22)">Noite</Chip>
-            </div>
 
             {/* Erro de carga */}
             {error && (
@@ -882,33 +920,11 @@ export default function NovoAgendamento() {
             {selectedSlot && (
               <div className="box box--highlight sticky-bar" aria-live="polite" id="resumo-agendamento">
                 <div className="appointment-summary">
-                  <div className="appointment-summary__item">
-                    <span className="appointment-summary__label">Data:</span>
-                    <span className="appointment-summary__value">{DateHelpers.formatDateFull(selectedSlot.datetime)}</span>
-                  </div>
-                  <div className="appointment-summary__item">
-                    <span className="appointment-summary__label">Horário:</span>
-                    <span className="appointment-summary__value">
-                      {DateHelpers.formatTime(selectedSlot.datetime)}{endTimeLabel ? ` – ${endTimeLabel}` : ""}
-                    </span>
-                  </div>
+                  <strong>{DateHelpers.formatDateFull(selectedSlot.datetime)}</strong>
+                  <span> • {DateHelpers.formatTime(selectedSlot.datetime)}{endTimeLabel ? ` – ${endTimeLabel}` : ""}</span>
                 </div>
                 <div className="row" style={{ gap: 6, marginLeft: "auto" }}>
-                  <button className="btn btn--outline" onClick={() => setState((p) => ({ ...p, selectedSlot: null }))}>Limpar</button>
-                  <button
-                    className="btn btn--primary"
-                    onClick={() => setModal((m) => ({ ...m, isOpen: true }))}
-                    aria-describedby="resumo-agendamento"
-                    disabled={
-                      !selectedSlot || !serviceId || modal.isSaving ||
-                      selectedSlotNow?.label !== "disponível" ||
-                      DateHelpers.isPastSlot(selectedSlot.datetime) ||
-                      !inBusinessHours(selectedSlot.datetime)
-                    }
-                    title="Confirmar agendamento"
-                  >
-                    {modal.isSaving ? <span className="spinner" /> : "Confirmar"}
-                  </button>
+                  <button className="btn btn--outline btn--sm" onClick={() => setState((p) => ({ ...p, selectedSlot: null }))}>Limpar</button>
                 </div>
               </div>
             )}
@@ -917,7 +933,7 @@ export default function NovoAgendamento() {
             <div className={`calendar ${density === "compact" ? "calendar--compact" : ""}`}>
               {/* Desktop: grid 7 colunas | Mobile: carrossel horizontal com snap */}
               <div className="calendar__inner">
-                {DateHelpers.weekDays(currentWeek).map(({ iso, date }) => {
+                {daysToRender.map(({ iso, date }) => {
                   const isToday = DateHelpers.sameYMD(iso, DateHelpers.toISODate(new Date()));
                   const dayLabel = new Intl.DateTimeFormat("pt-BR", {
                     weekday: "short", day: "2-digit", month: "2-digit",
