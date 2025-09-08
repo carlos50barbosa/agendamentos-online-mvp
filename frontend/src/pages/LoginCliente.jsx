@@ -1,4 +1,6 @@
 import React, { useState } from 'react'
+import { Link } from 'react-router-dom'
+import LogoAO from '../components/LogoAO.jsx'
 import { Api } from '../utils/api'
 import { saveToken, saveUser } from '../utils/auth'
 import { useNavigate } from 'react-router-dom'
@@ -34,8 +36,16 @@ export default function LoginCliente(){
     <div className="auth">
       <div className="auth-wrap">
         <div className="card auth-card">
+          <div className="auth-illus" aria-hidden>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
+              <line x1="16" y1="2" x2="16" y2="6"/>
+              <line x1="8" y1="2" x2="8" y2="6"/>
+              <line x1="3" y1="10" x2="21" y2="10"/>
+            </svg>
+          </div>
           <div className="auth-hero">
-            <div className="brand__logo" aria-hidden>AO</div>
+            <LogoAO size={48} />
             <div>
               <h2 style={{ margin: 0 }}>Login do Cliente</h2>
               <small>Acesse seus agendamentos</small>
@@ -75,7 +85,12 @@ export default function LoginCliente(){
           </button>
         </div>
 
-        <button className="btn btn--primary" disabled={disabled}>
+        <div className="row spread" style={{ width: '100%' }}>
+          <Link to="/recuperar-senha" className="btn btn--link">Esqueci minha senha</Link>
+          <span></span>
+        </div>
+
+        <button className="btn btn--primary btn--lg btn--block" disabled={disabled}>
           {loading ? <span className="spinner" /> : 'Entrar'}
         </button>
       </form>
@@ -90,6 +105,11 @@ export default function LoginCliente(){
           Erro: {err}
         </div>
       )}
+
+      <div className="divider"><span>ou</span></div>
+      <div className="auth-alt">
+        Novo por aqui? <Link to="/cadastro">Crie uma conta</Link>
+      </div>
         </div>
       </div>
     </div>

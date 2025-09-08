@@ -11,12 +11,16 @@ import ServicosEstabelecimento from './pages/ServicosEstabelecimento.jsx';
 import NovoAgendamento from './pages/NovoAgendamento.jsx';
 import EstabelecimentosList from './pages/EstabelecimentosList.jsx';
 import { IconUser, IconMenu, IconHome, IconPlus, IconGear, IconHelp, IconLogout, IconList, IconChevronLeft, IconChevronRight } from './components/Icons.jsx';
+import LogoAO from './components/LogoAO.jsx';
 import Modal from './components/Modal.jsx';
 import Loading from './pages/Loading.jsx';
 import Configuracoes from './pages/Configuracoes.jsx';
 import Ajuda from './pages/Ajuda.jsx';
 import Relatorios from './pages/Relatorios.jsx';
 import Planos from './pages/Planos.jsx';
+import RecuperarSenha from './pages/RecuperarSenha.jsx';
+import DefinirSenha from './pages/DefinirSenha.jsx';
+import AdminTools from './pages/AdminTools.jsx';
 
 function Sidebar({ open }){
   const nav = useNavigate();
@@ -54,20 +58,28 @@ function Sidebar({ open }){
   return (
     <aside className={`sidebar ${scrolled ? 'is-scrolled' : ''}`} ref={setEl}>
       <div className="sidebar__inner">
-        <NavLink to="/" className="brand">
-          <span className="brand__logo" aria-hidden="true">AO</span>
-          <span className="brand__text">
-            <strong>Agendamentos Online</strong>
-            <small>Rápido e sem fricção</small>
-          </span>
-        </NavLink>
+        {/* Marca removida da lateral conforme solicitado */}
 
         <nav id="mainnav" className="mainnav mainnav--vertical">
           {!user ? (
-            <>
-              <NavLink to="/login" className={({isActive}) => isActive ? 'active' : undefined}>Login</NavLink>
-              <NavLink to="/cadastro" className={({isActive}) => isActive ? 'active' : undefined}>Cadastro</NavLink>
-            </>
+            <div className="sidelist">
+              <div className="sidelist__section">
+                <NavLink
+                  to="/login"
+                  className={({isActive}) => `sidelist__item${isActive ? ' active' : ''}`}
+                >
+                  <IconUser className="sidelist__icon" aria-hidden="true" />
+                  <span>Login</span>
+                </NavLink>
+                <NavLink
+                  to="/cadastro"
+                  className={({isActive}) => `sidelist__item${isActive ? ' active' : ''}`}
+                >
+                  <IconPlus className="sidelist__icon" aria-hidden="true" />
+                  <span>Cadastro</span>
+                </NavLink>
+              </div>
+            </div>
           ) : (
             <>
               <div className="profilebox" title={user?.email || ''}>
@@ -215,14 +227,21 @@ export default function App(){
       <main className="app-main">
         <div className="app-topbar">
           <div className="app-topbar__inner">
-            <strong>Agendamentos Online</strong>
-            <small>Rápido e sem fricção</small>
+            <NavLink to="/" className="brand">
+              <LogoAO size={28} />
+              <span className="brand__text">
+                <strong>Agendamentos Online</strong>
+                <small>Rápido e sem fricção</small>
+              </span>
+            </NavLink>
           </div>
         </div>
         <div className="container">
           <Routes>
             <Route path="/" element={<EstabelecimentosList/>} />
             <Route path="/login" element={<Login/>}/>
+            <Route path="/recuperar-senha" element={<RecuperarSenha/>}/>
+            <Route path="/definir-senha" element={<DefinirSenha/>}/>
             <Route path="/login-cliente" element={<LoginCliente/>}/>
             <Route path="/login-estabelecimento" element={<LoginEstabelecimento/>}/>
             <Route path="/cadastro" element={<Cadastro/>}/>
@@ -235,6 +254,7 @@ export default function App(){
             <Route path="/ajuda" element={<Ajuda/>}/>
             <Route path="/relatorios" element={<Relatorios/>}/>
             <Route path="/planos" element={<Planos/>}/>
+            <Route path="/admin-tools" element={<AdminTools/>}/>
           </Routes>
         </div>
       </main>

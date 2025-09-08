@@ -26,6 +26,13 @@ export default function ServicosEstabelecimento() {
   const [toDelete, setToDelete] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
 
+  // Editar
+  const [editOpen, setEditOpen] = useState(false);
+  const [editItem, setEditItem] = useState(null);
+  const [editForm, setEditForm] = useState({ nome: '', duracao_min: 30, preco_centavos: 0 });
+  const [editPrecoStr, setEditPrecoStr] = useState('R$ 0,00');
+  const [editSaving, setEditSaving] = useState(false);
+
   // Toast
   const [toast, setToast] = useState(null); // {type:'success'|'error'|'info', msg:string}
   function showToast(type, msg, ms = 2500) {
@@ -77,6 +84,13 @@ export default function ServicosEstabelecimento() {
     setPrecoStr(formatBRL(centavos));
   }
 
+  function handleEditPrecoChange(e) {
+    const digits = e.target.value.replace(/\D/g, "");
+    const centavos = parseInt(digits || "0", 10);
+    setEditForm((f) => ({ ...f, preco_centavos: centavos }));
+    setEditPrecoStr(formatBRL(centavos));
+  }
+
   // Validação simples
   const formInvalid =
     !form.nome.trim() || form.duracao_min <= 0 || form.preco_centavos <= 0;
@@ -105,6 +119,35 @@ export default function ServicosEstabelecimento() {
   function askDelete(svc) {
     setToDelete(svc);
     setConfirmOpen(true);
+  }
+
+  // Abrir edição
+  function openEdit(svc){
+    setEditItem(svc);
+    setEditForm({ nome: svc.nome || '', duracao_min: svc.duracao_min || 30, preco_centavos: svc.preco_centavos || 0 });
+    setEditPrecoStr(formatBRL(svc.preco_centavos || 0));
+    setEditOpen(true);
+  }
+
+  async function saveEdit(){
+    if (!editItem) return;
+    if (!editForm.nome.trim() || !editForm.duracao_min || !editForm.preco_centavos){
+      showToast('error', 'Preencha os campos corretamente.');
+      return;
+    }
+    setEditSaving(true);
+    try{
+      const payload = { nome: editForm.nome.trim(), duracao_min: editForm.duracao_min, preco_centavos: editForm.preco_centavos };
+      await Api.servicosUpdate(editItem.id, payload);
+      setList(curr => curr.map(x => x.id === editItem.id ? { ...x, ...payload } : x));
+      setEditOpen(false);
+      setEditItem(null);
+      showToast('success', 'Serviço atualizado.');
+    }catch(e){
+      showToast('error', 'Falha ao atualizar o serviço.');
+    }finally{
+      setEditSaving(false);
+    }
   }
 
   async function confirmDelete() {
@@ -302,7 +345,7 @@ export default function ServicosEstabelecimento() {
                   <th>Duração</th>
                   <th>Preço</th>
                   <th>Status</th>
-                  <th style={{ width: 120 }}></th>
+                  <th style={{ width: 160 }}></th>
                 </tr>
               </thead>
               <tbody>
@@ -321,7 +364,14 @@ export default function ServicosEstabelecimento() {
                         {s.ativo ? "Ativo" : "Inativo"}
                       </button>
                     </td>
-                    <td className="table-actions" style={{ textAlign: "right" }}>
+                    <td className="table-actions" style={{ textAlign: "right", display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                      <button
+                        className="btn btn--outline"
+                        onClick={() => openEdit(s)}
+                        disabled={!!s._updating}
+                      >
+                        Editar
+                      </button>
                       <button
                         className="btn btn--danger"
                         onClick={() => askDelete(s)}
@@ -354,6 +404,46 @@ export default function ServicosEstabelecimento() {
             </button>
             <button className="btn btn--danger" onClick={confirmDelete}>
               Excluir
+            </button>
+          </div>
+        </Modal>
+      )}
+
+      {/* Modal de edição */}
+      {editOpen && (
+        <Modal onClose={() => setEditOpen(false)}>
+          <h3>Editar serviço</h3>
+          <div className="grid" style={{ gap: 8, marginTop: 8 }}>
+            <input
+              className="input"
+              placeholder="Nome do serviço"
+              value={editForm.nome}
+              onChange={(e) => setEditForm((f) => ({ ...f, nome: e.target.value }))}
+              maxLength={80}
+            />
+            <select
+              className="input"
+              value={editForm.duracao_min}
+              onChange={(e)=> setEditForm(f => ({ ...f, duracao_min: parseInt(e.target.value,10) }))}
+              title="Duração (min)"
+            >
+              {[15, 30, 45, 60, 75, 90, 120].map(m => (
+                <option key={m} value={m}>{m} min</option>
+              ))}
+            </select>
+            <input
+              className="input"
+              type="text"
+              inputMode="numeric"
+              placeholder="Preço"
+              value={editPrecoStr}
+              onChange={handleEditPrecoChange}
+            />
+          </div>
+          <div className="row" style={{ gap: 8, justifyContent: 'flex-end', marginTop: 12 }}>
+            <button className="btn btn--outline" onClick={()=>setEditOpen(false)}>Cancelar</button>
+            <button className="btn btn--primary" onClick={saveEdit} disabled={editSaving}>
+              {editSaving ? <span className="spinner"/> : 'Salvar alterações'}
             </button>
           </div>
         </Modal>

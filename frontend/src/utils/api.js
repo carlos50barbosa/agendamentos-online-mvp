@@ -99,6 +99,8 @@ export const Api = {
   register: (payload) => req('/auth/register', { method: 'POST', body: JSON.stringify(payload) }),
   login: (email, senha) => req('/auth/login', { method: 'POST', body: JSON.stringify({ email, senha }) }),
   me: () => req('/auth/me'),
+  requestPasswordReset: (email) => req('/auth/forgot', { method: 'POST', body: JSON.stringify({ email }) }),
+  resetPassword: (token, senha) => req('/auth/reset', { method: 'POST', body: JSON.stringify({ token, senha }) }),
 
   // Estabelecimentos + Serviços (NOVOS)
   listEstablishments: () => req('/establishments'),
@@ -126,7 +128,7 @@ export const Api = {
       idempotencyKey: opts.idempotencyKey,
     }),
   meusAgendamentos: () => req('/agendamentos'),
-  agendamentosEstabelecimento: () => req('/agendamentos/estabelecimento'),
+  agendamentosEstabelecimento: (status) => req(`/agendamentos/estabelecimento${toQuery({ status })}`),
   cancelarAgendamento: (id) => req(`/agendamentos/${id}/cancel`, { method: 'PUT' }),
 
   // Notificações (NOVO)
@@ -134,6 +136,13 @@ export const Api = {
     req('/notifications/whatsapp/schedule', {
       method: 'POST',
       body: JSON.stringify(payload),
+    }),
+
+  // Admin (manutenção)
+  adminCleanup: (adminToken) =>
+    req('/admin/cleanup', {
+      method: 'POST',
+      headers: { 'X-Admin-Token': String(adminToken || '') },
     }),
 };
 

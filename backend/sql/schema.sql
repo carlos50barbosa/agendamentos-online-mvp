@@ -21,6 +21,19 @@ CREATE TABLE IF NOT EXISTS usuarios (
   INDEX idx_usuarios_tipo (tipo)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
+-- Tokens de redefinição de senha (invalidação pós-uso)
+CREATE TABLE IF NOT EXISTS password_resets (
+  id           INT AUTO_INCREMENT PRIMARY KEY,
+  user_id      INT              NOT NULL,
+  jti          VARCHAR(64)      NOT NULL UNIQUE,
+  expires_at   DATETIME         NOT NULL,
+  used_at      DATETIME         NULL,
+  created_at   TIMESTAMP        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_pwdreset_user FOREIGN KEY (user_id) REFERENCES usuarios(id) ON DELETE CASCADE,
+  INDEX idx_pwdreset_user (user_id),
+  INDEX idx_pwdreset_expires (expires_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
 -- Serviços (somente estabelecimento)
 CREATE TABLE IF NOT EXISTS servicos (
   id                 INT AUTO_INCREMENT PRIMARY KEY,

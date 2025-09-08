@@ -2,18 +2,19 @@
    Design Tokens — Tema CLARO
    ======================= */
 :root{
-  --bg:#f9fafb;            /* fundo geral cinza bem claro */
+  --bg:#f0f4f8;            /* fundo geral cinza bem claro */
   --card-bg:#ffffff;       /* cartões brancos */
   --border:#e8e8ec;        /* borda suave */
   --text:#1f2937;          /* cinza-escuro legível */
   --muted:#6b7280;         /* texto secundário */
-  --brand:#2563eb;         /* primária (azul suave) */
-  --brand-100:#eef2ff;
-  --brand-200:#c7d2fe;
+  --brand:#5c5ccc;         /* primária (roxo suave) */
+  --brand-100:#efefff;     /* tom claro do brand */
+  --brand-200:#c9c9ff;     /* tom médio claro do brand */
   --hover:#f3f4f6;
   --radius:12px;
   --radius-sm:10px;
-  --ring-shadow:0 0 0 3px rgba(37,99,235,.28);
+  --ring-shadow:0 0 0 3px rgba(92,92,204,.28);
+  --topbar-h: 60px;        /* altura fixa da topbar */
 }
 
 *{ box-sizing:border-box; }
@@ -24,7 +25,7 @@ body{
   color:var(--text);
   -webkit-font-smoothing:antialiased;
   -moz-osx-font-smoothing:grayscale;
-  font-family:ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+  font-family:'Inter', ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
 }
 
 /* =======================
@@ -32,10 +33,14 @@ body{
    ======================= */
 .grid{ display:flex; flex-direction:column; gap:12px; }
 .row{ display:flex; align-items:center; gap:8px; }
-.row-wrap{ display:flex; flex-wrap:wrap; gap:8px; }
+.row-wrap{ display:flex; flex-wrap:wrap; gap:4px; }
 .spread{ justify-content:space-between; }
 .muted{ color:var(--muted); }
 .small{ font-size:12px; }
+
+/* Nome abreviado/compacto com reticências se exceder largura */
+.name-short{ display:inline-block; max-width: 18ch; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }
+@media (max-width: 780px){ .name-short{ max-width: 14ch; } }
 
 /* Cards / Boxes */
 .card{
@@ -92,6 +97,7 @@ body{
    Buttons
    ======================= */
 .btn{
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
   border:1px solid var(--border);
   background:#fff; color:var(--text);
   border-radius:10px; padding:8px 12px; height:auto;
@@ -103,6 +109,9 @@ body{
 .btn--sm{ padding:6px 10px; font-size:12px; }
 .btn--primary{ background:var(--brand); border-color:var(--brand); color:#fff; }
 .btn--outline{ background:#fff; }
+.btn--lg{ height:48px; padding:0 16px; font-size:14px; }
+.btn--block{ display:flex; width:100%; }
+.btn__icon{ width:18px; height:18px; }
 
 /* Segmented (tabs simples) */
 .segmented{ display:inline-flex; background:#f3f4f6; border-radius:10px; padding:2px; }
@@ -157,9 +166,9 @@ body{
   min-width:220px; max-width:320px; flex:1 1 220px;
   border:1px solid var(--border); border-radius:12px;
   padding:10px; background:#fff; cursor:pointer;
-  transition:background .12s ease, box-shadow .12s ease;
+  transition:background .12s ease, box-shadow .12s ease, transform .12s ease;
 }
-.mini-card:hover{ background:var(--hover); }
+.mini-card:hover{ background:var(--hover); transform: translateY(-2px); box-shadow: 0 10px 26px rgba(0,0,0,.08); }
 .mini-card--selected{ outline:2px solid var(--brand); }
 .mini-card__title{ font-weight:600; font-size:14px; margin-bottom:4px; }
 .mini-card__meta{ display:flex; gap:8px; color:var(--muted); font-size:12px; }
@@ -243,11 +252,11 @@ a:hover { opacity: 1; text-decoration: underline; }
 /* =======================
    Pricing (Planos)
    ======================= */
-.pricing-grid{ display:grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap:12px; }
+.pricing-grid{ display:grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap:6px; }
 .pricing-card{
   background:#fff; border:1px solid var(--border); border-radius:12px; padding:12px; display:flex; flex-direction:column; gap:10px;
 }
-.pricing-card.is-featured{ outline:2px solid var(--brand); box-shadow:0 12px 30px rgba(37,99,235,.15); }
+.pricing-card.is-featured{ outline:2px solid var(--brand); box-shadow:0 12px 30px rgba(92,92,204,.15); }
 .pricing-header{ display:flex; flex-direction:column; gap:2px; }
 .pricing-title{ font-weight:700; font-size:16px; }
 .price{ display:flex; align-items:baseline; gap:4px; }
@@ -259,15 +268,56 @@ a:hover { opacity: 1; text-decoration: underline; }
 /* =======================
    Auth (Login/Cadastro)
    ======================= */
-.auth{ display:grid; place-items:center; min-height: 68dvh; }
-.auth-wrap{ width:min(560px, 92vw); display:grid; gap:12px; }
-.auth-hero{ display:flex; align-items:center; gap:10px; }
-.auth-hero .brand__logo{ width:42px; height:42px; font-size:14px; }
-.auth-hero h2{ margin:0; }
+.auth{
+  display:grid; place-items:center; min-height: 92dvh;
+  padding: 24px 12px;
+  /* fundo moderno e sutil com base na cor da marca */
+  background:
+    radial-gradient(900px 480px at -10% -10%, rgba(92,92,204,.10), transparent 60%),
+    radial-gradient(720px 380px at 110% 0%, rgba(92,92,204,.08), transparent 60%),
+    linear-gradient(#f6f8fb, #eef2f7);
+}
+.auth-wrap{ width:min(640px, 92vw); display:grid; gap:14px; }
+.auth-hero{ display:flex; align-items:center; gap:12px; }
+.auth-hero .brand__logo{ width:48px; height:48px; }
+.auth-hero h2{ margin:0; font-size:22px; }
 .auth-hero small{ color:var(--muted); }
-.auth-card{ padding:16px; }
+.auth-card{ padding:20px; border-radius: 14px; box-shadow: 0 14px 40px rgba(0,0,0,.10); }
 .auth-actions{ display:flex; justify-content:flex-end; gap:8px; }
 .auth-alt{ text-align:center; color:var(--muted); }
+
+/* Inputs e botões mais confortáveis nas telas de auth */
+.auth-card .input{ width: 100%; height: 44px; font-size: 14px; }
+.auth-card .btn{ height: 44px; padding: 0 14px; }
+.auth-card .btn.btn--sm{ height: 36px; }
+.auth-card form{ width: 100%; }
+/* Links em telas de auth: não afeta botões estilizados como links */
+.auth a:not(.btn){ color: var(--brand); font-weight: 600; }
+/* Garantir contraste correto em botões primários dentro de .auth */
+.auth a.btn.btn--primary{ color: #fff; }
+
+/* Botão link para ações secundárias (ex.: Esqueci minha senha) */
+.btn--link{
+  background: transparent; border: 0; padding: 0; height: auto;
+  color: var(--brand); font-weight: 600; cursor: pointer;
+}
+.btn--link:hover{ text-decoration: underline; }
+
+/* Ilustração simples no topo do card */
+.auth-illus{
+  width: 60px; height: 60px; border-radius: 14px;
+  background: linear-gradient(180deg, var(--brand-100), #fff);
+  border: 1px solid var(--brand-200);
+  display: grid; place-items: center; margin: 0 auto 6px auto;
+  box-shadow: 0 8px 24px rgba(92,92,204,.15);
+  color: var(--brand);
+}
+.auth-illus svg{ width: 28px; height: 28px; }
+
+/* Divisor “ou” */
+.divider{ position: relative; text-align: center; margin: 12px 0; }
+.divider::before{ content: ""; position: absolute; left: 0; right: 0; top: 50%; height: 1px; background: var(--border); }
+.divider > span{ position: relative; background: #fff; padding: 0 8px; color: var(--muted); font-size: 12px; }
 
 /* Header / Nav simples */
 .header {
@@ -276,7 +326,7 @@ a:hover { opacity: 1; text-decoration: underline; }
 }
 .nav { display: flex; gap: 16px; align-items: center; }
 .nav a { padding: 6px 8px; border-radius: 8px; }
-.nav a.active { background: rgba(59,130,246,.15); border: 1px solid var(--primary); }
+.nav a.active { background: var(--brand-100); border: 1px solid var(--brand-200); }
 .nav .logout { margin-left: 8px; }
 
 /* =======================
@@ -445,6 +495,12 @@ button:focus-visible, a:focus-visible, select:focus-visible, input:focus-visible
   border-color: #fde68a;
   color: #92400e;
 }
+/* Concluído (azul) */
+.badge.done{
+  background: #eff6ff;   /* azul bem claro */
+  border-color: #bfdbfe; /* azul claro */
+  color: #1e40af;        /* azul escuro */
+}
 
 /* Badges de plano */
 .badge--pro{
@@ -500,7 +556,8 @@ button.danger:disabled,
 @media (max-width: 760px){
   /* Em telas estreitas: o card vira um contêiner rolável horizontalmente
      para evitar corte. A tabela mantém seu tamanho natural. */
-  .card{ overflow-x: auto; -webkit-overflow-scrolling: touch; touch-action: pan-x; overscroll-behavior-x: contain; }
+  /* Permitir rolagem vertical dentro dos cards no mobile */
+  .card{ overflow-x: auto; -webkit-overflow-scrolling: touch; touch-action: pan-x pan-y; overscroll-behavior-x: contain; }
   /* Deixe a largura da tabela ditada pelo conteúdo para garantir overflow */
   .card > table{ min-width: 520px; width: max-content; }
 
@@ -534,6 +591,7 @@ button.danger:disabled,
   margin: 0 auto;
   padding: 0 12px;            /* respiro lateral */
   max-width: 920px;           /* largura-alvo (desktop) */
+  font-size: 14px;            /* tipografia mais compacta no dashboard */
 }
 
 /* em telas grandes você pode estreitar um pouco mais, se quiser */
@@ -565,12 +623,17 @@ button.danger:disabled,
   display: flex; align-items: center; gap: 10px;
   color: var(--text); text-decoration: none;
 }
+.brand:hover,
+.brand:focus,
+.brand:active{
+  text-decoration: none; /* evita sublinhado no hover/click */
+}
 .brand__logo{
   width: 28px; height: 28px; border-radius: 8px;
-  background: var(--brand); color: #fff; font-weight: 700; font-size: 12px;
-  display: grid; place-items: center;
-  box-shadow: 0 4px 10px rgba(37,99,235,.25);
+  display: inline-block;
+  box-shadow: 0 4px 10px rgba(92,92,204,.25);
 }
+.brand__logo svg{ width: 100%; height: 100%; display: block; border-radius: 8px; }
 .brand__text strong{ display:block; font-size: 16px; line-height: 1; }
 .brand__text small{ display:block; font-size: 11px; color: var(--muted); margin-top: 2px; }
 
@@ -635,8 +698,9 @@ button.danger:disabled,
 }
 .app-shell.is-collapsed{ grid-template-columns: 0 1fr; }
 .sidebar{
-  position: sticky; top: 0; align-self: stretch;
-  height: 100%; max-height: 100%; overflow-y: auto;
+  position: fixed; left: 0; top: var(--topbar-h); bottom: 0; z-index: 60;
+  width: 260px; height: calc(100dvh - var(--topbar-h));
+  overflow-y: auto;
   background: #E0E7EF;
   border-right: 1px solid var(--border);
   display: flex; flex-direction: column;
@@ -649,7 +713,7 @@ button.danger:disabled,
 }
 .app-shell.is-collapsed .sidebar{ transform: translateX(-100%); }
 .mainnav--vertical{ display: flex; flex-direction: column; gap: 8px; flex: 0 0 auto; align-items: stretch; }
-.app-main{ background: var(--bg); min-width: 0; }
+.app-main{ background: var(--bg); min-width: 0; padding-top: var(--topbar-h); grid-column: 2; }
 
 /* Toggle da sidebar */
 .sidebar-toggle{
@@ -700,8 +764,8 @@ button.danger:disabled,
   .app-shell > .sidebar-overlay,
   .app-shell > .app-main{ grid-column: 1 / -1; }
   .sidebar{
-    position: fixed; left: 0; top: 0; z-index: 60;
-    width: 260px; height: 100dvh; border-right: 1px solid var(--border);
+    position: fixed; left: 0; top: auto; bottom: 0; z-index: 60;
+    width: 100%; height: 64px; border-right: 0; border-top: 1px solid var(--border);
   }
   .app-shell.sidebar-open .sidebar-overlay{
     display: block; position: fixed; inset: 0; z-index: 55; background: rgba(0,0,0,.25);
@@ -721,22 +785,86 @@ button.danger:disabled,
 
 /* Topbar simples no conteúdo */
 .app-topbar{
-  position: sticky; top: 0; z-index: 30;
-  background: rgba(255,255,255,.92); backdrop-filter: saturate(160%) blur(8px);
-  border-bottom: 1px solid var(--border);
+  position: fixed; left: 0; right: 0; top: 0; z-index: 70; /* fixada no topo da viewport */
+  height: var(--topbar-h);
+  display: flex; align-items: center;
+  background: rgba(255,255,255,.92); /* cor anterior (clara) */
+  backdrop-filter: saturate(160%) blur(8px);
+  border-bottom: 1px solid var(--brand-200); /* linha roxa clara */
+  box-shadow: 0 8px 24px rgba(92,92,204,.10); /* sombra roxa clara abaixo */
 }
 .app-topbar__inner{
-  max-width: 1100px; margin: 0 auto; padding: 10px 12px;
-  display: flex; flex-direction: column; line-height: 1.1;
+  max-width: 1100px; margin: 0 auto; padding: 0 12px;
+  display: flex; flex-direction: row; align-items: center; justify-content: space-between;
+  height: 100%; line-height: 1.1;
+}
+/* Desktop: brand encostada no canto esquerdo da topbar */
+@media (min-width: 781px){
+  .app-topbar__inner{ max-width: none; margin: 0; padding-left: 12px; padding-right: 12px; }
 }
 .app-topbar__inner strong{ font-size: 16px; }
 .app-topbar__inner small{ font-size: 11px; color: var(--muted); }
 
 @media (max-width: 780px){
-  .app-topbar__inner{ padding: 10px 16px; }
+  .app-topbar__inner{ padding: 10px 16px; flex-direction: row; align-items: center; justify-content: space-between; }
   .container{ margin-top: 8px; }
 }
 
+/* Dashboard: estilos compactos para tabelas, badges e botões */
+.table--dense thead th{ font-size: 11px; padding: 6px   8px; }
+.table--dense tbody td{ font-size: 13px; padding: 8px 10px; }
+.dashboard-narrow .badge{ font-size: 10px; padding: 2px 6px; }
+.dashboard-narrow .btn{ height: 34px; padding: 0 10px; font-size: 12px; }
+/* Aplicar compactação direto às tabelas do dashboard */
+.dashboard-narrow .card{ padding: 8px; }
+.dashboard-narrow .card > table thead th{ font-size: 10px; padding: 3px 4px; }
+.dashboard-narrow .card > table tbody td{ font-size: 12px; padding: 3px 4px; }
+.dashboard-narrow .card > table tbody td .small{ font-size: 10px; line-height: 1.05; }
+.dashboard-narrow .name-short{ max-width: 12ch; }
+.dashboard-narrow .card > table td:nth-child(1){ white-space: normal; word-break: break-word; }
+/* Aperta ainda mais o status */
+.dashboard-narrow .badge{ font-size: 10px; padding: 2px 5px; }
+
+/* Botão de cancelar do dashboard com o mesmo porte do badge */
+.dashboard-narrow .btn.btn--danger.btn--sm.danger{
+  font-size: 10px;
+  padding: 2px 6px;
+  height: auto;
+  line-height: 1;
+  border-radius: 999px;
+}
+
+/* Dashboard: controle explícito de largura das colunas */
+.dashboard-narrow .card > table{ table-layout: fixed; }
+/* Coluna 1 (Agendamento) — largura fixa em caracteres para evitar sobra */
+.dashboard-narrow .card > table th:nth-child(1),
+.dashboard-narrow .card > table td:nth-child(1){ width: 20ch; max-width: 20ch; }
+/* Coluna 2 (Início) — cabe o formato "dd/mm, hh:mm" */
+.dashboard-narrow .card > table th:nth-child(2),
+.dashboard-narrow .card > table td:nth-child(2){ width: 9ch; white-space: nowrap; }
+/* Coluna 3 (Status) */
+.dashboard-narrow .card > table th:nth-child(3),
+.dashboard-narrow .card > table td:nth-child(3){ width: 8ch; white-space: nowrap; }
+/* Coluna 4 (Ações) */
+.dashboard-narrow .card > table th:last-child,
+.dashboard-narrow .card > table td:last-child{ width: 1%; white-space: nowrap; }
+
+/* Desktop: tabelas de dashboard com tamanho padrão (fontes maiores e layout auto) */
+@media (min-width: 781px){
+  .dashboard-narrow .card{ padding: 12px; }
+  .dashboard-narrow .card > table{ table-layout: auto; }
+  .dashboard-narrow .card > table thead th{ font-size: 12px; padding: 10px 12px; }
+  .dashboard-narrow .card > table tbody td{ font-size: 14px; padding: 10px 12px; }
+  .dashboard-narrow .card > table th:nth-child(1),
+  .dashboard-narrow .card > table td:nth-child(1){ width: auto; max-width: none; }
+  .dashboard-narrow .card > table th:nth-child(2),
+  .dashboard-narrow .card > table td:nth-child(2){ width: auto; white-space: nowrap; }
+  .dashboard-narrow .card > table th:nth-child(3),
+  .dashboard-narrow .card > table td:nth-child(3){ width: auto; white-space: nowrap; }
+  .dashboard-narrow .card > table th:last-child,
+  .dashboard-narrow .card > table td:last-child{ width: 1%; white-space: nowrap; }
+  .dashboard-narrow .name-short{ max-width: 18ch; }
+}
 /* =======================  
    Mobile: barra inferior (somente ícones)
    ======================= */
@@ -771,23 +899,25 @@ button.danger:disabled,
     display: flex; flex-direction: row; align-items: center; justify-content: space-around;
     gap: 0; overflow: visible; /* evita clipar ícones */
   }
-  /* Esconde elementos não essenciais na barra */
-  .brand,
-  .profilebox,
-  .sidelist__heading{ display: none !important; }
+  /* Esconde elementos não essenciais SOMENTE na barra inferior (sidebar no mobile) */
+  .sidebar .brand,
+  .sidebar .profilebox,
+  .sidebar .sidelist__heading{ display: none !important; }
   /* Navegação vira horizontal */
   .mainnav--vertical{ flex-direction: row; align-items: center; width: 100%; }
   .sidelist{ flex-direction: row; gap: 8px; align-items: center; width: 100%; justify-content: space-around; }
   .sidelist__section{ display: flex; flex-direction: row; gap: 8px; }
   .sidelist__item{
     width: auto; padding: 6px; border-radius: 10px;
-    display: inline-flex; align-items: center; justify-content: center;
+    display: inline-flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 2px;
     min-width: 44px; min-height: 44px; /* alvo de toque acessível */
+    color: var(--text) !important;
+    text-align: center;
   }
-  .sidelist__item{ color: var(--text) !important; }
-  /* Mostra só o ícone */
-  .sidelist__item > span{ display: none; }
-  .sidelist__icon{ width: 24px; height: 24px; display: block; color: var(--text); flex-shrink: 0; stroke: currentColor; stroke-width: 2.2; }
+  /* Ícone acima, rótulo abaixo — compacto */
+  .sidelist__item > span{ display: block; font-size: 10px; line-height: 1; opacity: .9; max-width: 72px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sidelist__icon{ width: 24px; height: 24px; display: block; color: var(--text); flex-shrink: 0; stroke: currentColor; stroke-width: 2.2; margin: 0 auto; }
   .sidelist__item svg{ display: block; }
   /* Esconde controles do drawer no mobile */
   .sidebar-toggle,
@@ -796,4 +926,13 @@ button.danger:disabled,
   .app-shell.is-collapsed .sidebar{ transform: none; }
   /* Reserva espaço para a barra não cobrir o conteúdo */
   .app-main{ padding-bottom: 72px; }
+
+  /* Aumenta fonte no mobile para legibilidade */
+  html, body{ font-size: 16px; }
+  .dashboard-narrow{ font-size: 16px; }
+  .dashboard-narrow .card > table thead th{ font-size: 12px; padding: 6px 8px; }
+  .dashboard-narrow .card > table tbody td{ font-size: 14px; padding: 6px 8px; }
+  .dashboard-narrow .card > table tbody td .small{ font-size: 12px; }
+  .dashboard-narrow .badge{ font-size: 11px; padding: 3px 8px; }
+  .dashboard-narrow .btn{ height: 38px; padding: 0 12px; font-size: 13px; }
 }

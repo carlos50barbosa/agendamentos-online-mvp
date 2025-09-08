@@ -62,14 +62,28 @@ router.get('/', authRequired, isCliente, async (req, res) => {
 // Lista agendamentos do estabelecimento (somente confirmados/pendentes)
 router.get('/estabelecimento', authRequired, isEstabelecimento, async (req, res) => {
   const estId = req.user.id;
-  const [rows] = await pool.query(`
-    SELECT a.*, s.nome AS servico_nome, u.nome AS cliente_nome
-    FROM agendamentos a
-    JOIN servicos s ON s.id=a.servico_id
-    JOIN usuarios u ON u.id=a.cliente_id
-    WHERE a.estabelecimento_id=? AND a.status IN ('confirmado','pendente')
-    ORDER BY a.inicio DESC
-  `, [estId]);
+  const status = String(req.query?.status || '').toLowerCase();
+
+  // Mapeia filtros: por padrão mantém confirmados+pendentes (comportamento atual)
+  // status=todos -> todos; status=confirmado|cancelado|pendente -> somente aquele
+  let where = 'a.estabelecimento_id=? AND a.status IN (\'confirmado\',\'pendente\')';
+  const params = [estId];
+  if (status === 'todos') {
+    where = 'a.estabelecimento_id=?';
+  } else if (['confirmado', 'cancelado', 'pendente'].includes(status)) {
+    where = 'a.estabelecimento_id=? AND a.status=?';
+    params.push(status);
+  }
+
+  const [rows] = await pool.query(
+    `SELECT a.*, s.nome AS servico_nome, u.nome AS cliente_nome
+     FROM agendamentos a
+     JOIN servicos s ON s.id=a.servico_id
+     JOIN usuarios u ON u.id=a.cliente_id
+     WHERE ${where}
+     ORDER BY a.inicio DESC`,
+    params
+  );
   res.json(rows);
 });
 

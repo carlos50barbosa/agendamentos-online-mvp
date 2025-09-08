@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react'
+import LogoAO from '../components/LogoAO.jsx'
 import { Api } from '../utils/api'
 import { saveToken, saveUser } from '../utils/auth'
 import { useNavigate } from 'react-router-dom'
@@ -86,7 +87,7 @@ export default function Cadastro(){
       <div className="auth-wrap">
         <div className="card auth-card">
           <div className="auth-hero">
-            <div className="brand__logo" aria-hidden>AO</div>
+            <LogoAO size={48} />
             <div>
               <h2 style={{ margin: 0 }}>Criar conta</h2>
               <small>Leva menos de 2 minutos</small>

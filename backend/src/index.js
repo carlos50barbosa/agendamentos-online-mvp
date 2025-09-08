@@ -11,6 +11,9 @@ import slotsRouter from './routes/slots.js';
 import estabelecimentosRoutes from './routes/estabelecimentos.js';
 import notificationsRouter from './routes/notifications.js'; // opcional
 import notifyRouter from './routes/notify.js'; // rota de teste de notificações
+import adminRouter from './routes/admin.js';
+import { pool } from './lib/db.js';
+import { startMaintenance } from './lib/maintenance.js';
 
 
 const app = express();
@@ -43,6 +46,7 @@ app.use('/notifications', notificationsRouter);
 app.use('/establishments', estabelecimentosRoutes);
 app.use('/estabelecimentos', estabelecimentosRoutes);
 app.use('/notify', notifyRouter);
+app.use('/admin', adminRouter);
 
 // Aliases “/api/*” (seu Nginx usa /api)
 app.use('/api/auth', authRouter);
@@ -53,6 +57,7 @@ app.use('/api/notifications', notificationsRouter);
 app.use('/api/establishments', estabelecimentosRoutes);
 app.use('/api/estabelecimentos', estabelecimentosRoutes);
 app.use('/api/notify', notifyRouter);
+app.use('/api/admin', adminRouter);
 
 // Middleware final de erro
 app.use((err, _req, res, _next) => {
@@ -66,3 +71,6 @@ const PORT = Number(process.env.PORT || 3002);
 app.listen(PORT, HOST, () => {
   console.log(`✅ Backend ouvindo em http://${HOST}:${PORT}`);
 });
+
+// Tarefas de manutenção periódicas (limpeza de tokens expirados, etc.)
+startMaintenance(pool);
