@@ -106,6 +106,7 @@ export default function DashboardCliente() {
                 const effective = (String(i.status||'').toLowerCase() === 'confirmado' && past)
                   ? 'concluido'
                   : i.status;
+                const canCancel = String(i.status||'').toLowerCase() === 'confirmado' && !past;
                 const { cls, label } = statusMeta(effective);
                 return (
                   <tr key={i.id}>
@@ -122,10 +123,23 @@ export default function DashboardCliente() {
                     </td>
                     <td>
                       <span className={`badge ${cls}`}>{label}</span>
+                      {canCancel && (
+                        <span className="only-mobile" style={{ marginTop: 6, marginLeft: 8 }}>
+                          <button
+                            className="btn btn--danger btn--sm danger"
+                            onClick={() => cancelar(i.id)}
+                          >
+                            Cancelar
+                          </button>
+                        </span>
+                      )}
                     </td>
                     <td>
-                      {i.status?.toLowerCase() === 'confirmado' && (
-                        <button className="btn btn--danger btn--sm danger" onClick={() => cancelar(i.id)}>
+                      {canCancel && (
+                        <button
+                          className="btn btn--danger btn--sm danger"
+                          onClick={() => cancelar(i.id)}
+                        >
                           Cancelar
                         </button>
                       )}

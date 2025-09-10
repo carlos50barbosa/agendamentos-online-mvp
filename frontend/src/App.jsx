@@ -10,7 +10,7 @@ import DashboardEstabelecimento from './pages/DashboardEstabelecimento.jsx';
 import ServicosEstabelecimento from './pages/ServicosEstabelecimento.jsx';
 import NovoAgendamento from './pages/NovoAgendamento.jsx';
 import EstabelecimentosList from './pages/EstabelecimentosList.jsx';
-import { IconUser, IconMenu, IconHome, IconPlus, IconGear, IconHelp, IconLogout, IconList, IconChevronLeft, IconChevronRight } from './components/Icons.jsx';
+import { IconUser, IconMenu, IconHome, IconPlus, IconGear, IconHelp, IconLogout, IconList, IconChart, IconChevronLeft, IconChevronRight } from './components/Icons.jsx';
 import LogoAO from './components/LogoAO.jsx';
 import Modal from './components/Modal.jsx';
 import Loading from './pages/Loading.jsx';
@@ -103,22 +103,25 @@ function Sidebar({ open }){
               <div className="sidelist">
                 <div className="sidelist__section">
                   <div className="sidelist__heading">Navegação</div>
-                  <NavLink
-                    to={user?.tipo === 'estabelecimento' ? '/estab' : '/cliente'}
-                    className={({isActive}) => `sidelist__item${isActive ? ' active' : ''}`}
-                  >
-                    <IconHome className="sidelist__icon" aria-hidden="true" />
-                    <span>Dashboard</span>
-                  </NavLink>
                   {user?.tipo !== 'estabelecimento' && (
-                    <NavLink
-                      to="/novo"
-                      className={({isActive}) => `sidelist__item${isActive ? ' active' : ''}`}
-                    >
-                      <IconPlus className="sidelist__icon" aria-hidden="true" />
-                      <span>Novo Agendamento</span>
-                    </NavLink>
+                    <>
+                      <NavLink
+                        to="/novo"
+                        className={({isActive}) => `sidelist__item${isActive ? ' active' : ''}`}
+                      >
+                        <IconPlus className="sidelist__icon" aria-hidden="true" />
+                        <span>Novo Agendamento</span>
+                      </NavLink>
+                      <NavLink
+                        to="/cliente"
+                        className={({isActive}) => `sidelist__item${isActive ? ' active' : ''}`}
+                      >
+                        <IconHome className="sidelist__icon" aria-hidden="true" />
+                        <span>Dashboard</span>
+                      </NavLink>
+                    </>
                   )}
+                  {/* Para estabelecimentos, o Dashboard vai no meio da seção Gestão */}
                 </div>
 
                 <div className="sidelist__section">
@@ -132,19 +135,21 @@ function Sidebar({ open }){
                         <IconList className="sidelist__icon" aria-hidden="true" />
                         <span>Serviços</span>
                       </NavLink>
-                      <NavLink
-                        to="/planos"
-                        className={({isActive}) => `sidelist__item${isActive ? ' active' : ''}`}
-                      >
-                        <IconList className="sidelist__icon" aria-hidden="true" />
-                        <span>Planos</span>
-                      </NavLink>
+                      {/* Link de Planos removido da sidebar; acesso via Configurações */}
                       <NavLink
                         to="/relatorios"
                         className={({isActive}) => `sidelist__item${isActive ? ' active' : ''}`}
                       >
-                        <IconList className="sidelist__icon" aria-hidden="true" />
+                        <IconChart className="sidelist__icon" aria-hidden="true" />
                         <span>Relatórios</span>
+                      </NavLink>
+                      {/* Dashboard agora no centro (3º item da barra) */}
+                      <NavLink
+                        to="/estab"
+                        className={({isActive}) => `sidelist__item${isActive ? ' active' : ''}`}
+                      >
+                        <IconHome className="sidelist__icon" aria-hidden="true" />
+                        <span>Dashboard</span>
                       </NavLink>
                     </>
                   )}
@@ -159,13 +164,7 @@ function Sidebar({ open }){
                     <IconGear className="sidelist__icon" aria-hidden="true" />
                     <span>Configurações</span>
                   </NavLink>
-                  <NavLink
-                    to="/ajuda"
-                    className={({isActive}) => `sidelist__item${isActive ? ' active' : ''}`}
-                  >
-                    <IconHelp className="sidelist__icon" aria-hidden="true" />
-                    <span>Ajuda</span>
-                  </NavLink>
+                  {/* Link de Ajuda removido da sidebar; acesso via Configurações */}
                   <button
                     className="sidelist__item sidelist__item--danger"
                     onClick={() => setLogoutOpen(true)}

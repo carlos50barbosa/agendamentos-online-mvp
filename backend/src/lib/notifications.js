@@ -150,7 +150,26 @@ export async function notifyWhatsapp(message, to) {
   };
   const url = graphUrl(`${cfg.phoneId}/messages`);
   if (cfg.debug) console.log('[wa/cloud/text] to=%s body=%s', phone, message);
-  return callGraph(url, payload);
+  try{
+    return await callGraph(url, payload);
+  } catch (err) {
+    // Fallback automático: fora da janela de 24h só é permitido template
+    const msg = (err?.body && typeof err.body === 'object') ? (err.body.error?.message || '') : String(err?.body || err?.message || '');
+    const code = err?.body?.error?.code;
+    const sub = err?.body?.error?.error_subcode;
+    const is24h = code === 470 || /24\s*h/i.test(msg) || sub === 2018028 || sub === 131047 || err?.status === 400;
+    if (cfg.debug) console.warn('[wa/cloud/text] falhou (%s/%s): %s', code, sub, msg);
+    if (is24h) {
+      if (cfg.debug) console.log('[wa/cloud] tentando template por fallback (24h window)');
+      return sendTemplate({
+        to: phone,
+        name: cfg.templateName,
+        lang: cfg.templateLang,
+        bodyParams: cfg.templateHasBodyParam ? [message] : [],
+      });
+    }
+    throw err;
+  }
 }
 
 // ============== WhatsApp: Agendamento simples em memória ==============

@@ -87,6 +87,14 @@ export default function Configuracoes(){
         <h3 style={{ marginTop: 0 }}>Preferências</h3>
         <p className="muted">Em breve: edição de perfil, notificações, fuso-horário.</p>
       </div>
+
+      <div className="card" style={{ display: 'grid', gap: 8 }}>
+        <h3 style={{ marginTop: 0 }}>Ajuda</h3>
+        <p className="muted">Tire dúvidas, veja perguntas frequentes e formas de contato.</p>
+        <div className="row" style={{ gap: 8, justifyContent: 'flex-end' }}>
+          <Link className="btn btn--outline" to="/ajuda">Abrir Ajuda</Link>
+        </div>
+      </div>
     </div>
   );
 }

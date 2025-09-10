@@ -98,6 +98,17 @@ export function IconList(props){
   );
 }
 
+export function IconChart(props){
+  return (
+    <svg {...base} viewBox="0 0 24 24" aria-hidden="true" {...props}>
+      <path d="M3 3v18h18"/>
+      <rect x="7" y="13" width="3" height="5" rx="1"/>
+      <rect x="12" y="9" width="3" height="9" rx="1"/>
+      <rect x="17" y="5" width="3" height="13" rx="1"/>
+    </svg>
+  );
+}
+
 export default {
   IconUser,
   IconMenu,
@@ -109,4 +120,5 @@ export default {
   IconChevronLeft,
   IconChevronRight,
   IconList,
+  IconChart,
 };

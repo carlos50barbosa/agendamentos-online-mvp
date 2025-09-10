@@ -865,7 +865,7 @@ button.danger:disabled,
   .dashboard-narrow .card > table td:last-child{ width: 1%; white-space: nowrap; }
   .dashboard-narrow .name-short{ max-width: 18ch; }
 }
-/* =======================  
+/* =======================
    Mobile: barra inferior (somente ícones)
    ======================= */
 @media (max-width: 780px){
@@ -875,7 +875,68 @@ button.danger:disabled,
     width: 100%; max-width: 100%; overflow-x: hidden;
   }
   .app-shell, .app-main, .container{ min-width: 0; }
-  .dashboard-narrow{ min-width: 0; }
+  .dashboard-narrow{ 
+    min-width: 0; 
+    /* Centraliza os elementos no mobile e evita corte */
+    display: grid;               /* permite justify-items */
+    justify-items: center;       /* centraliza filhos horizontalmente */
+    align-content: start;
+    gap: 10px;                   /* respiro entre blocos */
+  }
+  /* Garante que blocos internos ocupem a largura disponível sem cortar */
+  .dashboard-narrow > *{ width: 100%; max-width: 100%; margin-left: auto; margin-right: auto; }
+  .dashboard-narrow .row,
+  .dashboard-narrow .grid,
+  .dashboard-narrow .header,
+  .dashboard-narrow .auth-actions{ justify-content: center; }
+  /* Imagens e mídias não estouram o container */
+  .dashboard-narrow img, .dashboard-narrow svg, .dashboard-narrow canvas{ max-width: 100%; height: auto; }
+
+  /* Dashboard: força tabela a se adaptar/rolar no mobile e remove larguras fixas */
+  .dashboard-narrow .card{ overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .dashboard-narrow .card > table{ table-layout: auto; min-width: 520px; width: max-content; }
+  .dashboard-narrow .card > table thead th{ white-space: nowrap; }
+  .dashboard-narrow .card > table th:nth-child(1),
+  .dashboard-narrow .card > table td:nth-child(1){ width: auto; max-width: none; }
+  .dashboard-narrow .card > table th:nth-child(2),
+  .dashboard-narrow .card > table td:nth-child(2){ width: auto; white-space: nowrap; }
+  .dashboard-narrow .card > table th:nth-child(3),
+  .dashboard-narrow .card > table td:nth-child(3){ width: auto; white-space: nowrap; }
+  .dashboard-narrow .card > table th:last-child,
+  .dashboard-narrow .card > table td:last-child{ width: auto; white-space: nowrap; }
+
+  /* Linhas spread: compactas e com quebra */
+  .row.spread{
+    font-size: 13px;
+    flex-wrap: wrap;
+    gap: 6px 8px;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+  .row.spread > *{ min-width: 0; }
+  .row.spread .btn{ height: 36px; padding: 0 10px; font-size: 12px; }
+  .row.spread .input,
+  .row.spread select{ height: 36px; padding: 0 10px; font-size: 13px; }
+
+  /* Dashboard: linhas com spread mais compactas e responsivas */
+  .row.spread{
+    font-size: 13px;
+    flex-wrap: wrap;                 /* permite quebrar para a próxima linha */
+    gap: 6px 8px;                    /* gaps menores */
+    align-items: center;             /* alinha melhor ícones/inputs */
+    justify-content: center;         /* centraliza quando quebrar */
+    text-align: center;              /* centraliza textos */
+    overflow-wrap: anywhere;         /* evita corte de strings longas */
+    word-break: break-word;
+  }
+  .row.spread > *{ min-width: 0; }
+  /* Botões e inputs mais enxutos dentro de linhas spread */
+  .row.spread .btn{ height: 36px; padding: 0 10px; font-size: 12px; }
+  .row.spread .input,
+  .row.spread select{ height: 36px; padding: 0 10px; font-size: 13px; }
 
   /* Sidebar vira uma barra fixa no rodapé */
   .sidebar{
@@ -936,3 +997,36 @@ button.danger:disabled,
   .dashboard-narrow .badge{ font-size: 11px; padding: 3px 8px; }
   .dashboard-narrow .btn{ height: 38px; padding: 0 12px; font-size: 13px; }
 }
+
+/* Utilitários de visibilidade por breakpoint */
+.only-mobile{ display: none !important; }
+.only-desktop{ display: inline-flex !important; }
+@media (max-width: 420px){
+  .only-mobile{ display: inline-flex !important; }
+  .only-desktop{ display: none !important; }
+}
+
+/* Mobile estreito: esconder coluna de Ações (última coluna) */
+@media (max-width: 420px){
+  .dashboard-narrow .card > table th:last-child,
+  .dashboard-narrow .card > table td:last-child{
+    display: none;
+  }
+  /* Ajusta a largura mínima da tabela quando a coluna some */
+  .dashboard-narrow .card > table{
+    min-width: 360px;
+    width: 100%;
+  }
+}
+  /* Telas muito estreitas: empilha os itens do spread verticalmente */
+  @media (max-width: 560px){
+    .dashboard-narrow .row.spread{
+      flex-direction: column;
+      align-items: stretch;
+      justify-content: center;
+    }
+    .dashboard-narrow .row.spread > *{
+      flex: 1 1 100%;
+      max-width: 100%;
+    }
+  }
