@@ -7,6 +7,7 @@ import { auth } from '../middleware/auth.js';
 import dotenv from 'dotenv'; dotenv.config();
 import { notifyEmail } from '../lib/notifications.js';
 import crypto from 'crypto';
+import { consumeLinkToken } from '../lib/wa_store.js';
 
 const router = Router();
 
@@ -216,3 +217,20 @@ router.post('/reset', async (req, res) => {
 });
 
 export default router;
+
+// Vincular telefone via token (one-time link)
+router.post('/link-phone', auth, async (req, res) => {
+  try {
+    const token = req.body?.token;
+    if (!token) return res.status(400).json({ error: 'missing_token' });
+    const rec = await consumeLinkToken(String(token));
+    if (!rec) return res.status(400).json({ error: 'invalid_token' });
+    const phone = String(rec.phone);
+    if (!/\d{8,}/.test(phone)) return res.status(400).json({ error: 'invalid_phone' });
+    await pool.query('UPDATE usuarios SET telefone=? WHERE id=?', [phone, req.user.id]);
+    return res.json({ ok: true, phone });
+  } catch (e) {
+    console.error('[auth/link-phone] erro', e);
+    return res.status(500).json({ error: 'server_error' });
+  }
+});

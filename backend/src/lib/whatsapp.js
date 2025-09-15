@@ -4,7 +4,7 @@ import dotenv from 'dotenv'; dotenv.config();
 // Node 18+ já tem fetch global. Se quiser compatibilidade, descomente:
 // import fetch from 'node-fetch';
 
-const VERSION = process.env.WA_API_VERSION || 'v22.0';
+const VERSION = process.env.WA_API_VERSION || 'v23.0';
 const PHONE_ID = process.env.WA_PHONE_NUMBER_ID;     // << use WA_* como no seu .env
 const TOKEN    = process.env.WA_TOKEN;
 

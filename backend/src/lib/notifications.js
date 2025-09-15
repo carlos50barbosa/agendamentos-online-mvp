@@ -7,7 +7,7 @@ import nodemailer from 'nodemailer';
  *
  * WA_PHONE_NUMBER_ID=...
  * WA_TOKEN=...
- * WA_API_VERSION=v22.0
+ * WA_API_VERSION=v23.0
  * WA_FORCE_TEMPLATE=true|false
  * WA_TEMPLATE_NAME=hello_world
  * WA_TEMPLATE_LANG=en_US
@@ -26,7 +26,7 @@ import nodemailer from 'nodemailer';
 const cfg = {
   phoneId: process.env.WA_PHONE_NUMBER_ID,
   token: process.env.WA_TOKEN,
-  apiVersion: process.env.WA_API_VERSION || 'v22.0',
+  apiVersion: process.env.WA_API_VERSION || 'v23.0',
 
   forceTemplate: /^true$/i.test(process.env.WA_FORCE_TEMPLATE || ''),
   templateName: process.env.WA_TEMPLATE_NAME || 'hello_world',
@@ -163,8 +163,8 @@ export async function notifyWhatsapp(message, to) {
       if (cfg.debug) console.log('[wa/cloud] tentando template por fallback (24h window)');
       return sendTemplate({
         to: phone,
-        name: cfg.templateName,
-        lang: cfg.templateLang,
+        name: templateName || cfg.templateName,
+        lang: templateLang || cfg.templateLang,
         bodyParams: cfg.templateHasBodyParam ? [message] : [],
       });
     }
@@ -175,7 +175,7 @@ export async function notifyWhatsapp(message, to) {
 // ============== WhatsApp: Agendamento simples em memória ==============
 const timers = new Set();
 
-export async function scheduleWhatsApp({ to, scheduledAt, message, metadata, useTemplate }) {
+export async function scheduleWhatsApp({ to, scheduledAt, message, metadata, useTemplate, bodyParams, templateName, templateLang }) {
   const when = new Date(scheduledAt);
   if (Number.isNaN(+when)) throw new Error('scheduledAt inválido');
 
@@ -190,11 +190,14 @@ export async function scheduleWhatsApp({ to, scheduledAt, message, metadata, use
   const sendFn = async () => {
     try {
       if (cfg.forceTemplate || useTemplate) {
+        const params = Array.isArray(bodyParams) && bodyParams.length > 0
+          ? bodyParams
+          : (cfg.templateHasBodyParam ? [message] : []);
         await sendTemplate({
           to: phone,
-          name: cfg.templateName,
-          lang: cfg.templateLang,
-          bodyParams: cfg.templateHasBodyParam ? [message] : [],
+          name: templateName || cfg.templateName,
+          lang: templateLang || cfg.templateLang,
+          bodyParams: params,
         });
       } else {
         await notifyWhatsapp(message, phone);

@@ -12,6 +12,9 @@ import estabelecimentosRoutes from './routes/estabelecimentos.js';
 import notificationsRouter from './routes/notifications.js'; // opcional
 import notifyRouter from './routes/notify.js'; // rota de teste de notificações
 import adminRouter from './routes/admin.js';
+import waWebhookRouter from './routes/whatsapp_webhook.js';
+import publicAgendamentosRouter from './routes/agendamentos_public.js';
+import otpPublicRouter from './routes/otp_public.js';
 import { pool } from './lib/db.js';
 import { startMaintenance } from './lib/maintenance.js';
 
@@ -21,9 +24,15 @@ const app = express();
 app.set('trust proxy', 1);
 app.use(morgan('dev'));
 app.use(cors({
-  origin: ['http://localhost:3001','http://127.0.0.1:3001'],
+  origin: [
+    'http://localhost:3001',
+    'http://127.0.0.1:3001',
+    // Vite dev server
+    'http://localhost:5173',
+    'http://127.0.0.1:5173',
+  ],
   credentials: true,
-  allowedHeaders: ['Content-Type','Authorization']
+  allowedHeaders: ['Content-Type', 'Authorization', 'Idempotency-Key', 'X-Admin-Token', 'X-OTP-Token'],
 }));
 app.options('*', cors());
 app.use(express.json());
@@ -46,7 +55,10 @@ app.use('/notifications', notificationsRouter);
 app.use('/establishments', estabelecimentosRoutes);
 app.use('/estabelecimentos', estabelecimentosRoutes);
 app.use('/notify', notifyRouter);
+app.use('/public/otp', otpPublicRouter);
+app.use('/public/agendamentos', publicAgendamentosRouter);
 app.use('/admin', adminRouter);
+app.use('/webhooks/whatsapp', waWebhookRouter);
 
 // Aliases “/api/*” (seu Nginx usa /api)
 app.use('/api/auth', authRouter);
@@ -57,7 +69,10 @@ app.use('/api/notifications', notificationsRouter);
 app.use('/api/establishments', estabelecimentosRoutes);
 app.use('/api/estabelecimentos', estabelecimentosRoutes);
 app.use('/api/notify', notifyRouter);
+app.use('/api/public/otp', otpPublicRouter);
+app.use('/api/public/agendamentos', publicAgendamentosRouter);
 app.use('/api/admin', adminRouter);
+app.use('/api/webhooks/whatsapp', waWebhookRouter);
 
 // Middleware final de erro
 app.use((err, _req, res, _next) => {

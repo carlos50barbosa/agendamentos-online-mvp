@@ -2,7 +2,7 @@
 import { Router } from 'express';
 import { pool } from '../lib/db.js';
 import { auth as authRequired, isCliente, isEstabelecimento } from '../middleware/auth.js';
-import { notifyEmail, notifyWhatsapp, scheduleWhatsApp } from '../lib/notifications.js';
+import { notifyEmail, notifyWhatsapp, scheduleWhatsApp, sendTemplate } from '../lib/notifications.js';
 
 const router = Router();
 
@@ -189,11 +189,23 @@ router.post('/', authRequired, isCliente, async (req, res) => {
 
     // (b) WhatsApp imediato
     fireAndForget(async () => {
+      const paramMode = String(process.env.WA_TEMPLATE_PARAM_MODE || 'single').toLowerCase();
+      const tplName = process.env.WA_TEMPLATE_NAME_CONFIRM || process.env.WA_TEMPLATE_NAME || 'confirmacao_agendamento';
+      const tplLang = process.env.WA_TEMPLATE_LANG || 'pt_BR';
+      const estNome = est?.nome || '';
       if (telCli) {
-        await notifyWhatsapp(`✅ Confirmação de agendamento: ${svc.nome} em ${inicioBR}`, telCli);
+        if (/^triple|3$/.test(paramMode)) {
+          try { await sendTemplate({ to: telCli, name: tplName, lang: tplLang, bodyParams: [svc.nome, inicioBR, estNome] }); } catch (e) { console.warn('[wa/confirm cli]', e?.message || e); }
+        } else {
+          await notifyWhatsapp(`✅ Confirmação: ${svc.nome} em ${inicioBR} — ${estNome}`, telCli);
+        }
       }
       if (telEst && telEst !== telCli) {
-        await notifyWhatsapp(`📅 Novo agendamento: ${svc.nome} em ${inicioBR} — Cliente: ${cli?.nome ?? ''}`, telEst);
+        if (/^triple|3$/.test(paramMode)) {
+          try { await sendTemplate({ to: telEst, name: tplName, lang: tplLang, bodyParams: [svc.nome, inicioBR, estNome] }); } catch (e) { console.warn('[wa/confirm est]', e?.message || e); }
+        } else {
+          await notifyWhatsapp(`📅 Novo agendamento: ${svc.nome} em ${inicioBR} — Cliente: ${cli?.nome ?? ''}`, telEst);
+        }
       }
     });
 
@@ -214,6 +226,11 @@ router.post('/', authRequired, isCliente, async (req, res) => {
             to: telCli,
             scheduledAt: t1.toISOString(),
             message: msg1Cli,
+            bodyParams: (String(process.env.WA_TEMPLATE_PARAM_MODE || 'single').toLowerCase().match(/^triple|3$/)
+              ? [svc.nome, `${hora} de ${data}`, estNome]
+              : undefined),
+            templateName: process.env.WA_TEMPLATE_NAME_REMINDER || process.env.WA_TEMPLATE_NAME_CONFIRM || process.env.WA_TEMPLATE_NAME,
+            templateLang: process.env.WA_TEMPLATE_LANG || 'pt_BR',
             metadata: {
               role: 'cliente',
               kind: 'reminder_1d',
@@ -231,6 +248,11 @@ router.post('/', authRequired, isCliente, async (req, res) => {
             to: telCli,
             scheduledAt: t2.toISOString(),
             message: msg2Cli,
+            bodyParams: (String(process.env.WA_TEMPLATE_PARAM_MODE || 'single').toLowerCase().match(/^triple|3$/)
+              ? [svc.nome, `${hora} de ${data}`, estNome]
+              : undefined),
+            templateName: process.env.WA_TEMPLATE_NAME_REMINDER || process.env.WA_TEMPLATE_NAME_CONFIRM || process.env.WA_TEMPLATE_NAME,
+            templateLang: process.env.WA_TEMPLATE_LANG || 'pt_BR',
             metadata: {
               role: 'cliente',
               kind: 'reminder_15m',
@@ -250,6 +272,11 @@ router.post('/', authRequired, isCliente, async (req, res) => {
           to: telEst,
           scheduledAt: t2.toISOString(),
           message: msg2Est,
+          bodyParams: (String(process.env.WA_TEMPLATE_PARAM_MODE || 'single').toLowerCase().match(/^triple|3$/)
+            ? [svc.nome, `${hora} de ${data}`, estNome]
+            : undefined),
+          templateName: process.env.WA_TEMPLATE_NAME_REMINDER || process.env.WA_TEMPLATE_NAME_CONFIRM || process.env.WA_TEMPLATE_NAME,
+          templateLang: process.env.WA_TEMPLATE_LANG || 'pt_BR',
           metadata: {
             role: 'dono',
             kind: 'reminder_15m',
@@ -315,12 +342,26 @@ router.put('/:id/cancel', authRequired, isCliente, async (req, res) => {
     const telEst = toDigits(est?.telefone);
 
     fireAndForget(async () => {
-      if (telCli) {
-        await notifyWhatsapp(`❌ Seu agendamento ${id} (${svc?.nome ?? 'serviço'}) em ${inicioBR} foi cancelado.`, telCli);
-      }
-      if (telEst && telEst !== telCli) {
-        await notifyWhatsapp(`❌ Cancelamento: agendamento ${id} (${svc?.nome ?? 'serviço'}) em ${inicioBR} pelo cliente ${cli?.nome ?? ''}.`, telEst);
-      }
+      const paramMode = String(process.env.WA_TEMPLATE_PARAM_MODE || 'single').toLowerCase();
+      const tplName = process.env.WA_TEMPLATE_NAME_CANCEL || process.env.WA_TEMPLATE_NAME || 'confirmacao_agendamento';
+      const tplLang = process.env.WA_TEMPLATE_LANG || 'pt_BR';
+    const params3 = [svc?.nome || '', inicioBR, est?.nome || ''];
+
+    if (/^triple|3$/.test(paramMode)) {
+    if (telCli) {
+    try { await sendTemplate({ to: telCli, name: tplName, lang: tplLang, bodyParams: params3 }); } catch (e) { console.warn('[wa/cancel cli]', e?.message || e); }
+    }
+    if (telEst && telEst !== telCli) {
+    try { await sendTemplate({ to: telEst, name: tplName, lang: tplLang, bodyParams: params3 }); } catch (e) { console.warn('[wa/cancel est]', e?.message || e); }
+    }
+    } else {
+    if (telCli) {
+      await notifyWhatsapp(`Seu agendamento ${id} (${svc?.nome ?? 'serviço'}) em ${inicioBR} foi cancelado.`, telCli);
+    }
+    if (telEst && telEst !== telCli) {
+      await notifyWhatsapp(`Cancelamento: agendamento ${id} (${svc?.nome ?? 'serviço'}) em ${inicioBR} pelo cliente ${cli?.nome ?? ''}.`, telEst);
+    }
+    }
     });
 
     return res.json({ ok: true });

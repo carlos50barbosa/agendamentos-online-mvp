@@ -101,9 +101,14 @@ export const Api = {
   me: () => req('/auth/me'),
   requestPasswordReset: (email) => req('/auth/forgot', { method: 'POST', body: JSON.stringify({ email }) }),
   resetPassword: (token, senha) => req('/auth/reset', { method: 'POST', body: JSON.stringify({ token, senha }) }),
+  linkPhone: (token) => req('/auth/link-phone', { method: 'POST', body: JSON.stringify({ token }) }),
 
   // Estabelecimentos + Serviços (NOVOS)
   listEstablishments: () => req('/establishments'),
+  getEstablishment: (idOrSlug) => req(`/establishments/${idOrSlug}`),
+  getEstablishmentMessages: (id) => req(`/establishments/${id}/messages`),
+  updateEstablishmentMessages: (id, payload) => req(`/establishments/${id}/messages`, { method: 'PUT', body: JSON.stringify(payload) }),
+  updateEstablishmentSlug: (id, slug) => req(`/establishments/${id}/slug`, { method: 'PUT', body: JSON.stringify({ slug }) }),
   listServices: (establishmentId) => req(`/servicos${toQuery({ establishmentId })}`),
 
   // Serviços (rotas existentes)
@@ -144,6 +149,16 @@ export const Api = {
       method: 'POST',
       headers: { 'X-Admin-Token': String(adminToken || '') },
     }),
+
+  // Público (sem login)
+  publicAgendar: (payload, opts = {}) =>
+    req('/public/agendamentos', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+      idempotencyKey: opts.idempotencyKey,
+    }),
+  requestOtp: (channel, value) => req('/public/otp/request', { method: 'POST', body: JSON.stringify({ channel, value }) }),
+  verifyOtp: (request_id, code) => req('/public/otp/verify', { method: 'POST', body: JSON.stringify({ request_id, code }) }),
 };
 
 // Exporta para depuração no console do navegador

@@ -6,8 +6,8 @@ import { auth, isEstabelecimento } from '../middleware/auth.js';
 const router = Router();
 
 // ===== Configuração padrão de funcionamento =====
-const OPEN_HOUR = 9;      // 09:00
-const CLOSE_HOUR = 18;    // até 18:00 (exclui 18:30)
+const OPEN_HOUR = 7;      // 07:00
+const CLOSE_HOUR = 22;    // até 22:00 (último slot termina às 22:00)
 const INTERVAL_MIN = 30;  // intervalo de 30min
 
 // Helpers

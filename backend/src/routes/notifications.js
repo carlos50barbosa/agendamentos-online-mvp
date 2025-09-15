@@ -14,9 +14,15 @@ const router = Router();
 router.post('/whatsapp/send', /* authRequired, */ async (req, res) => {
   const { to, message } = req.body || {};
   if (!to || !message) return res.status(400).json({ error: 'missing_fields' });
-  const r = await notifyWhatsapp(message, to);
-  if (!r.ok) return res.status(502).json({ ok: false, ...r });
-  res.json({ ok: true });
+  try {
+    const r = await notifyWhatsapp(message, to);
+    // r pode ser resposta do Graph API ou { blocked: true }
+    if (r && r.blocked) return res.status(202).json({ ok: true, blocked: true });
+    return res.json({ ok: true, result: r });
+  } catch (e) {
+    console.error('[notifications/send] erro:', e);
+    return res.status(502).json({ ok: false, error: 'send_failed', detail: e?.message || '' });
+  }
 });
 
 // Agendamento persistente
@@ -28,8 +34,9 @@ router.post('/whatsapp/schedule', /* authRequired, */ async (req, res) => {
       return res.status(400).json({ error: 'missing_fields' });
     }
     const r = await scheduleWhatsApp({ to, scheduledAt, message, metadata });
-    if (!r.ok) return res.status(400).json(r);
-    res.json(r);
+    // scheduleWhatsApp retorna { scheduled: true, at: ISO } ou { blocked: true }
+    if (r && r.blocked) return res.status(202).json({ ok: true, blocked: true });
+    return res.json({ ok: true, ...r });
   } catch (e) {
     console.error('[notifications/schedule] erro:', e);
     res.status(500).json({ error: 'server_error' });

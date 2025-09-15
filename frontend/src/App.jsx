@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { NavLink, Routes, Route, useNavigate } from 'react-router-dom';
+import { NavLink, Routes, Route, useNavigate, useLocation } from 'react-router-dom';
 import { getUser, logout } from './utils/auth';
 import LoginCliente from './pages/LoginCliente.jsx';
 import LoginEstabelecimento from './pages/LoginEstabelecimento.jsx';
@@ -21,6 +21,9 @@ import Planos from './pages/Planos.jsx';
 import RecuperarSenha from './pages/RecuperarSenha.jsx';
 import DefinirSenha from './pages/DefinirSenha.jsx';
 import AdminTools from './pages/AdminTools.jsx';
+import ChatAgendamento from './components/ChatAgendamento.jsx';
+import LinkPhone from './pages/LinkPhone.jsx';
+import Book from './pages/Book.jsx';
 
 function Sidebar({ open }){
   const nav = useNavigate();
@@ -205,6 +208,8 @@ function Sidebar({ open }){
 }
 
 export default function App(){
+  const loc = useLocation();
+  const isBook = (loc?.pathname || '').startsWith('/book');
   const [sidebarOpen, setSidebarOpen] = useState(true);
   useEffect(() => {
     try {
@@ -214,15 +219,19 @@ export default function App(){
 
   return (
     <div className={`app-shell ${sidebarOpen ? 'sidebar-open' : 'is-collapsed'}`}>
-      <Sidebar open={sidebarOpen}/>
-      <button
-        className="sidebar-toggle"
-        aria-label={sidebarOpen ? 'Ocultar menu' : 'Mostrar menu'}
-        onClick={() => setSidebarOpen(v => !v)}
-      >
-        {sidebarOpen ? <IconChevronLeft aria-hidden className="sidebar-toggle__icon"/> : <IconChevronRight aria-hidden className="sidebar-toggle__icon"/>}
-      </button>
-      <div className="sidebar-overlay" onClick={() => setSidebarOpen(false)} aria-hidden></div>
+      {!isBook && <Sidebar open={sidebarOpen}/>}    
+      {!isBook && (
+        <>
+          <button
+            className="sidebar-toggle"
+            aria-label={sidebarOpen ? 'Ocultar menu' : 'Mostrar menu'}
+            onClick={() => setSidebarOpen(v => !v)}
+          >
+            {sidebarOpen ? <IconChevronLeft aria-hidden className="sidebar-toggle__icon"/> : <IconChevronRight aria-hidden className="sidebar-toggle__icon"/>}
+          </button>
+          <div className="sidebar-overlay" onClick={() => setSidebarOpen(false)} aria-hidden></div>
+        </>
+      )}
       <main className="app-main">
         <div className="app-topbar">
           <div className="app-topbar__inner">
@@ -238,9 +247,12 @@ export default function App(){
         <div className="container">
           <Routes>
             <Route path="/" element={<EstabelecimentosList/>} />
+            <Route path="/book" element={<Book/>} />
+            <Route path="/book/:id" element={<Book/>} />
             <Route path="/login" element={<Login/>}/>
             <Route path="/recuperar-senha" element={<RecuperarSenha/>}/>
             <Route path="/definir-senha" element={<DefinirSenha/>}/>
+            <Route path="/link-phone" element={<LinkPhone/>}/>
             <Route path="/login-cliente" element={<LoginCliente/>}/>
             <Route path="/login-estabelecimento" element={<LoginEstabelecimento/>}/>
             <Route path="/cadastro" element={<Cadastro/>}/>
@@ -252,11 +264,14 @@ export default function App(){
             <Route path="/loading" element={<Loading/>}/>
             <Route path="/ajuda" element={<Ajuda/>}/>
             <Route path="/relatorios" element={<Relatorios/>}/>
-            <Route path="/planos" element={<Planos/>}/>
-            <Route path="/admin-tools" element={<AdminTools/>}/>
+          <Route path="/planos" element={<Planos/>}/>
+          <Route path="/admin-tools" element={<AdminTools/>}/>
+          <Route path="/book/:id" element={<Book/>}/>
           </Routes>
         </div>
       </main>
+      {/* Widget de chat de agendamento (flutuante) - oculto em /book */}
+      {!isBook && <ChatAgendamento />}
     </div>
   );
 }
