@@ -345,7 +345,7 @@ export default function Configuracoes() {
                 {planInfo.trialEnd && daysLeft > 0 ? (
                   <div className="box box--highlight">
                     <strong>Teste gratis ativo</strong>
-                    <div className="small muted">Termina em {fmtDate(planInfo.trialEnd)} – {daysLeft} {daysLeft === 1 ? 'dia' : 'dias'} restantes</div>
+                    <div className="small muted">Termina em {fmtDate(planInfo.trialEnd)} â€“ {daysLeft} {daysLeft === 1 ? 'dia' : 'dias'} restantes</div>
                   </div>
                 ) : (
                   <div className="box" style={{ borderColor: '#fde68a', background: '#fffbeb' }}>

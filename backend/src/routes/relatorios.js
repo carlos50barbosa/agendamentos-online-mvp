@@ -1,4 +1,4 @@
-ï»¿import { Router } from 'express';
+import { Router } from 'express';
 import { pool } from '../lib/db.js';
 import { auth as authRequired, isEstabelecimento } from '../middleware/auth.js';
 
@@ -258,7 +258,7 @@ router.get('/estabelecimento', authRequired, isEstabelecimento, async (req, res)
     const downloadType = String(req.query.download || '').toLowerCase();
 
     if (!allowAdvancedFilters && downloadType) {
-      return res.status(403).json({ error: 'plan_restricted', message: 'Exportação disponível a partir do plano Pro.' });
+      return res.status(403).json({ error: 'plan_restricted', message: 'ExportaÃ§Ã£o disponÃ­vel a partir do plano Pro.' });
     }
 
     if (downloadType === 'daily') {

@@ -83,7 +83,7 @@ router.post('/', auth, isEstabelecimento, async (req, res) => {
     if (plan === 'starter') {
       const [[countRow]] = await pool.query("SELECT COUNT(*) AS total FROM servicos WHERE estabelecimento_id=?", [estId]);
       if (Number(countRow?.total || 0) >= STARTER_MAX_SERVICES) {
-        return res.status(403).json({ error: 'plan_limit', message: 'Seu plano atual (Starter) permite cadastrar até 10 serviços. Para continuar adicionando serviços, atualize para o plano Pro ou Premium em Configurações > Planos.' });
+        return res.status(403).json({ error: 'plan_limit', message: 'Seu plano atual (Starter) permite cadastrar atÃ© 10 serviÃ§os. Para continuar adicionando serviÃ§os, atualize para o plano Pro ou Premium em ConfiguraÃ§Ãµes > Planos.' });
       }
     }
 

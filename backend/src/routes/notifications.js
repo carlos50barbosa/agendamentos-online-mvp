@@ -13,7 +13,7 @@ async function assertWhatsAppAllowed(user) {
   const [rows] = await pool.query("SELECT plan FROM usuarios WHERE id=? LIMIT 1", [user.id]);
   const plan = rows?.[0]?.plan || 'starter';
   if (plan === 'starter') {
-    return { allowed: false, plan, message: 'Disponível apenas para planos Pro e Premium.' };
+    return { allowed: false, plan, message: 'DisponÃ­vel apenas para planos Pro e Premium.' };
   }
   return { allowed: true, plan };
 }
