@@ -1,4 +1,4 @@
-﻿import jwt from 'jsonwebtoken';
+import jwt from 'jsonwebtoken';
 import dotenv from 'dotenv'; dotenv.config();
 import { pool } from '../lib/db.js';
 
@@ -15,7 +15,7 @@ export async function auth(req, res, next) {
     }
 
     const [rows] = await pool.query(
-      "SELECT id, nome, email, telefone, cep, endereco, numero, complemento, bairro, cidade, estado, tipo, plan, plan_trial_ends_at FROM usuarios WHERE id=? LIMIT 1",
+      "SELECT id, nome, email, telefone, cep, endereco, numero, complemento, bairro, cidade, estado, tipo, plan, plan_status, plan_trial_ends_at, plan_active_until, plan_subscription_id FROM usuarios WHERE id=? LIMIT 1",
       [userId]
     );
 

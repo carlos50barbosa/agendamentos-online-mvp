@@ -1,6 +1,7 @@
-// backend/src/routes/agendamentos_public.js
+﻿// backend/src/routes/agendamentos_public.js
 import { Router } from 'express';
 import { pool } from '../lib/db.js';
+import { getPlanContext, isDelinquentStatus } from '../lib/plans.js';
 import bcrypt from 'bcryptjs';
 import { notifyEmail, notifyWhatsapp, scheduleWhatsApp, sendTemplate } from '../lib/notifications.js';
 import jwt from 'jsonwebtoken';
@@ -41,7 +42,15 @@ router.post('/', async (req, res) => {
     const { estabelecimento_id, servico_id, inicio, nome, email, telefone, otp_token } = req.body || {};
 
     if (!estabelecimento_id || !servico_id || !inicio || !nome || !email || !telefone) {
-      return res.status(400).json({ error: 'invalid_payload', message: 'Campos obrigatórios: estabelecimento_id, servico_id, inicio, nome, email, telefone.' });
+      return res.status(400).json({ error: 'invalid_payload', message: 'Campos obrigatorios: estabelecimento_id, servico_id, inicio, nome, email, telefone.' });
+    }
+
+    const planContext = await getPlanContext(estabelecimento_id);
+    if (!planContext) {
+      return res.status(404).json({ error: 'estabelecimento_inexistente' });
+    }
+    if (isDelinquentStatus(planContext.status)) {
+      return res.status(403).json({ error: 'plan_delinquent', message: 'Este estabelecimento esta com o plano em atraso. Agendamentos temporariamente suspensos.' });
     }
 
     const inicioDate = new Date(inicio);
@@ -49,7 +58,7 @@ router.post('/', async (req, res) => {
     if (inicioDate.getTime() <= Date.now()) return res.status(400).json({ error: 'past_datetime' });
     if (!inBusinessHours(inicioDate.toISOString())) return res.status(400).json({ error: 'outside_business_hours' });
 
-    // valida serviço/estab
+    // valida servico/estab
     const [[svc]] = await pool.query(
       'SELECT duracao_min, nome FROM servicos WHERE id=? AND estabelecimento_id=? AND ativo=1',
       [servico_id, estabelecimento_id]
@@ -80,7 +89,7 @@ router.post('/', async (req, res) => {
       }
     }
 
-    // resolve/ cria cliente guest via email (preferência) ou telefone
+    // resolve/ cria cliente guest via email (preferencia) ou telefone
 
     let userId = null;
     {
@@ -131,7 +140,7 @@ router.post('/', async (req, res) => {
 
     await conn.commit(); conn.release(); conn = null;
 
-    // Notificações best-effort
+    // Notificacoes best-effort
     const inicioISO = new Date(inicioDate).toISOString();
     const inicioBR = brDateTime(inicioISO);
     const [[est]] = await pool.query('SELECT email, telefone, nome FROM usuarios WHERE id=?', [estabelecimento_id]);
@@ -143,7 +152,7 @@ router.post('/', async (req, res) => {
       try {
         if (emailNorm) {
           const subject = tmpl.email_subject || 'Agendamento confirmado';
-          const html = (tmpl.email_html || `<p>Olá, <b>{{cliente_nome}}</b>! Seu agendamento de <b>{{servico_nome}}</b> foi confirmado para <b>{{data_hora}}</b>.</p>`) 
+          const html = (tmpl.email_html || `<p>Ola, <b>{{cliente_nome}}</b>! Seu agendamento de <b>{{servico_nome}}</b> foi confirmado para <b>{{data_hora}}</b>.</p>`) 
             .replace(/{{\s*cliente_nome\s*}}/g, String(nome).split(' ')[0] || 'cliente')
             .replace(/{{\s*servico_nome\s*}}/g, svc.nome)
             .replace(/{{\s*data_hora\s*}}/g, inicioBR)
@@ -157,7 +166,7 @@ router.post('/', async (req, res) => {
           const tplName = process.env.WA_TEMPLATE_NAME_CONFIRM || process.env.WA_TEMPLATE_NAME || 'confirmacao_agendamento';
           const tplLang = process.env.WA_TEMPLATE_LANG || 'pt_BR';
           if (/^triple|3$/.test(paramMode)) {
-            // Envia 3 parâmetros: [serviço, data_hora, estabelecimento]
+            // Envia 3 parametros: [servico, data_hora, estabelecimento]
             await sendTemplate({
               to: telCli,
               name: tplName,
@@ -165,8 +174,8 @@ router.post('/', async (req, res) => {
               bodyParams: [svc.nome, inicioBR, est?.nome || '']
             });
           } else {
-            // Mensagem pronta como 1 parâmetro (compatível com template de 1 {{1}} ou texto puro)
-            const waMsg = (tmpl.wa_template || `✅ Confirmação: {{servico_nome}} em {{data_hora}} — {{estabelecimento_nome}}`)
+            // Mensagem pronta como 1 parametro (compativel com template de 1 {{1}} ou texto puro)
+            const waMsg = (tmpl.wa_template || `✅ Confirmacao: {{servico_nome}} em {{data_hora}} — {{estabelecimento_nome}}`)
               .replace(/{{\s*cliente_nome\s*}}/g, String(nome).split(' ')[0] || 'cliente')
               .replace(/{{\s*servico_nome\s*}}/g, svc.nome)
               .replace(/{{\s*data_hora\s*}}/g, inicioBR)
@@ -188,3 +197,6 @@ router.post('/', async (req, res) => {
 });
 
 export default router;
+
+
+

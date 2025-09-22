@@ -2,7 +2,7 @@
 import { Router } from 'express';
 import { notifyWhatsapp, scheduleWhatsApp } from '../lib/notifications.js';
 import { auth as authRequired } from '../middleware/auth.js';
-import { pool } from '../lib/db.js';
+import { getPlanContext, isDelinquentStatus, resolvePlanConfig } from '../lib/plans.js';
 
 const router = Router();
 
@@ -10,12 +10,35 @@ async function assertWhatsAppAllowed(user) {
   if (!user || user.tipo !== 'estabelecimento') {
     return { allowed: false, message: 'Apenas estabelecimentos podem usar este recurso.' };
   }
-  const [rows] = await pool.query("SELECT plan FROM usuarios WHERE id=? LIMIT 1", [user.id]);
-  const plan = rows?.[0]?.plan || 'starter';
-  if (plan === 'starter') {
-    return { allowed: false, plan, message: 'Disponível apenas para planos Pro e Premium.' };
+
+  const context = await getPlanContext(user.id);
+  const plan = context?.plan || 'starter';
+  const status = context?.status || null;
+  const config = context?.config || resolvePlanConfig(plan);
+
+  if (isDelinquentStatus(status)) {
+    return {
+      allowed: false,
+      plan,
+      status,
+      message: 'Sua assinatura esta em atraso. Regularize o pagamento para continuar enviando notificacoes.',
+    };
   }
-  return { allowed: true, plan };
+
+  if (config && config.allowWhatsApp === false) {
+    return {
+      allowed: false,
+      plan,
+      status,
+      message: 'Seu plano atual nao inclui notificacoes por WhatsApp.',
+    };
+  }
+
+  return {
+    allowed: true,
+    plan,
+    status,
+  };
 }
 
 // Envio imediato (teste)
@@ -63,3 +86,7 @@ router.post('/whatsapp/schedule', authRequired, async (req, res) => {
 });
 
 export default router;
+
+
+
+

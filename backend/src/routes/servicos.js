@@ -2,21 +2,20 @@
 import { Router } from 'express';
 import { pool } from '../lib/db.js';
 import { auth, isEstabelecimento } from '../middleware/auth.js';
+import {
+  getPlanContext,
+  resolvePlanConfig,
+  formatPlanLimitExceeded,
+  isDelinquentStatus,
+} from '../lib/plans.js';
 
 const router = Router();
 
-const STARTER_MAX_SERVICES = 10;
-
-async function getPlanForEstabelecimento(estId) {
-  const [rows] = await pool.query("SELECT plan FROM usuarios WHERE id=? AND tipo='estabelecimento' LIMIT 1", [estId]);
-  return rows && rows.length ? rows[0].plan || 'starter' : 'starter';
-}
-
 /**
  * GET /servicos?establishmentId=ID
- * Aceita também: ?estabelecimento_id= ou ?establishment_id=
- * — Público: lista serviços do estabelecimento informado (apenas ativos).
- * — Se não houver o parâmetro, repassa para o próximo handler (o protegido).
+ * Aceita tambem: ?estabelecimento_id= ou ?establishment_id=
+ * - Publico: lista servicos do estabelecimento informado (apenas ativos).
+ * - Se nao houver o parametro, repassa para o proximo handler (o protegido).
  */
 router.get('/', async (req, res, next) => {
   const estabId =
@@ -53,7 +52,7 @@ router.get('/', async (req, res, next) => {
 
 /**
  * GET /servicos
- * — Protegido: lista os serviços do estabelecimento logado (gestão)
+ * - Protegido: lista os servicos do estabelecimento logado (gestao)
  */
 router.get('/', auth, isEstabelecimento, async (req, res) => {
   try {
@@ -71,7 +70,7 @@ router.get('/', auth, isEstabelecimento, async (req, res) => {
 
 /**
  * POST /servicos
- * — Criar serviço (estabelecimento logado)
+ * - Criar servico (estabelecimento logado)
  */
 router.post('/', auth, isEstabelecimento, async (req, res) => {
   try {
@@ -79,11 +78,29 @@ router.post('/', auth, isEstabelecimento, async (req, res) => {
     const { nome, duracao_min, preco_centavos, ativo = 1 } = req.body;
     if (!nome || !duracao_min) return res.status(400).json({ error: 'invalid_payload' });
 
-    const plan = await getPlanForEstabelecimento(estId);
-    if (plan === 'starter') {
-      const [[countRow]] = await pool.query("SELECT COUNT(*) AS total FROM servicos WHERE estabelecimento_id=?", [estId]);
-      if (Number(countRow?.total || 0) >= STARTER_MAX_SERVICES) {
-        return res.status(403).json({ error: 'plan_limit', message: 'Seu plano atual (Starter) permite cadastrar até 10 serviços. Para continuar adicionando serviços, atualize para o plano Pro ou Premium em Configurações > Planos.' });
+    const planContext = await getPlanContext(estId);
+    const planConfig = planContext?.config || resolvePlanConfig('starter');
+    const planStatus = planContext?.status || 'trialing';
+
+    if (isDelinquentStatus(planStatus)) {
+      return res.status(402).json({
+        error: 'plan_delinquent',
+        message: 'Sua assinatura esta em atraso. Regularize o pagamento para cadastrar novos servicos.',
+      });
+    }
+
+    if (planConfig.maxServices !== null) {
+      const [[countRow]] = await pool.query(
+        "SELECT COUNT(*) AS total FROM servicos WHERE estabelecimento_id=?",
+        [estId]
+      );
+      const total = Number(countRow?.total || 0);
+      if (total >= planConfig.maxServices) {
+        return res.status(403).json({
+          error: 'plan_limit',
+          message: formatPlanLimitExceeded(planConfig, 'services') || 'Limite de servicos atingido.',
+          details: { limit: planConfig.maxServices, total },
+        });
       }
     }
 
@@ -101,7 +118,7 @@ router.post('/', auth, isEstabelecimento, async (req, res) => {
 
 /**
  * PUT /servicos/:id
- * — Atualizar serviço (somente do próprio estabelecimento)
+ * - Atualizar servico (somente do proprio estabelecimento)
  */
 router.put('/:id', auth, isEstabelecimento, async (req, res) => {
   try {
@@ -135,7 +152,7 @@ router.put('/:id', auth, isEstabelecimento, async (req, res) => {
 
 /**
  * DELETE /servicos/:id
- * — Remover serviço (somente do próprio estabelecimento)
+ * - Remover servico (somente do proprio estabelecimento)
  */
 router.delete('/:id', auth, isEstabelecimento, async (req, res) => {
   try {
@@ -153,3 +170,6 @@ router.delete('/:id', auth, isEstabelecimento, async (req, res) => {
 });
 
 export default router;
+
+
+

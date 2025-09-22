@@ -1,13 +1,14 @@
-// src/routes/slots.js
+﻿// src/routes/slots.js
 import { Router } from 'express';
 import { pool } from '../lib/db.js';
+import { getPlanContext, isDelinquentStatus } from '../lib/plans.js';
 import { auth, isEstabelecimento } from '../middleware/auth.js';
 
 const router = Router();
 
-// ===== Configuração padrão de funcionamento =====
+// ===== Configuracao padrao de funcionamento =====
 const OPEN_HOUR = 7;      // 07:00
-const CLOSE_HOUR = 22;    // até 22:00 (último slot termina às 22:00)
+const CLOSE_HOUR = 22;    // ate 22:00 (ultimo slot termina as 22:00)
 const INTERVAL_MIN = 30;  // intervalo de 30min
 
 // Helpers
@@ -35,7 +36,7 @@ router.get('/', async (req, res) => {
     const start = new Date(`${weekStart}T00:00:00`);
     const end = addDays(start, 6);
 
-    // Carrega agendamentos confirmados e bloqueios no período
+    // Carrega agendamentos confirmados e bloqueios no periodo
     const [ags] = await pool.query(
       `
       SELECT inicio, fim
@@ -69,7 +70,7 @@ router.get('/', async (req, res) => {
           const ocupado = ags.some(a => new Date(a.inicio) < e && new Date(a.fim) > s);
           const bloqueado = blq.some(b => new Date(b.inicio) < e && new Date(b.fim) > s);
 
-          const label = ocupado ? 'agendado' : (bloqueado ? 'bloqueado' : 'disponível');
+          const label = ocupado ? 'agendado' : (bloqueado ? 'bloqueado' : 'disponivel');
           const status = ocupado ? 'booked' : (bloqueado ? 'unavailable' : 'free');
 
           slots.push({
@@ -97,11 +98,19 @@ router.post('/toggle', auth, isEstabelecimento, async (req, res) => {
   const { slotDatetime } = req.body;
   if (!slotDatetime) return res.status(400).json({ error: 'missing_slot' });
 
+  const planContext = await getPlanContext(req.user.id);
+  if (planContext && isDelinquentStatus(planContext.status)) {
+    return res.status(403).json({
+      error: 'plan_delinquent',
+      message: 'Sua assinatura esta em atraso. Ajustes de agenda estao temporariamente bloqueados.'
+    });
+  }
+
   try {
     const s = new Date(slotDatetime);
     const e = new Date(s.getTime() + INTERVAL_MIN * 60000);
 
-    // Já existe bloqueio exato para esse intervalo?
+    // Ja existe bloqueio exato para esse intervalo?
     const [rows] = await pool.query(
       `SELECT id
          FROM bloqueios
@@ -115,8 +124,8 @@ router.post('/toggle', auth, isEstabelecimento, async (req, res) => {
       await pool.query(`DELETE FROM bloqueios WHERE id = ?`, [rows[0].id]);
       return res.json({ ok: true, action: 'liberado' });
     } else {
-      // Antes de bloquear, você pode checar se já há agendamento nesse horário
-      // e impedir o bloqueio; por ora, só criamos o bloqueio.
+      // Antes de bloquear, voce pode checar se ja ha agendamento nesse horario
+      // e impedir o bloqueio; por ora, so criamos o bloqueio.
       await pool.query(
         `INSERT INTO bloqueios (estabelecimento_id, inicio, fim) VALUES (?,?,?)`,
         [req.user.id, s, e]
@@ -130,3 +139,6 @@ router.post('/toggle', auth, isEstabelecimento, async (req, res) => {
 });
 
 export default router;
+
+
+

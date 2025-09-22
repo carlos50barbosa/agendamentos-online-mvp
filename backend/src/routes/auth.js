@@ -82,6 +82,9 @@ router.post('/register', async (req, res) => {
     const [rows] = await pool.query('SELECT id FROM usuarios WHERE LOWER(email)=? LIMIT 1', [emailNorm]);
     if (rows.length) return res.status(400).json({ error: 'email_exists' });
 
+    const now = new Date();
+    const trialEndsAt = tipo === 'estabelecimento' ? new Date(now.getTime() + 14 * 86400000) : null;
+
     const hash = await bcrypt.hash(String(senha), 10);
     const [r] = await pool.query(
       'INSERT INTO usuarios (nome, email, telefone, cep, endereco, numero, complemento, bairro, cidade, estado, senha_hash, tipo) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
@@ -101,6 +104,14 @@ router.post('/register', async (req, res) => {
       ]
     );
 
+    if (trialEndsAt) {
+      try {
+        await pool.query('UPDATE usuarios SET plan_trial_ends_at=? WHERE id=?', [trialEndsAt, r.insertId]);
+      } catch (err) {
+        console.error('[auth/register] failed to set trial end', err);
+      }
+    }
+
     const secret = process.env.JWT_SECRET;
     if (!secret) return res.status(500).json({ error: 'server_config', message: 'JWT_SECRET ausente.' });
 
@@ -117,6 +128,11 @@ router.post('/register', async (req, res) => {
       cidade: cidadeTrim || null,
       estado: estadoTrim || null,
       tipo,
+      plan: 'starter',
+      plan_status: 'trialing',
+      plan_trial_ends_at: trialEndsAt ? trialEndsAt.toISOString() : null,
+      plan_active_until: null,
+      plan_subscription_id: null,
     };
     const token = jwt.sign({ id: user.id, nome: nomeTrim, email: emailTrim, tipo }, secret, { expiresIn: '10h' });
     res.json({ token, user });
@@ -138,7 +154,7 @@ router.post('/login', async (req, res) => {
     const email = String(emailRaw).trim().toLowerCase();
 
     const [rows] = await pool.query(
-      'SELECT id, nome, email, telefone, cep, endereco, numero, complemento, bairro, cidade, estado, senha_hash, tipo FROM usuarios WHERE LOWER(email)=? LIMIT 1',
+      'SELECT id, nome, email, telefone, cep, endereco, numero, complemento, bairro, cidade, estado, senha_hash, tipo, plan, plan_status, plan_trial_ends_at, plan_active_until, plan_subscription_id FROM usuarios WHERE LOWER(email)=? LIMIT 1',
       [email]
     );
     if (!rows.length) return res.status(401).json({ error: 'invalid_credentials' });
@@ -170,6 +186,11 @@ router.post('/login', async (req, res) => {
       cidade: u.cidade || null,
       estado: u.estado || null,
       tipo: u.tipo || 'cliente',
+      plan: u.plan || 'starter',
+      plan_status: u.plan_status || 'trialing',
+      plan_trial_ends_at: u.plan_trial_ends_at ? new Date(u.plan_trial_ends_at).toISOString() : null,
+      plan_active_until: u.plan_active_until ? new Date(u.plan_active_until).toISOString() : null,
+      plan_subscription_id: u.plan_subscription_id || null,
     };
     return res.json({ ok: true, token, user });
   } catch (e) {
@@ -327,7 +348,7 @@ router.put('/me', auth, async (req, res) => {
       const html = `<p>Ola!</p><p>Use o codigo <strong>${code}</strong> para confirmar seu novo email.</p><p>O codigo expira em 30 minutos.</p>`;
       try { await notifyEmail(emailNorm, subject, html); } catch (err) { console.error('[auth/me][email]', err); }
 
-      const [[userRow]] = await pool.query("SELECT id, nome, email, telefone, cep, endereco, numero, complemento, bairro, cidade, estado, tipo, plan, plan_trial_ends_at FROM usuarios WHERE id=? LIMIT 1", [userId]);
+      const [[userRow]] = await pool.query("SELECT id, nome, email, telefone, cep, endereco, numero, complemento, bairro, cidade, estado, tipo, plan, plan_status, plan_trial_ends_at, plan_active_until, plan_subscription_id FROM usuarios WHERE id=? LIMIT 1", [userId]);
       if (!userRow) {
         return res.status(404).json({ error: 'not_found', message: 'Usuario nao encontrado.' });
       }
@@ -358,7 +379,7 @@ router.put('/me', auth, async (req, res) => {
       [nome, email, phoneClean || null, cepValue, enderecoValue, numeroValue, complementoValue, bairroValue, cidadeValue, estadoValue, userId]
     );
 
-    const [[userRow]] = await pool.query("SELECT id, nome, email, telefone, cep, endereco, numero, complemento, bairro, cidade, estado, tipo, plan, plan_trial_ends_at FROM usuarios WHERE id=? LIMIT 1", [userId]);
+    const [[userRow]] = await pool.query("SELECT id, nome, email, telefone, cep, endereco, numero, complemento, bairro, cidade, estado, tipo, plan, plan_status, plan_trial_ends_at, plan_active_until, plan_subscription_id FROM usuarios WHERE id=? LIMIT 1", [userId]);
     if (!userRow) {
       return res.status(404).json({ error: 'not_found', message: 'Usuario nao encontrado.' });
     }
@@ -408,7 +429,7 @@ router.post('/me/email-confirm', auth, async (req, res) => {
     await pool.query('UPDATE usuarios SET email=? WHERE id=?', [newEmail, userId]);
     await pool.query('DELETE FROM email_change_tokens WHERE id=?', [token.id]);
 
-    const [[userRow]] = await pool.query("SELECT id, nome, email, telefone, cep, endereco, numero, complemento, bairro, cidade, estado, tipo, plan, plan_trial_ends_at FROM usuarios WHERE id=? LIMIT 1", [userId]);
+    const [[userRow]] = await pool.query("SELECT id, nome, email, telefone, cep, endereco, numero, complemento, bairro, cidade, estado, tipo, plan, plan_status, plan_trial_ends_at, plan_active_until, plan_subscription_id FROM usuarios WHERE id=? LIMIT 1", [userId]);
     if (!userRow) {
       return res.status(404).json({ error: 'not_found', message: 'Usuario nao encontrado.' });
     }

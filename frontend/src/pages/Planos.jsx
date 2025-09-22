@@ -243,7 +243,7 @@ export default function Planos() {
               <div className="price"><span className="currency">R$</span><span className="amount">49</span><span className="period">/mês</span></div>
               <ul className="features">
                 <Feature>Agenda online e confirmações automáticas</Feature>
-                <Feature>Até 3 serviços e 1 profissional</Feature>
+                <Feature>Até 10 serviços e 1 profissional</Feature>
                 <Feature>Lembretes por e-mail</Feature>
                 <Feature>Relatórios básicos</Feature>
               </ul>

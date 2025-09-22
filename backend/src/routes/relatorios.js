@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { pool } from '../lib/db.js';
 import { auth as authRequired, isEstabelecimento } from '../middleware/auth.js';
+import { resolvePlanConfig, isDelinquentStatus } from '../lib/plans.js';
 
 const router = Router();
 
@@ -105,11 +106,18 @@ router.get('/estabelecimento', authRequired, isEstabelecimento, async (req, res)
     const estId = req.user.id;
     const now = new Date();
 
-    const [accountRows] = await pool.query("SELECT plan, plan_trial_ends_at FROM usuarios WHERE id=? AND tipo='estabelecimento' LIMIT 1", [estId]);
+    const [accountRows] = await pool.query("SELECT plan, plan_status, plan_trial_ends_at, plan_active_until FROM usuarios WHERE id=? AND tipo='estabelecimento' LIMIT 1", [estId]);
     const account = accountRows?.[0] || {};
     const plan = account.plan || 'starter';
+    const planStatus = account.plan_status || 'trialing';
+    const planConfig = resolvePlanConfig(plan);
     const planTrialEndsAtIso = account.plan_trial_ends_at ? new Date(account.plan_trial_ends_at).toISOString() : null;
-    const allowAdvancedFilters = plan !== 'starter';
+    const planActiveUntilIso = account.plan_active_until ? new Date(account.plan_active_until).toISOString() : null;
+    const delinquent = isDelinquentStatus(planStatus);
+    if (delinquent) {
+      return res.status(402).json({ error: 'plan_delinquent', message: 'Sua assinatura esta em atraso. Regularize o pagamento para acessar os relatorios.' });
+    }
+    const allowAdvancedFilters = !!planConfig.allowAdvancedReports;
 
     let { range = '30d', start, end } = req.query || {};
 
@@ -258,7 +266,7 @@ router.get('/estabelecimento', authRequired, isEstabelecimento, async (req, res)
     const downloadType = String(req.query.download || '').toLowerCase();
 
     if (!allowAdvancedFilters && downloadType) {
-      return res.status(403).json({ error: 'plan_restricted', message: 'Exportação disponível a partir do plano Pro.' });
+      return res.status(403).json({ error: 'plan_restricted', message: 'Relatorios avancados disponiveis a partir do plano Pro.' });
     }
 
     if (downloadType === 'daily') {
@@ -287,13 +295,13 @@ router.get('/estabelecimento', authRequired, isEstabelecimento, async (req, res)
     if (downloadType === 'services') {
       const csv = buildCsv(
         [
-          { key: 'nome', label: 'Serviço' },
+          { key: 'nome', label: 'Servico' },
           { key: 'total', label: 'Total' },
           { key: 'confirmados', label: 'Confirmados' },
           { key: 'cancelados', label: 'Cancelados' },
           { key: 'receita_centavos', label: 'Receita (centavos)' },
           { key: 'receita_reais', label: 'Receita (BRL)' },
-          { key: 'ticket_medio_reais', label: 'Ticket médio (BRL)' },
+          { key: 'ticket_medio_reais', label: 'Ticket medio (BRL)' },
         ],
         services.map((item) => ({
           nome: item.nome,
@@ -314,7 +322,9 @@ router.get('/estabelecimento', authRequired, isEstabelecimento, async (req, res)
     res.json({
       plan: {
         code: plan,
+        status: planStatus,
         trial_ends_at: planTrialEndsAtIso,
+        active_until: planActiveUntilIso,
         allow_advanced: allowAdvancedFilters,
       },
       range: {
@@ -338,3 +348,6 @@ router.get('/estabelecimento', authRequired, isEstabelecimento, async (req, res)
 });
 
 export default router;
+
+
+

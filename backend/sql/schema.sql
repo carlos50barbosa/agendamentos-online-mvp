@@ -24,6 +24,11 @@ CREATE TABLE IF NOT EXISTS usuarios (
   estado       CHAR(2)               NULL,
   senha_hash   VARCHAR(200)          NOT NULL,
   tipo         ENUM('cliente','estabelecimento') NOT NULL,
+  plan         ENUM('starter','pro','premium') NOT NULL DEFAULT 'starter',
+  plan_status  ENUM('trialing','active','delinquent') NOT NULL DEFAULT 'trialing',
+  plan_trial_ends_at DATETIME       NULL,
+  plan_active_until DATETIME       NULL,
+  plan_subscription_id VARCHAR(80) NULL,
   criado_em    TIMESTAMP             NOT NULL DEFAULT CURRENT_TIMESTAMP,
   INDEX idx_usuarios_tipo (tipo)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;

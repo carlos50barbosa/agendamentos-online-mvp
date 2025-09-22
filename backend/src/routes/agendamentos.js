@@ -1,19 +1,20 @@
 // backend/src/routes/agendamentos.js
 import { Router } from 'express';
 import { pool } from '../lib/db.js';
+import { getPlanContext, isDelinquentStatus } from '../lib/plans.js';
 import { auth as authRequired, isCliente, isEstabelecimento } from '../middleware/auth.js';
 import { notifyEmail, notifyWhatsapp, scheduleWhatsApp, sendTemplate } from '../lib/notifications.js';
 
 const router = Router();
 
 const TZ = 'America/Sao_Paulo';
-const toDigits = (s) => String(s || '').replace(/\D/g, ''); // normaliza telefone para apenas dÃ­gitos
+const toDigits = (s) => String(s || '').replace(/\D/g, ''); // normaliza telefone para apenas digitos
 
-/** HorÃ¡rio comercial: 07:00 (inclusive) atÃ© 22:00 (inclusive somente 22:00 em ponto) */
+/** Horario comercial: 07:00 (inclusive) ate 22:00 (inclusive somente 22:00 em ponto) */
 function inBusinessHours(dateISO) {
   const d = new Date(dateISO);
   if (Number.isNaN(d.getTime())) return false;
-  // ObservaÃ§Ã£o: usa timezone do servidor. Ideal seria usar TZ do estabelecimento.
+  // Observacao: usa timezone do servidor. Ideal seria usar TZ do estabelecimento.
   const h = d.getHours(), m = d.getMinutes();
   const afterStart = h > 7 || (h === 7 && m >= 0);
   const beforeEnd  = h < 22 || (h === 22 && m === 0);
@@ -33,7 +34,7 @@ function brTime(iso) {
   return new Date(iso).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: TZ });
 }
 
-// UtilitÃ¡rio: dispara funÃ§Ã£o async em background sem nunca derrubar a rota
+// Utilitario: dispara funcao async em background sem nunca derrubar a rota
 function fireAndForget(fn) {
   try {
     const p = Promise.resolve().then(fn);
@@ -64,7 +65,7 @@ router.get('/estabelecimento', authRequired, isEstabelecimento, async (req, res)
   const estId = req.user.id;
   const status = String(req.query?.status || '').toLowerCase();
 
-  // Mapeia filtros: por padrÃ£o mantÃ©m confirmados+pendentes (comportamento atual)
+  // Mapeia filtros: por padrao mantem confirmados+pendentes (comportamento atual)
   // status=todos -> todos; status=confirmado|cancelado|pendente -> somente aquele
   let where = 'a.estabelecimento_id=? AND a.status IN (\'confirmado\',\'pendente\')';
   const params = [estId];
@@ -87,7 +88,7 @@ router.get('/estabelecimento', authRequired, isEstabelecimento, async (req, res)
   res.json(rows);
 });
 
-/* =================== CriaÃ§Ã£o =================== */
+/* =================== Criacao =================== */
 
 // Criar agendamento (cliente)
 router.post('/', authRequired, isCliente, async (req, res) => {
@@ -95,44 +96,52 @@ router.post('/', authRequired, isCliente, async (req, res) => {
   try {
     const { estabelecimento_id, servico_id, inicio } = req.body;
 
-    // 1) validaÃ§Ã£o bÃ¡sica
+    // 1) validacao basica
     if (!estabelecimento_id || !servico_id || !inicio) {
       return res.status(400).json({
         error: 'invalid_payload',
-        message: 'Campos obrigatÃ³rios: estabelecimento_id, servico_id, inicio (ISO).'
+        message: 'Campos obrigatorios: estabelecimento_id, servico_id, inicio (ISO).'
       });
     }
 
     const inicioDate = new Date(inicio);
     if (Number.isNaN(inicioDate.getTime())) {
-      return res.status(400).json({ error: 'invalid_date', message: 'Formato de data/hora invÃ¡lido.' });
+      return res.status(400).json({ error: 'invalid_date', message: 'Formato de data/hora invalido.' });
     }
     if (inicioDate.getTime() <= Date.now()) {
-      return res.status(400).json({ error: 'past_datetime', message: 'NÃ£o Ã© possÃ­vel agendar no passado.' });
+      return res.status(400).json({ error: 'past_datetime', message: 'Nao e possivel agendar no passado.' });
     }
     if (!inBusinessHours(inicioDate.toISOString())) {
-      return res.status(400).json({ error: 'outside_business_hours', message: 'HorÃ¡rio fora do expediente (07:00â€“22:00).' });
+      return res.status(400).json({ error: 'outside_business_hours', message: 'Horario fora do expediente (07:00-22:00).' });
     }
 
-    // 2) valida serviÃ§o e vÃ­nculo com estabelecimento
+    // 2) valida servico e vinculo com estabelecimento
+    const planContext = await getPlanContext(estabelecimento_id);
+    if (!planContext) {
+      return res.status(404).json({ error: 'estabelecimento_inexistente' });
+    }
+    if (isDelinquentStatus(planContext.status)) {
+      return res.status(403).json({ error: 'plan_delinquent', message: 'Este estabelecimento esta com o plano em atraso. Agendamentos temporariamente suspensos.' });
+    }
+
     const [[svc]] = await pool.query(
       'SELECT duracao_min, nome FROM servicos WHERE id=? AND estabelecimento_id=? AND ativo=1',
       [servico_id, estabelecimento_id]
     );
     if (!svc) {
-      return res.status(400).json({ error: 'servico_invalido', message: 'ServiÃ§o invÃ¡lido ou inativo para este estabelecimento.' });
+      return res.status(400).json({ error: 'servico_invalido', message: 'Servico invalido ou inativo para este estabelecimento.' });
     }
     const dur = Number(svc.duracao_min || 0);
     if (!Number.isFinite(dur) || dur <= 0) {
-      return res.status(400).json({ error: 'duracao_invalida', message: 'DuraÃ§Ã£o do serviÃ§o invÃ¡lida.' });
+      return res.status(400).json({ error: 'duracao_invalida', message: 'Duracao do servico invalida.' });
     }
     const fimDate = new Date(inicioDate.getTime() + dur * 60_000);
 
-    // 3) transaÃ§Ã£o + checagem de conflito
+    // 3) transacao + checagem de conflito
     conn = await pool.getConnection();
     await conn.beginTransaction();
 
-    // Conflito por sobreposiÃ§Ã£o: a.inicio < novoFim AND a.fim > novoInicio
+    // Conflito por sobreposicao: a.inicio < novoFim AND a.fim > novoInicio
     const [conf] = await conn.query(`
       SELECT id FROM agendamentos
       WHERE estabelecimento_id = ? AND status IN ('confirmado','pendente')
@@ -143,7 +152,7 @@ router.post('/', authRequired, isCliente, async (req, res) => {
     if (conf.length) {
       await conn.rollback();
       conn.release();
-      return res.status(409).json({ error: 'slot_ocupado', message: 'HorÃ¡rio indisponÃ­vel.' });
+      return res.status(409).json({ error: 'slot_ocupado', message: 'Horario indisponivel.' });
     }
 
     // 4) insere
@@ -152,7 +161,7 @@ router.post('/', authRequired, isCliente, async (req, res) => {
       VALUES (?,?,?,?,?,'confirmado')
     `, [req.user.id, estabelecimento_id, servico_id, inicioDate, fimDate]);
 
-    // 5) lÃª dados consistentes ainda na transaÃ§Ã£o
+    // 5) le dados consistentes ainda na transacao
     const [[novo]] = await conn.query('SELECT * FROM agendamentos WHERE id=?', [r.insertId]);
     const [[cli]]  = await conn.query('SELECT email, telefone, nome FROM usuarios WHERE id=?', [req.user.id]);
     const [[est]]  = await conn.query('SELECT email, telefone, nome FROM usuarios WHERE id=?', [estabelecimento_id]);
@@ -160,7 +169,7 @@ router.post('/', authRequired, isCliente, async (req, res) => {
     await conn.commit();
     conn.release(); conn = null;
 
-    // 6) notificaÃ§Ã£o "best-effort" (NUNCA bloqueia a resposta)
+    // 6) notificacao "best-effort" (NUNCA bloqueia a resposta)
     const inicioISO = new Date(novo.inicio).toISOString();
     const inicioBR  = brDateTime(inicioISO);
     const hora      = brTime(inicioISO);
@@ -177,14 +186,14 @@ router.post('/', authRequired, isCliente, async (req, res) => {
         await notifyEmail(
           cli.email,
           'Agendamento confirmado',
-          `<p>OlÃ¡, <b>${cli?.nome ?? 'cliente'}</b>! Seu agendamento de <b>${svc.nome}</b> foi confirmado para <b>${inicioBR}</b>.</p>`
+          `<p>Ola, <b>${cli?.nome ?? 'cliente'}</b>! Seu agendamento de <b>${svc.nome}</b> foi confirmado para <b>${inicioBR}</b>.</p>`
         );
       }
       if (est?.email) {
         await notifyEmail(
           est.email,
           'Novo agendamento recebido',
-          `<p>VocÃª recebeu um novo agendamento de <b>${svc.nome}</b> em <b>${inicioBR}</b> para o cliente <b>${cli?.nome ?? ''}</b>.</p>`
+          `<p>Voce recebeu um novo agendamento de <b>${svc.nome}</b> em <b>${inicioBR}</b> para o cliente <b>${cli?.nome ?? ''}</b>.</p>`
         );
       }
     });
@@ -199,23 +208,23 @@ router.post('/', authRequired, isCliente, async (req, res) => {
         if (/^triple|3$/.test(paramMode)) {
           try { await sendTemplate({ to: telCli, name: tplName, lang: tplLang, bodyParams: [svc.nome, inicioBR, estNomeLabel] }); } catch (e) { console.warn('[wa/confirm cli]', e?.message || e); }
         } else {
-          await notifyWhatsapp(`âœ… ConfirmaÃ§Ã£o: ${svc.nome} em ${inicioBR} â€” ${estNomeLabel}`, telCli);
+          await notifyWhatsapp(`[OK] Confirmacao: ${svc.nome} em ${inicioBR} - ${estNomeLabel}`, telCli);
         }
       }
       if (telEst && telEst !== telCli) {
         if (/^triple|3$/.test(paramMode)) {
           try { await sendTemplate({ to: telEst, name: tplName, lang: tplLang, bodyParams: [svc.nome, inicioBR, estNomeLabel] }); } catch (e) { console.warn('[wa/confirm est]', e?.message || e); }
         } else {
-          await notifyWhatsapp(`ðŸ”” Novo agendamento: ${svc.nome} em ${inicioBR} â€” Cliente: ${cli?.nome ?? ''}`, telEst);
+          await notifyWhatsapp(`[Novo] Agendamento: ${svc.nome} em ${inicioBR} - Cliente: ${cli?.nome ?? ''}`, telEst);
         }
       }
     });
 
-    // (c) Lembretes (WhatsApp) â€” somente se houver tempo hÃ¡bil
+    // (c) Lembretes (WhatsApp) - somente se houver tempo habil
     const now = Date.now();
     const reminderTime = new Date(inicioDate.getTime() - 8 * 60 * 60 * 1000); // -8h
 
-    const msgCliReminder = `â° Lembrete: faltam 8 horas para o seu ${svc.nome} em ${estNomeFriendly} (${hora} de ${data}).`;
+    const msgCliReminder = `[Lembrete] Faltam 8 horas para o seu ${svc.nome} em ${estNomeFriendly} (${hora} de ${data}).`;
 
     fireAndForget(async () => {
       if (telCli && reminderTime.getTime() > now) {
@@ -242,7 +251,7 @@ router.post('/', authRequired, isCliente, async (req, res) => {
       }
     });
 
-    // 7) resposta (NUNCA depende das notificaÃ§Ãµes)
+    // 7) resposta (NUNCA depende das notificacoes)
     return res.status(201).json({
       id: novo.id,
       cliente_id: novo.cliente_id,
@@ -260,7 +269,7 @@ router.post('/', authRequired, isCliente, async (req, res) => {
     // Se for erro de chave/unique/conflito que porventura escapou:
     const msg = String(e?.message || '');
     if (/duplicate|unique|constraint/i.test(msg)) {
-      return res.status(409).json({ error: 'slot_ocupado', message: 'HorÃ¡rio indisponÃ­vel.' });
+      return res.status(409).json({ error: 'slot_ocupado', message: 'Horario indisponivel.' });
     }
     return res.status(500).json({ error: 'server_error' });
   }
@@ -278,7 +287,7 @@ router.put('/:id/cancel', authRequired, isCliente, async (req, res) => {
       [id, req.user.id]
     );
     if (!rows.affectedRows) {
-      return res.status(404).json({ error: 'not_found', message: 'Agendamento nÃ£o encontrado.' });
+      return res.status(404).json({ error: 'not_found', message: 'Agendamento nao encontrado.' });
     }
 
     // contatos para notificar (opcional)
@@ -307,10 +316,10 @@ router.put('/:id/cancel', authRequired, isCliente, async (req, res) => {
     }
     } else {
     if (telCli) {
-      await notifyWhatsapp(`Seu agendamento ${id} (${svc?.nome ?? 'serviÃ§o'}) em ${inicioBR} foi cancelado.`, telCli);
+      await notifyWhatsapp(`Seu agendamento ${id} (${svc?.nome ?? 'servico'}) em ${inicioBR} foi cancelado.`, telCli);
     }
     if (telEst && telEst !== telCli) {
-      await notifyWhatsapp(`ðŸ”” Cancelamento: agendamento ${id} (${svc?.nome ?? 'serviÃ§o'}) em ${inicioBR} pelo cliente ${cli?.nome ?? ''}.`, telEst);
+      await notifyWhatsapp(`[Aviso] Cancelamento: agendamento ${id} (${svc?.nome ?? 'servico'}) em ${inicioBR} pelo cliente ${cli?.nome ?? ''}.`, telEst);
     }
     }
     });
@@ -323,4 +332,7 @@ router.put('/:id/cancel', authRequired, isCliente, async (req, res) => {
 });
 
 export default router;
+
+
+
 

@@ -32,7 +32,15 @@ export default function Configuracoes() {
   const user = getUser();
   const isEstab = user?.tipo === 'estabelecimento';
 
-  const [planInfo, setPlanInfo] = useState({ plan: 'starter', trialEnd: null });
+  const [planInfo, setPlanInfo] = useState({
+    plan: 'starter',
+    status: 'trialing',
+    trialEnd: null,
+    trialDaysLeft: null,
+    trialWarn: false,
+    allowAdvanced: false,
+    activeUntil: null,
+  });
   const [slug, setSlug] = useState('');
   const [msg, setMsg] = useState({ email_subject: '', email_html: '', wa_template: '' });
   const [savingMessages, setSavingMessages] = useState(false);
@@ -63,8 +71,17 @@ export default function Configuracoes() {
   useEffect(() => {
     try {
       const plan = localStorage.getItem('plan_current') || 'starter';
+      const status = localStorage.getItem('plan_status') || 'trialing';
       const trialEnd = localStorage.getItem('trial_end');
-      setPlanInfo({ plan, trialEnd });
+      const daysLeft = trialEnd ? Math.max(0, Math.ceil((new Date(trialEnd).getTime() - Date.now()) / 86400000)) : null;
+      setPlanInfo((prev) => ({
+        ...prev,
+        plan,
+        status,
+        trialEnd,
+        trialDaysLeft: daysLeft,
+        trialWarn: daysLeft != null ? daysLeft <= 3 : prev.trialWarn,
+      }));
     } catch {}
   }, []);
 
@@ -117,10 +134,29 @@ export default function Configuracoes() {
 
   useEffect(() => {
     (async () => {
-      if (!isEstab) return;
+      if (!isEstab || !user?.id) return;
       try {
         const est = await Api.getEstablishment(user.id);
         setSlug(est?.slug || '');
+        const ctx = est?.plan_context;
+        if (ctx) {
+          setPlanInfo((prev) => ({
+            ...prev,
+            plan: ctx.plan || 'starter',
+            status: ctx.status || 'trialing',
+            trialEnd: ctx.trial?.ends_at || null,
+            trialDaysLeft: typeof ctx.trial?.days_left === 'number' ? ctx.trial.days_left : prev.trialDaysLeft,
+            trialWarn: !!ctx.trial?.warn,
+            allowAdvanced: !!ctx.limits?.allowAdvancedReports,
+            activeUntil: ctx.active_until || null,
+          }));
+          try {
+            localStorage.setItem('plan_current', ctx.plan || 'starter');
+            localStorage.setItem('plan_status', ctx.status || 'trialing');
+            if (ctx.trial?.ends_at) localStorage.setItem('trial_end', ctx.trial.ends_at);
+            else localStorage.removeItem('trial_end');
+          } catch {}
+        }
       } catch {}
       try {
         const tmpl = await Api.getEstablishmentMessages(user.id);
@@ -134,10 +170,11 @@ export default function Configuracoes() {
   }, [isEstab, user?.id]);
 
   const daysLeft = useMemo(() => {
+    if (planInfo.trialDaysLeft != null) return planInfo.trialDaysLeft;
     if (!planInfo.trialEnd) return 0;
     const diff = new Date(planInfo.trialEnd).getTime() - Date.now();
     return Math.max(0, Math.ceil(diff / 86400000));
-  }, [planInfo.trialEnd]);
+  }, [planInfo.trialDaysLeft, planInfo.trialEnd]);
 
   const fmtDate = (iso) =>
     iso ? new Date(iso).toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' }) : '';
@@ -147,15 +184,35 @@ export default function Configuracoes() {
     return slug ? `${window.location.origin}/book/${slug}` : `${window.location.origin}/book/${user.id}`;
   }, [slug, user?.id]);
 
-  const startTrial = useCallback(() => {
+  const startTrial = useCallback(async () => {
+    if (!isEstab || !user?.id) return;
     try {
-      const d = new Date();
-      d.setDate(d.getDate() + 14);
-      const iso = d.toISOString();
-      localStorage.setItem('trial_end', iso);
-      setPlanInfo((prev) => ({ ...prev, trialEnd: iso }));
-    } catch {}
-  }, []);
+      const response = await Api.updateEstablishmentPlan(user.id, { plan: 'pro', status: 'trialing', trialDays: 14 });
+      const ctx = response?.plan;
+      if (ctx) {
+        setPlanInfo((prev) => ({
+          ...prev,
+          plan: ctx.plan || 'starter',
+          status: ctx.status || 'trialing',
+          trialEnd: ctx.trial?.ends_at || null,
+          trialDaysLeft: typeof ctx.trial?.days_left === 'number' ? ctx.trial.days_left : prev.trialDaysLeft,
+          trialWarn: !!ctx.trial?.warn,
+          allowAdvanced: !!ctx.limits?.allowAdvancedReports,
+          activeUntil: ctx.active_until || null,
+        }));
+        try {
+          localStorage.setItem('plan_current', ctx.plan || 'starter');
+          localStorage.setItem('plan_status', ctx.status || 'trialing');
+          if (ctx.trial?.ends_at) localStorage.setItem('trial_end', ctx.trial.ends_at);
+          else localStorage.removeItem('trial_end');
+        } catch {}
+      }
+      alert('Teste gratuito do plano Pro ativado por 14 dias!');
+    } catch (err) {
+      console.error('startTrial failed', err);
+      alert('Nao foi possivel iniciar o teste gratuito agora.');
+    }
+  }, [isEstab, user?.id]);
 
   const toggleSection = useCallback((id) => {
     setOpenSections((prev) => ({ ...prev, [id]: !prev[id] }));
@@ -340,12 +397,20 @@ export default function Configuracoes() {
                 {planInfo.plan.toUpperCase()}
               </div>
             </div>
+            {planInfo.status && (
+              <div className="small muted">Status atual: {planInfo.status.toUpperCase()}</div>
+            )}
+            {planInfo.status === 'delinquent' && (
+              <div className="notice notice--error" role="alert">
+                <strong>Pagamento em atraso.</strong> Regularize a assinatura para liberar os recursos.
+              </div>
+            )}
             {planInfo.plan === 'starter' ? (
               <>
                 {planInfo.trialEnd && daysLeft > 0 ? (
                   <div className="box box--highlight">
                     <strong>Teste gratis ativo</strong>
-                    <div className="small muted">Termina em {fmtDate(planInfo.trialEnd)} – {daysLeft} {daysLeft === 1 ? 'dia' : 'dias'} restantes</div>
+                    <div className="small muted">Termina em {fmtDate(planInfo.trialEnd)} - {daysLeft} {daysLeft === 1 ? 'dia' : 'dias'} restantes</div>
                   </div>
                 ) : (
                   <div className="box" style={{ borderColor: '#fde68a', background: '#fffbeb' }}>
@@ -355,7 +420,7 @@ export default function Configuracoes() {
                 )}
                 <div className="row" style={{ gap: 8, justifyContent: 'flex-end' }}>
                   {!planInfo.trialEnd && (
-                    <button className="btn btn--outline" onClick={startTrial}>Ativar 14 dias gratis</button>
+                    <button className="btn btn--outline" type="button" onClick={startTrial} disabled={planInfo.status === "delinquent"}>Ativar 14 dias gratis</button>
                   )}
                   <Link className="btn btn--primary" to="/planos">Conhecer planos</Link>
                 </div>
@@ -487,10 +552,14 @@ export default function Configuracoes() {
 
     return list;
   }, [
-    isEstab,
-    planInfo.plan,
-    planInfo.trialEnd,
-    daysLeft,
+    isEstab,      planInfo.plan,
+      planInfo.status,
+      planInfo.trialEnd,
+      planInfo.trialDaysLeft,
+      planInfo.trialWarn,
+      planInfo.allowAdvanced,
+      planInfo.activeUntil,
+      daysLeft,
     fmtDate,
     publicLink,
     slug,
@@ -532,3 +601,4 @@ export default function Configuracoes() {
     </div>
   );
 }
+

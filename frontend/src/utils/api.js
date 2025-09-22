@@ -111,6 +111,7 @@ export const Api = {
   getEstablishmentMessages: (id) => req(`/establishments/${id}/messages`),
   updateEstablishmentMessages: (id, payload) => req(`/establishments/${id}/messages`, { method: 'PUT', body: JSON.stringify(payload) }),
   updateEstablishmentSlug: (id, slug) => req(`/establishments/${id}/slug`, { method: 'PUT', body: JSON.stringify({ slug }) }),
+  updateEstablishmentPlan: (id, payload) => req(`/establishments/${id}/plan`, { method: 'PUT', body: JSON.stringify(payload) }),
   listServices: (establishmentId) => req(`/servicos${toQuery({ establishmentId })}`),
 
   // Serviços (rotas existentes)
