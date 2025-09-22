@@ -8,7 +8,7 @@ import { getUser } from "../utils/auth";
 const TZ = Intl.DateTimeFormat().resolvedOptions().timeZone || "America/Sao_Paulo";
 
 const DateHelpers = {
-  // Parse de 'YYYY-MM-DD' como data local (evita UTC) ou mantém Date
+  // Parse de 'YYYY-MM-DD' como data local (evita UTC) ou mantÃ©m Date
   parseLocal: (dateish) => {
     if (dateish instanceof Date) return new Date(dateish);
     if (typeof dateish === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateish)){
@@ -71,7 +71,7 @@ const DateHelpers = {
     return dt;
   },
   monthGrid: (monthStartIso) => {
-    // Retorna 6 linhas x 7 colunas começando na segunda-feira
+    // Retorna 6 linhas x 7 colunas comeÃ§ando na segunda-feira
     const first = DateHelpers.parseLocal(monthStartIso);
     first.setDate(1);
     const firstWeekday = (first.getDay() + 6) % 7; // 0=Seg
@@ -97,7 +97,7 @@ const DateHelpers = {
     const fmt = new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "short" });
     const s1 = fmt.format(start);
     const s2 = fmt.format(end);
-    return `${s1} – ${s2}`.replace(/\./g, "");
+    return `${s1} â€“ ${s2}`.replace(/\./g, "");
   },
   formatTime: (datetime) => {
     const dt = new Date(datetime);
@@ -125,16 +125,16 @@ const weekRangeMs = (isoMonday) => {
 // Chave do overlay persistido por estabelecimento + semana
 const fbKey = (establishmentId, isoMonday) => `fb:${establishmentId}:${isoMonday}`;
 
-/* =================== Helpers de Serviço =================== */
+/* =================== Helpers de ServiÃ§o =================== */
 const ServiceHelpers = {
-  title: (s) => s?.title || s?.nome || `Serviço #${s?.id ?? ""}`,
+  title: (s) => s?.title || s?.nome || `ServiÃ§o #${s?.id ?? ""}`,
   duration: (s) => Number(s?.duracao_min ?? s?.duration ?? 0),
   price: (s) => Number(s?.preco_centavos ?? s?.preco ?? s?.price_centavos ?? 0),
   formatPrice: (centavos) =>
     (Number(centavos || 0) / 100).toLocaleString("pt-BR", { style: "currency", currency: "BRL" }),
 };
 
-/* =================== Janela 07–22 =================== */
+/* =================== Janela 07â€“22 =================== */
 const BUSINESS_HOURS = { start: 7, end: 22 };
 const inBusinessHours = (isoDatetime) => {
   const d = new Date(isoDatetime);
@@ -145,7 +145,7 @@ const inBusinessHours = (isoDatetime) => {
   return afterStart && beforeEnd;
 };
 
-/* =================== Grade 07–22 =================== */
+/* =================== Grade 07â€“22 =================== */
 const pad2 = (n) => String(n).padStart(2, "0");
 const localKey = (dateish) => {
   const d = new Date(dateish);
@@ -188,12 +188,33 @@ function fillBusinessGrid({ currentWeek, slots, stepMinutes = 30 }) {
       const k = localKey(t);
       const existing = byKey.get(k);
       filled.push(
-        existing || { datetime: new Date(t).toISOString(), label: "disponível", status: "available" }
+        existing || { datetime: new Date(t).toISOString(), label: "disponÃ­vel", status: "available" }
       );
     }
   }
   return filled;
 }
+
+
+const normalizeSlotLabel = (value) => {
+  if (value === null || value === undefined) return '';
+  return String(value)
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[^a-z0-9:/-]/g, '');
+};
+
+const isAvailableLabel = (value) => {
+  const normalized = normalizeSlotLabel(value);
+  return normalized === 'disponivel' || normalized === 'available';
+};
+
+const slotStatusClass = (label) => {
+  const normalized = normalizeSlotLabel(label);
+  if (normalized === 'agendado' || normalized === 'ocupado') return 'busy';
+  if (normalized === 'bloqueado') return 'block';
+  return 'ok';
+};
 
 /* =================== UI Components =================== */
 const Modal = ({ children, onClose }) => (
@@ -207,7 +228,7 @@ const Modal = ({ children, onClose }) => (
 const Toast = ({ type, message, onDismiss }) => (
   <div className={`toast ${type}`} role="status" aria-live="polite">
     <div className="toast-content">
-      <span className="toast-icon">{type === "success" ? "✓" : type === "error" ? "✕" : "ℹ"}</span>
+      <span className="toast-icon">{type === "success" ? "âœ“" : type === "error" ? "âœ•" : "â„¹"}</span>
       {message}
     </div>
     <button className="toast-close" onClick={onDismiss} aria-label="Fechar">
@@ -226,7 +247,7 @@ const DensityToggle = ({ value, onChange }) => (
   <div className="segmented" role="tablist" aria-label="Densidade">
     {[
       { value: "compact", label: "Compacto" },
-      { value: "comfortable", label: "Confortável" },
+      { value: "comfortable", label: "ConfortÃ¡vel" },
     ].map((opt) => (
       <button
         key={opt.value}
@@ -244,10 +265,10 @@ const DensityToggle = ({ value, onChange }) => (
 
 const SlotButton = ({ slot, isSelected, onClick, density = "compact" }) => {
   const isPast = DateHelpers.isPastSlot(slot.datetime);
-  const label = String(slot.label || "disponível").toLowerCase().trim();
 
-  const statusClass = label === "agendado" ? "busy" : label === "bloqueado" ? "block" : "ok";
-  const disabledReason = isPast || label !== "disponível";
+  const statusClass = slotStatusClass(slot.label);
+  const disabledReason = isPast || !isAvailableLabel(slot.label);
+  const tooltipLabel = slot?.label ?? 'disponÃ­vel';
 
   const className = [
     "slot-btn",
@@ -260,7 +281,7 @@ const SlotButton = ({ slot, isSelected, onClick, density = "compact" }) => {
   return (
     <button
       className={className}
-      title={`${new Date(slot.datetime).toLocaleString("pt-BR")} — ${label}${isPast ? " (passado)" : ""}`}
+      title={`${new Date(slot.datetime).toLocaleString("pt-BR")} – ${tooltipLabel}${isPast ? " (passado)" : ""}`}
       onClick={onClick}
       disabled={disabledReason}
       aria-disabled={disabledReason}
@@ -296,10 +317,11 @@ const EstablishmentCard = ({ est, selected, onSelect }) => {
   );
 };
 
-/* =================== Página Principal =================== */
+/* =================== PÃ¡gina Principal =================== */
 export default function NovoAgendamento() {
   const user = getUser();
   const liveRef = useRef(null);
+  const toastTimeoutRef = useRef(null);
   const nav = useNavigate();
 
   // Redireciona estabelecimentos para seu dashboard
@@ -309,7 +331,7 @@ export default function NovoAgendamento() {
     }
   }, [user?.tipo, nav]);
   if (user?.tipo === 'estabelecimento') {
-    return <div className="container"><div className="empty">Redirecionando…</div></div>;
+    return <div className="container"><div className="empty">Redirecionandoâ€¦</div></div>;
   }
 
   const [state, setState] = useState({
@@ -324,12 +346,12 @@ export default function NovoAgendamento() {
     selectedSlot: null,
     filters: { onlyAvailable: false, hidePast: true, timeRange: "all" }, // all|morning|afternoon|evening
     density: "compact",
-    forceBusy: [], // overlay para casos que o backend não devolve ainda
+    forceBusy: [], // overlay para casos que o backend nÃ£o devolve ainda
   });
   const [estQuery, setEstQuery] = useState("");
   const [searchParams, setSearchParams] = useSearchParams();
 
-  // Inicializa estQuery a partir de ?q= da URL e reage a mudanças no histórico
+  // Inicializa estQuery a partir de ?q= da URL e reage a mudanÃ§as no histÃ³rico
   useEffect(() => {
     const q = (searchParams.get('q') || '').trim();
     if (q !== estQuery) setEstQuery(q);
@@ -337,7 +359,7 @@ export default function NovoAgendamento() {
   }, [searchParams]);
 
   // Inicializa/normaliza a semana a partir de ?week=YYYY-MM-DD
-  // Sempre força a segunda-feira correspondente
+  // Sempre forÃ§a a segunda-feira correspondente
   useEffect(() => {
     const w = (searchParams.get('week') || '').trim();
     if (/^\d{4}-\d{2}-\d{2}$/.test(w)) {
@@ -351,7 +373,7 @@ export default function NovoAgendamento() {
 
   const [modal, setModal] = useState({ isOpen: false, isSaving: false });
   const [toast, setToast] = useState(null);
-  const [viewMode] = useState('month'); // por ora, mês é o padrão
+  const [viewMode] = useState('month'); // por ora, mÃªs Ã© o padrÃ£o
   const [monthStart, setMonthStart] = useState(() => DateHelpers.firstOfMonthISO(new Date()));
   const [selectedDate, setSelectedDate] = useState(null); // YYYY-MM-DD
 
@@ -384,13 +406,13 @@ export default function NovoAgendamento() {
     return 30;
   }, [selectedService]);
 
-  // Persistência leve (filtros/densidade)
+  // PersistÃªncia leve (filtros/densidade)
   useEffect(() => {
     try {
       const saved = JSON.parse(localStorage.getItem("novo-agendamento-ui") || "{}");
       setState((p) => ({
         ...p,
-        filters: { ...p.filters, ...saved.filters, onlyAvailable: false }, // força exibir ocupados
+        filters: { ...p.filters, ...saved.filters, onlyAvailable: false }, // forÃ§a exibir ocupados
         density: saved.density || p.density
       }));
     } catch {}
@@ -404,19 +426,26 @@ export default function NovoAgendamento() {
   // Toast helper
   const showToast = useCallback((type, message, duration = 4500) => {
     setToast({ type, message });
-    const t = setTimeout(() => setToast(null), duration);
-    return () => clearTimeout(t);
+    if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
+    toastTimeoutRef.current = setTimeout(() => {
+      setToast(null);
+      toastTimeoutRef.current = null;
+    }, duration);
   }, []);
 
-  // Copiar link compartilhável (preserva q, estabelecimento e servico)
+  useEffect(() => () => {
+    if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
+  }, []);
+
+  // Copiar link compartilhÃ¡vel (preserva q, estabelecimento e servico)
   const copyShareLink = useCallback(async () => {
     try{
       const sp = new URLSearchParams(searchParams);
-      // Garante que os parâmetros atuais estão refletidos
+      // Garante que os parÃ¢metros atuais estÃ£o refletidos
       if (estQuery && estQuery.trim()) sp.set('q', estQuery.trim()); else sp.delete('q');
-      if (state.establishmentId) sp.set('estabelecimento', String(state.establishmentId)); else sp.delete('estabelecimento');
-      if (state.serviceId) sp.set('servico', String(state.serviceId)); else sp.delete('servico');
-      if (state.currentWeek) sp.set('week', String(state.currentWeek)); else sp.delete('week');
+      if (establishmentId) sp.set('estabelecimento', String(establishmentId)); else sp.delete('estabelecimento');
+      if (serviceId) sp.set('servico', String(serviceId)); else sp.delete('servico');
+      if (currentWeek) sp.set('week', String(currentWeek)); else sp.delete('week');
       const url = `${window.location.origin}/novo${sp.toString() ? `?${sp.toString()}` : ''}`;
       if (navigator.clipboard?.writeText) {
         await navigator.clipboard.writeText(url);
@@ -424,11 +453,11 @@ export default function NovoAgendamento() {
         const ta = document.createElement('textarea');
         ta.value = url; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta);
       }
-      showToast('info', 'Link copiado para a área de transferência.');
+      showToast('info', 'Link copiado para a Ã¡rea de transferÃªncia.');
     }catch{
-      showToast('error', 'Não foi possível copiar o link.');
+      showToast('error', 'NÃ£o foi possÃ­vel copiar o link.');
     }
-  }, [searchParams, estQuery, state.establishmentId, state.serviceId, state.currentWeek, showToast]);
+  }, [searchParams, estQuery, establishmentId, serviceId, currentWeek, showToast]);
 
   /* ====== Carregar Estabelecimentos ====== */
   useEffect(() => {
@@ -440,12 +469,12 @@ export default function NovoAgendamento() {
           establishments: list || [],
         }));
       } catch {
-        showToast("error", "Não foi possível carregar estabelecimentos.");
+        showToast("error", "NÃ£o foi possÃ­vel carregar estabelecimentos.");
       }
     })();
   }, [showToast]);
 
-  // Se vier ?estabelecimento= na URL, seleciona automaticamente após carregar a lista
+  // Se vier ?estabelecimento= na URL, seleciona automaticamente apÃ³s carregar a lista
   useEffect(() => {
     const estParam = (searchParams.get('estabelecimento') || '').trim();
     if (establishments.length && estParam && estParam !== state.establishmentId) {
@@ -453,7 +482,7 @@ export default function NovoAgendamento() {
     }
   }, [establishments, searchParams, state.establishmentId]);
 
-  /* ====== Carregar Serviços quando escolher Estabelecimento ====== */
+  /* ====== Carregar ServiÃ§os quando escolher Estabelecimento ====== */
   useEffect(() => {
     (async () => {
       if (!establishmentId) {
@@ -470,7 +499,7 @@ export default function NovoAgendamento() {
         setState((p) => ({
           ...p,
           services: list || [],
-          serviceId: "", // aguarda o clique do usuário
+          serviceId: "", // aguarda o clique do usuÃ¡rio
           slots: [],
           selectedSlot: null,
         }));
@@ -488,12 +517,12 @@ export default function NovoAgendamento() {
         }catch{}
       } catch {
         setState((p) => ({ ...p, services: [], serviceId: "", slots: [], selectedSlot: null }));
-        showToast("error", "Não foi possível carregar os serviços.");
+        showToast("error", "NÃ£o foi possÃ­vel carregar os serviÃ§os.");
       }
     })();
   }, [establishmentId, showToast, searchParams, setSearchParams]);
 
-  /* ====== Normalização de slots ====== */
+  /* ====== NormalizaÃ§Ã£o de slots ====== */
   const normalizeSlots = useCallback((data) => {
     const arr = Array.isArray(data) ? data : data?.slots || [];
     return arr.map((slot) => {
@@ -504,8 +533,8 @@ export default function NovoAgendamento() {
           ? "agendado"
           : raw.includes("unavail") || raw.includes("block") || raw.includes("bloq")
           ? "bloqueado"
-          : "disponível";
-      if (["agendado", "bloqueado", "disponível"].includes(String(slot.label).toLowerCase())) {
+          : "disponÃ­vel";
+      if ((["agendado", "bloqueado"].includes(normalizeSlotLabel(slot.label)) || isAvailableLabel(slot.label))) {
         label = String(slot.label).toLowerCase();
       }
       return { ...slot, datetime, label };
@@ -528,7 +557,7 @@ export default function NovoAgendamento() {
         });
       }
     } catch (e) {
-      // silencioso; não deve quebrar UI por causa de falha de leitura
+      // silencioso; nÃ£o deve quebrar UI por causa de falha de leitura
     }
 
     // agendamentos do estabelecimento
@@ -552,9 +581,9 @@ export default function NovoAgendamento() {
         });
       }
     } catch (e) {
-      // se for 403 (Forbidden), ignorar — rota é restrita a estabelecimento
+      // se for 403 (Forbidden), ignorar â€” rota Ã© restrita a estabelecimento
       if (!String(e?.message || '').includes('HTTP 403')) {
-        // outros erros também não devem quebrar a UI
+        // outros erros tambÃ©m nÃ£o devem quebrar a UI
       }
     }
 
@@ -579,7 +608,7 @@ export default function NovoAgendamento() {
 
       // C) conjuntos de ocupados por fonte
       const busyFromApi = new Set(
-        normalized.filter((s) => s.label !== "disponível").map((s) => minuteISO(s.datetime))
+        normalized.filter((s) => !isAvailableLabel(s.label)).map((s) => minuteISO(s.datetime))
       );
 
       let persisted = [];
@@ -591,7 +620,7 @@ export default function NovoAgendamento() {
       const fromAppts = await getBusyFromAppointments();
       const apptSet = new Set(fromAppts);
 
-      // D) aplica overlay e limpa o que já está ocupado no backend ou tem agendamento ativo
+      // D) aplica overlay e limpa o que jÃ¡ estÃ¡ ocupado no backend ou tem agendamento ativo
       setState((prev) => {
         const prevForced = Array.from(new Set([...prev.forceBusy, ...persisted]));
         const busyKnownSet = new Set([...busyFromApi, ...apptSet, ...prevForced]);
@@ -600,12 +629,12 @@ export default function NovoAgendamento() {
           busyKnownSet.has(minuteISO(s.datetime)) ? { ...s, label: "agendado" } : s
         );
 
-        // mantém no overlay apenas o que AINDA é reconhecido como ocupado por API ou agendamento ativo
+        // mantÃ©m no overlay apenas o que AINDA Ã© reconhecido como ocupado por API ou agendamento ativo
         const cleaned = prevForced.filter((k) => busyFromApi.has(k) || apptSet.has(k));
         try { localStorage.setItem(fbKey(establishmentId, currentWeek), JSON.stringify(cleaned)); } catch {}
 
         const firstAvailable = overlayed.find(
-          (s) => s.label === "disponível" && !DateHelpers.isPastSlot(s.datetime) && inBusinessHours(s.datetime)
+          (s) => s.label === "disponÃ­vel" && !DateHelpers.isPastSlot(s.datetime) && inBusinessHours(s.datetime)
         );
 
         return {
@@ -622,7 +651,7 @@ export default function NovoAgendamento() {
         slots: [],
         selectedSlot: null,
         loading: false,
-        error: "Não foi possível carregar os horários.",
+        error: "NÃ£o foi possÃ­vel carregar os horÃ¡rios.",
       }));
     }
   }, [establishmentId, serviceId, currentWeek, normalizeSlots, stepMinutes, getBusyFromAppointments]);
@@ -656,7 +685,7 @@ export default function NovoAgendamento() {
   const isSlotVisible = useCallback(
     (slot) => {
       if (!inBusinessHours(slot.datetime)) return false;
-      if (filters.onlyAvailable && slot.label !== "disponível") return false;
+      if (filters.onlyAvailable && !isAvailableLabel(slot.label)) return false;
       if (filters.hidePast && DateHelpers.isPastSlot(slot.datetime)) return false;
       if (!timeRangeCheck(slot.datetime)) return false;
       return true;
@@ -677,11 +706,11 @@ export default function NovoAgendamento() {
     return { days, grouped };
   }, [currentWeek, slots]);
 
-  // announce seleção (a11y)
+  // announce seleÃ§Ã£o (a11y)
   useEffect(() => {
     if (!selectedSlot || !liveRef.current) return;
     const dt = new Date(selectedSlot.datetime);
-    liveRef.current.textContent = `Selecionado ${dt.toLocaleDateString("pt-BR")} às ${DateHelpers.formatTime(
+    liveRef.current.textContent = `Selecionado ${dt.toLocaleDateString("pt-BR")} Ã s ${DateHelpers.formatTime(
       selectedSlot.datetime
     )}`;
   }, [selectedSlot]);
@@ -691,7 +720,7 @@ export default function NovoAgendamento() {
   const scheduleWhatsAppReminders = useCallback(
     async ({ inicioISO, servicoNome, estabelecimentoNome }) => {
       if (!FRONT_SCHEDULE_WHATSAPP) {
-        showToast("success", "Agendado com sucesso! Os lembretes serão enviados automaticamente.");
+        showToast("success", "Agendado com sucesso! Os lembretes serÃ£o enviados automaticamente.");
         return;
       }
       const toPhone =
@@ -706,12 +735,12 @@ export default function NovoAgendamento() {
       const reminderTime = new Date(inMs - 8 * 60 * 60 * 1000);
       const dataBR = start.toLocaleDateString("pt-BR");
       const horaBR = start.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
-      const msgReminder = `⏰ Lembrete: faltam 8 horas para o seu ${servicoNome} em ${estabelecimentoNome} (${horaBR} de ${dataBR}).`;
+      const msgReminder = `â° Lembrete: faltam 8 horas para o seu ${servicoNome} em ${estabelecimentoNome} (${horaBR} de ${dataBR}).`;
       const tasks = [];
       if (reminderTime.getTime() > now)
         tasks.push(Api.scheduleWhatsApp?.({ to: toPhone, scheduledAt: reminderTime.toISOString(), message: msgReminder, metadata: { kind: "reminder_8h", appointmentAt: start.toISOString() } }));
       if (!tasks.length) {
-        showToast("info", "Agendado! Sem lembrete porque o horário está muito próximo.");
+        showToast("info", "Agendado! Sem lembrete porque o horÃ¡rio estÃ¡ muito prÃ³ximo.");
         return;
       }
       const results = await Promise.allSettled(tasks);
@@ -721,7 +750,7 @@ export default function NovoAgendamento() {
     [showToast, user]
   );
 
-  // Verifica se o agendamento existe mesmo após um erro
+  // Verifica se o agendamento existe mesmo apÃ³s um erro
   const verifyBookingCreated = useCallback(
     async (slotIso) => {
       const sameStart = (a, b) =>
@@ -734,7 +763,7 @@ export default function NovoAgendamento() {
         const slotsData = await Api.getSlots(establishmentId, currentWeek, { includeBusy: true });
         const normalized = normalizeSlots(slotsData);
         const found = normalized.find((s) => sameStart(s.datetime, slotIso));
-        slotIndisponivel = !!(found && found.label !== "disponível");
+        slotIndisponivel = !!(found && !isAvailableLabel(found.label));
       } catch {}
 
       try {
@@ -764,11 +793,11 @@ export default function NovoAgendamento() {
     if (!selectedSlot || !serviceId || !selectedService) return;
 
     if (DateHelpers.isPastSlot(selectedSlot.datetime)) {
-      showToast("error", "Não é possível agendar no passado.");
+      showToast("error", "NÃ£o Ã© possÃ­vel agendar no passado.");
       return;
     }
     if (!inBusinessHours(selectedSlot.datetime)) {
-      showToast("error", "Este horário está fora do período de 07:00–22:00.");
+      showToast("error", "Este horÃ¡rio estÃ¡ fora do perÃ­odo de 07:00â€“22:00.");
       return;
     }
 
@@ -801,7 +830,7 @@ export default function NovoAgendamento() {
         if (meu) {
           success = true;
           setModal((p) => ({ ...p, isOpen: false }));
-          showToast("success", "Seu agendamento já existia e foi confirmado.");
+          showToast("success", "Seu agendamento jÃ¡ existia e foi confirmado.");
           // persiste overlay para sobreviver ao reload
           {
             const key = `fb:${establishmentId}:${currentWeek}`;
@@ -812,16 +841,16 @@ export default function NovoAgendamento() {
             });
           }
         } else {
-          showToast("error", "Este horário acabou de ficar indisponível. Escolha outro.");
+          showToast("error", "Este horÃ¡rio acabou de ficar indisponÃ­vel. Escolha outro.");
         }
       } else if (Number(code) === 500) {
-        // Se criou (meu) OU o slot ficou indisponível por qualquer fonte, tratamos como sucesso.
+        // Se criou (meu) OU o slot ficou indisponÃ­vel por qualquer fonte, tratamos como sucesso.
         if (slotIndisponivel || meu) {
           success = true;
           setModal((p) => ({ ...p, isOpen: false }));
           showToast("success", "Agendado com sucesso! (o servidor retornou 500)");
 
-          // Se o /slots ainda NÃO marcou ocupado, força overlay vermelho neste minuto
+          // Se o /slots ainda NÃƒO marcou ocupado, forÃ§a overlay vermelho neste minuto
           if (!slotIndisponivel) {
             const key = `fb:${establishmentId}:${currentWeek}`;
             setState((p) => {
@@ -838,7 +867,7 @@ export default function NovoAgendamento() {
         showToast("error", e?.message || "Falha ao agendar.");
       }
     } finally {
-      // Sempre recarrega para refletir indisponíveis
+      // Sempre recarrega para refletir indisponÃ­veis
       await loadSlots();
 
       // Evita duplo clique se deu certo
@@ -907,7 +936,7 @@ export default function NovoAgendamento() {
 
   const weekLabel = DateHelpers.formatWeekLabel(currentWeek);
 
-  // Reordenar colunas da semana para começar pelo dia atual (se pertencer à semana atual)
+  // Reordenar colunas da semana para comeÃ§ar pelo dia atual (se pertencer Ã  semana atual)
   const daysToRender = useMemo(() => {
     const list = DateHelpers.weekDays(currentWeek);
     const todayIso = DateHelpers.toISODate(new Date());
@@ -919,14 +948,14 @@ export default function NovoAgendamento() {
   const isOwner = user?.tipo === "estabelecimento";
   const step = !establishmentId && !isOwner ? 1 : !serviceId ? 2 : 3;
 
-  // Ao clicar num dia do mês, define a semana correspondente e marca o dia
+  // Ao clicar num dia do mÃªs, define a semana correspondente e marca o dia
   const handlePickDay = useCallback((isoDay) => {
     setSelectedDate(isoDay);
     const wk = DateHelpers.weekStartISO(isoDay);
     if (wk !== currentWeek) setState((p) => ({ ...p, currentWeek: wk }));
   }, [currentWeek]);
 
-  // Quando o mês visível contém hoje, pré-seleciona o dia atual se nada estiver selecionado
+  // Quando o mÃªs visÃ­vel contÃ©m hoje, prÃ©-seleciona o dia atual se nada estiver selecionado
   useEffect(() => {
     const todayIso = DateHelpers.toISODate(new Date());
     if (DateHelpers.isSameMonth(todayIso, monthStart)) {
@@ -953,29 +982,29 @@ export default function NovoAgendamento() {
                 aria-label="Semana anterior"
                 onClick={() => handleWeekChange(DateHelpers.addWeeksISO(currentWeek, -1))}
               >
-                ◀
+                â—€
               </button>
-              <small className="muted" title={`Fuso: ${TZ} • Janela: 07:00–22:00`}>
+              <small className="muted" title={`Fuso: ${TZ} â€¢ Janela: 07:00â€“22:00`}>
                 Semana: {weekLabel}
               </small>
               <button
                 className="btn btn--sm"
-                aria-label="Próxima semana"
+                aria-label="PrÃ³xima semana"
                 onClick={() => handleWeekChange(DateHelpers.addWeeksISO(currentWeek, 1))}
               >
-                ▶
+                â–¶
               </button>
             </div>
           </div>
           <div className="row" style={{ gap: 8 }}>
             <DensityToggle value={density} onChange={(v) => setState((p) => ({ ...p, density: v }))} />
-            <button className="btn btn--outline btn--sm" onClick={copyShareLink} title="Copiar link desta seleção">
+            <button className="btn btn--outline btn--sm" onClick={copyShareLink} title="Copiar link desta seleÃ§Ã£o">
               Copiar link
             </button>
           </div>
         </div>
 
-        {/* Passo 1 — Estabelecimento */}
+        {/* Passo 1 â€” Estabelecimento */}
         {step === 1 && (
           <>
             <p className="muted" style={{ marginTop: 0 }}>Escolha um estabelecimento:</p>
@@ -983,7 +1012,7 @@ export default function NovoAgendamento() {
               <input
                 className="input"
                 type="search"
-                placeholder="Buscar estabelecimento…"
+                placeholder="Buscar estabelecimentoâ€¦"
                 value={estQuery}
                 onChange={(e) => {
                   const v = e.target.value;
@@ -1012,12 +1041,12 @@ export default function NovoAgendamento() {
           </>
         )}
 
-        {/* Passo 2 — Serviço */}
+        {/* Passo 2 â€” ServiÃ§o */}
         {step === 2 && (
           <>
             <div className="row spread" style={{ alignItems: "center" }}>
               <div className="muted">
-                <b>Estabelecimento:</b> {selectedEstablishment?.name || "—"}
+                <b>Estabelecimento:</b> {selectedEstablishment?.name || "â€”"}
               </div>
               <button
                 className="btn btn--outline btn--sm"
@@ -1034,10 +1063,10 @@ export default function NovoAgendamento() {
                 Trocar
               </button>
             </div>
-            <p className="muted" style={{ marginTop: 8 }}>Escolha um serviço:</p>
+            <p className="muted" style={{ marginTop: 8 }}>Escolha um serviÃ§o:</p>
             <div className="row-wrap">
               {services.length === 0 ? (
-                <div className="empty small">Sem serviços cadastrados.</div>
+                <div className="empty small">Sem serviÃ§os cadastrados.</div>
               ) : (
                 services.map((s) => (
                   <ServiceCard
@@ -1052,24 +1081,24 @@ export default function NovoAgendamento() {
           </>
         )}
 
-        {/* Passo 3 — Calendário mensal e horários do dia */}
+        {/* Passo 3 â€” CalendÃ¡rio mensal e horÃ¡rios do dia */}
         {step === 3 && (
           <>
             <div className="row spread" style={{ alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 6 }}>
               <div className="row" style={{ gap: 8, alignItems: "center" }}>
                 <span className="muted"><b>Estabelecimento:</b> {selectedEstablishment?.name}</span>
-                <span className="muted">•</span>
+                <span className="muted">â€¢</span>
                 <span className="muted">
-                  <b>Serviço:</b> {ServiceHelpers.title(selectedService)}
-                  {serviceDuration ? ` • ${serviceDuration} min` : ""}
-                  {servicePrice !== "R$\u00A00,00" ? ` • ${servicePrice}` : ""}
+                  <b>ServiÃ§o:</b> {ServiceHelpers.title(selectedService)}
+                  {serviceDuration ? ` â€¢ ${serviceDuration} min` : ""}
+                  {servicePrice !== "R$\u00A00,00" ? ` â€¢ ${servicePrice}` : ""}
                 </span>
               </div>
               <details className="filters" style={{ marginLeft: "auto" }}>
                 <summary>Filtros</summary>
                 <div className="filters__content">
                   <label className="label">
-                    <span>Início da semana</span>
+                    <span>InÃ­cio da semana</span>
                     <input
                       type="date"
                       value={currentWeek}
@@ -1081,30 +1110,30 @@ export default function NovoAgendamento() {
                   <div className="row" style={{ alignItems: "center", gap: 10 }}>
                     <label className="switch">
                       <input type="checkbox" checked={filters.onlyAvailable} onChange={() => handleFilterToggle("onlyAvailable")} />
-                      <span>Somente disponíveis</span>
+                      <span>Somente disponÃ­veis</span>
                     </label>
                     <label className="switch">
                       <input type="checkbox" checked={filters.hidePast} onChange={() => handleFilterToggle("hidePast")} />
                       <span>Ocultar passados</span>
                     </label>
                   </div>
-                  <div className="row" style={{ gap: 6, flexWrap: "wrap", marginTop: 6 }} role="group" aria-label="Período do dia">
-                    <Chip active={filters.timeRange === "all"} onClick={() => handleTimeRange("all")} title="Todos os horários">Todos</Chip>
-                    <Chip active={filters.timeRange === "morning"} onClick={() => handleTimeRange("morning")} title="Manhã (07–12)">Manhã</Chip>
-                    <Chip active={filters.timeRange === "afternoon"} onClick={() => handleTimeRange("afternoon")} title="Tarde (12–18)">Tarde</Chip>
-                    <Chip active={filters.timeRange === "evening"} onClick={() => handleTimeRange("evening")} title="Noite (18–22)">Noite</Chip>
+                  <div className="row" style={{ gap: 6, flexWrap: "wrap", marginTop: 6 }} role="group" aria-label="PerÃ­odo do dia">
+                    <Chip active={filters.timeRange === "all"} onClick={() => handleTimeRange("all")} title="Todos os horÃ¡rios">Todos</Chip>
+                    <Chip active={filters.timeRange === "morning"} onClick={() => handleTimeRange("morning")} title="ManhÃ£ (07â€“12)">ManhÃ£</Chip>
+                    <Chip active={filters.timeRange === "afternoon"} onClick={() => handleTimeRange("afternoon")} title="Tarde (12â€“18)">Tarde</Chip>
+                    <Chip active={filters.timeRange === "evening"} onClick={() => handleTimeRange("evening")} title="Noite (18â€“22)">Noite</Chip>
                   </div>
                 </div>
               </details>
             </div>
 
-            {/* Calendário mensal */}
+            {/* CalendÃ¡rio mensal */}
             <div className="month card" style={{ padding: 8, marginBottom: 8 }}>
               <div className="row spread" style={{ alignItems: 'center', marginBottom: 6 }}>
                 <div className="row" style={{ gap: 6, alignItems: 'center' }}>
-                  <button className="btn btn--sm" aria-label="Mês anterior" onClick={() => setMonthStart(DateHelpers.firstOfMonthISO(DateHelpers.addMonths(monthStart, -1)))}>◀</button>
+                  <button className="btn btn--sm" aria-label="MÃªs anterior" onClick={() => setMonthStart(DateHelpers.firstOfMonthISO(DateHelpers.addMonths(monthStart, -1)))}>â—€</button>
                   <strong>{new Date(monthStart + 'T00:00:00').toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })}</strong>
-                  <button className="btn btn--sm" aria-label="Próximo mês" onClick={() => setMonthStart(DateHelpers.firstOfMonthISO(DateHelpers.addMonths(monthStart, 1)))}>▶</button>
+                  <button className="btn btn--sm" aria-label="PrÃ³ximo mÃªs" onClick={() => setMonthStart(DateHelpers.firstOfMonthISO(DateHelpers.addMonths(monthStart, 1)))}>â–¶</button>
                 </div>
                 <button
                   className="btn btn--outline btn--sm"
@@ -1120,8 +1149,8 @@ export default function NovoAgendamento() {
                 </button>
               </div>
               <div className="month__grid">
-                {["S", "T", "Q", "Q", "S", "S", "D"].map((d) => (
-                  <div key={d} className="month__dow muted">{d}</div>
+                {['S', 'T', 'Q', 'Q', 'S', 'S', 'D'].map((d, index) => (
+                  <div key={`${d}-${index}`} className="month__dow muted">{d}</div>
                 ))}
                 {DateHelpers.monthGrid(monthStart).map(({ iso, inMonth, date }) => {
                   const isToday = DateHelpers.sameYMD(iso, DateHelpers.toISODate(new Date()));
@@ -1150,12 +1179,12 @@ export default function NovoAgendamento() {
               </div>
             )}
 
-            {/* Sumário selecionado */}
+            {/* SumÃ¡rio selecionado */}
             {selectedSlot && (
               <div className="box box--highlight sticky-bar" aria-live="polite" id="resumo-agendamento">
                 <div className="appointment-summary">
                   <strong>{DateHelpers.formatDateFull(selectedSlot.datetime)}</strong>
-                  <span> • {DateHelpers.formatTime(selectedSlot.datetime)}{endTimeLabel ? ` – ${endTimeLabel}` : ""}</span>
+                  <span> â€¢ {DateHelpers.formatTime(selectedSlot.datetime)}{endTimeLabel ? ` â€“ ${endTimeLabel}` : ""}</span>
                 </div>
                 <div className="row" style={{ gap: 6, marginLeft: "auto" }}>
                   <button className="btn btn--outline btn--sm" onClick={() => setState((p) => ({ ...p, selectedSlot: null }))}>Limpar</button>
@@ -1163,7 +1192,7 @@ export default function NovoAgendamento() {
               </div>
             )}
 
-            {/* Horários do dia selecionado */}
+            {/* HorÃ¡rios do dia selecionado */}
             <div className="card" style={{ marginTop: 8 }}>
               <h3 style={{ marginTop: 0, marginBottom: 8 }}>
                 {selectedDate
@@ -1175,7 +1204,7 @@ export default function NovoAgendamento() {
                   {loading ? (
                     Array.from({ length: 8 }).map((_, i) => <div key={i} className="shimmer pill" />)
                   ) : ((groupedSlots.grouped[selectedDate] || []).filter(isSlotVisible)).length === 0 ? (
-                    <div className="empty">Sem horários para este dia.</div>
+                    <div className="empty">Sem horÃ¡rios para este dia.</div>
                   ) : (
                     groupedSlots.grouped[selectedDate].filter(isSlotVisible).map((slot) => (
                       <SlotButton
@@ -1189,21 +1218,21 @@ export default function NovoAgendamento() {
                   )}
                 </div>
               ) : (
-                <div className="empty">Escolha uma data no calendário acima.</div>
+                <div className="empty">Escolha uma data no calendÃ¡rio acima.</div>
               )}
             </div>
 
-            {/* Rodapé ações */}
+            {/* RodapÃ© aÃ§Ãµes */}
             <div className="row" style={{ marginTop: 8, justifyContent: "flex-end", gap: 6 }}>
               <button className="btn" onClick={() => setState((p) => ({ ...p, selectedSlot: null }))} disabled={!selectedSlot}>
-                Limpar seleção
+                Limpar seleÃ§Ã£o
               </button>
               <button
                 className="btn btn--primary"
                 onClick={() => setModal((m) => ({ ...m, isOpen: true }))}
                 disabled={
                   !selectedSlot || !serviceId || modal.isSaving ||
-                  selectedSlotNow?.label !== "disponível" ||
+                  selectedSlotNow && !isAvailableLabel(selectedSlotNow.label) ||
                   DateHelpers.isPastSlot(selectedSlot.datetime) ||
                   !inBusinessHours(selectedSlot.datetime)
                 }
@@ -1215,22 +1244,22 @@ export default function NovoAgendamento() {
         )}
       </div>
 
-      {/* Modal de confirmação */}
+      {/* Modal de confirmaÃ§Ã£o */}
       {modal.isOpen && selectedSlot && selectedService && (
         <Modal onClose={() => setModal((m) => ({ ...m, isOpen: false }))}>
           <h3>Confirmar agendamento?</h3>
           <div className="confirmation-details">
             <div className="confirmation-details__item"><span className="confirmation-details__label">Estabelecimento:</span><span className="confirmation-details__value">{selectedEstablishment?.name}</span></div>
-            <div className="confirmation-details__item"><span className="confirmation-details__label">Serviço:</span><span className="confirmation-details__value">{ServiceHelpers.title(selectedService)}</span></div>
+            <div className="confirmation-details__item"><span className="confirmation-details__label">ServiÃ§o:</span><span className="confirmation-details__value">{ServiceHelpers.title(selectedService)}</span></div>
             {serviceDuration > 0 && (
-              <div className="confirmation-details__item"><span className="confirmation-details__label">Duração:</span><span className="confirmation-details__value">{serviceDuration} minutos</span></div>
+              <div className="confirmation-details__item"><span className="confirmation-details__label">DuraÃ§Ã£o:</span><span className="confirmation-details__value">{serviceDuration} minutos</span></div>
             )}
             {servicePrice !== "R$\u00A00,00" && (
-              <div className="confirmation-details__item"><span className="confirmation-details__label">Preço:</span><span className="confirmation-details__value">{servicePrice}</span></div>
+              <div className="confirmation-details__item"><span className="confirmation-details__label">PreÃ§o:</span><span className="confirmation-details__value">{servicePrice}</span></div>
             )}
             <div className="confirmation-details__item"><span className="confirmation-details__label">Data:</span><span className="confirmation-details__value">{DateHelpers.formatDateFull(selectedSlot.datetime)}</span></div>
-            <div className="confirmation-details__item"><span className="confirmation-details__label">Horário:</span><span className="confirmation-details__value">
-              {DateHelpers.formatTime(selectedSlot.datetime)}{endTimeLabel ? ` – ${endTimeLabel}` : ""}
+            <div className="confirmation-details__item"><span className="confirmation-details__label">HorÃ¡rio:</span><span className="confirmation-details__value">
+              {DateHelpers.formatTime(selectedSlot.datetime)}{endTimeLabel ? ` â€“ ${endTimeLabel}` : ""}
             </span></div>
           </div>
           <div className="row" style={{ justifyContent: "flex-end", gap: 6, marginTop: 8 }}>
@@ -1246,3 +1275,4 @@ export default function NovoAgendamento() {
     </div>
   );
 }
+

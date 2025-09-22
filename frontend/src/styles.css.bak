@@ -512,21 +512,12 @@ a:hover { opacity: 1; text-decoration: underline; }
 
 
 /* Configuracoes */
-.config-section__toggle{display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;padding:8px 10px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:16px;font-weight:600;border-radius:var(--radius-sm);cursor:pointer;transition:background .18s ease,color .18s ease,box-shadow .18s ease;}
+.config-section__toggle{display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;padding:6px 8px;border:0;background:transparent;color:var(--text);font-size:16px;font-weight:600;border-radius:var(--radius-sm);cursor:pointer;transition:background .18s ease,color .18s ease;}
 .config-section__toggle:hover,.config-section__toggle:focus-visible{background:var(--surface-soft);color:var(--brand);}
 .config-section__toggle:focus-visible{outline:none;box-shadow:var(--ring-shadow);}
-.config-section__toggle.is-open{background:var(--surface-soft);border-color:var(--brand-200);color:var(--brand);}
 .config-section__icon{width:18px;height:18px;transition:transform .2s ease,color .2s ease;color:var(--muted);}
 .config-section__toggle.is-open .config-section__icon{transform:rotate(90deg);color:var(--brand);}
-.config-section__content{margin-top:12px;display:grid;gap:10px;}
-.notice{padding:8px 10px;border-radius:var(--radius-sm);font-size:14px;}
-.notice--success{background:var(--success-bg);border:1px solid var(--success-border);color:var(--success-text);}
-.notice--error{background:var(--danger-bg);border:1px solid var(--danger-border);color:var(--danger-text);}
-.config-toggle{display:flex;gap:10px;align-items:flex-start;}
-.config-toggle input{margin-top:4px;}
-.config-toggle span{display:flex;flex-direction:column;gap:2px;}
-.config-toggle strong{font-size:14px;}
-.config-toggle small{font-size:12px;color:var(--muted);}
+.config-section__content{margin-top:12px;display:grid;gap:8px;}
 /* Servicos Estabelecimento */
 .service-status{ display:inline-flex; align-items:center; justify-content:center; min-width:72px; padding:4px 10px; font-weight:600; transition:filter .18s ease; }
 .service-status:disabled{ opacity:.6; cursor:not-allowed; }
