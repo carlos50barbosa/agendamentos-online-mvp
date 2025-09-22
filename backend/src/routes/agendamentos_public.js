@@ -25,6 +25,15 @@ function brDateTime(iso) {
 
 function toDigits(s){ return String(s || '').replace(/\D/g, ''); }
 
+function normalizePhoneBR(value){
+  let digits = toDigits(value);
+  if (!digits) return '';
+  digits = digits.replace(/^0+/, '');
+  if (digits.startsWith('55')) return digits;
+  if (digits.length >= 10 && digits.length <= 11) return `55${digits}`;
+  return digits;
+}
+
 // POST /public/agendamentos — cria agendamento sem login (guest)
 router.post('/', async (req, res) => {
   let conn;
@@ -50,6 +59,10 @@ router.post('/', async (req, res) => {
     if (!Number.isFinite(dur) || dur <= 0) return res.status(400).json({ error: 'duracao_invalida' });
     const fimDate = new Date(inicioDate.getTime() + dur * 60_000);
 
+    const emailNorm = String(email).trim().toLowerCase();
+    const telDigits = toDigits(telefone);
+    const telNorm = normalizePhoneBR(telefone);
+
     // OTP opcional (exigido via flag)
     const requireOtp = /^(1|true)$/i.test(String(process.env.PUBLIC_BOOKING_REQUIRE_OTP || ''));
     if (requireOtp) {
@@ -59,10 +72,8 @@ router.post('/', async (req, res) => {
       try {
         const payload = jwt.verify(token, secret);
         if (payload?.scope !== 'otp') throw new Error('bad_scope');
-        const emailNormLower = String(email).trim().toLowerCase();
-        const telNormDigits = toDigits(telefone);
-        const ok = (payload.ch === 'email' && String(payload.v || '').toLowerCase() === emailNormLower) ||
-                  (payload.ch === 'phone' && String(payload.v || '') === telNormDigits);
+        const ok = (payload.ch === 'email' && String(payload.v || '').toLowerCase() === emailNorm) ||
+                  (payload.ch === 'phone' && String(payload.v || '') === telDigits);
         if (!ok) return res.status(400).json({ error: 'otp_mismatch' });
       } catch (e) {
         return res.status(400).json({ error: 'otp_invalid' });
@@ -70,17 +81,20 @@ router.post('/', async (req, res) => {
     }
 
     // resolve/ cria cliente guest via email (preferência) ou telefone
-    const emailNorm = String(email).trim().toLowerCase();
-    const telNorm = toDigits(telefone);
 
     let userId = null;
     {
       const [urows] = await pool.query('SELECT id FROM usuarios WHERE LOWER(email)=? LIMIT 1', [emailNorm]);
       if (urows.length) userId = urows[0].id;
     }
-    if (!userId && telNorm) {
-      const [urows] = await pool.query('SELECT id FROM usuarios WHERE telefone=? LIMIT 1', [telNorm]);
-      if (urows.length) userId = urows[0].id;
+    if (!userId && (telNorm || telDigits)) {
+      const candidates = [];
+      if (telNorm) candidates.push(telNorm);
+      if (telDigits && telDigits !== telNorm) candidates.push(telDigits);
+      for (const candidate of candidates) {
+        const [urows] = await pool.query('SELECT id FROM usuarios WHERE telefone=? LIMIT 1', [candidate]);
+        if (urows.length) { userId = urows[0].id; break; }
+      }
     }
     if (!userId) {
       const hash = await bcrypt.hash(Math.random().toString(36), 10);
@@ -90,7 +104,13 @@ router.post('/', async (req, res) => {
       );
       userId = r.insertId;
     } else {
-      try { await pool.query('UPDATE usuarios SET nome=COALESCE(nome,?), telefone=COALESCE(telefone,?) WHERE id=?', [String(nome).slice(0,120), telNorm || null, userId]); } catch {}
+      try {
+        if (telNorm) {
+          await pool.query('UPDATE usuarios SET nome=COALESCE(nome,?), telefone=? WHERE id=?', [String(nome).slice(0,120), telNorm, userId]);
+        } else {
+          await pool.query('UPDATE usuarios SET nome=COALESCE(nome,?) WHERE id=?', [String(nome).slice(0,120), userId]);
+        }
+      } catch {}
     }
 
     conn = await pool.getConnection();
@@ -117,8 +137,8 @@ router.post('/', async (req, res) => {
     const [[est]] = await pool.query('SELECT email, telefone, nome FROM usuarios WHERE id=?', [estabelecimento_id]);
     const [tmplRows] = await pool.query('SELECT email_subject, email_html, wa_template FROM estab_messages WHERE estabelecimento_id=?', [estabelecimento_id]);
     const tmpl = (tmplRows && tmplRows[0]) ? tmplRows[0] : {};
-    const telCli = telNorm;
-    const telEst = toDigits(est?.telefone);
+    const telCli = normalizePhoneBR(telNorm);
+    const telEst = normalizePhoneBR(est?.telefone);
     (async () => {
       try {
         if (emailNorm) {
@@ -129,15 +149,6 @@ router.post('/', async (req, res) => {
             .replace(/{{\s*data_hora\s*}}/g, inicioBR)
             .replace(/{{\s*estabelecimento_nome\s*}}/g, est?.nome || '');
           await notifyEmail(emailNorm, subject, html);
-        }
-      } catch {}
-      try {
-        if (est?.email) {
-          await notifyEmail(
-            est.email,
-            'Novo agendamento (link público)',
-            `<p>Você recebeu um novo agendamento de <b>${svc.nome}</b> em <b>${inicioBR}</b> — Cliente: <b>${String(nome) || ''}</b>.</p>`
-          );
         }
       } catch {}
       try {
@@ -164,7 +175,7 @@ router.post('/', async (req, res) => {
           }
         }
       } catch {}
-      try { if (telEst && telEst !== telCli) await notifyWhatsapp(`📅 Novo agendamento: ${svc.nome} em ${inicioBR} — Cliente: ${String(nome)||''}`, telEst); } catch {}
+      try { if (telEst && telEst !== telCli) await notifyWhatsapp(`🔔 Novo agendamento: ${svc.nome} em ${inicioBR} — Cliente: ${String(nome)||''}`, telEst); } catch {}
     })();
 
     return res.status(201).json({ id: ins.insertId, cliente_id: userId, estabelecimento_id, servico_id, inicio: inicioDate, fim: fimDate, status: 'confirmado' });

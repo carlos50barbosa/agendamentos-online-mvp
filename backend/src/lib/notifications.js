@@ -37,15 +37,26 @@ const cfg = {
     .split(',')
     .map(s => s.trim())
     .filter(Boolean)
-    .map(s => s.replace(/\D/g, '')),
+    .map(normalizePhoneDigits)
+    .filter(Boolean),
 
   debug: /^true$/i.test(process.env.WA_DEBUG_LOG || ''),
 };
 
 const toDigits = s => String(s || '').replace(/\D/g, '');
 
+function normalizePhoneDigits(value) {
+  let digits = toDigits(value);
+  if (!digits) return '';
+  digits = digits.replace(/^0+/, '');
+  if (digits.startsWith('55')) return digits;
+  if (digits.length >= 10 && digits.length <= 11) return `55${digits}`;
+  return digits;
+}
+
 function isAllowed(to) {
-  const n = toDigits(to);
+  const n = normalizePhoneDigits(to);
+  if (!n) return false;
   if (!cfg.allowedList.length) return true;
   return cfg.allowedList.includes(n);
 }
@@ -84,7 +95,11 @@ async function callGraph(url, payload) {
 
 // ============== WhatsApp: Template ==============
 export async function sendTemplate({ to, name, lang, bodyParams = [] }) {
-  const phone = toDigits(to);
+  const phone = normalizePhoneDigits(to);
+  if (!phone) {
+    if (cfg.debug) console.warn('[whatsapp] invalid phone -> %s', to);
+    return { invalid: true };
+  }
   if (!isAllowed(phone)) {
     if (cfg.debug) console.warn('[whatsapp] bloqueado por ALLOWED_LIST -> %s', phone);
     return { blocked: true };
@@ -123,7 +138,11 @@ export async function sendTemplate({ to, name, lang, bodyParams = [] }) {
 
 // ============== WhatsApp: Texto (ou Template se forceTemplate=true) ==============
 export async function notifyWhatsapp(message, to) {
-  const phone = toDigits(to);
+  const phone = normalizePhoneDigits(to);
+  if (!phone) {
+    if (cfg.debug) console.warn('[whatsapp] invalid phone -> %s', to);
+    return { invalid: true };
+  }
   if (!isAllowed(phone)) {
     if (cfg.debug) console.warn('[whatsapp] bloqueado por ALLOWED_LIST -> %s', phone);
     return { blocked: true };
@@ -180,8 +199,12 @@ export async function scheduleWhatsApp({ to, scheduledAt, message, metadata, use
   if (Number.isNaN(+when)) throw new Error('scheduledAt inválido');
 
   const ms = +when - Date.now();
-  const phone = toDigits(to);
+  const phone = normalizePhoneDigits(to);
 
+  if (!phone) {
+    if (cfg.debug) console.warn('[whatsapp] invalid phone (schedule) -> %s', to);
+    return { invalid: true };
+  }
   if (!isAllowed(phone)) {
     if (cfg.debug) console.warn('[whatsapp] bloqueado por ALLOWED_LIST -> %s (schedule)', phone);
     return { blocked: true };

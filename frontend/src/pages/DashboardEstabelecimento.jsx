@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react'
 import { Api } from '../utils/api'
+import { IconBell } from '../components/Icons.jsx'
 
 export default function DashboardEstabelecimento(){
   const [itens,setItens]=useState([])
@@ -47,6 +48,16 @@ export default function DashboardEstabelecimento(){
     return { cls:'pending', label: v||'pendente' }
   }
 
+  const totals = useMemo(()=>{
+    const acc = { recebidos: 0, cancelados: 0 }
+    for (const item of itens) {
+      const st = String(item?.status || '').toLowerCase()
+      if (st === 'confirmado' || st === 'pendente') acc.recebidos += 1
+      if (st === 'cancelado') acc.cancelados += 1
+    }
+    return acc
+  }, [itens])
+
   const shown = React.useMemo(()=>{
     if (status !== 'concluido') return itens
     return itens.filter(i => new Date(i.fim || i.inicio).getTime() < Date.now())
@@ -55,7 +66,14 @@ export default function DashboardEstabelecimento(){
     <div className="dashboard-narrow">
     <div className="card">
       <div className="row spread" style={{ marginBottom: 8 }}>
-        <h2 style={{ margin: 0 }}>Agendamentos</h2>
+        <div className="row" style={{ alignItems: 'center', gap: 12 }}>
+          <h2 style={{ margin: 0 }}>Agendamentos</h2>
+          <div className="notif-bell" title="NotificaÁıes de agendamentos">
+            <IconBell className="notif-bell__icon" aria-hidden="true" />
+            <span className="notif-bell__pill">Recebidos {totals.recebidos}</span>
+            <span className="notif-bell__pill notif-bell__pill--cancel">Cancelados {totals.cancelados}</span>
+          </div>
+        </div>
         <select className="input" value={status} onChange={e=>setStatus(e.target.value)} title="Status">
           <option value="confirmado">Confirmados</option>
           <option value="concluido">Conclu√≠dos</option>

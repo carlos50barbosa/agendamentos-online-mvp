@@ -1,5 +1,5 @@
 -- ===============================================
--- ESQUEMA COMPLETO (criação do zero)
+-- ESQUEMA COMPLETO (criacao do zero)
 -- ===============================================
 
 -- Criar DB
@@ -9,19 +9,26 @@ CREATE DATABASE IF NOT EXISTS agendamentos
 
 USE agendamentos;
 
--- Usuários (clientes e estabelecimentos)
+-- Usuarios (clientes e estabelecimentos)
 CREATE TABLE IF NOT EXISTS usuarios (
   id           INT AUTO_INCREMENT PRIMARY KEY,
   nome         VARCHAR(120)          NOT NULL,
   email        VARCHAR(160)          NOT NULL UNIQUE,
-  telefone     VARCHAR(20)           NULL,         -- (NOVO) usado para WhatsApp
+  telefone     VARCHAR(20)           NULL,         -- usado para WhatsApp
+  cep          VARCHAR(8)            NULL,
+  endereco     VARCHAR(255)          NULL,
+  numero       VARCHAR(20)           NULL,
+  complemento  VARCHAR(120)          NULL,
+  bairro       VARCHAR(120)          NULL,
+  cidade       VARCHAR(120)          NULL,
+  estado       CHAR(2)               NULL,
   senha_hash   VARCHAR(200)          NOT NULL,
   tipo         ENUM('cliente','estabelecimento') NOT NULL,
   criado_em    TIMESTAMP             NOT NULL DEFAULT CURRENT_TIMESTAMP,
   INDEX idx_usuarios_tipo (tipo)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
--- Tokens de redefinição de senha (invalidação pós-uso)
+-- Tokens de redefinicao de senha (invalidacao pos-uso)
 CREATE TABLE IF NOT EXISTS password_resets (
   id           INT AUTO_INCREMENT PRIMARY KEY,
   user_id      INT              NOT NULL,
@@ -34,7 +41,7 @@ CREATE TABLE IF NOT EXISTS password_resets (
   INDEX idx_pwdreset_expires (expires_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
--- Serviços (somente estabelecimento)
+-- Servicos (somente estabelecimento)
 CREATE TABLE IF NOT EXISTS servicos (
   id                 INT AUTO_INCREMENT PRIMARY KEY,
   estabelecimento_id INT              NOT NULL,
@@ -64,14 +71,14 @@ CREATE TABLE IF NOT EXISTS agendamentos (
   CONSTRAINT fk_ag_estab FOREIGN KEY (estabelecimento_id) REFERENCES usuarios(id) ON DELETE CASCADE,
   CONSTRAINT fk_ag_srv   FOREIGN KEY (servico_id)         REFERENCES servicos(id) ON DELETE CASCADE,
 
-  -- índices úteis para consultas
+  -- indices uteis para consultas
   INDEX idx_ag_estab_inicio (estabelecimento_id, inicio),
   INDEX idx_ag_cliente_inicio (cliente_id, inicio),
   INDEX idx_ag_estab_status_inicio (estabelecimento_id, status, inicio),
   INDEX idx_ag_cliente_status_inicio (cliente_id, status, inicio)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
--- Bloqueios de horários (slots indisponíveis)
+-- Bloqueios de horarios (slots indisponiveis)
 CREATE TABLE IF NOT EXISTS bloqueios (
   id                 INT AUTO_INCREMENT PRIMARY KEY,
   estabelecimento_id INT          NOT NULL,
@@ -80,3 +87,15 @@ CREATE TABLE IF NOT EXISTS bloqueios (
   CONSTRAINT fk_blk_estab FOREIGN KEY (estabelecimento_id) REFERENCES usuarios(id) ON DELETE CASCADE,
   INDEX idx_blk_estab_inicio (estabelecimento_id, inicio)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+CREATE TABLE IF NOT EXISTS email_change_tokens (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  user_id INT NOT NULL,
+  new_email VARCHAR(190) NOT NULL,
+  code_hash VARCHAR(255) NOT NULL,
+  expires_at DATETIME NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uniq_email_change_user (user_id),
+  KEY idx_email_change_expires (expires_at),
+  CONSTRAINT fk_email_change_user FOREIGN KEY (user_id) REFERENCES usuarios(id) ON DELETE CASCADE
+);

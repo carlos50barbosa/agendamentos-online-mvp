@@ -1,4 +1,4 @@
-// backend/src/routes/estabelecimentos.js
+﻿// backend/src/routes/estabelecimentos.js
 import { Router } from "express";
 import { pool } from "../lib/db.js";
 import { auth, isEstabelecimento } from "../middleware/auth.js";
@@ -39,12 +39,12 @@ router.get('/:idOrSlug', async (req, res) => {
     const id = Number(idOrSlug);
     if (Number.isFinite(id)) {
       [rows] = await pool.query(
-        "SELECT id, nome, email, telefone, slug FROM usuarios WHERE id=? AND tipo='estabelecimento' LIMIT 1",
+        "SELECT id, nome, email, telefone, slug, plan, plan_trial_ends_at FROM usuarios WHERE id=? AND tipo='estabelecimento' LIMIT 1",
         [id]
       );
     } else {
       [rows] = await pool.query(
-        "SELECT id, nome, email, telefone, slug FROM usuarios WHERE slug=? AND tipo='estabelecimento' LIMIT 1",
+        "SELECT id, nome, email, telefone, slug, plan, plan_trial_ends_at FROM usuarios WHERE slug=? AND tipo='estabelecimento' LIMIT 1",
         [idOrSlug]
       );
     }
@@ -107,4 +107,64 @@ router.put('/:id/slug', auth, isEstabelecimento, async (req, res) => {
   }
 });
 
+router.put('/:id/plan', auth, isEstabelecimento, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id) || req.user.id !== id) {
+      return res.status(403).json({ error: 'forbidden' });
+    }
+
+    const rawPlan = String(req.body?.plan || '').toLowerCase();
+    const allowedPlans = new Set(['starter', 'pro', 'premium']);
+    if (!allowedPlans.has(rawPlan)) {
+      return res.status(400).json({ error: 'invalid_plan', message: 'Plano inválido.' });
+    }
+
+    let planTrialEndsAt = null;
+    if (rawPlan === 'starter') {
+      planTrialEndsAt = null;
+    } else if (req.body?.trialEndsAt) {
+      const parsed = new Date(req.body.trialEndsAt);
+      if (Number.isNaN(parsed.getTime())) {
+        return res.status(400).json({ error: 'invalid_trial', message: 'trialEndsAt inválido.' });
+      }
+      planTrialEndsAt = parsed;
+    } else if (req.body?.trialDays) {
+      const days = Number(req.body.trialDays);
+      if (!Number.isFinite(days) || days <= 0 || days > 60) {
+        return res.status(400).json({ error: 'invalid_trial', message: 'trialDays deve ser entre 1 e 60.' });
+      }
+      const dt = new Date();
+      dt.setDate(dt.getDate() + days);
+      planTrialEndsAt = dt;
+    } else {
+      planTrialEndsAt = null;
+    }
+
+    await pool.query(
+      "UPDATE usuarios SET plan=?, plan_trial_ends_at=? WHERE id=? AND tipo='estabelecimento'",
+      [rawPlan, planTrialEndsAt, id]
+    );
+
+    const [rows] = await pool.query(
+      "SELECT id, nome, email, telefone, slug, plan, plan_trial_ends_at FROM usuarios WHERE id=? LIMIT 1",
+      [id]
+    );
+    const row = rows?.[0];
+    if (!row) return res.status(404).json({ error: 'not_found' });
+
+    return res.json({
+      ok: true,
+      plan: row.plan || 'starter',
+      plan_trial_ends_at: row.plan_trial_ends_at ? new Date(row.plan_trial_ends_at).toISOString() : null,
+    });
+  } catch (e) {
+    console.error('PUT /establishments/:id/plan', e);
+    return res.status(500).json({ error: 'server_error' });
+  }
+});
 export default router;
+
+
+
+

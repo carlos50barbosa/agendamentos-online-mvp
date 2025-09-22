@@ -13,35 +13,117 @@ const router = Router();
 
 router.post('/register', async (req, res) => {
   try {
-    const { nome, email, senha, tipo, telefone } = req.body;
+    const {
+      nome,
+      email,
+      senha,
+      tipo,
+      telefone,
+      cep,
+      endereco,
+      numero,
+      complemento,
+      bairro,
+      cidade,
+      estado,
+    } = req.body || {};
+
     if (!nome || !email || !senha || !['cliente','estabelecimento'].includes(tipo)) {
       return res.status(400).json({ error: 'invalid_payload' });
     }
-    if (telefone && String(telefone).length > 20) {
+
+    const telefoneTrim = telefone === undefined || telefone === null ? null : String(telefone).trim();
+    if (telefoneTrim && telefoneTrim.length > 20) {
       return res.status(400).json({ error: 'telefone_invalido' });
     }
 
-    const [rows] = await pool.query('SELECT id FROM usuarios WHERE email=?', [email]);
+    const nomeTrim = String(nome).trim();
+    const emailTrim = String(email).trim();
+    const emailNorm = emailTrim.toLowerCase();
+    const cepDigits = (cep ? String(cep) : '').replace(/[^0-9]/g, '').slice(0, 8);
+    const enderecoTrim = endereco ? String(endereco).trim() : '';
+    const numeroTrim = numero ? String(numero).trim() : '';
+    const complementoTrim = complemento ? String(complemento).trim() : '';
+    const bairroTrim = bairro ? String(bairro).trim() : '';
+    const cidadeTrim = cidade ? String(cidade).trim() : '';
+    const estadoTrim = estado ? String(estado).trim().toUpperCase() : '';
+
+    if (tipo === 'estabelecimento') {
+      if (cepDigits.length !== 8) {
+        return res.status(400).json({ error: 'cep_invalido', message: 'Informe um CEP valido com 8 digitos.' });
+      }
+      if (!enderecoTrim) {
+        return res.status(400).json({ error: 'endereco_obrigatorio', message: 'Informe o endereco do estabelecimento.' });
+      }
+      if (!numeroTrim) {
+        return res.status(400).json({ error: 'numero_obrigatorio', message: 'Informe o numero do endereco.' });
+      }
+      if (!bairroTrim) {
+        return res.status(400).json({ error: 'bairro_obrigatorio', message: 'Informe o bairro do endereco.' });
+      }
+      if (!cidadeTrim) {
+        return res.status(400).json({ error: 'cidade_obrigatoria', message: 'Informe a cidade.' });
+      }
+      if (!/^[A-Z]{2}$/.test(estadoTrim)) {
+        return res.status(400).json({ error: 'estado_invalido', message: 'Informe a UF com 2 letras.' });
+      }
+    } else {
+      if (cepDigits.length && cepDigits.length !== 8) {
+        return res.status(400).json({ error: 'cep_invalido', message: 'Informe um CEP valido com 8 digitos.' });
+      }
+      if (estadoTrim && !/^[A-Z]{2}$/.test(estadoTrim)) {
+        return res.status(400).json({ error: 'estado_invalido', message: 'Informe a UF com 2 letras.' });
+      }
+    }
+
+    const [rows] = await pool.query('SELECT id FROM usuarios WHERE LOWER(email)=? LIMIT 1', [emailNorm]);
     if (rows.length) return res.status(400).json({ error: 'email_exists' });
 
     const hash = await bcrypt.hash(String(senha), 10);
     const [r] = await pool.query(
-      'INSERT INTO usuarios (nome, email, telefone, senha_hash, tipo) VALUES (?,?,?,?,?)',
-      [nome, email, telefone || null, hash, tipo]
+      'INSERT INTO usuarios (nome, email, telefone, cep, endereco, numero, complemento, bairro, cidade, estado, senha_hash, tipo) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
+      [
+        nomeTrim,
+        emailTrim,
+        telefoneTrim || null,
+        cepDigits || null,
+        enderecoTrim || null,
+        numeroTrim || null,
+        complementoTrim || null,
+        bairroTrim || null,
+        cidadeTrim || null,
+        estadoTrim || null,
+        hash,
+        tipo,
+      ]
     );
 
     const secret = process.env.JWT_SECRET;
     if (!secret) return res.status(500).json({ error: 'server_config', message: 'JWT_SECRET ausente.' });
 
-    const user = { id: r.insertId, nome, email, telefone: telefone || null, tipo };
-    // Expira em 10 horas
-    const token = jwt.sign({ id: user.id, nome, email, tipo }, secret, { expiresIn: '10h' });
+    const user = {
+      id: r.insertId,
+      nome: nomeTrim,
+      email: emailTrim,
+      telefone: telefoneTrim || null,
+      cep: cepDigits || null,
+      endereco: enderecoTrim || null,
+      numero: numeroTrim || null,
+      complemento: complementoTrim || null,
+      bairro: bairroTrim || null,
+      cidade: cidadeTrim || null,
+      estado: estadoTrim || null,
+      tipo,
+    };
+    const token = jwt.sign({ id: user.id, nome: nomeTrim, email: emailTrim, tipo }, secret, { expiresIn: '10h' });
     res.json({ token, user });
   } catch (e) {
     console.error('[auth/register] erro:', e);
     res.status(500).json({ error: 'server_error' });
   }
 });
+
+
 
 router.post('/login', async (req, res) => {
   try {
@@ -52,9 +134,8 @@ router.post('/login', async (req, res) => {
     }
     const email = String(emailRaw).trim().toLowerCase();
 
-    // 🔧 Removido "senha" do SELECT (coluna não existe)
     const [rows] = await pool.query(
-      'SELECT id, nome, email, telefone, senha_hash, tipo FROM usuarios WHERE LOWER(email)=? LIMIT 1',
+      'SELECT id, nome, email, telefone, cep, endereco, numero, complemento, bairro, cidade, estado, senha_hash, tipo FROM usuarios WHERE LOWER(email)=? LIMIT 1',
       [email]
     );
     if (!rows.length) return res.status(401).json({ error: 'invalid_credentials' });
@@ -71,10 +152,22 @@ router.post('/login', async (req, res) => {
     if (!secret) return res.status(500).json({ error: 'server_config', message: 'JWT_SECRET ausente.' });
 
     const payload = { id: u.id, nome: u.nome, email: u.email, tipo: u.tipo || 'cliente' };
-    // Expira em 10 horas
     const token = jwt.sign(payload, secret, { expiresIn: '10h' });
 
-    const user = { id: u.id, nome: u.nome, email: u.email, telefone: u.telefone, tipo: u.tipo || 'cliente' };
+    const user = {
+      id: u.id,
+      nome: u.nome,
+      email: u.email,
+      telefone: u.telefone,
+      cep: u.cep || null,
+      endereco: u.endereco || null,
+      numero: u.numero || null,
+      complemento: u.complemento || null,
+      bairro: u.bairro || null,
+      cidade: u.cidade || null,
+      estado: u.estado || null,
+      tipo: u.tipo || 'cliente',
+    };
     return res.json({ ok: true, token, user });
   } catch (e) {
     console.error('[auth/login] erro:', e);
@@ -82,11 +175,251 @@ router.post('/login', async (req, res) => {
   }
 });
 
-router.get('/me', auth, async (_req, res) => {
-  res.json({ user: _req.user });
+
+
+
+router.get('/me', auth, async (req, res) => {
+  try {
+    const [[pending]] = await pool.query('SELECT new_email, expires_at FROM email_change_tokens WHERE user_id=? LIMIT 1', [req.user.id]);
+    const emailConfirmation = pending
+      ? { pending: true, newEmail: pending.new_email, expiresAt: pending.expires_at }
+      : null;
+    res.json({ user: req.user, emailConfirmation });
+  } catch (e) {
+    console.error('[auth/me][GET]', e);
+    res.json({ user: req.user, emailConfirmation: null });
+  }
 });
 
+
+
+router.put('/me', auth, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    let {
+      nome,
+      email,
+      telefone,
+      senhaAtual,
+      senhaNova,
+      cep,
+      endereco,
+      numero,
+      complemento,
+      bairro,
+      cidade,
+      estado,
+    } = req.body || {};
+
+    nome = String(nome || '').trim();
+    email = String(email || '').trim();
+    telefone = telefone === undefined || telefone === null ? null : String(telefone).trim();
+    const cepDigitsRaw = (cep ? String(cep) : '').replace(/[^0-9]/g, '').slice(0, 8);
+    const cepNormalized = cepDigitsRaw.length === 8 ? cepDigitsRaw : '';
+    const enderecoTrim = endereco ? String(endereco).trim() : '';
+    const numeroTrim = numero ? String(numero).trim() : '';
+    const complementoTrim = complemento ? String(complemento).trim() : '';
+    const bairroTrim = bairro ? String(bairro).trim() : '';
+    const cidadeTrim = cidade ? String(cidade).trim() : '';
+    const estadoTrim = estado ? String(estado).trim().toUpperCase() : '';
+    const addressRequired = req.user?.tipo === 'estabelecimento';
+
+    if (!nome) {
+      return res.status(400).json({ error: 'nome_invalido', message: 'Informe seu nome.' });
+    }
+    if (!email) {
+      return res.status(400).json({ error: 'email_invalido', message: 'Informe um email.' });
+    }
+
+    const emailNorm = email.toLowerCase();
+    const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRe.test(emailNorm)) {
+      return res.status(400).json({ error: 'email_invalido', message: 'Email invalido.' });
+    }
+
+    if (addressRequired) {
+      if (cepDigitsRaw.length !== 8) {
+        return res.status(400).json({ error: 'cep_invalido', message: 'Informe um CEP valido com 8 digitos.' });
+      }
+      if (!enderecoTrim) {
+        return res.status(400).json({ error: 'endereco_obrigatorio', message: 'Informe o endereco do estabelecimento.' });
+      }
+      if (!numeroTrim) {
+        return res.status(400).json({ error: 'numero_obrigatorio', message: 'Informe o numero do endereco.' });
+      }
+      if (!bairroTrim) {
+        return res.status(400).json({ error: 'bairro_obrigatorio', message: 'Informe o bairro do endereco.' });
+      }
+      if (!cidadeTrim) {
+        return res.status(400).json({ error: 'cidade_obrigatoria', message: 'Informe a cidade.' });
+      }
+      if (!/^[A-Z]{2}$/.test(estadoTrim)) {
+        return res.status(400).json({ error: 'estado_invalido', message: 'Informe a UF com 2 letras.' });
+      }
+    } else {
+      if (cepDigitsRaw.length && cepDigitsRaw.length !== 8) {
+        return res.status(400).json({ error: 'cep_invalido', message: 'Informe um CEP valido com 8 digitos.' });
+      }
+      if (estadoTrim && !/^[A-Z]{2}$/.test(estadoTrim)) {
+        return res.status(400).json({ error: 'estado_invalido', message: 'Informe a UF com 2 letras.' });
+      }
+    }
+
+    const phoneClean = telefone ? telefone.replace(/[^\d+]/g, '') : null;
+    if (phoneClean && phoneClean.length > 25) {
+      return res.status(400).json({ error: 'telefone_invalido', message: 'Telefone invalido.' });
+    }
+
+    const [emailRows] = await pool.query('SELECT id FROM usuarios WHERE LOWER(email)=? AND id<>? LIMIT 1', [emailNorm, userId]);
+    if (emailRows.length) {
+      return res.status(400).json({ error: 'email_exists', message: 'Este email ja esta em uso.' });
+    }
+
+    const atual = String(senhaAtual || '').trim();
+    if (!atual) {
+      return res.status(400).json({ error: 'senha_atual_obrigatoria', message: 'Informe a senha atual.' });
+    }
+
+    const [[row]] = await pool.query('SELECT senha_hash FROM usuarios WHERE id=? LIMIT 1', [userId]);
+    if (!row || !row.senha_hash) {
+      return res.status(400).json({ error: 'senha_indefinida', message: 'Nao foi possivel validar a senha atual.' });
+    }
+
+    const okAtual = await bcrypt.compare(atual, row.senha_hash);
+    if (!okAtual) {
+      return res.status(400).json({ error: 'senha_incorreta', message: 'Senha atual incorreta.' });
+    }
+
+    if (senhaNova) {
+      const nova = String(senhaNova || '');
+      if (nova.length < 6) {
+        return res.status(400).json({ error: 'senha_fraca', message: 'A nova senha deve ter pelo menos 6 caracteres.' });
+      }
+      const newHash = await bcrypt.hash(nova, 10);
+      await pool.query('UPDATE usuarios SET senha_hash=? WHERE id=?', [newHash, userId]);
+    }
+
+    const cepValue = cepNormalized || null;
+    const enderecoValue = enderecoTrim || null;
+    const numeroValue = numeroTrim || null;
+    const complementoValue = complementoTrim || null;
+    const bairroValue = bairroTrim || null;
+    const cidadeValue = cidadeTrim || null;
+    const estadoValue = estadoTrim || null;
+
+    const currentEmail = String(req.user?.email || '').trim().toLowerCase();
+    const emailChanged = emailNorm !== currentEmail;
+
+    if (emailChanged) {
+      await pool.query(
+        'UPDATE usuarios SET nome=?, telefone=?, cep=?, endereco=?, numero=?, complemento=?, bairro=?, cidade=?, estado=? WHERE id=?',
+        [nome, phoneClean || null, cepValue, enderecoValue, numeroValue, complementoValue, bairroValue, cidadeValue, estadoValue, userId]
+      );
+      await pool.query('DELETE FROM email_change_tokens WHERE user_id=?', [userId]);
+      const code = String(Math.floor(100000 + Math.random() * 900000));
+      const codeHash = await bcrypt.hash(code, 10);
+      const expiresAt = new Date(Date.now() + 30 * 60 * 1000);
+      await pool.query('INSERT INTO email_change_tokens (user_id, new_email, code_hash, expires_at) VALUES (?,?,?,?)', [userId, emailNorm, codeHash, expiresAt]);
+      const subject = 'Confirme seu novo email';
+      const html = `<p>Ola!</p><p>Use o codigo <strong>${code}</strong> para confirmar seu novo email.</p><p>O codigo expira em 30 minutos.</p>`;
+      try { await notifyEmail(emailNorm, subject, html); } catch (err) { console.error('[auth/me][email]', err); }
+
+      const [[userRow]] = await pool.query("SELECT id, nome, email, telefone, cep, endereco, numero, complemento, bairro, cidade, estado, tipo, plan, plan_trial_ends_at FROM usuarios WHERE id=? LIMIT 1", [userId]);
+      if (!userRow) {
+        return res.status(404).json({ error: 'not_found', message: 'Usuario nao encontrado.' });
+      }
+
+      const mergedUser = {
+        ...userRow,
+        nome: userRow.nome || nome,
+        telefone: userRow.telefone || phoneClean,
+        cep: userRow.cep || cepValue,
+        endereco: userRow.endereco || enderecoValue,
+        numero: userRow.numero || numeroValue,
+        complemento: userRow.complemento || complementoValue,
+        bairro: userRow.bairro || bairroValue,
+        cidade: userRow.cidade || cidadeValue,
+        estado: userRow.estado || estadoValue,
+      };
+      req.user = { ...req.user, ...mergedUser };
+
+      return res.json({
+        ok: true,
+        user: mergedUser,
+        emailConfirmation: { pending: true, newEmail: emailNorm, expiresAt: expiresAt.toISOString() },
+      });
+    }
+
+    await pool.query(
+      'UPDATE usuarios SET nome=?, email=?, telefone=?, cep=?, endereco=?, numero=?, complemento=?, bairro=?, cidade=?, estado=? WHERE id=?',
+      [nome, email, phoneClean || null, cepValue, enderecoValue, numeroValue, complementoValue, bairroValue, cidadeValue, estadoValue, userId]
+    );
+
+    const [[userRow]] = await pool.query("SELECT id, nome, email, telefone, cep, endereco, numero, complemento, bairro, cidade, estado, tipo, plan, plan_trial_ends_at FROM usuarios WHERE id=? LIMIT 1", [userId]);
+    if (!userRow) {
+      return res.status(404).json({ error: 'not_found', message: 'Usuario nao encontrado.' });
+    }
+
+    req.user = { ...req.user, ...userRow };
+
+    return res.json({ ok: true, user: userRow });
+  } catch (e) {
+    console.error('[auth/me][PUT] erro:', e);
+    return res.status(500).json({ error: 'server_error' });
+  }
+});
+
+
+
 // Recuperação de senha (envio de link com token)
+
+router.post('/me/email-confirm', auth, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const code = String(req.body?.code || '').trim();
+    if (!/^[0-9]{6}$/.test(code)) {
+      return res.status(400).json({ error: 'codigo_invalido', message: 'Informe o codigo de 6 digitos.' });
+    }
+
+    const [rows] = await pool.query('SELECT id, new_email, code_hash, expires_at FROM email_change_tokens WHERE user_id=? LIMIT 1', [userId]);
+    const token = rows?.[0];
+    if (!token) {
+      return res.status(404).json({ error: 'codigo_expirado', message: 'Nenhum pedido de troca de email encontrado.' });
+    }
+    if (new Date(token.expires_at).getTime() < Date.now()) {
+      await pool.query('DELETE FROM email_change_tokens WHERE id=?', [token.id]);
+      return res.status(400).json({ error: 'codigo_expirado', message: 'Codigo expirado. Solicite novamente.' });
+    }
+
+    const ok = await bcrypt.compare(code, token.code_hash);
+    if (!ok) {
+      return res.status(400).json({ error: 'codigo_invalido', message: 'Codigo invalido.' });
+    }
+
+    const newEmail = String(token.new_email || '').trim();
+    if (!newEmail) {
+      await pool.query('DELETE FROM email_change_tokens WHERE id=?', [token.id]);
+      return res.status(400).json({ error: 'codigo_invalido', message: 'Codigo invalido.' });
+    }
+
+    await pool.query('UPDATE usuarios SET email=? WHERE id=?', [newEmail, userId]);
+    await pool.query('DELETE FROM email_change_tokens WHERE id=?', [token.id]);
+
+    const [[userRow]] = await pool.query("SELECT id, nome, email, telefone, cep, endereco, numero, complemento, bairro, cidade, estado, tipo, plan, plan_trial_ends_at FROM usuarios WHERE id=? LIMIT 1", [userId]);
+    if (!userRow) {
+      return res.status(404).json({ error: 'not_found', message: 'Usuario nao encontrado.' });
+    }
+
+    req.user = { ...req.user, ...userRow };
+
+    return res.json({ ok: true, user: userRow });
+  } catch (e) {
+    console.error('[auth/email-confirm]', e);
+    return res.status(500).json({ error: 'server_error' });
+  }
+});
+
+
 router.post('/forgot', async (req, res) => {
   try{
     const emailRaw = req.body?.email;

@@ -45,6 +45,15 @@ export function IconPlus(props){
   );
 }
 
+export function IconBell(props){
+  return (
+    <svg {...base} viewBox="0 0 24 24" aria-hidden="true" {...props}>
+      <path d="M18 8a6 6 0 10-12 0c0 7-3 9-3 9h18s-3-2-3-9"/>
+      <path d="M13.73 21a2 2 0 01-3.46 0"/>
+    </svg>
+  );
+}
+
 export function IconGear(props){
   return (
     <svg {...base} viewBox="0 0 24 24" aria-hidden="true" {...props}>
@@ -109,16 +118,47 @@ export function IconChart(props){
   );
 }
 
+export function IconDownload(props){
+  return (
+    <svg {...base} viewBox="0 0 24 24" aria-hidden="true" {...props}>
+      <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+      <path d="M7 10l5 5 5-5"/>
+      <path d="M12 15V3"/>
+    </svg>
+  );
+}
+
+export function IconSun(props){
+  return (
+    <svg {...base} viewBox="0 0 24 24" aria-hidden="true" {...props}>
+      <circle cx="12" cy="12" r="4"/>
+      <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/>
+    </svg>
+  );
+}
+
+export function IconMoon(props){
+  return (
+    <svg {...base} viewBox="0 0 24 24" aria-hidden="true" {...props}>
+      <path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/>
+    </svg>
+  );
+}
+
 export default {
   IconUser,
   IconMenu,
   IconHome,
   IconPlus,
   IconGear,
+  IconBell,
   IconHelp,
   IconLogout,
+  IconSun,
+  IconMoon,
   IconChevronLeft,
   IconChevronRight,
   IconList,
   IconChart,
+  IconDownload,
 };

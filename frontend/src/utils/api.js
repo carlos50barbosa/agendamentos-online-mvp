@@ -99,6 +99,8 @@ export const Api = {
   register: (payload) => req('/auth/register', { method: 'POST', body: JSON.stringify(payload) }),
   login: (email, senha) => req('/auth/login', { method: 'POST', body: JSON.stringify({ email, senha }) }),
   me: () => req('/auth/me'),
+  updateProfile: (payload) => req('/auth/me', { method: 'PUT', body: JSON.stringify(payload) }),
+  confirmEmailChange: (payload) => req('/auth/me/email-confirm', { method: 'POST', body: JSON.stringify(payload) }),
   requestPasswordReset: (email) => req('/auth/forgot', { method: 'POST', body: JSON.stringify({ email }) }),
   resetPassword: (token, senha) => req('/auth/reset', { method: 'POST', body: JSON.stringify({ token, senha }) }),
   linkPhone: (token) => req('/auth/link-phone', { method: 'POST', body: JSON.stringify({ token }) }),
@@ -157,9 +159,54 @@ export const Api = {
       body: JSON.stringify(payload),
       idempotencyKey: opts.idempotencyKey,
     }),
+
+  relatoriosEstabelecimento: (params = {}) => req(`/relatorios/estabelecimento${toQuery(params)}`),
+  downloadRelatorio: async (type, params = {}) => {
+    const search = { ...params, download: type };
+    const token = getToken();
+    const url = join(BASE, `/relatorios/estabelecimento${toQuery(search)}`);
+    const headers = {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    };
+    const res = await fetch(url, { headers });
+    const contentType = res.headers.get('content-type') || '';
+
+    if (!res.ok) {
+      let detail = '';
+      if (contentType.includes('application/json')) {
+        try {
+          const data = await res.json();
+          detail = data?.message || data?.error || '';
+
+        } catch {}
+      } else {
+        try {
+          detail = await res.text();
+        } catch {}
+      }
+      const err = new Error(detail || `HTTP ${res.status}`);
+      err.status = res.status;
+      err.url = url;
+      err.text = detail;
+      throw err;
+    }
+
+    const disposition = res.headers.get('content-disposition') || '';
+    const filenameMatch = disposition.match(/filename="?([^";]+)"?/i);
+    const rawName = filenameMatch ? filenameMatch[1] : `relatorio-${type}.csv`;
+    let filename = rawName;
+    try {
+      filename = decodeURIComponent(rawName);
+    } catch {}
+    const blob = await res.blob();
+    return { blob, filename };
+  },
   requestOtp: (channel, value) => req('/public/otp/request', { method: 'POST', body: JSON.stringify({ channel, value }) }),
   verifyOtp: (request_id, code) => req('/public/otp/verify', { method: 'POST', body: JSON.stringify({ request_id, code }) }),
 };
 
 // Exporta para depuração no console do navegador
 export const API_BASE_URL = BASE;
+
+
+

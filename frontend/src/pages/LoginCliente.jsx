@@ -100,7 +100,7 @@ export default function LoginCliente(){
           className="box"
           role="alert"
           aria-live="polite"
-          style={{ marginTop: 10, borderColor: '#7f1d1d', color: '#991b1b', background: '#fef2f2' }}
+          style={{ marginTop: 10, borderColor: 'var(--danger-border)', color: 'var(--danger-text)', background: 'var(--danger-bg)' }}
         >
           Erro: {err}
         </div>

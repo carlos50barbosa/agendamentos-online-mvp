@@ -16,6 +16,19 @@ function formatTimeBR(iso) {
 }
 function genIdemKey() { return 'idem_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2,8); }
 
+function formatPhone(input) {
+  const digits = String(input || '').replace(/\D/g, '').slice(0, 11);
+  if (!digits) return '';
+  const ddd = digits.slice(0, 2);
+  if (digits.length <= 2) return `(${ddd}`;
+  if (digits.length <= 6) return `(${ddd}) ${digits.slice(2)}`;
+  const useFive = digits.length >= 11;
+  const middleSize = useFive ? 5 : 4;
+  const middle = digits.slice(2, 2 + middleSize);
+  const suffix = digits.slice(2 + middleSize);
+  return suffix ? `(${ddd}) ${middle}-${suffix}` : `(${ddd}) ${middle}`;
+}
+
 export default function Book(){
   const { id } = useParams();
   const nav = useNavigate();
@@ -32,14 +45,25 @@ export default function Book(){
 
   const [nome, setNome] = useState('');
   const [email, setEmail] = useState('');
-  const [phone, setPhone] = useState('55');
+  const [phone, setPhone] = useState('');
   const [otpReqId, setOtpReqId] = useState('');
   const [otpCode, setOtpCode] = useState('');
   const [otpToken, setOtpToken] = useState('');
   const [otpMsg, setOtpMsg] = useState('');
   const [done, setDone] = useState(false);
 
-  const canSubmit = useMemo(() => !!(estab && selService && selDate && selTimeIso && nome.trim() && email.trim() && /\d{8,}/.test(String(phone))), [estab, selService, selDate, selTimeIso, nome, email, phone]);
+  const canSubmit = useMemo(() => {
+    const phoneDigits = String(phone || '');
+    return !!(
+      estab &&
+      selService &&
+      selDate &&
+      selTimeIso &&
+      nome.trim() &&
+      email.trim() &&
+      /^\d{10,11}$/.test(phoneDigits)
+    );
+  }, [estab, selService, selDate, selTimeIso, nome, email, phone]);
 
   useEffect(() => {
     (async () => {
@@ -79,10 +103,11 @@ export default function Book(){
     finally { setLoading(false); }
   }
 
-  async function submitBooking(){
+  async function performBooking({ token, manageLoading = true } = {}) {
     if (!canSubmit) return;
+    if (manageLoading) { setLoading(true); setError(''); }
+    else { setError(''); }
     try {
-      setLoading(true); setError('');
       const idem = genIdemKey();
       const payload = {
         estabelecimento_id: estab.id,
@@ -90,43 +115,67 @@ export default function Book(){
         inicio: selTimeIso,
         nome, email, telefone: phone,
       };
-      if (otpToken) payload.otp_token = otpToken;
+      const effectiveToken = token ?? otpToken;
+      if (effectiveToken) payload.otp_token = effectiveToken;
       await Api.publicAgendar(payload, { idempotencyKey: idem });
       setDone(true);
     } catch (e) {
       const msg = e?.data?.message || e?.message || 'Falha ao agendar.';
       setError(String(msg));
       if (e?.data?.error === 'otp_required') {
-        setOtpMsg('Verifique seu contato para continuar. Envie e valide o código.');
+        setOtpMsg('Verifique seu email para continuar. Envie e valide o codigo.');
       }
-    } finally { setLoading(false); }
+    } finally {
+      if (manageLoading) setLoading(false);
+    }
   }
 
   async function sendOtp(){
+    const emailTrim = email.trim();
+    if (!emailTrim) {
+      setError('Informe um email valido para receber o codigo.');
+      return;
+    }
     try {
       setLoading(true); setOtpMsg(''); setError('');
-      const value = /\d{8,}/.test(String(phone)) ? phone : String(email);
-      const channel = /\d{8,}/.test(String(phone)) ? 'phone' : 'email';
-      const r = await Api.requestOtp(channel, value);
+      const r = await Api.requestOtp('email', emailTrim);
       setOtpReqId(r?.request_id || '');
-      setOtpMsg(`Código enviado via ${channel === 'phone' ? 'WhatsApp' : 'email'}.`);
+      setOtpMsg('Codigo enviado para o seu email.');
     } catch (e) {
-      setError('Não foi possível enviar o código.');
+      setError('Nao foi possivel enviar o codigo.');
     } finally { setLoading(false); }
   }
 
-  async function verifyOtp(){
+  async function handleConfirm(){
+    if (!canSubmit) {
+      setError('Preencha os dados do agendamento antes de validar.');
+      return;
+    }
+    if (!otpReqId) {
+      setError('Solicite o envio do codigo antes de confirmar.');
+      return;
+    }
+    if (!otpCode || !otpCode.trim()) {
+      setError('Informe o codigo recebido.');
+      return;
+    }
     try {
       setLoading(true); setError('');
-      if (!otpReqId || !otpCode) return;
       const r = await Api.verifyOtp(otpReqId, otpCode);
-      if (r?.otp_token) {
-        setOtpToken(r.otp_token);
-        setOtpMsg('Contato verificado.');
+      const token = r?.otp_token;
+      if (!token) {
+        setError('Codigo invalido ou expirado.');
+        return;
       }
+      setOtpToken(token);
+      setOtpMsg('Contato verificado.');
+      await performBooking({ token, manageLoading: false });
     } catch (e) {
-      setError('Código inválido ou expirado.');
-    } finally { setLoading(false); }
+      const msg = e?.data?.message || e?.message || 'Codigo invalido ou expirado.';
+      setError(String(msg));
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
@@ -187,16 +236,18 @@ export default function Book(){
                   <div className="chatrow" style={{ flexWrap: 'wrap', gap: 8 }}>
                     <input className="chatinput" placeholder="Seu nome" value={nome} onChange={e => setNome(e.target.value)} />
                     <input className="chatinput" placeholder="Seu email" value={email} onChange={e => setEmail(e.target.value)} />
-                    <input className="chatinput" placeholder="Seu WhatsApp (com DDD)" value={phone} onChange={e => setPhone(e.target.value)} />
+                    <input className="chatinput" placeholder="Seu WhatsApp (00) 00000-0000" value={formatPhone(phone)} onChange={e => {
+                    const digits = e.target.value.replace(/\D/g, '').slice(0, 11);
+                    setPhone(digits);
+                  }} />
                   </div>
                   <div className="chatrow" style={{ marginTop: 6, gap: 8 }}>
-                    <button className="chatbtn" type="button" onClick={sendOtp} disabled={loading || (!email && !phone)}>Enviar código</button>
+                    <button className="chatbtn" type="button" onClick={sendOtp} disabled={loading || !email.trim()}>Enviar código</button>
                     <input className="chatinput" placeholder="Código" value={otpCode} onChange={e => setOtpCode(e.target.value)} style={{ maxWidth: 140 }} />
-                    <button className="chatbtn chatbtn--muted" type="button" onClick={verifyOtp} disabled={loading || !otpReqId || !otpCode}>Validar</button>
+                    <button className="chatbtn chatbtn--muted" type="button" onClick={handleConfirm} disabled={loading || !canSubmit || !otpReqId || !otpCode.trim()}>Validar e confirmar</button>
                   </div>
-                  {otpMsg && <div className="chatmsg" style={{ background:'#f1f5f9' }}>{otpMsg}</div>}
+                  {otpMsg && <div className="chatmsg" style={{ background:'var(--chat-bot-bg)' }}>{otpMsg}</div>}
                   <div className="chatrow" style={{ marginTop: 8 }}>
-                    <button className="chatbtn" disabled={!canSubmit || loading} onClick={submitBooking}>{loading ? 'Agendando…' : 'Confirmar'}</button>
                     <button className="chatbtn chatbtn--muted" onClick={() => setSelTimeIso('')}>Voltar</button>
                   </div>
                 </>

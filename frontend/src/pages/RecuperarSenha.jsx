@@ -47,7 +47,7 @@ export default function RecuperarSenha(){
           </div>
 
           {sent ? (
-            <div className="box" role="status" style={{ marginTop: 10, borderColor: '#a7f3d0', color: '#065f46', background: '#ecfdf5' }}>
+            <div className="box" role="status" style={{ marginTop: 10, borderColor: 'var(--success-border)', color: 'var(--success-text)', background: 'var(--success-bg)' }}>
               Se existir uma conta para <strong>{email}</strong>, você receberá um email com instruções.
             </div>
           ) : (
@@ -68,7 +68,7 @@ export default function RecuperarSenha(){
           )}
 
           {err && (
-            <div className="box" role="alert" aria-live="polite" style={{ marginTop: 10, borderColor: '#7f1d1d', color: '#991b1b', background: '#fef2f2' }}>
+            <div className="box" role="alert" aria-live="polite" style={{ marginTop: 10, borderColor: 'var(--danger-border)', color: 'var(--danger-text)', background: 'var(--danger-bg)' }}>
               Erro: {err}
             </div>
           )}

@@ -43,7 +43,7 @@ export default function Planos(){
 
   return (
     <div className="grid" style={{ gap: 12 }}>
-      <div className="card" style={{ background: '#f8fbff' }}>
+      <div className="card" style={{ background: 'var(--surface-soft)' }}>
         <div className="row spread" style={{ alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           <div className="row" style={{ gap: 10, alignItems: 'center' }}>
             <div className="brand__logo" aria-hidden>AO</div>
@@ -61,7 +61,7 @@ export default function Planos(){
       </div>
 
       {user?.tipo !== 'estabelecimento' && (
-        <div className="box" role="alert" style={{ borderColor: '#fde68a', background: '#fffbeb' }}>
+        <div className="box" role="alert" style={{ borderColor: 'var(--warning-border)', background: 'var(--warning-bg)' }}>
           Esta página é voltada para estabelecimentos. Faça login como estabelecimento para contratar um plano.
         </div>
       )}

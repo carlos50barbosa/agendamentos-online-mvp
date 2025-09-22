@@ -1,6 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { NavLink, Routes, Route, useNavigate, useLocation } from 'react-router-dom';
-import { getUser, logout } from './utils/auth';
+import { getUser, logout, USER_EVENT } from './utils/auth';
 import LoginCliente from './pages/LoginCliente.jsx';
 import LoginEstabelecimento from './pages/LoginEstabelecimento.jsx';
 import Login from './pages/Login.jsx';
@@ -10,7 +10,19 @@ import DashboardEstabelecimento from './pages/DashboardEstabelecimento.jsx';
 import ServicosEstabelecimento from './pages/ServicosEstabelecimento.jsx';
 import NovoAgendamento from './pages/NovoAgendamento.jsx';
 import EstabelecimentosList from './pages/EstabelecimentosList.jsx';
-import { IconUser, IconMenu, IconHome, IconPlus, IconGear, IconHelp, IconLogout, IconList, IconChart, IconChevronLeft, IconChevronRight } from './components/Icons.jsx';
+import {
+  IconUser,
+  IconHome,
+  IconPlus,
+  IconGear,
+  IconLogout,
+  IconList,
+  IconChart,
+  IconChevronLeft,
+  IconChevronRight,
+  IconSun,
+  IconMoon,
+} from './components/Icons.jsx';
 import LogoAO from './components/LogoAO.jsx';
 import Modal from './components/Modal.jsx';
 import Loading from './pages/Loading.jsx';
@@ -24,10 +36,126 @@ import AdminTools from './pages/AdminTools.jsx';
 import ChatAgendamento from './components/ChatAgendamento.jsx';
 import LinkPhone from './pages/LinkPhone.jsx';
 import Book from './pages/Book.jsx';
+import {
+  PREFERENCES_EVENT,
+  PREFERENCES_STORAGE_KEY,
+  mergePreferences,
+  readPreferences,
+  writePreferences,
+  applyThemePreference,
+  broadcastPreferences,
+} from './utils/preferences.js';
 
-function Sidebar({ open }){
+const APP_ROUTES = [
+  { path: '/', element: <EstabelecimentosList /> },
+  { path: '/book', element: <Book /> },
+  { path: '/book/:id', element: <Book /> },
+  { path: '/login', element: <Login /> },
+  { path: '/recuperar-senha', element: <RecuperarSenha /> },
+  { path: '/definir-senha', element: <DefinirSenha /> },
+  { path: '/link-phone', element: <LinkPhone /> },
+  { path: '/login-cliente', element: <LoginCliente /> },
+  { path: '/login-estabelecimento', element: <LoginEstabelecimento /> },
+  { path: '/cadastro', element: <Cadastro /> },
+  { path: '/cliente', element: <DashboardCliente /> },
+  { path: '/estab', element: <DashboardEstabelecimento /> },
+  { path: '/servicos', element: <ServicosEstabelecimento /> },
+  { path: '/novo', element: <NovoAgendamento /> },
+  { path: '/configuracoes', element: <Configuracoes /> },
+  { path: '/loading', element: <Loading /> },
+  { path: '/ajuda', element: <Ajuda /> },
+  { path: '/relatorios', element: <Relatorios /> },
+  { path: '/planos', element: <Planos /> },
+  { path: '/admin-tools', element: <AdminTools /> },
+];
+
+function useAppPreferences() {
+  const initial = useMemo(() => {
+    const stored = mergePreferences(readPreferences());
+    const resolved = applyThemePreference(stored.theme);
+    return { stored, resolved };
+  }, []);
+
+  const [preferences, setPreferences] = useState(initial.stored);
+  const [resolvedTheme, setResolvedTheme] = useState(initial.resolved);
+  const prefsDirtyRef = useRef(false);
+
+  useEffect(() => {
+    writePreferences(preferences);
+  }, [preferences]);
+
+  useEffect(() => {
+    let cleanup = () => {};
+    const nextResolved = applyThemePreference(preferences.theme);
+    setResolvedTheme(nextResolved);
+
+    if (preferences.theme === 'auto' && typeof window !== 'undefined' && window.matchMedia) {
+      const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+      const listener = () => setResolvedTheme(applyThemePreference('auto'));
+      if (mediaQuery.addEventListener) mediaQuery.addEventListener('change', listener);
+      else mediaQuery.addListener(listener);
+      cleanup = () => {
+        if (mediaQuery.removeEventListener) mediaQuery.removeEventListener('change', listener);
+        else mediaQuery.removeListener(listener);
+      };
+    }
+
+    return cleanup;
+  }, [preferences.theme]);
+
+  useEffect(() => {
+    const handlePrefEvent = (event) => {
+      const detail = event.detail || {};
+      if (!detail.preferences || detail.source === 'app') return;
+      if (prefsDirtyRef.current) return;
+      const next = mergePreferences(detail.preferences);
+      setPreferences(next);
+    };
+
+    const handleStorage = (event) => {
+      if (event.key !== PREFERENCES_STORAGE_KEY) return;
+      if (prefsDirtyRef.current) return;
+      try {
+        const parsed = event.newValue ? JSON.parse(event.newValue) : {};
+        setPreferences(mergePreferences(parsed));
+      } catch {}
+    };
+
+    window.addEventListener(PREFERENCES_EVENT, handlePrefEvent);
+    window.addEventListener('storage', handleStorage);
+    return () => {
+      window.removeEventListener(PREFERENCES_EVENT, handlePrefEvent);
+      window.removeEventListener('storage', handleStorage);
+    };
+  }, []);
+
+  const updatePreferences = useCallback((partial, source = 'app', shouldBroadcast = true) => {
+    setPreferences((prev) => {
+      const next = mergePreferences({ ...prev, ...partial });
+      if (shouldBroadcast) broadcastPreferences(next, source);
+      return next;
+    });
+  }, []);
+
+  const toggleTheme = useCallback(() => {
+    const nextTheme = resolvedTheme === 'dark' ? 'light' : 'dark';
+    prefsDirtyRef.current = true;
+    updatePreferences({ theme: nextTheme });
+    prefsDirtyRef.current = false;
+  }, [resolvedTheme, updatePreferences]);
+
+  return {
+    preferences,
+    isDark: resolvedTheme === 'dark',
+    chatEnabled: preferences.chatWidget !== false,
+    toggleTheme,
+  };
+}
+
+function Sidebar({ open, user }) {
   const nav = useNavigate();
-  const user = getUser();
+  const resolvedUser = user ?? getUser();
+  const isEstab = resolvedUser?.tipo === 'estabelecimento';
 
   const [scrolled, setScrolled] = useState(false);
   const [el, setEl] = useState(null);
@@ -47,37 +175,28 @@ function Sidebar({ open }){
   }, [open, el]);
 
   useEffect(() => {
-    try{
-      if (user?.tipo === 'estabelecimento'){
+    try {
+      if (resolvedUser?.tipo === 'estabelecimento') {
         const p = (localStorage.getItem('plan_current') || 'starter').toLowerCase();
-        if (p === 'pro' || p === 'premium') setPlanLabel(p.toUpperCase());
-        else setPlanLabel('');
+        setPlanLabel(p === 'pro' || p === 'premium' ? p.toUpperCase() : '');
       } else {
         setPlanLabel('');
       }
-    }catch{}
-  }, [user?.tipo]);
+    } catch {}
+  }, [resolvedUser?.tipo]);
 
   return (
     <aside className={`sidebar ${scrolled ? 'is-scrolled' : ''}`} ref={setEl}>
       <div className="sidebar__inner">
-        {/* Marca removida da lateral conforme solicitado */}
-
         <nav id="mainnav" className="mainnav mainnav--vertical">
-          {!user ? (
+          {!resolvedUser ? (
             <div className="sidelist">
               <div className="sidelist__section">
-                <NavLink
-                  to="/login"
-                  className={({isActive}) => `sidelist__item${isActive ? ' active' : ''}`}
-                >
+                <NavLink to="/login" className={({ isActive }) => `sidelist__item${isActive ? ' active' : ''}`}>
                   <IconUser className="sidelist__icon" aria-hidden="true" />
                   <span>Login</span>
                 </NavLink>
-                <NavLink
-                  to="/cadastro"
-                  className={({isActive}) => `sidelist__item${isActive ? ' active' : ''}`}
-                >
+                <NavLink to="/cadastro" className={({ isActive }) => `sidelist__item${isActive ? ' active' : ''}`}>
                   <IconPlus className="sidelist__icon" aria-hidden="true" />
                   <span>Cadastro</span>
                 </NavLink>
@@ -85,19 +204,16 @@ function Sidebar({ open }){
             </div>
           ) : (
             <>
-              <div className="profilebox" title={user?.email || ''}>
+              <div className="profilebox" title={resolvedUser?.email || ''}>
                 <IconUser className="profilebox__icon" aria-hidden="true" />
                 <div className="profilebox__info">
-                  <div className="profilebox__name">{user?.nome || user?.name || 'Usuário'}</div>
-                  {user?.email && <div className="profilebox__sub">{user.email}</div>}
+                  <div className="profilebox__name">{resolvedUser?.nome || resolvedUser?.name || 'Usuário'}</div>
+                  {resolvedUser?.email && <div className="profilebox__sub">{resolvedUser.email}</div>}
                 </div>
               </div>
               {planLabel && (
                 <div className="row" style={{ gap: 6 }}>
-                  <div
-                    className={`badge ${planLabel === 'PREMIUM' ? 'badge--premium' : 'badge--pro'}`}
-                    title="Plano atual"
-                  >
+                  <div className={`badge ${planLabel === 'PREMIUM' ? 'badge--premium' : 'badge--pro'}`} title="Plano atual">
                     {planLabel}
                   </div>
                 </div>
@@ -105,73 +221,38 @@ function Sidebar({ open }){
 
               <div className="sidelist">
                 <div className="sidelist__section">
-                  <div className="sidelist__heading">Navegação</div>
-                  {user?.tipo !== 'estabelecimento' && (
-                    <>
-                      <NavLink
-                        to="/novo"
-                        className={({isActive}) => `sidelist__item${isActive ? ' active' : ''}`}
-                      >
-                        <IconPlus className="sidelist__icon" aria-hidden="true" />
-                        <span>Novo Agendamento</span>
-                      </NavLink>
-                      <NavLink
-                        to="/cliente"
-                        className={({isActive}) => `sidelist__item${isActive ? ' active' : ''}`}
-                      >
-                        <IconHome className="sidelist__icon" aria-hidden="true" />
-                        <span>Dashboard</span>
-                      </NavLink>
-                    </>
-                  )}
-                  {/* Para estabelecimentos, o Dashboard vai no meio da seção Gestão */}
-                </div>
-
-                <div className="sidelist__section">
-                  <div className="sidelist__heading">Gestão</div>
-                  {user?.tipo === 'estabelecimento' && (
-                    <>
-                      <NavLink
-                        to="/servicos"
-                        className={({isActive}) => `sidelist__item${isActive ? ' active' : ''}`}
-                      >
-                        <IconList className="sidelist__icon" aria-hidden="true" />
-                        <span>Serviços</span>
-                      </NavLink>
-                      {/* Link de Planos removido da sidebar; acesso via Configurações */}
-                      <NavLink
-                        to="/relatorios"
-                        className={({isActive}) => `sidelist__item${isActive ? ' active' : ''}`}
-                      >
-                        <IconChart className="sidelist__icon" aria-hidden="true" />
-                        <span>Relatórios</span>
-                      </NavLink>
-                      {/* Dashboard agora no centro (3º item da barra) */}
-                      <NavLink
-                        to="/estab"
-                        className={({isActive}) => `sidelist__item${isActive ? ' active' : ''}`}
-                      >
-                        <IconHome className="sidelist__icon" aria-hidden="true" />
-                        <span>Dashboard</span>
-                      </NavLink>
-                    </>
-                  )}
-                </div>
-
-                <div className="sidelist__section">
-                  <div className="sidelist__heading">Suporte</div>
-                  <NavLink
-                    to="/configuracoes"
-                    className={({isActive}) => `sidelist__item${isActive ? ' active' : ''}`}
-                  >
-                    <IconGear className="sidelist__icon" aria-hidden="true" />
-                    <span>Configurações</span>
+                  <div className="sidelist__heading">Principal</div>
+                  <NavLink to={isEstab ? '/estab' : '/cliente'} className={({ isActive }) => `sidelist__item${isActive ? ' active' : ''}`}>
+                    <IconHome className="sidelist__icon" aria-hidden="true" />
+                    <span>Dashboard</span>
                   </NavLink>
-                  {/* Link de Ajuda removido da sidebar; acesso via Configurações */}
-                  <button
-                    className="sidelist__item sidelist__item--danger"
-                    onClick={() => setLogoutOpen(true)}
-                  >
+                  {!isEstab && (
+                    <NavLink to="/novo" className={({ isActive }) => `sidelist__item${isActive ? ' active' : ''}`}>
+                      <IconPlus className="sidelist__icon" aria-hidden="true" />
+                      <span>Novo Agendamento</span>
+                    </NavLink>
+                  )}
+                  {isEstab && (
+                    <>
+                      <NavLink to="/servicos" className={({ isActive }) => `sidelist__item${isActive ? ' active' : ''}`}>
+                        <IconList className="sidelist__icon" aria-hidden="true" />
+                        <span>Servicos</span>
+                      </NavLink>
+                      <NavLink to="/relatorios" className={({ isActive }) => `sidelist__item${isActive ? ' active' : ''}`}>
+                        <IconChart className="sidelist__icon" aria-hidden="true" />
+                        <span>Relatorios</span>
+                      </NavLink>
+                    </>
+                  )}
+                </div>
+
+                <div className="sidelist__section">
+                  <div className="sidelist__heading">Conta</div>
+                  <NavLink to="/configuracoes" className={({ isActive }) => `sidelist__item${isActive ? ' active' : ''}`}>
+                    <IconGear className="sidelist__icon" aria-hidden="true" />
+                    <span>Configuracoes</span>
+                  </NavLink>
+                  <button className="sidelist__item sidelist__item--danger" onClick={() => setLogoutOpen(true)}>
                     <IconLogout className="sidelist__icon" aria-hidden="true" />
                     <span>Sair</span>
                   </button>
@@ -207,10 +288,36 @@ function Sidebar({ open }){
   );
 }
 
-export default function App(){
+export default function App() {
   const loc = useLocation();
   const isBook = (loc?.pathname || '').startsWith('/book');
+  const [currentUser, setCurrentUser] = useState(() => getUser());
+  const { isDark, chatEnabled, toggleTheme } = useAppPreferences();
   const [sidebarOpen, setSidebarOpen] = useState(true);
+
+  useEffect(() => {
+    const handleUserEvent = (event) => {
+      if (event?.detail && Object.prototype.hasOwnProperty.call(event.detail, 'user')) {
+        setCurrentUser(event.detail.user);
+      } else {
+        setCurrentUser(getUser());
+      }
+    };
+
+    const handleStorage = (event) => {
+      if (event.key === 'user') {
+        setCurrentUser(getUser());
+      }
+    };
+
+    window.addEventListener(USER_EVENT, handleUserEvent);
+    window.addEventListener('storage', handleStorage);
+    return () => {
+      window.removeEventListener(USER_EVENT, handleUserEvent);
+      window.removeEventListener('storage', handleStorage);
+    };
+  }, []);
+
   useEffect(() => {
     try {
       if (window.matchMedia('(max-width: 780px)').matches) setSidebarOpen(false);
@@ -219,15 +326,19 @@ export default function App(){
 
   return (
     <div className={`app-shell ${sidebarOpen ? 'sidebar-open' : 'is-collapsed'}`}>
-      {!isBook && <Sidebar open={sidebarOpen}/>}    
+      {!isBook && <Sidebar open={sidebarOpen} user={currentUser} />}
       {!isBook && (
         <>
           <button
             className="sidebar-toggle"
             aria-label={sidebarOpen ? 'Ocultar menu' : 'Mostrar menu'}
-            onClick={() => setSidebarOpen(v => !v)}
+            onClick={() => setSidebarOpen((value) => !value)}
           >
-            {sidebarOpen ? <IconChevronLeft aria-hidden className="sidebar-toggle__icon"/> : <IconChevronRight aria-hidden className="sidebar-toggle__icon"/>}
+            {sidebarOpen ? (
+              <IconChevronLeft aria-hidden className="sidebar-toggle__icon" />
+            ) : (
+              <IconChevronRight aria-hidden className="sidebar-toggle__icon" />
+            )}
           </button>
           <div className="sidebar-overlay" onClick={() => setSidebarOpen(false)} aria-hidden></div>
         </>
@@ -242,36 +353,28 @@ export default function App(){
                 <small>Rápido e sem fricção</small>
               </span>
             </NavLink>
+            <div className="app-topbar__actions">
+              <button
+                type="button"
+                className="theme-toggle"
+                onClick={toggleTheme}
+                aria-label={`Ativar tema ${isDark ? 'claro' : 'escuro'}`}
+                title={isDark ? 'Alternar para tema claro' : 'Alternar para tema escuro'}
+              >
+                {isDark ? <IconSun aria-hidden="true" /> : <IconMoon aria-hidden="true" />}
+              </button>
+            </div>
           </div>
         </div>
         <div className="container">
           <Routes>
-            <Route path="/" element={<EstabelecimentosList/>} />
-            <Route path="/book" element={<Book/>} />
-            <Route path="/book/:id" element={<Book/>} />
-            <Route path="/login" element={<Login/>}/>
-            <Route path="/recuperar-senha" element={<RecuperarSenha/>}/>
-            <Route path="/definir-senha" element={<DefinirSenha/>}/>
-            <Route path="/link-phone" element={<LinkPhone/>}/>
-            <Route path="/login-cliente" element={<LoginCliente/>}/>
-            <Route path="/login-estabelecimento" element={<LoginEstabelecimento/>}/>
-            <Route path="/cadastro" element={<Cadastro/>}/>
-            <Route path="/cliente" element={<DashboardCliente/>}/>
-            <Route path="/estab" element={<DashboardEstabelecimento/>}/>
-            <Route path="/servicos" element={<ServicosEstabelecimento/>}/>
-            <Route path="/novo" element={<NovoAgendamento/>}/>
-            <Route path="/configuracoes" element={<Configuracoes/>}/>
-            <Route path="/loading" element={<Loading/>}/>
-            <Route path="/ajuda" element={<Ajuda/>}/>
-            <Route path="/relatorios" element={<Relatorios/>}/>
-          <Route path="/planos" element={<Planos/>}/>
-          <Route path="/admin-tools" element={<AdminTools/>}/>
-          <Route path="/book/:id" element={<Book/>}/>
+            {APP_ROUTES.map(({ path, element }) => (
+              <Route key={path} path={path} element={element} />
+            ))}
           </Routes>
         </div>
       </main>
-      {/* Widget de chat de agendamento (flutuante) - oculto em /book */}
-      {!isBook && <ChatAgendamento />}
+      {!isBook && chatEnabled && <ChatAgendamento />}
     </div>
   );
 }

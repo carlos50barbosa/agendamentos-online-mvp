@@ -7,7 +7,7 @@ export default function ServicosEstabelecimento() {
   const [list, setList] = useState([]);
   const [loadingList, setLoadingList] = useState(true);
 
-  // Formulário
+  // Formulario
   const [form, setForm] = useState({
     nome: "",
     duracao_min: 30,
@@ -35,6 +35,8 @@ export default function ServicosEstabelecimento() {
 
   // Toast
   const [toast, setToast] = useState(null); // {type:'success'|'error'|'info', msg:string}
+  const [planLimitOpen, setPlanLimitOpen] = useState(false);
+  const [planLimitMessage, setPlanLimitMessage] = useState('');
   function showToast(type, msg, ms = 2500) {
     setToast({ type, msg });
     window.clearTimeout(showToast._t);
@@ -47,7 +49,7 @@ export default function ServicosEstabelecimento() {
         const rows = await Api.servicosList();
         setList(rows || []);
       } catch (e) {
-        showToast("error", "Não foi possível carregar os serviços.");
+        showToast("error", "Nao foi possivel carregar os servicos.");
       } finally {
         setLoadingList(false);
       }
@@ -73,12 +75,12 @@ export default function ServicosEstabelecimento() {
     return Math.max(0, Math.ceil(diff / 86400000));
   }, [trialInfo]);
 
-  // Helpers de preço (BRL)
+  // Helpers de preco (BRL)
   const formatBRL = (centavos) =>
     (centavos / 100).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 
   function handlePrecoChange(e) {
-    const digits = e.target.value.replace(/\D/g, ""); // apenas números
+    const digits = e.target.value.replace(/\D/g, ""); // apenas numeros
     const centavos = parseInt(digits || "0", 10);
     setForm((f) => ({ ...f, preco_centavos: centavos }));
     setPrecoStr(formatBRL(centavos));
@@ -91,7 +93,7 @@ export default function ServicosEstabelecimento() {
     setEditPrecoStr(formatBRL(centavos));
   }
 
-  // Validação simples
+  // Validacao simples
   const formInvalid =
     !form.nome.trim() || form.duracao_min <= 0 || form.preco_centavos <= 0;
 
@@ -107,21 +109,26 @@ export default function ServicosEstabelecimento() {
       setList((curr) => [novo, ...curr]);
       setForm({ nome: "", duracao_min: 30, preco_centavos: 0, ativo: true });
       setPrecoStr("R$ 0,00");
-      showToast("success", "Serviço cadastrado!");
+      showToast("success", "Servico cadastrado!");
     } catch (err) {
-      showToast("error", "Erro ao salvar o serviço.");
+      if (err?.data?.error === 'plan_limit') {
+        setPlanLimitMessage(err?.message || 'Seu plano atual nao permite adicionar mais servicos. Atualize o plano para continuar.');
+        setPlanLimitOpen(true);
+      } else {
+        showToast("error", "Erro ao salvar o servico.");
+      }
     } finally {
       setSaving(false);
     }
   }
 
-  // Confirmação de exclusão
+  // Confirmacao de exclusao
   function askDelete(svc) {
     setToDelete(svc);
     setConfirmOpen(true);
   }
 
-  // Abrir edição
+  // Abrir edicao
   function openEdit(svc){
     setEditItem(svc);
     setEditForm({ nome: svc.nome || '', duracao_min: svc.duracao_min || 30, preco_centavos: svc.preco_centavos || 0 });
@@ -142,9 +149,9 @@ export default function ServicosEstabelecimento() {
       setList(curr => curr.map(x => x.id === editItem.id ? { ...x, ...payload } : x));
       setEditOpen(false);
       setEditItem(null);
-      showToast('success', 'Serviço atualizado.');
+      showToast('success', 'Servico atualizado.');
     }catch(e){
-      showToast('error', 'Falha ao atualizar o serviço.');
+      showToast('error', 'Falha ao atualizar o servico.');
     }finally{
       setEditSaving(false);
     }
@@ -162,7 +169,7 @@ export default function ServicosEstabelecimento() {
 
     try {
       await Api.servicosDelete(id);
-      showToast("success", "Serviço excluído.");
+      showToast("success", "Servico excluido.");
     } catch (e) {
       // reverte se falhar
       setList(prev);
@@ -187,10 +194,10 @@ export default function ServicosEstabelecimento() {
       setList((curr) =>
         curr.map((x) => (x.id === svc.id ? { ...x, _updating: false } : x))
       );
-      showToast("success", `Serviço ${novoAtivo ? "ativado" : "inativado"}.`);
+      showToast("success", `Servico ${novoAtivo ? "ativado" : "inativado"}.`);
     } catch (e) {
       setList(prev);
-      showToast("error", "Não foi possível atualizar o status.");
+      showToast("error", "Nao foi possivel atualizar o status.");
     }
   }
 
@@ -216,17 +223,17 @@ export default function ServicosEstabelecimento() {
             <div className="row" style={{ gap: 8, alignItems: 'center' }}>
               <div className="brand__logo" aria-hidden>AO</div>
               <div>
-                <strong>Teste grátis ativo</strong>
+                <strong>Teste gratis ativo</strong>
                 <div className="small muted">{trialDaysLeft} {trialDaysLeft === 1 ? 'dia restante' : 'dias restantes'}</div>
               </div>
             </div>
             <Link className="btn btn--primary btn--sm" to="/planos">Experimentar Pro</Link>
           </div>
         ) : (
-          <div className="card" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, borderColor: '#fde68a', background: '#fffbeb' }}>
+          <div className="card" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, borderColor: 'var(--warning-border)', background: 'var(--warning-bg)' }}>
             <div>
-              <strong>Seu período de teste terminou</strong>
-              <div className="small muted">Desbloqueie WhatsApp, relatórios avançados e mais com o Pro.</div>
+              <strong>Seu periodo de teste terminou</strong>
+              <div className="small muted">Desbloqueie WhatsApp, relatorios avancados e mais com o Pro.</div>
             </div>
             <Link className="btn btn--outline btn--sm" to="/planos">Conhecer planos</Link>
           </div>
@@ -235,13 +242,13 @@ export default function ServicosEstabelecimento() {
       {/* Toast */}
       {toast && <div className={`toast ${toast.type}`}>{toast.msg}</div>}
 
-      {/* Novo Serviço */}
+      {/* Novo Servico */}
       <div className="card">
-        <h2 style={{ marginBottom: 12 }}>Novo Serviço</h2>
+        <h2 style={{ marginBottom: 12 }}>Novo Servico</h2>
         <form onSubmit={add} className="row" style={{ gap: 8, flexWrap: "wrap" }}>
           <input
             className="input"
-            placeholder="Nome do serviço"
+            placeholder="Nome do servico"
             value={form.nome}
             onChange={(e) => setForm((f) => ({ ...f, nome: e.target.value }))}
             maxLength={80}
@@ -253,7 +260,7 @@ export default function ServicosEstabelecimento() {
             onChange={(e) =>
               setForm((f) => ({ ...f, duracao_min: parseInt(e.target.value, 10) }))
             }
-            title="Duração (min)"
+            title="Duracao (min)"
           >
             {[15, 30, 45, 60, 75, 90, 120].map((m) => (
               <option key={m} value={m}>
@@ -266,7 +273,7 @@ export default function ServicosEstabelecimento() {
             className="input"
             type="text"
             inputMode="numeric"
-            placeholder="Preço"
+            placeholder="Preco"
             value={precoStr}
             onChange={handlePrecoChange}
           />
@@ -285,15 +292,15 @@ export default function ServicosEstabelecimento() {
           </button>
         </form>
 
-        {/* Dica de validação */}
+        {/* Dica de validacao */}
         {formInvalid && (
           <small className="muted">
-            Preencha nome, selecione duração e informe um preço maior que zero.
+            Preencha nome, selecione duracao e informe um preco maior que zero.
           </small>
         )}
       </div>
 
-      {/* Meus Serviços */}
+      {/* Meus Servicos */}
       <div className="card">
         <div
           className="header-row"
@@ -305,11 +312,11 @@ export default function ServicosEstabelecimento() {
             marginBottom: 12,
           }}
         >
-          <h2>Meus Serviços</h2>
+          <h2>Meus Servicos</h2>
           <div className="filters" style={{ display: "flex", gap: 8 }}>
             <input
               className="input"
-              placeholder="Buscar por nome…"
+              placeholder="Buscar por nome..."
               value={query}
               onChange={(e) => setQuery(e.target.value)}
             />
@@ -329,23 +336,23 @@ export default function ServicosEstabelecimento() {
           <SkeletonTable />
         ) : filtered.length === 0 ? (
           <div className="empty">
-            <p>Nenhum serviço encontrado.</p>
-            <small>Dica: ajuste a busca ou cadastre um novo serviço acima.</small>
+            <p>Nenhum servico encontrado.</p>
+            <small>Dica: ajuste a busca ou cadastre um novo servico acima.</small>
           </div>
         ) : (
           <>
             <div className="count" style={{ marginBottom: 8 }}>
               Exibindo <b>{filtered.length}</b>{" "}
-              {filtered.length === 1 ? "serviço" : "serviços"}.
+              {filtered.length === 1 ? "servico" : "servicos"}.
             </div>
             <table>
               <thead>
                 <tr>
                   <th>Nome</th>
-                  <th>Duração</th>
-                  <th>Preço</th>
-                  <th>Status</th>
-                  <th style={{ width: 160 }}></th>
+                  <th>Duracao</th>
+                  <th>Preco</th>
+                  <th className="service-status__header">Status</th>
+                  <th className="service-actions__header">Acoes</th>
                 </tr>
               </thead>
               <tbody>
@@ -354,9 +361,9 @@ export default function ServicosEstabelecimento() {
                     <td>{s.nome}</td>
                     <td>{s.duracao_min} min</td>
                     <td>{formatBRL(s.preco_centavos ?? 0)}</td>
-                    <td>
+                    <td className="service-status-cell">
                       <button
-                        className={`badge ${s.ativo ? "ok" : "out"}`} // 'off' -> 'out'
+                        className={`badge service-status ${s.ativo ? "ok" : "out"}`}
                         title="Clique para alternar"
                         onClick={() => toggleAtivo(s)}
                         disabled={!!s._updating}
@@ -364,7 +371,7 @@ export default function ServicosEstabelecimento() {
                         {s.ativo ? "Ativo" : "Inativo"}
                       </button>
                     </td>
-                    <td className="table-actions" style={{ textAlign: "right", display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                    <td className="service-actions">
                       <button
                         className="btn btn--outline"
                         onClick={() => openEdit(s)}
@@ -388,12 +395,12 @@ export default function ServicosEstabelecimento() {
         )}
       </div>
 
-      {/* Modal de confirmação */}
+      {/* Modal de confirmacao */}
       {confirmOpen && (
         <Modal onClose={() => setConfirmOpen(false)}>
-          <h3>Excluir serviço?</h3>
+          <h3>Excluir servico?</h3>
           <p>
-            Tem certeza que deseja excluir <b>{toDelete?.nome}</b>? Esta ação não
+            Tem certeza que deseja excluir <b>{toDelete?.nome}</b>? Esta acao nao
             pode ser desfeita.
           </p>
           <div
@@ -409,14 +416,33 @@ export default function ServicosEstabelecimento() {
         </Modal>
       )}
 
-      {/* Modal de edição */}
+      {/* Modal de edicao */}
+      {planLimitOpen && (
+        <Modal onClose={() => setPlanLimitOpen(false)}>
+          <h3>Atualize seu plano</h3>
+          <p>
+            {planLimitMessage || 'Seu plano atual (Starter) permite cadastrar ate 10 servicos. Para adicionar novos servicos, migre para o plano Pro ou Premium.'}
+          </p>
+          <p className="muted">
+            Acesse <strong>Configuracoes &gt; Planos</strong> ou utilize os botoes abaixo para mudar de plano.
+          </p>
+          <div className="row" style={{ gap: 8, justifyContent: 'flex-end', marginTop: 16 }}>
+            <Link className="btn btn--outline" to="/configuracoes" onClick={() => setPlanLimitOpen(false)}>Ir para Configuracoes</Link>
+            <Link className="btn btn--primary" to="/planos" onClick={() => setPlanLimitOpen(false)}>Ver planos</Link>
+          </div>
+          <div className="row" style={{ justifyContent: 'flex-end', marginTop: 8 }}>
+            <button className="btn btn--sm" onClick={() => setPlanLimitOpen(false)}>Fechar</button>
+          </div>
+        </Modal>
+      )}
+
       {editOpen && (
         <Modal onClose={() => setEditOpen(false)}>
-          <h3>Editar serviço</h3>
+          <h3>Editar servico</h3>
           <div className="grid" style={{ gap: 8, marginTop: 8 }}>
             <input
               className="input"
-              placeholder="Nome do serviço"
+              placeholder="Nome do servico"
               value={editForm.nome}
               onChange={(e) => setEditForm((f) => ({ ...f, nome: e.target.value }))}
               maxLength={80}
@@ -425,7 +451,7 @@ export default function ServicosEstabelecimento() {
               className="input"
               value={editForm.duracao_min}
               onChange={(e)=> setEditForm(f => ({ ...f, duracao_min: parseInt(e.target.value,10) }))}
-              title="Duração (min)"
+              title="Duracao (min)"
             >
               {[15, 30, 45, 60, 75, 90, 120].map(m => (
                 <option key={m} value={m}>{m} min</option>
@@ -435,7 +461,7 @@ export default function ServicosEstabelecimento() {
               className="input"
               type="text"
               inputMode="numeric"
-              placeholder="Preço"
+              placeholder="Preco"
               value={editPrecoStr}
               onChange={handleEditPrecoChange}
             />
@@ -443,7 +469,7 @@ export default function ServicosEstabelecimento() {
           <div className="row" style={{ gap: 8, justifyContent: 'flex-end', marginTop: 12 }}>
             <button className="btn btn--outline" onClick={()=>setEditOpen(false)}>Cancelar</button>
             <button className="btn btn--primary" onClick={saveEdit} disabled={editSaving}>
-              {editSaving ? <span className="spinner"/> : 'Salvar alterações'}
+              {editSaving ? <span className="spinner"/> : 'Salvar alteracoes'}
             </button>
           </div>
         </Modal>
@@ -460,8 +486,8 @@ function SkeletonTable() {
       <thead>
         <tr>
           <th>Nome</th>
-          <th>Duração</th>
-          <th>Preço</th>
+          <th>Duracao</th>
+          <th>Preco</th>
           <th>Status</th>
           <th></th>
         </tr>

@@ -5,6 +5,13 @@ import { auth, isEstabelecimento } from '../middleware/auth.js';
 
 const router = Router();
 
+const STARTER_MAX_SERVICES = 10;
+
+async function getPlanForEstabelecimento(estId) {
+  const [rows] = await pool.query("SELECT plan FROM usuarios WHERE id=? AND tipo='estabelecimento' LIMIT 1", [estId]);
+  return rows && rows.length ? rows[0].plan || 'starter' : 'starter';
+}
+
 /**
  * GET /servicos?establishmentId=ID
  * Aceita tambÃ©m: ?estabelecimento_id= ou ?establishment_id=
@@ -71,6 +78,15 @@ router.post('/', auth, isEstabelecimento, async (req, res) => {
     const estId = req.user.id;
     const { nome, duracao_min, preco_centavos, ativo = 1 } = req.body;
     if (!nome || !duracao_min) return res.status(400).json({ error: 'invalid_payload' });
+
+    const plan = await getPlanForEstabelecimento(estId);
+    if (plan === 'starter') {
+      const [[countRow]] = await pool.query("SELECT COUNT(*) AS total FROM servicos WHERE estabelecimento_id=?", [estId]);
+      if (Number(countRow?.total || 0) >= STARTER_MAX_SERVICES) {
+        return res.status(403).json({ error: 'plan_limit', message: 'Seu plano atual (Starter) permite cadastrar até 10 serviços. Para continuar adicionando serviços, atualize para o plano Pro ou Premium em Configurações > Planos.' });
+      }
+    }
+
     const [r] = await pool.query(
       'INSERT INTO servicos (estabelecimento_id, nome, duracao_min, preco_centavos, ativo) VALUES (?,?,?,?,?)',
       [estId, nome, duracao_min, preco_centavos || 0, ativo ? 1 : 0]

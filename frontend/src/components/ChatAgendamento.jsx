@@ -58,6 +58,8 @@ export default function ChatAgendamento({ publicMode = false, preselectedEstabId
   const [pubPhone, setPubPhone] = useState('');
 
   const user = getUser();
+  const isEstabelecimento = user?.tipo === 'estabelecimento';
+
 
   // Pré-seleciona estabelecimento no modo público
   useEffect(() => {
@@ -197,7 +199,7 @@ export default function ChatAgendamento({ publicMode = false, preselectedEstabId
 
   return (
     <>
-      <button className="chatfab" onClick={() => { if (!open) resetFlow(); setOpen(v => !v); }} aria-label={open ? 'Fechar chat de agendamento' : 'Abrir chat de agendamento'}>
+      <button className={!isEstabelecimento || publicMode ? "chatfab" : undefined} onClick={() => { if (!open) resetFlow(); setOpen(v => !v); }} aria-label={open ? 'Fechar chat de agendamento' : 'Abrir chat de agendamento'}>
         {open ? '×' : 'Agendar'}
       </button>
 
@@ -251,7 +253,7 @@ export default function ChatAgendamento({ publicMode = false, preselectedEstabId
                     const isPast = (() => { try { return new Date(a.inicio).getTime() < Date.now(); } catch { return false; } })();
                     const isCanceled = String(a.status || '').toLowerCase() === 'cancelado';
                     return (
-                      <div key={a.id} className="chatmsg" style={{ border: '1px solid #e2e8f0', borderRadius: 8, padding: 8 }}>
+                      <div key={a.id} className="chatmsg" style={{ border: '1px solid var(--chat-border)', borderRadius: 8, padding: 8 }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                           <strong>#{a.id}</strong> — {a.servico_nome} em {a.estabelecimento_nome}
                           {isCanceled && <span className="badge out" title="Agendamento cancelado">cancelado</span>}

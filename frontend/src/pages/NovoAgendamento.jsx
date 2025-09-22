@@ -703,24 +703,20 @@ export default function NovoAgendamento() {
       const start = new Date(inicioISO);
       const inMs = start.getTime();
       const now = Date.now();
-      const t1 = new Date(inMs - 24 * 60 * 60 * 1000);
-      const t2 = new Date(inMs - 15 * 60 * 1000);
+      const reminderTime = new Date(inMs - 8 * 60 * 60 * 1000);
       const dataBR = start.toLocaleDateString("pt-BR");
       const horaBR = start.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
-      const msg1 = `🔔 Lembrete: amanhã às ${horaBR} você tem ${servicoNome} em ${estabelecimentoNome}.`;
-      const msg2 = `⏰ Faltam 15 minutos para o seu ${servicoNome} em ${estabelecimentoNome} (${horaBR} de ${dataBR}).`;
+      const msgReminder = `⏰ Lembrete: faltam 8 horas para o seu ${servicoNome} em ${estabelecimentoNome} (${horaBR} de ${dataBR}).`;
       const tasks = [];
-      if (t1.getTime() > now)
-        tasks.push(Api.scheduleWhatsApp?.({ to: toPhone, scheduledAt: t1.toISOString(), message: msg1, metadata: { kind: "reminder_1d", appointmentAt: start.toISOString() } }));
-      if (t2.getTime() > now)
-        tasks.push(Api.scheduleWhatsApp?.({ to: toPhone, scheduledAt: t2.toISOString(), message: msg2, metadata: { kind: "reminder_15m", appointmentAt: start.toISOString() } }));
+      if (reminderTime.getTime() > now)
+        tasks.push(Api.scheduleWhatsApp?.({ to: toPhone, scheduledAt: reminderTime.toISOString(), message: msgReminder, metadata: { kind: "reminder_8h", appointmentAt: start.toISOString() } }));
       if (!tasks.length) {
-        showToast("info", "Agendado! Sem lembretes porque o horário está muito próximo.");
+        showToast("info", "Agendado! Sem lembrete porque o horário está muito próximo.");
         return;
       }
       const results = await Promise.allSettled(tasks);
       const failed = results.some((r) => r.status === "rejected");
-      showToast(failed ? "error" : "success", failed ? "Agendado! Falha ao programar alguns lembretes." : "Agendado com sucesso! Lembretes programados.");
+      showToast(failed ? "error" : "success", failed ? "Agendado! Falha ao programar o lembrete." : "Agendado com sucesso! Lembrete programado.");
     },
     [showToast, user]
   );

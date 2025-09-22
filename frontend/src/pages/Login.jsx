@@ -35,7 +35,7 @@ export default function Login() {
             </div>
           </div>
           {sessionMsg && (
-            <div className="box" role="alert" aria-live="polite" style={{ marginTop: 10, borderColor: '#14532d', color: '#065f46', background: '#ecfdf5' }}>
+            <div className="box" role="alert" aria-live="polite" style={{ marginTop: 10, borderColor: 'var(--success-border)', color: 'var(--success-text)', background: 'var(--success-bg)' }}>
               {sessionMsg}
             </div>
           )}
