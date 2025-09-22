@@ -33,10 +33,7 @@ router.post('/register', async (req, res) => {
     }
 
     const telefoneTrim = telefone === undefined || telefone === null ? null : String(telefone).trim();
-    if (!telefoneTrim) {
-      return res.status(400).json({ error: 'telefone_obrigatorio', message: 'Informe um telefone com DDD.' });
-    }
-    if (telefoneTrim.length > 20) {
+    if (telefoneTrim && telefoneTrim.length > 20) {
       return res.status(400).json({ error: 'telefone_invalido' });
     }
 
