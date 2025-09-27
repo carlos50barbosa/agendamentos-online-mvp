@@ -1,4 +1,4 @@
-// src/pages/Configuracoes.jsx
+﻿// src/pages/Configuracoes.jsx
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { getUser, saveUser } from '../utils/auth';
@@ -67,6 +67,12 @@ export default function Configuracoes() {
   const [prefs, setPrefs] = useState(() => mergePreferences(readPreferences()));
   const [notifStatus, setNotifStatus] = useState('');
   const notifTimerRef = useRef(null);
+  // Billing state
+  const [billing, setBilling] = useState({ subscription: null, history: [] });
+  const [billingLoading, setBillingLoading] = useState(false);
+  const [checkoutLoading, setCheckoutLoading] = useState(false);
+  const [checkoutError, setCheckoutError] = useState('');
+  const checkoutIntentRef = useRef(false);
 
   useEffect(() => {
     try {
@@ -132,6 +138,47 @@ export default function Configuracoes() {
   }, [isEstab, profileForm.cep]);
 
 
+  const fetchBilling = useCallback(async () => {
+    if (!isEstab || !user?.id) return null;
+    try {
+      setBillingLoading(true);
+      const data = await Api.billingSubscription();
+      if (data?.plan) {
+        setPlanInfo((prev) => {
+          const nextStatus = data.plan.status || prev.status;
+          const nextPlan = nextStatus === 'active' ? (data.plan.plan || prev.plan) : prev.plan;
+          const next = {
+            ...prev,
+            plan: nextPlan,
+            status: nextStatus,
+            trialEnd: data.plan.trial?.ends_at || prev.trialEnd,
+            trialDaysLeft: typeof data.plan.trial?.days_left === 'number' ? data.plan.trial.days_left : prev.trialDaysLeft,
+            trialWarn: !!data.plan.trial?.warn,
+            allowAdvanced: !!data.plan.limits?.allowAdvancedReports,
+            activeUntil: data.plan.active_until || prev.activeUntil,
+          };
+          try {
+            localStorage.setItem('plan_current', next.plan);
+            localStorage.setItem('plan_status', next.status);
+            if (next.trialEnd) localStorage.setItem('trial_end', next.trialEnd);
+            else localStorage.removeItem('trial_end');
+          } catch {}
+          return next;
+        });
+      }
+      setBilling({
+        subscription: data?.subscription || null,
+        history: Array.isArray(data?.history) ? data.history : [],
+      });
+      return data;
+    } catch (err) {
+      console.error('billingSubscription failed', err);
+      throw err;
+    } finally {
+      setBillingLoading(false);
+    }
+  }, [isEstab, user?.id]);
+
   useEffect(() => {
     (async () => {
       if (!isEstab || !user?.id) return;
@@ -166,9 +213,50 @@ export default function Configuracoes() {
           wa_template: tmpl?.wa_template || '',
         });
       } catch {}
+      try {
+        await fetchBilling();
+      } catch {}
     })();
-  }, [isEstab, user?.id]);
+  }, [isEstab, user?.id, fetchBilling]);
 
+  const handleCheckout = useCallback(async (targetPlan) => {
+    if (!isEstab) return;
+    setCheckoutError('');
+    setCheckoutLoading(true);
+    checkoutIntentRef.current = true;
+    try {
+      const payload = { plan: targetPlan };
+      const data = await Api.billingCreateCheckout(payload);
+      if (data?.subscription) {
+        setBilling((prev) => ({ ...prev, subscription: data.subscription }));
+      }
+      try {
+        await fetchBilling();
+      } catch {}
+      if (typeof window !== 'undefined' && data?.init_point) {
+        window.location.href = data.init_point;
+      }
+    } catch (err) {
+      console.error('billing checkout failed', err);
+      setCheckoutError(err?.data?.message || err?.message || 'Falha ao gerar link de pagamento.');
+    } finally {
+      setCheckoutLoading(false);
+      checkoutIntentRef.current = false;
+      try { localStorage.removeItem('intent_plano'); } catch {}
+    }
+  }, [fetchBilling, isEstab]);
+
+  useEffect(() => {
+    if (!isEstab) return;
+    let storedPlan = null;
+    try {
+      storedPlan = localStorage.getItem('intent_plano');
+    } catch {}
+    if (storedPlan && !checkoutIntentRef.current) {
+      checkoutIntentRef.current = true;
+      handleCheckout(storedPlan);
+    }
+  }, [handleCheckout, isEstab]);
   const daysLeft = useMemo(() => {
     if (planInfo.trialDaysLeft != null) return planInfo.trialDaysLeft;
     if (!planInfo.trialEnd) return 0;
@@ -207,12 +295,13 @@ export default function Configuracoes() {
           else localStorage.removeItem('trial_end');
         } catch {}
       }
+      await fetchBilling();
       alert('Teste gratuito do plano Pro ativado por 14 dias!');
     } catch (err) {
       console.error('startTrial failed', err);
       alert('Nao foi possivel iniciar o teste gratuito agora.');
     }
-  }, [isEstab, user?.id]);
+  }, [isEstab, user?.id, fetchBilling]);
 
   const toggleSection = useCallback((id) => {
     setOpenSections((prev) => ({ ...prev, [id]: !prev[id] }));
@@ -285,16 +374,34 @@ export default function Configuracoes() {
     setPrefs(next);
     writePreferences(next);
     broadcastPreferences(next);
-    setNotifStatus('Preferencias salvas.');
+    setNotifStatus('PreferÃªncias salvas.');
     setTimeout(() => setNotifStatus(''), 2000);
   };
 
   const sections = useMemo(() => {
     const list = [];
 
+    const statusLabelMap = {
+      trialing: 'Teste gratuito',
+      active: 'Ativo',
+      delinquent: 'Pagamento em atraso',
+      pending: 'Pagamento pendente',
+      canceled: 'Cancelado',
+      expired: 'Expirado',
+    };
+    const statusLabel = statusLabelMap[planInfo.status] || (planInfo.status ? planInfo.status.toUpperCase() : '');
+    const subscriptionStatusLabel = billing.subscription?.status
+      ? statusLabelMap[billing.subscription.status] || billing.subscription.status.toUpperCase()
+      : null;
+    const nextChargeLabel = billing.subscription?.current_period_end ? fmtDate(billing.subscription.current_period_end) : null;
+    const amountLabel =
+      typeof billing.subscription?.amount_cents === 'number'
+        ? (billing.subscription.amount_cents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+        : null;
+
     list.push({
       id: 'profile',
-      title: 'Perfil e Seguranca',
+      title: 'Perfil e SeguranÃ§a',
       content: (
         <form onSubmit={handleSaveProfile} className="grid" style={{ gap: 10 }}>
           <label className="label">
@@ -335,7 +442,7 @@ export default function Configuracoes() {
               </div>
               <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
                 <label className="label" style={{ flex: '0 1 120px' }}>
-                  <span>Numero</span>
+                  <span>NÃºmero</span>
                   <input className="input" value={profileForm.numero} onChange={(e) => handleProfileChange('numero', e.target.value)} required />
                 </label>
                 <label className="label" style={{ flex: '1 1 200px' }}>
@@ -378,7 +485,7 @@ export default function Configuracoes() {
           )}
           <div className="row" style={{ justifyContent: 'flex-end', gap: 8 }}>
             <button type="submit" className="btn btn--primary" disabled={profileSaving}>
-              {profileSaving ? <span className="spinner" /> : 'Salvar alteracoes'}
+              {profileSaving ? <span className="spinner" /> : 'Salvar alteraÃ§Ãµes'}
             </button>
           </div>
         </form>
@@ -398,42 +505,85 @@ export default function Configuracoes() {
               </div>
             </div>
             {planInfo.status && (
-              <div className="small muted">Status atual: {planInfo.status.toUpperCase()}</div>
+              <div className="small muted">
+                Status atual: {statusLabel}
+                {planInfo.status === 'active' && planInfo.activeUntil ? ` ? pr?xima cobran?a em ${fmtDate(planInfo.activeUntil)}` : ''}
+              </div>
+            )}
+            {billing.subscription?.status && (
+              <div className="small muted">
+                Assinatura Mercado Pago: {subscriptionStatusLabel}
+                {amountLabel ? ` ? ${amountLabel}/m?s` : ''}
+                {nextChargeLabel ? ` ? pr?ximo d?bito em ${nextChargeLabel}` : ''}
+              </div>
+            )}
+            {billingLoading && (
+              <div className="small muted">Atualizando informa??es de cobran?a...</div>
             )}
             {planInfo.status === 'delinquent' && (
               <div className="notice notice--error" role="alert">
                 <strong>Pagamento em atraso.</strong> Regularize a assinatura para liberar os recursos.
               </div>
             )}
+            {planInfo.status === 'pending' && (
+              <div className="notice notice--warn" role="alert">
+                <strong>Pagamento pendente.</strong> Finalize o checkout para concluir a contrata??o.
+              </div>
+            )}
+            {checkoutError && (
+              <div className="notice notice--error" role="alert">{checkoutError}</div>
+            )}
             {planInfo.plan === 'starter' ? (
               <>
                 {planInfo.trialEnd && daysLeft > 0 ? (
                   <div className="box box--highlight">
-                    <strong>Teste gratis ativo</strong>
+                    <strong>Teste gr?tis ativo</strong>
                     <div className="small muted">Termina em {fmtDate(planInfo.trialEnd)} - {daysLeft} {daysLeft === 1 ? 'dia' : 'dias'} restantes</div>
                   </div>
                 ) : (
                   <div className="box" style={{ borderColor: '#fde68a', background: '#fffbeb' }}>
-                    <strong>Voce esta no plano Starter</strong>
-                    <div className="small muted">Ative 14 dias gratis do Pro para desbloquear WhatsApp e relatorios.</div>
+                    <strong>Voc? est? no plano Starter</strong>
+                    <div className="small muted">Ative 14 dias gr?tis do Pro para desbloquear WhatsApp e relat?rios.</div>
                   </div>
                 )}
-                <div className="row" style={{ gap: 8, justifyContent: 'flex-end' }}>
+                <div className="row" style={{ gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
                   {!planInfo.trialEnd && (
-                    <button className="btn btn--outline" type="button" onClick={startTrial} disabled={planInfo.status === "delinquent"}>Ativar 14 dias gratis</button>
+                    <button
+                      className="btn btn--outline"
+                      type="button"
+                      onClick={startTrial}
+                      disabled={planInfo.status === 'delinquent' || checkoutLoading}
+                    >
+                      {checkoutLoading ? <span className="spinner" /> : 'Ativar 14 dias gr?tis'}
+                    </button>
                   )}
-                  <Link className="btn btn--primary" to="/planos">Conhecer planos</Link>
+                  <button
+                    className="btn btn--primary"
+                    type="button"
+                    onClick={() => handleCheckout('pro')}
+                    disabled={checkoutLoading}
+                  >
+                    {checkoutLoading ? <span className="spinner" /> : 'Contratar plano Pro'}
+                  </button>
+                  <Link className="btn btn--outline" to="/planos">Conhecer planos</Link>
                 </div>
               </>
             ) : (
               <>
                 <div className="box box--highlight">
-                  <strong>{planInfo.plan === 'pro' ? 'Plano Pro ativo' : 'Plano Premium ativo'}</strong>
-                  <div className="small muted">Obrigado por apoiar o Agendamentos Online.</div>
+                  <strong>{planInfo.plan === 'pro' ? 'Plano Pro' : 'Plano Premium'} {planInfo.status === 'active' ? 'ativo' : 'contratado'}</strong>
+                  <div className="small muted">
+                    {planInfo.status === 'active' ? 'Obrigado por apoiar o Agendamentos Online.' : 'Assim que o pagamento for confirmado, os recursos ser?o liberados.'}
+                  </div>
                 </div>
-                <div className="row" style={{ gap: 8, justifyContent: 'flex-end' }}>
-                  <button className="btn" type="button" onClick={() => alert('Em breve: central de cobranca')}>
-                    Gerenciar cobranca
+                <div className="row" style={{ gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                  <button
+                    className="btn"
+                    type="button"
+                    onClick={() => handleCheckout(planInfo.plan)}
+                    disabled={checkoutLoading}
+                  >
+                    {checkoutLoading ? <span className="spinner" /> : planInfo.status === 'pending' ? 'Finalizar pagamento' : 'Gerar link de pagamento'}
                   </button>
                   <Link className="btn btn--outline" to="/planos">Alterar plano</Link>
                 </div>
@@ -442,19 +592,18 @@ export default function Configuracoes() {
           </>
         ),
       });
-
       list.push({
         id: 'public-link',
-        title: 'Link publico e mensagens',
+        title: 'Link pÃºblico e mensagens',
         content: (
           <div className="grid" style={{ gap: 8 }}>
             <label className="label">
-              <span>Slug do estabelecimento (apenas letras, numeros e hifens)</span>
+              <span>Slug do estabelecimento (apenas letras, nÃºmeros e hifens)</span>
               <input className="input" placeholder="ex: studio-bela" value={slug} onChange={(e) => setSlug(e.target.value)} />
             </label>
             <div className="row" style={{ alignItems: 'center', gap: 8 }}>
               <div className="small muted" style={{ userSelect: 'text' }}>
-                {publicLink ? `Link publico: ${publicLink}` : 'Link publico sera exibido aqui'}
+                {publicLink ? `Link pÃºblico: ${publicLink}` : 'Link publico sera exibido aqui'}
               </div>
               <button
                 type="button"
@@ -464,11 +613,11 @@ export default function Configuracoes() {
                   try { navigator.clipboard.writeText(publicLink); } catch {}
                 }}
               >
-                Copiar link publico
+                Copiar link pÃºblico
               </button>
             </div>
             <label className="label">
-              <span>Assunto do email de confirmacao</span>
+              <span>Assunto do email de confirmaÃ§Ã£o</span>
               <input className="input" value={msg.email_subject} onChange={(e) => setMsg((m) => ({ ...m, email_subject: e.target.value }))} />
             </label>
             <label className="label">
@@ -507,7 +656,7 @@ export default function Configuracoes() {
 
     list.push({
       id: 'notifications',
-      title: 'Notificacoes',
+      title: 'NotificaÃ§Ãµes',
       content: (
         <div className="grid" style={{ gap: 10 }}>
           <label className="config-toggle">
@@ -517,8 +666,8 @@ export default function Configuracoes() {
               onChange={() => handleTogglePref('notificationsEmail')}
             />
             <span>
-              <strong>Receber emails de confirmacao</strong>
-              <small>Envia emails de confirmacao e atualizacoes de agendamentos.</small>
+              <strong>Receber emails de confirmaÃ§Ã£o</strong>
+              <small>Envia emails de confirmaÃ§Ã£o e atualizacoes de agendamentos.</small>
             </span>
           </label>
           <label className="config-toggle">
@@ -542,7 +691,7 @@ export default function Configuracoes() {
       title: 'Ajuda',
       content: (
         <>
-          <p className="muted">Tire duvidas, veja perguntas frequentes e formas de contato.</p>
+          <p className="muted">Tire dÃºvidas, veja perguntas frequentes e formas de contato.</p>
           <div className="row" style={{ gap: 8, justifyContent: 'flex-end' }}>
             <Link className="btn btn--outline" to="/ajuda">Abrir Ajuda</Link>
           </div>
@@ -552,14 +701,15 @@ export default function Configuracoes() {
 
     return list;
   }, [
-    isEstab,      planInfo.plan,
-      planInfo.status,
-      planInfo.trialEnd,
-      planInfo.trialDaysLeft,
-      planInfo.trialWarn,
-      planInfo.allowAdvanced,
-      planInfo.activeUntil,
-      daysLeft,
+    isEstab,
+    planInfo.plan,
+    planInfo.status,
+    planInfo.trialEnd,
+    planInfo.trialDaysLeft,
+    planInfo.trialWarn,
+    planInfo.allowAdvanced,
+    planInfo.activeUntil,
+    daysLeft,
     fmtDate,
     publicLink,
     slug,
@@ -572,13 +722,19 @@ export default function Configuracoes() {
     profileStatus,
     prefs,
     notifStatus,
+    billing,
+    billingLoading,
+    checkoutLoading,
+    checkoutError,
+    startTrial,
+    handleCheckout,
   ]);
 
   return (
     <div className="grid" style={{ gap: 12 }}>
       <div className="card">
         <h2 style={{ marginTop: 0 }}>Configuracoes</h2>
-        <p className="muted" style={{ marginTop: 0 }}>Gerencie sua conta e preferencias.</p>
+        <p className="muted" style={{ marginTop: 0 }}>Gerencie sua conta e preferÃªncias.</p>
       </div>
 
       {sections.map(({ id, title, content }) => {
@@ -601,4 +757,9 @@ export default function Configuracoes() {
     </div>
   );
 }
+
+
+
+
+
 

@@ -522,6 +522,7 @@ a:hover { opacity: 1; text-decoration: underline; }
 .notice{padding:8px 10px;border-radius:var(--radius-sm);font-size:14px;}
 .notice--success{background:var(--success-bg);border:1px solid var(--success-border);color:var(--success-text);}
 .notice--error{background:var(--danger-bg);border:1px solid var(--danger-border);color:var(--danger-text);}
+.notice--warn{background:var(--warning-bg);border:1px solid var(--warning-border);color:var(--warning-text);}
 .config-toggle{display:flex;gap:10px;align-items:flex-start;}
 .config-toggle input{margin-top:4px;}
 .config-toggle span{display:flex;flex-direction:column;gap:2px;}

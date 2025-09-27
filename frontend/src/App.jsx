@@ -236,11 +236,11 @@ function Sidebar({ open, user }) {
                     <>
                       <NavLink to="/servicos" className={({ isActive }) => `sidelist__item${isActive ? ' active' : ''}`}>
                         <IconList className="sidelist__icon" aria-hidden="true" />
-                        <span>Servicos</span>
+                        <span>Serviços</span>
                       </NavLink>
                       <NavLink to="/relatorios" className={({ isActive }) => `sidelist__item${isActive ? ' active' : ''}`}>
                         <IconChart className="sidelist__icon" aria-hidden="true" />
-                        <span>Relatorios</span>
+                        <span>Relatórios</span>
                       </NavLink>
                     </>
                   )}
@@ -250,7 +250,7 @@ function Sidebar({ open, user }) {
                   <div className="sidelist__heading">Conta</div>
                   <NavLink to="/configuracoes" className={({ isActive }) => `sidelist__item${isActive ? ' active' : ''}`}>
                     <IconGear className="sidelist__icon" aria-hidden="true" />
-                    <span>Configuracoes</span>
+                    <span>Configurações</span>
                   </NavLink>
                   <button className="sidelist__item sidelist__item--danger" onClick={() => setLogoutOpen(true)}>
                     <IconLogout className="sidelist__icon" aria-hidden="true" />

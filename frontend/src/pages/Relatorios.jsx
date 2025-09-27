@@ -310,9 +310,9 @@ export default function Relatorios() {
     return (
       <div className="report-page">
         <div className="card report-card">
-          <h2 className="report-heading">Relatorios</h2>
+          <h2 className="report-heading">Relatórios</h2>
           <div className="box error report-alert">
-            Relatorios disponiveis apenas para estabelecimentos.
+            Relatórios disponíveis apenas para estabelecimentos.
           </div>
         </div>
       </div>
@@ -326,7 +326,7 @@ export default function Relatorios() {
         <div className="report-header">
           <div className="report-title">
             <IconChart aria-hidden className="report-title__icon" />
-            <h2 className="report-heading">Relatorios do estabelecimento</h2>
+            <h2 className="report-heading">Relatórios do estabelecimento</h2>
           </div>
           <div className="report-filters">
             <select
@@ -380,7 +380,7 @@ export default function Relatorios() {
               onChange={(event) => setServiceFilter(event.target.value)}
               disabled={loading || !serviceOptions.length}
             >
-              <option value="all">Todos os servicos</option>
+              <option value="all">Todos os serviços</option>
               {serviceOptions.map((svc) => (
                 <option key={svc.id} value={svc.id}>
                   {svc.nome || svc.title || svc.name}
@@ -426,7 +426,7 @@ export default function Relatorios() {
                   </div>
                 ))
               ) : (
-                <div className="empty report-empty">Nenhum dado disponivel para o periodo selecionado.</div>
+                <div className="empty report-empty">Nenhum dado disponível para o período selecionado.</div>
               )}
             </div>
 
@@ -447,7 +447,7 @@ export default function Relatorios() {
               </div>
 
               {!displayDaily.length ? (
-                <div className="empty">Nenhum agendamento no periodo selecionado.</div>
+                <div className="empty">Nenhum agendamento no período selecionado.</div>
               ) : (
                 <>
                   <div className="report-chart" role="img" aria-label="Comparativo diario de confirmados e cancelados">
@@ -508,7 +508,7 @@ export default function Relatorios() {
 
             <section className="report-section">
               <div className="report-section__header">
-                <h3>Servicos com mais agendamentos</h3>
+                <h3>Serviços com mais agendamentos</h3>
                 <div className="report-actions">
                   <button
                     type="button"
@@ -523,18 +523,18 @@ export default function Relatorios() {
               </div>
 
               {!services.length ? (
-                <div className="empty">Nenhum servico movimentou agendamentos no periodo.</div>
+                <div className="empty">Nenhum serviço movimentou agendamentos no período.</div>
               ) : (
                 <div className="report-table-wrapper">
                   <table className="report-table">
                     <thead>
                       <tr>
-                        <th>Servico</th>
+                        <th>Serviço</th>
                         <th>Total</th>
                         <th>Confirmados</th>
                         <th>Cancelados</th>
                         <th>Receita</th>
-                        <th>Ticket medio</th>
+                        <th>Ticket médio</th>
                       </tr>
                     </thead>
                     <tbody>

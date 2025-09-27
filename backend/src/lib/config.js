@@ -1,4 +1,4 @@
-// backend/src/config.js
+﻿// backend/src/config.js
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -13,17 +13,17 @@ else dotenv.config()
 
 function getAny(...names) {
   for (const n of names) {
-    let v = process.env[n]
-    if (v !== undefined && v !== null && String(v).trim() !== '') {
-      return String(v).trim() // remove espaços finais/acidentais
+    const value = process.env[n]
+    if (value !== undefined && value !== null && String(value).trim() !== '') {
+      return String(value).trim()
     }
   }
   return undefined
 }
 function requireAny(...names) {
-  const v = getAny(...names)
-  if (!v) throw new Error(`ENV ausente: ${names.join(' | ')}`)
-  return v
+  const value = getAny(...names)
+  if (!value) throw new Error('ENV ausente: ' + names.join(' | '))
+  return value
 }
 
 export const config = {
@@ -37,5 +37,21 @@ export const config = {
   app: {
     port: Number(getAny('PORT') || 3002),
     jwtSecret: requireAny('JWT_SECRET'),
-  }
+  },
+  billing: {
+    provider: getAny('BILLING_PROVIDER', 'PAYMENT_PROVIDER') || 'mercadopago',
+    currency: getAny('BILLING_CURRENCY') || 'BRL',
+    mercadopago: {
+      accessToken: getAny('MERCADOPAGO_ACCESS_TOKEN', 'MP_ACCESS_TOKEN'),
+      publicKey: getAny('MERCADOPAGO_PUBLIC_KEY', 'MP_PUBLIC_KEY'),
+      webhookSecret: getAny('MERCADOPAGO_WEBHOOK_SECRET', 'MP_WEBHOOK_SECRET'),
+      successUrl: getAny('MERCADOPAGO_SUCCESS_URL') || null,
+      failureUrl: getAny('MERCADOPAGO_FAILURE_URL') || null,
+      pendingUrl: getAny('MERCADOPAGO_PENDING_URL') || null,
+      testPayerEmail: getAny('MERCADOPAGO_TEST_PAYER_EMAIL'),
+    },
+  },
 }
+
+export const env = { getAny, requireAny }
+

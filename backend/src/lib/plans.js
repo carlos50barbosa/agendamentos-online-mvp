@@ -2,7 +2,7 @@
 import { pool } from './db.js';
 
 export const PLAN_TIERS = ['starter', 'pro', 'premium'];
-export const PLAN_STATUS = ['trialing', 'active', 'delinquent'];
+export const PLAN_STATUS = ['trialing', 'active', 'delinquent', 'pending', 'canceled', 'expired'];
 
 const LIMIT_UNLIMITED = null;
 
@@ -10,6 +10,7 @@ const PLAN_CONFIG = {
   starter: {
     code: 'starter',
     label: 'Starter',
+    priceCents: 4900,
     maxServices: 10,
     maxProfessionals: 2,
     allowWhatsApp: true,
@@ -18,6 +19,7 @@ const PLAN_CONFIG = {
   pro: {
     code: 'pro',
     label: 'Pro',
+    priceCents: 9900,
     maxServices: 100,
     maxProfessionals: 10,
     allowWhatsApp: true,
@@ -26,6 +28,7 @@ const PLAN_CONFIG = {
   premium: {
     code: 'premium',
     label: 'Premium',
+    priceCents: 19900,
     maxServices: LIMIT_UNLIMITED,
     maxProfessionals: LIMIT_UNLIMITED,
     allowWhatsApp: true,
@@ -147,4 +150,13 @@ export function serializePlanContext(context) {
     active_until: activeUntil ? activeUntil.toISOString() : null,
     subscription_id: subscriptionId,
   };
+}
+
+
+export function getPlanPriceCents(plan) {
+  return resolvePlanConfig(plan).priceCents;
+}
+
+export function getPlanLabel(plan) {
+  return resolvePlanConfig(plan).label;
 }

@@ -13,6 +13,7 @@ import notificationsRouter from './routes/notifications.js'; // opcional
 import notifyRouter from './routes/notify.js'; // rota de teste de notificações
 import adminRouter from './routes/admin.js';
 import relatoriosRouter from './routes/relatorios.js';
+import billingRouter from './routes/billing.js';
 import waWebhookRouter from './routes/whatsapp_webhook.js';
 import publicAgendamentosRouter from './routes/agendamentos_public.js';
 import otpPublicRouter from './routes/otp_public.js';
@@ -60,6 +61,7 @@ app.use('/public/otp', otpPublicRouter);
 app.use('/public/agendamentos', publicAgendamentosRouter);
 app.use('/admin', adminRouter);
 app.use('/relatorios', relatoriosRouter);
+app.use('/billing', billingRouter);
 app.use('/webhooks/whatsapp', waWebhookRouter);
 
 // Aliases “/api/*” (seu Nginx usa /api)
@@ -75,6 +77,7 @@ app.use('/api/public/otp', otpPublicRouter);
 app.use('/api/public/agendamentos', publicAgendamentosRouter);
 app.use('/api/admin', adminRouter);
 app.use('/api/relatorios', relatoriosRouter);
+app.use('/api/billing', billingRouter);
 app.use('/api/webhooks/whatsapp', waWebhookRouter);
 
 // Middleware final de erro
@@ -92,5 +95,7 @@ app.listen(PORT, HOST, () => {
 
 // Tarefas de manutenção periódicas (limpeza de tokens expirados, etc.)
 startMaintenance(pool);
+
+
 
 

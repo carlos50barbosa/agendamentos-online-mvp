@@ -244,11 +244,11 @@ export default function ServicosEstabelecimento() {
 
       {/* Novo Servico */}
       <div className="card">
-        <h2 style={{ marginBottom: 12 }}>Novo Servico</h2>
+        <h2 style={{ marginBottom: 12 }}>Novo Serviço</h2>
         <form onSubmit={add} className="row" style={{ gap: 8, flexWrap: "wrap" }}>
           <input
             className="input"
-            placeholder="Nome do servico"
+            placeholder="Nome do serviço"
             value={form.nome}
             onChange={(e) => setForm((f) => ({ ...f, nome: e.target.value }))}
             maxLength={80}
@@ -295,7 +295,7 @@ export default function ServicosEstabelecimento() {
         {/* Dica de validacao */}
         {formInvalid && (
           <small className="muted">
-            Preencha nome, selecione duracao e informe um preco maior que zero.
+            Preencha nome, selecione duracao e informe um preço maior que zero.
           </small>
         )}
       </div>
@@ -312,7 +312,7 @@ export default function ServicosEstabelecimento() {
             marginBottom: 12,
           }}
         >
-          <h2>Meus Servicos</h2>
+          <h2>Meus Serviços</h2>
           <div className="filters" style={{ display: "flex", gap: 8 }}>
             <input
               className="input"
@@ -336,8 +336,8 @@ export default function ServicosEstabelecimento() {
           <SkeletonTable />
         ) : filtered.length === 0 ? (
           <div className="empty">
-            <p>Nenhum servico encontrado.</p>
-            <small>Dica: ajuste a busca ou cadastre um novo servico acima.</small>
+            <p>Nenhum serviço encontrado.</p>
+            <small>Dica: ajuste a busca ou cadastre um novo serviço acima.</small>
           </div>
         ) : (
           <>
@@ -349,10 +349,10 @@ export default function ServicosEstabelecimento() {
               <thead>
                 <tr>
                   <th>Nome</th>
-                  <th>Duracao</th>
-                  <th>Preco</th>
+                  <th>Duração</th>
+                  <th>Preço</th>
                   <th className="service-status__header">Status</th>
-                  <th className="service-actions__header">Acoes</th>
+                  <th className="service-actions__header">Ações</th>
                 </tr>
               </thead>
               <tbody>

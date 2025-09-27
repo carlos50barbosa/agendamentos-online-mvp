@@ -36,7 +36,10 @@ export async function auth(req, res, next) {
       estado: row.estado || null,
       tipo: row.tipo || 'cliente',
       plan: row.plan || 'starter',
+      plan_status: row.plan_status || 'trialing',
       plan_trial_ends_at: row.plan_trial_ends_at ? new Date(row.plan_trial_ends_at).toISOString() : null,
+      plan_active_until: row.plan_active_until ? new Date(row.plan_active_until).toISOString() : null,
+      plan_subscription_id: row.plan_subscription_id || null,
     };
 
     next();

@@ -4,7 +4,8 @@
   "type": "module",
   "scripts": {
     "dev": "node src/index.js",
-    "start": "node src/index.js"
+    "start": "node src/index.js",
+    "test:plan": "node scripts/test-plan-flows.mjs"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
@@ -12,6 +13,7 @@
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
     "jsonwebtoken": "^9.0.2",
+    "mercadopago": "^2.9.0",
     "morgan": "^1.10.1",
     "mysql2": "^3.11.0",
     "node-fetch": "^3.3.2",

@@ -97,7 +97,7 @@ const DateHelpers = {
     const fmt = new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "short" });
     const s1 = fmt.format(start);
     const s2 = fmt.format(end);
-    return `${s1} â€“ ${s2}`.replace(/\./g, "");
+    return `${s1} • ${s2}`.replace(/\./g, "");
   },
   formatTime: (datetime) => {
     const dt = new Date(datetime);
@@ -134,7 +134,7 @@ const ServiceHelpers = {
     (Number(centavos || 0) / 100).toLocaleString("pt-BR", { style: "currency", currency: "BRL" }),
 };
 
-/* =================== Janela 07â€“22 =================== */
+/* =================== Janela 07•22 =================== */
 const BUSINESS_HOURS = { start: 7, end: 22 };
 const inBusinessHours = (isoDatetime) => {
   const d = new Date(isoDatetime);
@@ -145,7 +145,7 @@ const inBusinessHours = (isoDatetime) => {
   return afterStart && beforeEnd;
 };
 
-/* =================== Grade 07â€“22 =================== */
+/* =================== Grade 07•22 =================== */
 const pad2 = (n) => String(n).padStart(2, "0");
 const localKey = (dateish) => {
   const d = new Date(dateish);
@@ -188,7 +188,7 @@ function fillBusinessGrid({ currentWeek, slots, stepMinutes = 30 }) {
       const k = localKey(t);
       const existing = byKey.get(k);
       filled.push(
-        existing || { datetime: new Date(t).toISOString(), label: "disponÃ­vel", status: "available" }
+        existing || { datetime: new Date(t).toISOString(), label: "disponível", status: "available" }
       );
     }
   }
@@ -228,7 +228,7 @@ const Modal = ({ children, onClose }) => (
 const Toast = ({ type, message, onDismiss }) => (
   <div className={`toast ${type}`} role="status" aria-live="polite">
     <div className="toast-content">
-      <span className="toast-icon">{type === "success" ? "âœ“" : type === "error" ? "âœ•" : "â„¹"}</span>
+      <span className="toast-icon">{type === "success" ? "✔" : type === "error" ? "✘" : "ℹ"}</span>
       {message}
     </div>
     <button className="toast-close" onClick={onDismiss} aria-label="Fechar">
@@ -247,7 +247,7 @@ const DensityToggle = ({ value, onChange }) => (
   <div className="segmented" role="tablist" aria-label="Densidade">
     {[
       { value: "compact", label: "Compacto" },
-      { value: "comfortable", label: "ConfortÃ¡vel" },
+      { value: "comfortable", label: "Confortável" },
     ].map((opt) => (
       <button
         key={opt.value}
@@ -268,7 +268,7 @@ const SlotButton = ({ slot, isSelected, onClick, density = "compact" }) => {
 
   const statusClass = slotStatusClass(slot.label);
   const disabledReason = isPast || !isAvailableLabel(slot.label);
-  const tooltipLabel = slot?.label ?? 'disponÃ­vel';
+  const tooltipLabel = slot?.label ?? 'disponí­vel';
 
   const className = [
     "slot-btn",
@@ -346,7 +346,7 @@ export default function NovoAgendamento() {
     selectedSlot: null,
     filters: { onlyAvailable: false, hidePast: true, timeRange: "all" }, // all|morning|afternoon|evening
     density: "compact",
-    forceBusy: [], // overlay para casos que o backend nÃ£o devolve ainda
+    forceBusy: [], // overlay para casos que o backend Não devolve ainda
   });
   const [estQuery, setEstQuery] = useState("");
   const [searchParams, setSearchParams] = useSearchParams();
@@ -373,7 +373,7 @@ export default function NovoAgendamento() {
 
   const [modal, setModal] = useState({ isOpen: false, isSaving: false });
   const [toast, setToast] = useState(null);
-  const [viewMode] = useState('month'); // por ora, mÃªs Ã© o padrÃ£o
+  const [viewMode] = useState('month'); // por ora, Mês Ã© o padrÃ£o
   const [monthStart, setMonthStart] = useState(() => DateHelpers.firstOfMonthISO(new Date()));
   const [selectedDate, setSelectedDate] = useState(null); // YYYY-MM-DD
 
@@ -455,7 +455,7 @@ export default function NovoAgendamento() {
       }
       showToast('info', 'Link copiado para a Ã¡rea de transferÃªncia.');
     }catch{
-      showToast('error', 'NÃ£o foi possÃ­vel copiar o link.');
+      showToast('error', 'Não foi possÃ­vel copiar o link.');
     }
   }, [searchParams, estQuery, establishmentId, serviceId, currentWeek, showToast]);
 
@@ -469,7 +469,7 @@ export default function NovoAgendamento() {
           establishments: list || [],
         }));
       } catch {
-        showToast("error", "NÃ£o foi possÃ­vel carregar estabelecimentos.");
+        showToast("error", "Não foi possÃ­vel carregar estabelecimentos.");
       }
     })();
   }, [showToast]);
@@ -517,7 +517,7 @@ export default function NovoAgendamento() {
         }catch{}
       } catch {
         setState((p) => ({ ...p, services: [], serviceId: "", slots: [], selectedSlot: null }));
-        showToast("error", "NÃ£o foi possÃ­vel carregar os serviÃ§os.");
+        showToast("error", "Não foi possÃ­vel carregar os serviÃ§os.");
       }
     })();
   }, [establishmentId, showToast, searchParams, setSearchParams]);
@@ -533,7 +533,7 @@ export default function NovoAgendamento() {
           ? "agendado"
           : raw.includes("unavail") || raw.includes("block") || raw.includes("bloq")
           ? "bloqueado"
-          : "disponÃ­vel";
+          : "disponí­vel";
       if ((["agendado", "bloqueado"].includes(normalizeSlotLabel(slot.label)) || isAvailableLabel(slot.label))) {
         label = String(slot.label).toLowerCase();
       }
@@ -557,7 +557,7 @@ export default function NovoAgendamento() {
         });
       }
     } catch (e) {
-      // silencioso; nÃ£o deve quebrar UI por causa de falha de leitura
+      // silencioso; Não deve quebrar UI por causa de falha de leitura
     }
 
     // agendamentos do estabelecimento
@@ -581,9 +581,9 @@ export default function NovoAgendamento() {
         });
       }
     } catch (e) {
-      // se for 403 (Forbidden), ignorar â€” rota Ã© restrita a estabelecimento
+      // se for 403 (Forbidden), ignorar • rota Ã© restrita a estabelecimento
       if (!String(e?.message || '').includes('HTTP 403')) {
-        // outros erros tambÃ©m nÃ£o devem quebrar a UI
+        // outros erros tambÃ©m Não devem quebrar a UI
       }
     }
 
@@ -634,7 +634,7 @@ export default function NovoAgendamento() {
         try { localStorage.setItem(fbKey(establishmentId, currentWeek), JSON.stringify(cleaned)); } catch {}
 
         const firstAvailable = overlayed.find(
-          (s) => s.label === "disponÃ­vel" && !DateHelpers.isPastSlot(s.datetime) && inBusinessHours(s.datetime)
+          (s) => s.label === "disponí­vel" && !DateHelpers.isPastSlot(s.datetime) && inBusinessHours(s.datetime)
         );
 
         return {
@@ -651,7 +651,7 @@ export default function NovoAgendamento() {
         slots: [],
         selectedSlot: null,
         loading: false,
-        error: "NÃ£o foi possÃ­vel carregar os horÃ¡rios.",
+        error: "Não foi possível carregar os horários.",
       }));
     }
   }, [establishmentId, serviceId, currentWeek, normalizeSlots, stepMinutes, getBusyFromAppointments]);
@@ -710,7 +710,7 @@ export default function NovoAgendamento() {
   useEffect(() => {
     if (!selectedSlot || !liveRef.current) return;
     const dt = new Date(selectedSlot.datetime);
-    liveRef.current.textContent = `Selecionado ${dt.toLocaleDateString("pt-BR")} Ã s ${DateHelpers.formatTime(
+    liveRef.current.textContent = `Selecionado ${dt.toLocaleDateString("pt-BR")} às ${DateHelpers.formatTime(
       selectedSlot.datetime
     )}`;
   }, [selectedSlot]);
@@ -720,7 +720,7 @@ export default function NovoAgendamento() {
   const scheduleWhatsAppReminders = useCallback(
     async ({ inicioISO, servicoNome, estabelecimentoNome }) => {
       if (!FRONT_SCHEDULE_WHATSAPP) {
-        showToast("success", "Agendado com sucesso! Os lembretes serÃ£o enviados automaticamente.");
+        showToast("success", "Agendado com sucesso! Os lembretes serão enviados automaticamente.");
         return;
       }
       const toPhone =
@@ -740,7 +740,7 @@ export default function NovoAgendamento() {
       if (reminderTime.getTime() > now)
         tasks.push(Api.scheduleWhatsApp?.({ to: toPhone, scheduledAt: reminderTime.toISOString(), message: msgReminder, metadata: { kind: "reminder_8h", appointmentAt: start.toISOString() } }));
       if (!tasks.length) {
-        showToast("info", "Agendado! Sem lembrete porque o horÃ¡rio estÃ¡ muito prÃ³ximo.");
+        showToast("info", "Agendado! Sem lembrete porque o horário está¡ muito próximo.");
         return;
       }
       const results = await Promise.allSettled(tasks);
@@ -793,11 +793,11 @@ export default function NovoAgendamento() {
     if (!selectedSlot || !serviceId || !selectedService) return;
 
     if (DateHelpers.isPastSlot(selectedSlot.datetime)) {
-      showToast("error", "NÃ£o Ã© possÃ­vel agendar no passado.");
+      showToast("error", "Não foi possível agendar no passado.");
       return;
     }
     if (!inBusinessHours(selectedSlot.datetime)) {
-      showToast("error", "Este horÃ¡rio estÃ¡ fora do perÃ­odo de 07:00â€“22:00.");
+      showToast("error", "Este horário está fora do perí­odo de 07:00•22:00.");
       return;
     }
 
@@ -830,7 +830,7 @@ export default function NovoAgendamento() {
         if (meu) {
           success = true;
           setModal((p) => ({ ...p, isOpen: false }));
-          showToast("success", "Seu agendamento jÃ¡ existia e foi confirmado.");
+          showToast("success", "Seu agendamento já existia e foi confirmado.");
           // persiste overlay para sobreviver ao reload
           {
             const key = `fb:${establishmentId}:${currentWeek}`;
@@ -841,10 +841,10 @@ export default function NovoAgendamento() {
             });
           }
         } else {
-          showToast("error", "Este horÃ¡rio acabou de ficar indisponÃ­vel. Escolha outro.");
+          showToast("error", "Este horário acabou de ficar indisponí­vel. Escolha outro.");
         }
       } else if (Number(code) === 500) {
-        // Se criou (meu) OU o slot ficou indisponÃ­vel por qualquer fonte, tratamos como sucesso.
+        // Se criou (meu) OU o slot ficou indisponí­vel por qualquer fonte, tratamos como sucesso.
         if (slotIndisponivel || meu) {
           success = true;
           setModal((p) => ({ ...p, isOpen: false }));
@@ -948,14 +948,14 @@ export default function NovoAgendamento() {
   const isOwner = user?.tipo === "estabelecimento";
   const step = !establishmentId && !isOwner ? 1 : !serviceId ? 2 : 3;
 
-  // Ao clicar num dia do mÃªs, define a semana correspondente e marca o dia
+  // Ao clicar num dia do Mês, define a semana correspondente e marca o dia
   const handlePickDay = useCallback((isoDay) => {
     setSelectedDate(isoDay);
     const wk = DateHelpers.weekStartISO(isoDay);
     if (wk !== currentWeek) setState((p) => ({ ...p, currentWeek: wk }));
   }, [currentWeek]);
 
-  // Quando o mÃªs visÃ­vel contÃ©m hoje, prÃ©-seleciona o dia atual se nada estiver selecionado
+  // Quando o Mês visÃ­vel contÃ©m hoje, prÃ©-seleciona o dia atual se nada estiver selecionado
   useEffect(() => {
     const todayIso = DateHelpers.toISODate(new Date());
     if (DateHelpers.isSameMonth(todayIso, monthStart)) {
@@ -982,17 +982,17 @@ export default function NovoAgendamento() {
                 aria-label="Semana anterior"
                 onClick={() => handleWeekChange(DateHelpers.addWeeksISO(currentWeek, -1))}
               >
-                â—€
+                ⬅️
               </button>
-              <small className="muted" title={`Fuso: ${TZ} â€¢ Janela: 07:00â€“22:00`}>
+              <small className="muted" title={`Fuso: ${TZ} • Janela: 07:00-22:00`}>
                 Semana: {weekLabel}
               </small>
               <button
                 className="btn btn--sm"
-                aria-label="PrÃ³xima semana"
+                aria-label="Próxima semana"
                 onClick={() => handleWeekChange(DateHelpers.addWeeksISO(currentWeek, 1))}
               >
-                â–¶
+                ➡️
               </button>
             </div>
           </div>
@@ -1004,7 +1004,7 @@ export default function NovoAgendamento() {
           </div>
         </div>
 
-        {/* Passo 1 â€” Estabelecimento */}
+        {/* Passo 1 • Estabelecimento */}
         {step === 1 && (
           <>
             <p className="muted" style={{ marginTop: 0 }}>Escolha um estabelecimento:</p>
@@ -1012,7 +1012,7 @@ export default function NovoAgendamento() {
               <input
                 className="input"
                 type="search"
-                placeholder="Buscar estabelecimentoâ€¦"
+                placeholder="Buscar estabelecimento"
                 value={estQuery}
                 onChange={(e) => {
                   const v = e.target.value;
@@ -1041,12 +1041,12 @@ export default function NovoAgendamento() {
           </>
         )}
 
-        {/* Passo 2 â€” ServiÃ§o */}
+        {/* Passo 2 • Serviço */}
         {step === 2 && (
           <>
             <div className="row spread" style={{ alignItems: "center" }}>
               <div className="muted">
-                <b>Estabelecimento:</b> {selectedEstablishment?.name || "â€”"}
+                <b>Estabelecimento:</b> {selectedEstablishment?.name || "•"}
               </div>
               <button
                 className="btn btn--outline btn--sm"
@@ -1063,10 +1063,10 @@ export default function NovoAgendamento() {
                 Trocar
               </button>
             </div>
-            <p className="muted" style={{ marginTop: 8 }}>Escolha um serviÃ§o:</p>
+            <p className="muted" style={{ marginTop: 8 }}>Escolha um serviços:</p>
             <div className="row-wrap">
               {services.length === 0 ? (
-                <div className="empty small">Sem serviÃ§os cadastrados.</div>
+                <div className="empty small">Sem serviços cadastrados.</div>
               ) : (
                 services.map((s) => (
                   <ServiceCard
@@ -1081,24 +1081,24 @@ export default function NovoAgendamento() {
           </>
         )}
 
-        {/* Passo 3 â€” CalendÃ¡rio mensal e horÃ¡rios do dia */}
+        {/* Passo 3 • Calendário mensal e horários do dia */}
         {step === 3 && (
           <>
             <div className="row spread" style={{ alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 6 }}>
               <div className="row" style={{ gap: 8, alignItems: "center" }}>
                 <span className="muted"><b>Estabelecimento:</b> {selectedEstablishment?.name}</span>
-                <span className="muted">â€¢</span>
+                <span className="muted">─</span>
                 <span className="muted">
-                  <b>ServiÃ§o:</b> {ServiceHelpers.title(selectedService)}
-                  {serviceDuration ? ` â€¢ ${serviceDuration} min` : ""}
-                  {servicePrice !== "R$\u00A00,00" ? ` â€¢ ${servicePrice}` : ""}
+                  <b>serviço:</b> {ServiceHelpers.title(selectedService)}
+                  {serviceDuration ? ` ─ ${serviceDuration} min` : ""}
+                  {servicePrice !== "R$\u00A00,00" ? ` ─ ${servicePrice}` : ""}
                 </span>
               </div>
               <details className="filters" style={{ marginLeft: "auto" }}>
                 <summary>Filtros</summary>
                 <div className="filters__content">
                   <label className="label">
-                    <span>InÃ­cio da semana</span>
+                    <span>Início da semana</span>
                     <input
                       type="date"
                       value={currentWeek}
@@ -1110,7 +1110,7 @@ export default function NovoAgendamento() {
                   <div className="row" style={{ alignItems: "center", gap: 10 }}>
                     <label className="switch">
                       <input type="checkbox" checked={filters.onlyAvailable} onChange={() => handleFilterToggle("onlyAvailable")} />
-                      <span>Somente disponÃ­veis</span>
+                      <span>Somente disponí­veis</span>
                     </label>
                     <label className="switch">
                       <input type="checkbox" checked={filters.hidePast} onChange={() => handleFilterToggle("hidePast")} />
@@ -1119,11 +1119,11 @@ export default function NovoAgendamento() {
                   </div>
                   <div className="row" style={{ gap: 6, flexWrap: "wrap", marginTop: 6 }} role="group" aria-label="PerÃ­odo do dia">
                     <Chip active={filters.timeRange === "all"} onClick={() => handleTimeRange("all")} title="Todos os horÃ¡rios">Todos</Chip>
-                    <Chip active={filters.timeRange === "morning"} onClick={() => handleTimeRange("morning")} title="ManhÃ£ (07â€“12)">ManhÃ£</Chip>
-                    <Chip active={filters.timeRange === "afternoon"} onClick={() => handleTimeRange("afternoon")} title="Tarde (12â€“18)">Tarde</Chip>
-                    <Chip active={filters.timeRange === "evening"} onClick={() => handleTimeRange("evening")} title="Noite (18â€“22)">Noite</Chip>
+                    <Chip active={filters.timeRange === "morning"} onClick={() => handleTimeRange("morning")} title="Manhã (07•12)">Manhã</Chip>
+                    <Chip active={filters.timeRange === "afternoon"} onClick={() => handleTimeRange("afternoon")} title="Tarde (12•18)">Tarde</Chip>
+                    <Chip active={filters.timeRange === "evening"} onClick={() => handleTimeRange("evening")} title="Noite (18•22)">Noite</Chip>
                   </div>
-                </div>
+                </div>  
               </details>
             </div>
 
@@ -1131,9 +1131,9 @@ export default function NovoAgendamento() {
             <div className="month card" style={{ padding: 8, marginBottom: 8 }}>
               <div className="row spread" style={{ alignItems: 'center', marginBottom: 6 }}>
                 <div className="row" style={{ gap: 6, alignItems: 'center' }}>
-                  <button className="btn btn--sm" aria-label="MÃªs anterior" onClick={() => setMonthStart(DateHelpers.firstOfMonthISO(DateHelpers.addMonths(monthStart, -1)))}>â—€</button>
+                  <button className="btn btn--sm" aria-label="Mês anterior" onClick={() => setMonthStart(DateHelpers.firstOfMonthISO(DateHelpers.addMonths(monthStart, -1)))}>⬅️</button>
                   <strong>{new Date(monthStart + 'T00:00:00').toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })}</strong>
-                  <button className="btn btn--sm" aria-label="PrÃ³ximo mÃªs" onClick={() => setMonthStart(DateHelpers.firstOfMonthISO(DateHelpers.addMonths(monthStart, 1)))}>â–¶</button>
+                  <button className="btn btn--sm" aria-label="PrÃ³ximo Mês" onClick={() => setMonthStart(DateHelpers.firstOfMonthISO(DateHelpers.addMonths(monthStart, 1)))}>➡️</button>
                 </div>
                 <button
                   className="btn btn--outline btn--sm"
@@ -1184,7 +1184,7 @@ export default function NovoAgendamento() {
               <div className="box box--highlight sticky-bar" aria-live="polite" id="resumo-agendamento">
                 <div className="appointment-summary">
                   <strong>{DateHelpers.formatDateFull(selectedSlot.datetime)}</strong>
-                  <span> â€¢ {DateHelpers.formatTime(selectedSlot.datetime)}{endTimeLabel ? ` â€“ ${endTimeLabel}` : ""}</span>
+                  <span> ─ {DateHelpers.formatTime(selectedSlot.datetime)}{endTimeLabel ? ` • ${endTimeLabel}` : ""}</span>
                 </div>
                 <div className="row" style={{ gap: 6, marginLeft: "auto" }}>
                   <button className="btn btn--outline btn--sm" onClick={() => setState((p) => ({ ...p, selectedSlot: null }))}>Limpar</button>
@@ -1204,7 +1204,7 @@ export default function NovoAgendamento() {
                   {loading ? (
                     Array.from({ length: 8 }).map((_, i) => <div key={i} className="shimmer pill" />)
                   ) : ((groupedSlots.grouped[selectedDate] || []).filter(isSlotVisible)).length === 0 ? (
-                    <div className="empty">Sem horÃ¡rios para este dia.</div>
+                    <div className="empty">Sem horários para este dia.</div>
                   ) : (
                     groupedSlots.grouped[selectedDate].filter(isSlotVisible).map((slot) => (
                       <SlotButton
@@ -1218,14 +1218,14 @@ export default function NovoAgendamento() {
                   )}
                 </div>
               ) : (
-                <div className="empty">Escolha uma data no calendÃ¡rio acima.</div>
+                <div className="empty">Escolha uma data no calendário acima.</div>
               )}
             </div>
 
             {/* RodapÃ© aÃ§Ãµes */}
             <div className="row" style={{ marginTop: 8, justifyContent: "flex-end", gap: 6 }}>
               <button className="btn" onClick={() => setState((p) => ({ ...p, selectedSlot: null }))} disabled={!selectedSlot}>
-                Limpar seleÃ§Ã£o
+                Limpar seleção
               </button>
               <button
                 className="btn btn--primary"
@@ -1250,16 +1250,16 @@ export default function NovoAgendamento() {
           <h3>Confirmar agendamento?</h3>
           <div className="confirmation-details">
             <div className="confirmation-details__item"><span className="confirmation-details__label">Estabelecimento:</span><span className="confirmation-details__value">{selectedEstablishment?.name}</span></div>
-            <div className="confirmation-details__item"><span className="confirmation-details__label">ServiÃ§o:</span><span className="confirmation-details__value">{ServiceHelpers.title(selectedService)}</span></div>
+            <div className="confirmation-details__item"><span className="confirmation-details__label">Serviço:</span><span className="confirmation-details__value">{ServiceHelpers.title(selectedService)}</span></div>
             {serviceDuration > 0 && (
-              <div className="confirmation-details__item"><span className="confirmation-details__label">DuraÃ§Ã£o:</span><span className="confirmation-details__value">{serviceDuration} minutos</span></div>
+              <div className="confirmation-details__item"><span className="confirmation-details__label">Duração:</span><span className="confirmation-details__value">{serviceDuration} minutos</span></div>
             )}
             {servicePrice !== "R$\u00A00,00" && (
-              <div className="confirmation-details__item"><span className="confirmation-details__label">PreÃ§o:</span><span className="confirmation-details__value">{servicePrice}</span></div>
+              <div className="confirmation-details__item"><span className="confirmation-details__label">Preço:</span><span className="confirmation-details__value">{servicePrice}</span></div>
             )}
             <div className="confirmation-details__item"><span className="confirmation-details__label">Data:</span><span className="confirmation-details__value">{DateHelpers.formatDateFull(selectedSlot.datetime)}</span></div>
-            <div className="confirmation-details__item"><span className="confirmation-details__label">HorÃ¡rio:</span><span className="confirmation-details__value">
-              {DateHelpers.formatTime(selectedSlot.datetime)}{endTimeLabel ? ` â€“ ${endTimeLabel}` : ""}
+            <div className="confirmation-details__item"><span className="confirmation-details__label">Horário:</span><span className="confirmation-details__value">
+              {DateHelpers.formatTime(selectedSlot.datetime)}{endTimeLabel ? ` • ${endTimeLabel}` : ""}
             </span></div>
           </div>
           <div className="row" style={{ justifyContent: "flex-end", gap: 6, marginTop: 8 }}>

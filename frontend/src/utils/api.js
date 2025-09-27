@@ -1,10 +1,10 @@
-// src/utils/api.js
+﻿// src/utils/api.js
 import { getToken, logout } from './auth';
 
 // Base robusta:
-// 1) Usa VITE_API_URL (produção recomendada)
+// 1) Usa VITE_API_URL (produÃ§Ã£o recomendada)
 // 2) Em dev, cai para http://localhost:3002
-// 3) Em produção sem VITE_API_URL, usa o mesmo domínio do front (window.location.origin)
+// 3) Em produÃ§Ã£o sem VITE_API_URL, usa o mesmo domÃ­nio do front (window.location.origin)
 const BASE = (
   import.meta.env.VITE_API_URL ||
   (import.meta.env.DEV ? 'http://localhost:3002' : window.location.origin)
@@ -25,7 +25,7 @@ function toQuery(params = {}) {
 async function req(path, opt = {}) {
   const token = getToken();
 
-  // extra (não vai para fetch): idempotencyKey
+  // extra (nÃ£o vai para fetch): idempotencyKey
   const { idempotencyKey, ...fetchOpt } = opt;
 
   const headers = {
@@ -33,7 +33,7 @@ async function req(path, opt = {}) {
     ...(fetchOpt.headers || {}),
   };
 
-  // Evita enviar "Bearer null" nos endpoints públicos (/auth/login, /auth/register)
+  // Evita enviar "Bearer null" nos endpoints pÃºblicos (/auth/login, /auth/register)
   const isPublicAuth = /^\/?auth\/(login|register)/i.test(path);
   if (token && !isPublicAuth) {
     headers.Authorization = `Bearer ${token}`;
@@ -59,12 +59,12 @@ async function req(path, opt = {}) {
     if (isJson) data = await res.json();
     else text = await res.text();
   } catch {
-    // corpo vazio/invalid — segue com null/texto vazio
+    // corpo vazio/invalid â€” segue com null/texto vazio
   }
 
   if (!res.ok) {
     const detail =
-      (data && (data.error || data.message)) ||
+      (data && (data.message || data.error)) ||
       text ||
       '';
     const err = new Error(detail ? `${detail}` : `HTTP ${res.status}`);
@@ -73,16 +73,16 @@ async function req(path, opt = {}) {
     err.text = text;
     err.url = join(BASE, path);
 
-    // Se o token expirou (ou outro 401), limpa sessão e redireciona para login
+    // Se o token expirou (ou outro 401), limpa sessÃ£o e redireciona para login
     const tokenStillPresent = !!token;
     const isAuthRoute = isPublicAuth;
     if (res.status === 401 && tokenStillPresent && !isAuthRoute) {
       try { logout(); } catch {}
       try {
-        const msg = (data && (data.message || data.error)) || 'Sua sessão expirou. Faça login novamente.';
+        const msg = (data && (data.message || data.error)) || 'Sua sessÃ£o expirou. FaÃ§a login novamente.';
         localStorage.setItem('session_message', String(msg).toLowerCase().includes('expir')
-          ? 'Sua sessão expirou. Faça login novamente.'
-          : 'Seu acesso não é mais válido. Faça login novamente.');
+          ? 'Sua sessÃ£o expirou. FaÃ§a login novamente.'
+          : 'Seu acesso nÃ£o Ã© mais vÃ¡lido. FaÃ§a login novamente.');
       } catch {}
       if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/login')) {
         window.location.assign('/login');
@@ -105,7 +105,7 @@ export const Api = {
   resetPassword: (token, senha) => req('/auth/reset', { method: 'POST', body: JSON.stringify({ token, senha }) }),
   linkPhone: (token) => req('/auth/link-phone', { method: 'POST', body: JSON.stringify({ token }) }),
 
-  // Estabelecimentos + Serviços (NOVOS)
+  // Estabelecimentos + ServiÃ§os (NOVOS)
   listEstablishments: () => req('/establishments'),
   getEstablishment: (idOrSlug) => req(`/establishments/${idOrSlug}`),
   getEstablishmentMessages: (id) => req(`/establishments/${id}/messages`),
@@ -114,14 +114,19 @@ export const Api = {
   updateEstablishmentPlan: (id, payload) => req(`/establishments/${id}/plan`, { method: 'PUT', body: JSON.stringify(payload) }),
   listServices: (establishmentId) => req(`/servicos${toQuery({ establishmentId })}`),
 
-  // Serviços (rotas existentes)
+  // Billing (assinaturas Mercado Pago)
+  billingCreateCheckout: (payload) =>
+    req('/billing/checkout-session', { method: 'POST', body: JSON.stringify(payload) }),
+  billingSubscription: () => req('/billing/subscription'),
+
+  // ServiÃ§os (rotas existentes)
   servicosList: () => req('/servicos'),
   servicosCreate: (payload) => req('/servicos', { method: 'POST', body: JSON.stringify(payload) }),
   servicosUpdate: (id, payload) => req(`/servicos/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
   servicosDelete: (id) => req(`/servicos/${id}`, { method: 'DELETE' }),
 
   // Slots
-  // Obs.: includeBusy é opcional; se o backend suportar, retorna também ocupados/bloqueados.
+  // Obs.: includeBusy Ã© opcional; se o backend suportar, retorna tambÃ©m ocupados/bloqueados.
   getSlots: (establishmentId, weekStart, { includeBusy } = {}) =>
     req(`/slots${toQuery({ establishmentId, weekStart, includeBusy: includeBusy ? 1 : undefined })}`),
 
@@ -139,21 +144,21 @@ export const Api = {
   agendamentosEstabelecimento: (status) => req(`/agendamentos/estabelecimento${toQuery({ status })}`),
   cancelarAgendamento: (id) => req(`/agendamentos/${id}/cancel`, { method: 'PUT' }),
 
-  // Notificações (NOVO)
+  // NotificaÃ§Ãµes (NOVO)
   scheduleWhatsApp: (payload) =>
     req('/notifications/whatsapp/schedule', {
       method: 'POST',
       body: JSON.stringify(payload),
     }),
 
-  // Admin (manutenção)
+  // Admin (manutenÃ§Ã£o)
   adminCleanup: (adminToken) =>
     req('/admin/cleanup', {
       method: 'POST',
       headers: { 'X-Admin-Token': String(adminToken || '') },
     }),
 
-  // Público (sem login)
+  // PÃºblico (sem login)
   publicAgendar: (payload, opts = {}) =>
     req('/public/agendamentos', {
       method: 'POST',
@@ -206,8 +211,9 @@ export const Api = {
   verifyOtp: (request_id, code) => req('/public/otp/verify', { method: 'POST', body: JSON.stringify({ request_id, code }) }),
 };
 
-// Exporta para depuração no console do navegador
+// Exporta para depuraÃ§Ã£o no console do navegador
 export const API_BASE_URL = BASE;
+
 
 
 
