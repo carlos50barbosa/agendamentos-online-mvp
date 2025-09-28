@@ -184,10 +184,12 @@ router.put('/:id/plan', auth, isEstabelecimento, async (req, res) => {
       }
       planTrialEndsAt = parsed;
     } else if (req.body?.trialDays) {
-      const days = Number(req.body.trialDays);
-      if (!Number.isFinite(days) || days <= 0 || days > 60) {
-        return res.status(400).json({ error: 'invalid_trial', message: 'trialDays deve ser entre 1 e 60.' });
+      let days = Number(req.body.trialDays);
+      if (!Number.isFinite(days) || days <= 0) {
+        return res.status(400).json({ error: 'invalid_trial', message: 'trialDays deve ser um número positivo.' });
       }
+      // Política: teste grátis de 7 dias
+      if (days > 7) days = 7;
       const dt = new Date();
       dt.setDate(dt.getDate() + days);
       planTrialEndsAt = dt;
@@ -242,6 +244,29 @@ router.put('/:id/plan', auth, isEstabelecimento, async (req, res) => {
     return res.status(500).json({ error: 'server_error' });
   }
 });
+
+// Estatísticas rápidas do estabelecimento (serviços e profissionais)
+router.get('/:id/stats', auth, isEstabelecimento, async (req, res) => {
+  try {
+    const id = Number(req.params.id)
+    if (!Number.isFinite(id) || req.user.id !== id) return res.status(403).json({ error: 'forbidden' })
+
+    // Conta serviços
+    const [[svcRow]] = await pool.query(
+      'SELECT COUNT(*) AS total FROM servicos WHERE estabelecimento_id=?',
+      [id]
+    )
+    const services = Number(svcRow?.total || 0)
+
+    // Conta profissionais (se houver a tabela)
+    const professionals = await countProfessionals(id)
+
+    return res.json({ services, professionals })
+  } catch (e) {
+    console.error('GET /establishments/:id/stats', e)
+    return res.status(500).json({ error: 'server_error' })
+  }
+})
 
 export default router;
 

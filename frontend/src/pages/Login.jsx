@@ -1,11 +1,14 @@
 // src/pages/Login.jsx
 import React, { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { IconUser, IconHome } from '../components/Icons.jsx';
 import LogoAO from '../components/LogoAO.jsx';
 
 export default function Login() {
   const [sessionMsg, setSessionMsg] = useState('');
+  const loc = useLocation();
+  const searchParams = React.useMemo(() => new URLSearchParams(loc.search), [loc.search]);
+  const next = searchParams.get('next') || '';
   useEffect(() => {
     try{
       const msg = localStorage.getItem('session_message');
@@ -44,7 +47,7 @@ export default function Login() {
               <div className="mini-card__title">Cliente</div>
               <div className="mini-card__meta"><span>Acesse sua conta de cliente</span></div>
               <div className="row" style={{ marginTop: 8, width: '100%' }}>
-                <Link className="btn btn--primary btn--lg btn--block" to="/login-cliente">
+                <Link className="btn btn--primary btn--lg btn--block" to={`/login-cliente${next ? `?next=${encodeURIComponent(next)}` : ''}`}>
                   <IconUser className="btn__icon" aria-hidden />
                   Entrar como Cliente
                 </Link>
@@ -54,7 +57,7 @@ export default function Login() {
               <div className="mini-card__title">Estabelecimento</div>
               <div className="mini-card__meta"><span>Acesse como estabelecimento</span></div>
               <div className="row" style={{ marginTop: 8, width: '100%' }}>
-                <Link className="btn btn--primary btn--lg btn--block" to="/login-estabelecimento">
+                <Link className="btn btn--primary btn--lg btn--block" to={`/login-estabelecimento${next ? `?next=${encodeURIComponent(next)}` : ''}`}>
                   <IconHome className="btn__icon" aria-hidden />
                   Entrar como Estabelecimento
                 </Link>

@@ -33,6 +33,7 @@ import Planos from './pages/Planos.jsx';
 import RecuperarSenha from './pages/RecuperarSenha.jsx';
 import DefinirSenha from './pages/DefinirSenha.jsx';
 import AdminTools from './pages/AdminTools.jsx';
+import AdminDB from './pages/AdminDB.jsx';
 import ChatAgendamento from './components/ChatAgendamento.jsx';
 import LinkPhone from './pages/LinkPhone.jsx';
 import Book from './pages/Book.jsx';
@@ -67,6 +68,7 @@ const APP_ROUTES = [
   { path: '/relatorios', element: <Relatorios /> },
   { path: '/planos', element: <Planos /> },
   { path: '/admin-tools', element: <AdminTools /> },
+  { path: '/admin/db', element: <AdminDB /> },
 ];
 
 function useAppPreferences() {

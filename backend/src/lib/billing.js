@@ -7,6 +7,7 @@ import {
   createSubscription,
   updateSubscription,
   getSubscriptionByGatewayId,
+  getSubscriptionByPlanId,
   appendSubscriptionEvent,
 } from './subscriptions.js'
 import { pool } from './db.js'
@@ -37,6 +38,18 @@ function ensureMercadoPagoPlan() {
   if (!mercadoPagoClient) mercadoPagoClient = new MercadoPagoConfig({ accessToken })
   mercadoPagoPlan = new PreApprovalPlan(mercadoPagoClient)
   return mercadoPagoPlan
+}
+
+export async function getPlanInitPoint(preApprovalPlanId) {
+  if (!preApprovalPlanId) return null
+  const client = ensureMercadoPagoPlan()
+  try {
+    const plan = await client.get({ preApprovalPlanId })
+    return plan?.init_point || plan?.sandbox_init_point || null
+  } catch (e) {
+    console.warn('[mp][preapproval_plan.get] failed', preApprovalPlanId, e?.message || e)
+    return null
+  }
 }
 
 function formatAmountString(priceCents) {
@@ -240,15 +253,21 @@ export async function syncMercadoPagoPreapproval(preapprovalId, eventPayload = n
 
   let subscription = await getSubscriptionByGatewayId(preapproval.id)
   if (!subscription) {
-    let estabelecimentoId = null;
-    let inferredPlan = 'starter';
-
-    const [userRows] = await pool.query("SELECT id, plan FROM usuarios WHERE plan_subscription_id=? LIMIT 1", [preapproval.id]);
-    if (userRows?.length) {
-      estabelecimentoId = userRows[0].id;
-      const normalized = String(userRows[0].plan || '').toLowerCase();
-      if (PLAN_TIERS.includes(normalized)) inferredPlan = normalized;
+    // Tenta localizar pelo plano vinculado (preapproval.preapproval_plan_id)
+    const planId = preapproval?.preapproval_plan_id || preapproval?.plan_id || null
+    const byPlan = await getSubscriptionByPlanId(planId)
+    if (byPlan) {
+      // amarra a assinatura ao registro existente
+      subscription = await updateSubscription(byPlan.id, {
+        gatewaySubscriptionId: preapproval.id,
+        status: String(preapproval.status || 'pending').toLowerCase(),
+        currency: (preapproval.auto_recurring?.currency_id || BILLING_CURRENCY).toUpperCase(),
+        amountCents: Math.round(Number(preapproval.auto_recurring?.transaction_amount || byPlan.amountCents / 100) * 100),
+      })
     } else {
+      // Último recurso: inferir pelo external_reference
+      let estabelecimentoId = null;
+      let inferredPlan = 'starter';
       const parts = String(preapproval.external_reference || '').split(':');
       const planToken = String(parts[1] || parts[0] || '').toLowerCase();
       const estabToken = parts[3];
@@ -257,21 +276,19 @@ export async function syncMercadoPagoPreapproval(preapprovalId, eventPayload = n
         const candidateId = Number(estabToken);
         if (Number.isFinite(candidateId)) estabelecimentoId = candidateId;
       }
+      if (!estabelecimentoId) {
+        throw new Error('Nao foi possivel vincular a assinatura ao estabelecimento');
+      }
+      subscription = await createSubscription({
+        estabelecimentoId,
+        plan: inferredPlan,
+        amountCents: Math.round(Number(preapproval.auto_recurring?.transaction_amount || 0) * 100) || getPlanPriceCents(inferredPlan),
+        currency: (preapproval.auto_recurring?.currency_id || BILLING_CURRENCY).toUpperCase(),
+        status: String(preapproval.status || 'pending').toLowerCase(),
+        gatewaySubscriptionId: preapproval.id,
+        externalReference: preapproval.external_reference || null,
+      })
     }
-
-    if (!estabelecimentoId) {
-      throw new Error('Nao foi possivel inferir o estabelecimento da assinatura');
-    }
-
-    subscription = await createSubscription({
-      estabelecimentoId,
-      plan: inferredPlan,
-      amountCents: Math.round(Number(preapproval.auto_recurring?.transaction_amount || 0) * 100) || getPlanPriceCents(inferredPlan),
-      currency: (preapproval.auto_recurring?.currency_id || BILLING_CURRENCY).toUpperCase(),
-      status: String(preapproval.status || 'pending').toLowerCase(),
-      gatewaySubscriptionId: preapproval.id,
-      externalReference: preapproval.external_reference || null,
-    });
   }
 
   const updates = {

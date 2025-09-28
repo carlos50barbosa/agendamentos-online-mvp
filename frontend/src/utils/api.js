@@ -112,12 +112,15 @@ export const Api = {
   updateEstablishmentMessages: (id, payload) => req(`/establishments/${id}/messages`, { method: 'PUT', body: JSON.stringify(payload) }),
   updateEstablishmentSlug: (id, slug) => req(`/establishments/${id}/slug`, { method: 'PUT', body: JSON.stringify({ slug }) }),
   updateEstablishmentPlan: (id, payload) => req(`/establishments/${id}/plan`, { method: 'PUT', body: JSON.stringify(payload) }),
+  getEstablishmentStats: (id) => req(`/establishments/${id}/stats`),
   listServices: (establishmentId) => req(`/servicos${toQuery({ establishmentId })}`),
 
   // Billing (assinaturas Mercado Pago)
   billingCreateCheckout: (payload) =>
     req('/billing/checkout-session', { method: 'POST', body: JSON.stringify(payload) }),
   billingSubscription: () => req('/billing/subscription'),
+  billingSync: (preapproval_id) => req(`/billing/sync${toQuery({ preapproval_id })}`),
+  billingChangeCheckout: (target_plan) => req('/billing/change', { method: 'POST', body: JSON.stringify({ target_plan }) }),
 
   // ServiÃ§os (rotas existentes)
   servicosList: () => req('/servicos'),

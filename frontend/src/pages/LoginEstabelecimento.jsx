@@ -3,10 +3,12 @@ import { Link } from 'react-router-dom'
 import LogoAO from '../components/LogoAO.jsx'
 import { Api } from '../utils/api'
 import { saveToken, saveUser } from '../utils/auth'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useLocation } from 'react-router-dom'
 
 export default function LoginEstabelecimento(){
   const nav = useNavigate()
+  const loc = useLocation()
+  const nextParam = React.useMemo(() => new URLSearchParams(loc.search).get('next') || '', [loc.search])
   const [email,setEmail]=useState('')
   const [senha,setSenha]=useState('')
   const [showPass,setShowPass]=useState(false)
@@ -18,7 +20,9 @@ export default function LoginEstabelecimento(){
     try{
       const { token, user } = await Api.login(email.trim(), senha)
       if(user?.tipo!=='estabelecimento') throw new Error('tipo_incorreto')
-      saveToken(token); saveUser(user); nav('/loading?type=login&next=/estab')
+      saveToken(token); saveUser(user);
+      const next = nextParam || '/estab'
+      nav(`/loading?type=login&next=${encodeURIComponent(next)}`)
     }catch(e){
       setErr(
         e?.message==='tipo_incorreto'

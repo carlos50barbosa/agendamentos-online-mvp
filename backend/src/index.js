@@ -34,7 +34,7 @@ app.use(cors({
     'http://127.0.0.1:5173',
   ],
   credentials: true,
-  allowedHeaders: ['Content-Type', 'Authorization', 'Idempotency-Key', 'X-Admin-Token', 'X-OTP-Token'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Idempotency-Key', 'X-Admin-Token', 'X-Admin-Allow-Write', 'X-OTP-Token'],
 }));
 app.options('*', cors());
 app.use(express.json());
@@ -47,6 +47,19 @@ app.get('/api/health', (_req, res) => res.status(200).send('ok'));
 app.get('/', (_req, res) =>
   res.json({ ok: true, msg: 'Backend rodando. Use as rotas da API.' })
 );
+
+// Redireciona rotas de SPA do front quando acessadas pelo domínio do backend (útil para back_url)
+const FRONTEND_BASE = (process.env.FRONTEND_BASE_URL || process.env.APP_URL || 'http://localhost:3001').replace(/\/$/, '');
+function redirectToFront(path) {
+  return (req, res) => {
+    const qs = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '';
+    const target = `${FRONTEND_BASE}${path || req.path}${qs}`;
+    res.redirect(302, target);
+  };
+}
+
+// Ajuste mínimo: rota usada pelo back_url do Mercado Pago
+app.get('/configuracoes', redirectToFront('/configuracoes'));
 
 // Rotas “sem /api”
 app.use('/auth', authRouter);

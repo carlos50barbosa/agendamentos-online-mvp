@@ -73,6 +73,30 @@ export default function Configuracoes() {
   const [checkoutLoading, setCheckoutLoading] = useState(false);
   const [checkoutError, setCheckoutError] = useState('');
   const checkoutIntentRef = useRef(false);
+  // Contagem simples para pré-validação de downgrade (serviços)
+  const [serviceCount, setServiceCount] = useState(null);
+  const [professionalCount, setProfessionalCount] = useState(null);
+
+  // Metadados dos planos (espelha backend)
+  const PLAN_META = {
+    starter: { label: 'Starter', maxServices: 10, maxProfessionals: 2 },
+    pro: { label: 'Pro', maxServices: 100, maxProfessionals: 10 },
+    premium: { label: 'Premium', maxServices: null, maxProfessionals: null },
+  };
+  const PLAN_ORDER = { starter: 0, pro: 1, premium: 2 };
+  const planLabel = (p) => PLAN_META[p]?.label || p?.toUpperCase() || '';
+  const exceedsServices = (target) => {
+    const limit = PLAN_META[target]?.maxServices;
+    if (limit == null) return false;
+    if (serviceCount == null) return false;
+    return serviceCount > limit;
+  };
+  const exceedsProfessionals = (target) => {
+    const limit = PLAN_META[target]?.maxProfessionals;
+    if (limit == null) return false;
+    if (professionalCount == null) return false;
+    return professionalCount > limit;
+  };
 
   useEffect(() => {
     try {
@@ -182,6 +206,14 @@ export default function Configuracoes() {
   useEffect(() => {
     (async () => {
       if (!isEstab || !user?.id) return;
+      // Se voltamos do checkout com preapproval_id, sincroniza estado antes de carregar
+      try {
+        const url = new URL(window.location.href);
+        const preId = url.searchParams.get('preapproval_id');
+        if (preId) {
+          await Api.billingSync(preId);
+        }
+      } catch {}
       try {
         const est = await Api.getEstablishment(user.id);
         setSlug(est?.slug || '');
@@ -195,6 +227,7 @@ export default function Configuracoes() {
             trialDaysLeft: typeof ctx.trial?.days_left === 'number' ? ctx.trial.days_left : prev.trialDaysLeft,
             trialWarn: !!ctx.trial?.warn,
             allowAdvanced: !!ctx.limits?.allowAdvancedReports,
+            allowWhatsapp: !!(ctx.features?.allow_whatsapp ?? ctx.limits?.allowWhatsApp),
             activeUntil: ctx.active_until || null,
           }));
           try {
@@ -204,6 +237,12 @@ export default function Configuracoes() {
             else localStorage.removeItem('trial_end');
           } catch {}
         }
+      } catch {}
+      // Carrega contagem de serviços/profissionais para pré-validar downgrades
+      try {
+        const stats = await Api.getEstablishmentStats(user.id);
+        setServiceCount(typeof stats?.services === 'number' ? stats.services : 0);
+        setProfessionalCount(typeof stats?.professionals === 'number' ? stats.professionals : 0);
       } catch {}
       try {
         const tmpl = await Api.getEstablishmentMessages(user.id);
@@ -238,7 +277,21 @@ export default function Configuracoes() {
       }
     } catch (err) {
       console.error('billing checkout failed', err);
-      setCheckoutError(err?.data?.message || err?.message || 'Falha ao gerar link de pagamento.');
+      // Mensagem amigável quando já existe assinatura ativa
+      if (err?.status === 409 && err?.data?.error === 'already_active') {
+        try {
+          const iso = err?.data?.plan?.active_until || err?.data?.plan?.trial?.ends_at || null;
+          const msg = iso
+            ? `Sua assinatura já está ativa até ${new Date(iso).toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' })}.`
+            : 'Sua assinatura já está ativa no momento.';
+          setCheckoutError(msg);
+          await fetchBilling();
+        } catch {
+          setCheckoutError(err?.data?.message || 'Sua assinatura já está ativa.');
+        }
+      } else {
+        setCheckoutError(err?.data?.message || err?.message || 'Falha ao gerar link de pagamento.');
+      }
     } finally {
       setCheckoutLoading(false);
       checkoutIntentRef.current = false;
@@ -246,17 +299,56 @@ export default function Configuracoes() {
     }
   }, [fetchBilling, isEstab]);
 
+  const handleChangePlan = useCallback(async (targetPlan) => {
+    setCheckoutError('');
+    setCheckoutLoading(true);
+    try {
+      // Confirmação com aviso de cobrança no próximo ciclo para upgrades
+      const isUp = (PLAN_ORDER[targetPlan] ?? 0) > (PLAN_ORDER[planInfo.plan] ?? 0);
+      const extra = isUp ? '\n\nAviso: a cobrança do novo valor ocorre no próximo ciclo.' : '';
+      const msg = `Confirmar alteração para o plano ${planLabel(targetPlan)}?${extra}`;
+      // eslint-disable-next-line no-alert
+      const ok = typeof window !== 'undefined' ? window.confirm(msg) : true;
+      if (!ok) { setCheckoutLoading(false); return; }
+      const data = await Api.billingChangeCheckout(targetPlan);
+      if (data?.init_point) {
+        window.location.href = data.init_point;
+        return;
+      }
+      await fetchBilling();
+    } catch (err) {
+      if (err?.status === 409 && (err?.data?.error === 'plan_downgrade_blocked' || err?.data?.error === 'same_plan')) {
+        setCheckoutError(err?.data?.message || 'Não foi possível alterar o plano.');
+      } else {
+        setCheckoutError(err?.data?.message || err?.message || 'Falha ao alterar o plano.');
+      }
+    } finally {
+      setCheckoutLoading(false);
+    }
+  }, [fetchBilling]);
+
   useEffect(() => {
     if (!isEstab) return;
     let storedPlan = null;
-    try {
-      storedPlan = localStorage.getItem('intent_plano');
-    } catch {}
+    try { storedPlan = localStorage.getItem('intent_plano'); } catch {}
     if (storedPlan && !checkoutIntentRef.current) {
       checkoutIntentRef.current = true;
-      handleCheckout(storedPlan);
+      (async () => {
+        try {
+          // Se há assinatura ativa e o plano desejado difere do atual, usar rota de change
+          if (planInfo.status === 'active' && storedPlan !== planInfo.plan) {
+            const data = await Api.billingChangeCheckout(storedPlan);
+            if (data?.init_point) window.location.href = data.init_point;
+          } else {
+            await handleCheckout(storedPlan);
+          }
+        } finally {
+          try { localStorage.removeItem('intent_plano'); } catch {}
+          checkoutIntentRef.current = false;
+        }
+      })();
     }
-  }, [handleCheckout, isEstab]);
+  }, [handleCheckout, isEstab, planInfo.status, planInfo.plan]);
   const daysLeft = useMemo(() => {
     if (planInfo.trialDaysLeft != null) return planInfo.trialDaysLeft;
     if (!planInfo.trialEnd) return 0;
@@ -275,7 +367,7 @@ export default function Configuracoes() {
   const startTrial = useCallback(async () => {
     if (!isEstab || !user?.id) return;
     try {
-      const response = await Api.updateEstablishmentPlan(user.id, { plan: 'pro', status: 'trialing', trialDays: 14 });
+      const response = await Api.updateEstablishmentPlan(user.id, { plan: 'pro', status: 'trialing', trialDays: 7 });
       const ctx = response?.plan;
       if (ctx) {
         setPlanInfo((prev) => ({
@@ -296,7 +388,7 @@ export default function Configuracoes() {
         } catch {}
       }
       await fetchBilling();
-      alert('Teste gratuito do plano Pro ativado por 14 dias!');
+      alert('Teste gratuito do plano Pro ativado por 7 dias!');
     } catch (err) {
       console.error('startTrial failed', err);
       alert('Nao foi possivel iniciar o teste gratuito agora.');
@@ -537,15 +629,21 @@ export default function Configuracoes() {
               <>
                 {planInfo.trialEnd && daysLeft > 0 ? (
                   <div className="box box--highlight">
-                    <strong>Teste gr?tis ativo</strong>
+                    <strong>Teste grátis ativo</strong>
                     <div className="small muted">Termina em {fmtDate(planInfo.trialEnd)} - {daysLeft} {daysLeft === 1 ? 'dia' : 'dias'} restantes</div>
                   </div>
                 ) : (
                   <div className="box" style={{ borderColor: '#fde68a', background: '#fffbeb' }}>
-                    <strong>Voc? est? no plano Starter</strong>
-                    <div className="small muted">Ative 14 dias gr?tis do Pro para desbloquear WhatsApp e relat?rios.</div>
+                    <strong>Você está no plano Starter</strong>
+                    <div className="small muted">Ative 7 dias grátis do Pro para desbloquear campanhas no WhatsApp e relatórios avançados.</div>
                   </div>
                 )}
+                {/* Resumo de recursos do plano atual */}
+                <div className="small muted" style={{ marginTop: 8 }}>
+                  <div><strong>Recursos do plano:</strong></div>
+                  <div>WhatsApp: lembretes{planInfo.plan !== 'starter' ? ' + campanhas' : ''}</div>
+                  <div>Relatórios: {planInfo.allowAdvanced ? 'avançados' : 'básicos'}</div>
+                </div>
                 <div className="row" style={{ gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
                   {!planInfo.trialEnd && (
                     <button
@@ -554,7 +652,7 @@ export default function Configuracoes() {
                       onClick={startTrial}
                       disabled={planInfo.status === 'delinquent' || checkoutLoading}
                     >
-                      {checkoutLoading ? <span className="spinner" /> : 'Ativar 14 dias gr?tis'}
+                      {checkoutLoading ? <span className="spinner" /> : 'Ativar 7 dias grátis'}
                     </button>
                   )}
                   <button
@@ -576,16 +674,61 @@ export default function Configuracoes() {
                     {planInfo.status === 'active' ? 'Obrigado por apoiar o Agendamentos Online.' : 'Assim que o pagamento for confirmado, os recursos ser?o liberados.'}
                   </div>
                 </div>
-                <div className="row" style={{ gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
-                  <button
-                    className="btn"
-                    type="button"
-                    onClick={() => handleCheckout(planInfo.plan)}
-                    disabled={checkoutLoading}
-                  >
-                    {checkoutLoading ? <span className="spinner" /> : planInfo.status === 'pending' ? 'Finalizar pagamento' : 'Gerar link de pagamento'}
-                  </button>
+                {/* Resumo de recursos do plano atual */}
+                <div className="small muted" style={{ marginTop: 8 }}>
+                  <div><strong>Recursos do plano:</strong></div>
+                  <div>WhatsApp: lembretes + campanhas</div>
+                  <div>Relatórios: {planInfo.allowAdvanced ? 'avançados' : 'básicos'}</div>
+                </div>
+                <div className="row" style={{ gap: 8, justifyContent: 'space-between', flexWrap: 'wrap', alignItems: 'center' }}>
+                  <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+                    <div className="small muted">Alterar plano:</div>
+                    {(['starter','pro','premium'].filter(p => p !== planInfo.plan)).map((p) => (
+                      <button
+                        key={p}
+                        className="btn btn--outline"
+                        type="button"
+                        disabled={checkoutLoading || exceedsServices(p) || exceedsProfessionals(p)}
+                        title={
+                          exceedsServices(p)
+                            ? `Reduza seus serviços para até ${PLAN_META[p].maxServices} antes de ir para ${planLabel(p)}.`
+                            : exceedsProfessionals(p)
+                            ? `Reduza seus profissionais para até ${PLAN_META[p].maxProfessionals} antes de ir para ${planLabel(p)}.`
+                            : ''
+                        }
+                        onClick={() => handleChangePlan(p)}
+                      >
+                        {`Ir para ${planLabel(p)}`}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+                  {planInfo.status !== 'active' && (
+                    <button
+                      className="btn"
+                      type="button"
+                      onClick={() => handleCheckout(planInfo.plan)}
+                      disabled={checkoutLoading}
+                    >
+                      {checkoutLoading ? <span className="spinner" /> : planInfo.status === 'pending' ? 'Finalizar pagamento' : 'Gerar link de pagamento'}
+                    </button>
+                  )}
                   <Link className="btn btn--outline" to="/planos">Alterar plano</Link>
+                  </div>
+                </div>
+                {/* Aviso de política de cobrança em upgrades/downgrades */}
+                <div className="notice notice--warn" role="status">
+                  Upgrades liberam recursos imediatamente; a cobrança do novo valor ocorre no próximo ciclo. Downgrades passam a valer no ciclo seguinte, desde que os limites do plano sejam atendidos. Testes gratuitos têm duração de 7 dias.
+                </div>
+                {/* Resumo dos limites por plano */}
+                <div className="small muted" style={{ marginTop: 8 }}>
+                  <div>Seus serviços: {serviceCount == null ? '...' : serviceCount} · Profissionais: {professionalCount == null ? '...' : professionalCount}</div>
+                  <div>
+                    Limites:
+                    {' '}Starter (serviços: {PLAN_META.starter.maxServices}, profissionais: {PLAN_META.starter.maxProfessionals});
+                    {' '}Pro (serviços: {PLAN_META.pro.maxServices}, profissionais: {PLAN_META.pro.maxProfessionals});
+                    {' '}Premium (sem limites)
+                  </div>
                 </div>
               </>
             )}

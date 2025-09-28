@@ -55,6 +55,15 @@ export async function getSubscriptionByGatewayId(gatewaySubscriptionId) {
   return mapRow(rows?.[0])
 }
 
+export async function getSubscriptionByPlanId(gatewayPreferenceId) {
+  if (!gatewayPreferenceId) return null
+  const [rows] = await pool.query(
+    'SELECT * FROM subscriptions WHERE gateway_preference_id=? LIMIT 1',
+    [gatewayPreferenceId]
+  )
+  return mapRow(rows?.[0])
+}
+
 export async function getLatestSubscriptionForEstabelecimento(estabelecimentoId) {
   const [rows] = await pool.query(
     'SELECT * FROM subscriptions WHERE estabelecimento_id=? ORDER BY created_at DESC LIMIT 1',

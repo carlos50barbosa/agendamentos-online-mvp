@@ -1,7 +1,7 @@
 
 // src/pages/Planos.jsx
 import React from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { getUser } from '../utils/auth';
 
 function Feature({ icon = '✅', children }) {
@@ -118,7 +118,20 @@ const FAQS = [
   },
   {
     question: 'Consigo testar com minha equipe antes de decidir?',
-    answer: 'Sim! Todos os planos têm 14 dias grátis com acesso completo. Nesse período nosso time de sucesso acompanha a configuração e apresenta as melhores práticas para seu segmento.',
+    answer: 'Sim! Todos os planos têm 7 dias grátis com acesso completo. Nesse período nosso time de sucesso acompanha a configuração e apresenta as melhores práticas para seu segmento.',
+  },
+  {
+    question: 'Como funcionam upgrades e downgrades de plano?',
+    answer: (
+      <>
+        Upgrades liberam recursos imediatamente e a cobrança do novo valor ocorre no próximo ciclo de faturamento.
+        Downgrades passam a valer no ciclo seguinte, desde que os limites do plano (como quantidade de serviços e profissionais) sejam atendidos.
+        <br />
+        <Link className="btn btn--sm btn--outline" to="/configuracoes" style={{ marginTop: 8 }}>
+          Ir para Configurações
+        </Link>
+      </>
+    ),
   },
 ];
 
@@ -128,7 +141,12 @@ export default function Planos() {
 
   const goCheckout = (plano) => () => {
     try { localStorage.setItem('intent_plano', plano); } catch {}
-    nav('/configuracoes');
+    const u = getUser();
+    if (u && u.tipo === 'estabelecimento') {
+      nav('/configuracoes');
+    } else {
+      nav('/login?next=/configuracoes');
+    }
   };
 
   return (
@@ -144,14 +162,14 @@ export default function Planos() {
             <span className="hero__badge hero__badge--outline">Suporte humano 7×12</span>
           </div>
           <div className="hero__actions">
-            <button className="btn btn--primary btn--lg" onClick={goCheckout('pro')}>Começar teste gratuito</button>
+            <button className="btn btn--primary btn--lg" onClick={goCheckout('pro')}>Começar teste de 7 dias</button>
             <button className="btn btn--outline btn--lg" onClick={() => nav('/ajuda')}>Ver tour guiado</button>
           </div>
           {user?.tipo !== 'estabelecimento' && (
             <div className="alert-inline" role="status">Página pensada para estabelecimentos. Faça login como estabelecimento para contratar um plano.</div>
           )}
           <div className="hero__footnote">
-            <span>14 dias grátis · sem cartão de crédito</span>
+            <span>7 dias grátis · sem cartão de crédito</span>
             <span>Integrações com WhatsApp, Instagram e Google</span>
           </div>
           <div className="stats-grid">
@@ -234,17 +252,33 @@ export default function Planos() {
             <h2>Planos e preços</h2>
             <p>Escolha o plano ideal hoje e faça upgrade quando for hora de expandir.</p>
           </header>
+          <div className="small muted" style={{ marginTop: -8, marginBottom: 12 }}>
+            Política de cobrança: upgrades liberam recursos imediatamente e a cobrança do novo valor ocorre no próximo ciclo. Downgrades passam a valer no ciclo seguinte, desde que os limites do plano sejam atendidos.
+          </div>
+          <div className="box" style={{ marginBottom: 12 }}>
+            <strong>Limites por plano</strong>
+            <ul style={{ margin: '8px 0 0 16px' }}>
+              <li>Starter: até 10 serviços e 2 profissionais.</li>
+              <li>Pro: até 100 serviços e 10 profissionais.</li>
+              <li>Premium: sem limites.</li>
+            </ul>
+            <div className="row" style={{ gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
+              <Link className="btn btn--outline btn--sm" to="/login?next=/configuracoes">Ir para Starter</Link>
+              <Link className="btn btn--outline btn--sm" to="/login?next=/configuracoes">Ir para Pro</Link>
+            </div>
+          </div>
           <div className="pricing-grid">
             <div className="pricing-card">
               <div className="pricing-header">
                 <div className="pricing-title">Starter</div>
                 <div className="pricing-subtitle muted">Para começar com o essencial</div>
               </div>
-              <div className="price"><span className="currency">R$</span><span className="amount">49</span><span className="period">/mês</span></div>
+              <div className="price"><span className="currency">R$</span><span className="amount">14,90</span><span className="period">/mês</span></div>
               <ul className="features">
                 <Feature>Agenda online e confirmações automáticas</Feature>
                 <Feature>Até 10 serviços e 1 profissional</Feature>
                 <Feature>Lembretes por e-mail</Feature>
+                <Feature>Lembretes por WhatsApp</Feature>
                 <Feature>Relatórios básicos</Feature>
               </ul>
               <button className="btn" onClick={goCheckout('starter')}>Começar agora</button>
@@ -263,7 +297,7 @@ export default function Planos() {
                 <Feature>Relatórios avançados e indicadores em tempo real</Feature>
                 <Feature>Suporte prioritário via WhatsApp Business</Feature>
               </ul>
-              <button className="btn btn--primary" onClick={goCheckout('pro')}>Iniciar 14 dias grátis</button>
+              <button className="btn btn--primary" onClick={goCheckout('pro')}>Iniciar 7 dias grátis</button>
             </div>
 
             <div className="pricing-card">
@@ -302,7 +336,7 @@ export default function Planos() {
         <div className="section-shell cta-final__inner">
           <div>
             <h2>Pronto para lotar a agenda e encantar seus clientes?</h2>
-            <p>Comece hoje com 14 dias grátis. Sem cartão de crédito, sem compromisso.</p>
+            <p>Comece hoje com 7 dias grátis. Sem cartão de crédito, sem compromisso.</p>
           </div>
           <div className="cta-final__actions">
             <button className="btn btn--primary btn--lg" onClick={goCheckout('pro')}>Quero testar agora</button>
