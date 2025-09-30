@@ -10,7 +10,8 @@ const PLAN_CONFIG = {
   starter: {
     code: 'starter',
     label: 'Starter',
-    priceCents: 4900,
+    priceCents: 1490,
+    annualPriceCents: 14900,
     maxServices: 10,
     maxProfessionals: 2,
     allowWhatsApp: true,
@@ -20,6 +21,7 @@ const PLAN_CONFIG = {
     code: 'pro',
     label: 'Pro',
     priceCents: 9900,
+    annualPriceCents: 99000,
     maxServices: 100,
     maxProfessionals: 10,
     allowWhatsApp: true,
@@ -29,12 +31,38 @@ const PLAN_CONFIG = {
     code: 'premium',
     label: 'Premium',
     priceCents: 19900,
+    annualPriceCents: 199000,
     maxServices: LIMIT_UNLIMITED,
     maxProfessionals: LIMIT_UNLIMITED,
     allowWhatsApp: true,
     allowAdvancedReports: true,
   },
 };
+
+export const BILLING_CYCLES = {
+  mensal: {
+    key: 'mensal',
+    label: 'Mensal',
+    frequency: 1,
+    frequencyType: 'months',
+  },
+  anual: {
+    key: 'anual',
+    label: 'Anual',
+    frequency: 1,
+    frequencyType: 'years',
+  },
+};
+
+export function normalizeBillingCycle(cycle) {
+  const key = String(cycle || '').toLowerCase();
+  return BILLING_CYCLES[key] ? key : 'mensal';
+}
+
+export function getBillingCycleConfig(cycle) {
+  const key = normalizeBillingCycle(cycle);
+  return BILLING_CYCLES[key];
+}
 
 export function resolvePlanConfig(plan) {
   const key = (plan || '').toLowerCase();
@@ -89,13 +117,14 @@ export async function countProfessionals(estabelecimentoId) {
 
 export async function getPlanContext(estabelecimentoId) {
   const [rows] = await pool.query(
-    "SELECT plan, plan_status, plan_trial_ends_at, plan_active_until, plan_subscription_id FROM usuarios WHERE id=? AND tipo='estabelecimento' LIMIT 1",
+    "SELECT plan, plan_status, plan_trial_ends_at, plan_active_until, plan_subscription_id, plan_cycle FROM usuarios WHERE id=? AND tipo='estabelecimento' LIMIT 1",
     [estabelecimentoId]
   );
   if (!rows.length) return null;
   const row = rows[0];
   const plan = row.plan || 'starter';
   const status = row.plan_status || 'trialing';
+  const cycle = normalizeBillingCycle(row.plan_cycle);
   const config = resolvePlanConfig(plan);
   const trialEndsAt = row.plan_trial_ends_at ? new Date(row.plan_trial_ends_at) : null;
   const activeUntil = row.plan_active_until ? new Date(row.plan_active_until) : null;
@@ -103,6 +132,7 @@ export async function getPlanContext(estabelecimentoId) {
   return {
     plan,
     status,
+    cycle,
     config,
     trialEndsAt,
     activeUntil,
@@ -127,10 +157,11 @@ export function formatPlanLimitExceeded(planConfig, type) {
 
 export function serializePlanContext(context) {
   if (!context) return null;
-  const { plan, status, config, trialEndsAt, activeUntil, trial, subscriptionId } = context;
+  const { plan, status, cycle, config, trialEndsAt, activeUntil, trial, subscriptionId } = context;
   return {
     plan,
     status,
+    billing_cycle: cycle,
     limits: {
       maxServices: config.maxServices,
       maxProfessionals: config.maxProfessionals,
@@ -153,8 +184,13 @@ export function serializePlanContext(context) {
 }
 
 
-export function getPlanPriceCents(plan) {
-  return resolvePlanConfig(plan).priceCents;
+export function getPlanPriceCents(plan, cycle = 'mensal') {
+  const cfg = resolvePlanConfig(plan);
+  const normalized = normalizeBillingCycle(cycle);
+  if (normalized === 'anual' && typeof cfg.annualPriceCents === 'number') {
+    return cfg.annualPriceCents;
+  }
+  return cfg.priceCents;
 }
 
 export function getPlanLabel(plan) {

@@ -11,6 +11,7 @@ import {
   resolvePlanConfig,
   countProfessionals,
   formatPlanLimitExceeded,
+  normalizeBillingCycle,
 } from '../lib/plans.js'
 import {
   getLatestSubscriptionForEstabelecimento,
@@ -48,7 +49,8 @@ function verifyWebhookSignature(req, resourceId) {
 
 router.post('/checkout-session', auth, isEstabelecimento, async (req, res) => {
   try {
-    const { plan, successUrl, failureUrl, pendingUrl } = req.body || {}
+    const { plan, billing_cycle: rawCycle, successUrl, failureUrl, pendingUrl } = req.body || {}
+    const billingCycle = normalizeBillingCycle(rawCycle)
 
     // 1) Trava: se já está ativo e ainda dentro do período, não criar novo checkout
     const ctx = await getPlanContext(req.user.id)
@@ -78,6 +80,7 @@ router.post('/checkout-session', auth, isEstabelecimento, async (req, res) => {
     const result = await createMercadoPagoCheckout({
       estabelecimento: { id: req.user.id, email: req.user.email },
       plan,
+      billingCycle,
       successUrl,
       failureUrl,
       pendingUrl,
@@ -94,6 +97,7 @@ router.post('/checkout-session', auth, isEstabelecimento, async (req, res) => {
       init_point: result.initPoint,
       plan_status: result.planStatus,
       subscription: serializeSubscription(result.subscription),
+      billing_cycle: billingCycle,
     })
   } catch (error) {
     const responseData = error?.response?.data
@@ -172,6 +176,7 @@ router.get('/sync', auth, isEstabelecimento, async (req, res) => {
 router.post('/change', auth, isEstabelecimento, async (req, res) => {
   try {
     const target = String(req.body?.target_plan || req.body?.plan || '').toLowerCase()
+    const billingCycle = normalizeBillingCycle(req.body?.billing_cycle)
     if (!PLAN_TIERS.includes(target)) {
       return res.status(400).json({ error: 'invalid_plan' })
     }
@@ -219,12 +224,14 @@ router.post('/change', auth, isEstabelecimento, async (req, res) => {
     const result = await createMercadoPagoCheckout({
       estabelecimento: { id: req.user.id, email: req.user.email },
       plan: target,
+      billingCycle,
     })
     return res.json({
       ok: true,
       init_point: result.initPoint,
       plan_status: result.planStatus,
       subscription: serializeSubscription(result.subscription),
+      billing_cycle: billingCycle,
     })
   } catch (error) {
     const responseData = error?.response?.data

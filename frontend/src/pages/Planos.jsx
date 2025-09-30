@@ -1,6 +1,6 @@
 
 // src/pages/Planos.jsx
-import React from 'react';
+import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { getUser } from '../utils/auth';
 
@@ -135,18 +135,88 @@ const FAQS = [
   },
 ];
 
+const BILLING_CYCLES = {
+  mensal: { label: 'Mensal', periodLabel: '/mês' },
+  anual: { label: 'Anual', periodLabel: '/ano' },
+};
+
+const PRICING_PLANS = [
+  {
+    key: 'starter',
+    title: 'Starter',
+    subtitle: 'Para começar com o essencial',
+    prices: { mensal: '14,90', anual: '149,00' },
+    features: [
+      'Agenda online e confirmações automáticas',
+      'Até 10 serviços e 2 profissionais',
+      'Lembretes por e-mail',
+      'Lembretes por WhatsApp',
+      'Relatórios básicos',
+    ],
+    annualNote: 'Economize o equivalente a 2 meses no plano anual.',
+    ctaVariant: 'btn',
+    ctaLabel: 'Testar grátis por 7 dias',
+    ctaKind: 'trial',
+  },
+  {
+    key: 'pro',
+    title: 'Pro',
+    subtitle: 'O melhor custo-benefício',
+    prices: { mensal: '99,00', anual: '990,00' },
+    features: [
+      'Tudo do Starter, sem limites',
+      'Equipe completa e múltiplas agendas',
+      'Lembretes e campanhas por WhatsApp',
+      'Relatórios avançados e indicadores em tempo real',
+      'Suporte prioritário via WhatsApp Business',
+    ],
+    annualNote: 'Economize o equivalente a 2 meses no plano anual.',
+    ctaVariant: 'btn btn--primary',
+    ctaLabel: 'Testar grátis por 7 dias',
+    ctaKind: 'trial',
+    featured: true,
+  },
+  {
+    key: 'premium',
+    title: 'Premium',
+    subtitle: 'Para alto volume e franquias',
+    prices: { mensal: '199,00', anual: '1.990,00' },
+    features: [
+      'Tudo do Pro com integrações personalizadas',
+      'Onboarding assistido e treinamento da equipe',
+      'API e dashboards executivos',
+      'SLA dedicado e gerente de sucesso',
+    ],
+    annualNote: 'Economize o equivalente a 2 meses no plano anual.',
+    ctaVariant: 'btn btn--outline',
+    ctaLabel: 'Falar com vendas',
+    ctaKind: 'sales',
+    ctaHref: '/contato?plano=premium',
+  },
+];
+
 export default function Planos() {
   const user = getUser();
   const nav = useNavigate();
+  const [billingCycle, setBillingCycle] = useState('mensal');
 
-  const goCheckout = (plano) => () => {
-    try { localStorage.setItem('intent_plano', plano); } catch {}
+  const goCheckout = (plano, ciclo = 'mensal') => () => {
+    try {
+      localStorage.setItem('intent_plano', plano);
+      localStorage.setItem('intent_plano_ciclo', ciclo);
+    } catch {}
     const u = getUser();
     if (u && u.tipo === 'estabelecimento') {
       nav('/configuracoes');
     } else {
       nav('/login?next=/configuracoes');
     }
+  };
+
+  const planCtaTarget = user?.tipo === 'estabelecimento' ? '/configuracoes' : '/login?next=/configuracoes';
+  const handlePlanCta = (plan, ciclo) => (event) => {
+    event.preventDefault();
+    goCheckout(plan, ciclo)();
   };
 
   return (
@@ -255,65 +325,69 @@ export default function Planos() {
           <div className="small muted" style={{ marginTop: -8, marginBottom: 12 }}>
             Política de cobrança: upgrades liberam recursos imediatamente e a cobrança do novo valor ocorre no próximo ciclo. Downgrades passam a valer no ciclo seguinte, desde que os limites do plano sejam atendidos.
           </div>
-          <div className="box" style={{ marginBottom: 12 }}>
-            <strong>Limites por plano</strong>
-            <ul style={{ margin: '8px 0 0 16px' }}>
-              <li>Starter: até 10 serviços e 2 profissionais.</li>
-              <li>Pro: até 100 serviços e 10 profissionais.</li>
-              <li>Premium: sem limites.</li>
-            </ul>
-            <div className="row" style={{ gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
-              <Link className="btn btn--outline btn--sm" to="/login?next=/configuracoes">Ir para Starter</Link>
-              <Link className="btn btn--outline btn--sm" to="/login?next=/configuracoes">Ir para Pro</Link>
-            </div>
+          <div
+            className="segmented billing-toggle"
+            role="group"
+            aria-label="Selecionar ciclo de cobrança"
+            style={{ margin: '0 auto 24px' }}
+          >
+            {Object.entries(BILLING_CYCLES).map(([cycleKey, info]) => (
+              <button
+                key={cycleKey}
+                type="button"
+                className={`segmented__btn ${billingCycle === cycleKey ? 'is-active' : ''}`}
+                aria-pressed={billingCycle === cycleKey}
+                onClick={() => {
+                  if (billingCycle !== cycleKey) setBillingCycle(cycleKey);
+                }}
+              >
+                {info.label}
+              </button>
+            ))}
           </div>
           <div className="pricing-grid">
-            <div className="pricing-card">
-              <div className="pricing-header">
-                <div className="pricing-title">Starter</div>
-                <div className="pricing-subtitle muted">Para começar com o essencial</div>
-              </div>
-              <div className="price"><span className="currency">R$</span><span className="amount">14,90</span><span className="period">/mês</span></div>
-              <ul className="features">
-                <Feature>Agenda online e confirmações automáticas</Feature>
-                <Feature>Até 10 serviços e 1 profissional</Feature>
-                <Feature>Lembretes por e-mail</Feature>
-                <Feature>Lembretes por WhatsApp</Feature>
-                <Feature>Relatórios básicos</Feature>
-              </ul>
-              <button className="btn" onClick={goCheckout('starter')}>Começar agora</button>
-            </div>
-
-            <div className="pricing-card is-featured">
-              <div className="pricing-header">
-                <div className="pricing-title">Pro</div>
-                <div className="pricing-subtitle muted">O melhor custo-benefício</div>
-              </div>
-              <div className="price"><span className="currency">R$</span><span className="amount">99</span><span className="period">/mês</span></div>
-              <ul className="features">
-                <Feature>Tudo do Starter, sem limites</Feature>
-                <Feature>Equipe completa e múltiplas agendas</Feature>
-                <Feature>Lembretes e campanhas por WhatsApp</Feature>
-                <Feature>Relatórios avançados e indicadores em tempo real</Feature>
-                <Feature>Suporte prioritário via WhatsApp Business</Feature>
-              </ul>
-              <button className="btn btn--primary" onClick={goCheckout('pro')}>Iniciar 7 dias grátis</button>
-            </div>
-
-            <div className="pricing-card">
-              <div className="pricing-header">
-                <div className="pricing-title">Premium</div>
-                <div className="pricing-subtitle muted">Para alto volume e franquias</div>
-              </div>
-              <div className="price"><span className="currency">R$</span><span className="amount">199</span><span className="period">/mês</span></div>
-              <ul className="features">
-                <Feature>Tudo do Pro com integrações personalizadas</Feature>
-                <Feature>Onboarding assistido e treinamento da equipe</Feature>
-                <Feature>API e dashboards executivos</Feature>
-                <Feature>SLA dedicado e gerente de sucesso</Feature>
-              </ul>
-              <button className="btn" onClick={goCheckout('premium')}>Falar com vendas</button>
-            </div>
+            {PRICING_PLANS.map((plan) => {
+              const price = plan.prices[billingCycle];
+              const periodLabel = BILLING_CYCLES[billingCycle].periodLabel;
+              const cardClass = `pricing-card${plan.featured ? ' is-featured' : ''}`;
+              const isSales = plan.ctaKind === 'sales';
+              const linkTo = isSales
+                ? (() => {
+                    const base = plan.ctaHref || `/contato?plano=${plan.key}`;
+                    const separator = base.includes('?') ? '&' : '?';
+                    return `${base}${separator}ciclo=${billingCycle}`;
+                  })()
+                : planCtaTarget;
+              const linkOnClick = isSales ? undefined : handlePlanCta(plan.key, billingCycle);
+              return (
+                <Link
+                  key={plan.key}
+                  className={cardClass}
+                  to={linkTo}
+                  onClick={linkOnClick}
+                  style={{ textDecoration: 'none', color: 'inherit' }}
+                >
+                  <div className="pricing-header">
+                    <div className="pricing-title" style={{ cursor: 'pointer' }}>{plan.title}</div>
+                    <div className="pricing-subtitle muted">{plan.subtitle}</div>
+                  </div>
+                  <div className="price">
+                    <span className="currency">R$</span>
+                    <span className="amount">{price}</span>
+                    <span className="period">{periodLabel}</span>
+                  </div>
+                  <ul className="features">
+                    {plan.features.map((item) => (
+                      <Feature key={item}>{item}</Feature>
+                    ))}
+                  </ul>
+                  {billingCycle === 'anual' && plan.annualNote && (
+                    <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>{plan.annualNote}</div>
+                  )}
+                  <span className={plan.ctaVariant || 'btn'}>{plan.ctaLabel || 'Saiba mais'}</span>
+                </Link>
+              );
+            })}
           </div>
         </div>
       </section>

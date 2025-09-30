@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS usuarios (
   tipo         ENUM('cliente','estabelecimento') NOT NULL,
   plan         ENUM('starter','pro','premium') NOT NULL DEFAULT 'starter',
   plan_status  ENUM('trialing','active','delinquent') NOT NULL DEFAULT 'trialing',
+  plan_cycle   ENUM('mensal','anual') NOT NULL DEFAULT 'mensal',
   plan_trial_ends_at DATETIME       NULL,
   plan_active_until DATETIME       NULL,
   plan_subscription_id VARCHAR(80) NULL,

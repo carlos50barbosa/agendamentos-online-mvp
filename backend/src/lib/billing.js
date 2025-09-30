@@ -2,7 +2,13 @@
 import { randomUUID } from 'node:crypto'
 import { MercadoPagoConfig, PreApproval, PreApprovalPlan } from 'mercadopago'
 import { config } from './config.js'
-import { PLAN_TIERS, getPlanPriceCents, getPlanLabel } from './plans.js'
+import {
+  PLAN_TIERS,
+  getPlanPriceCents,
+  getPlanLabel,
+  normalizeBillingCycle,
+  getBillingCycleConfig,
+} from './plans.js'
 import {
   createSubscription,
   updateSubscription,
@@ -70,8 +76,9 @@ function extractMpError(err) {
   } catch { return String(err?.message || err) }
 }
 
-function buildExternalReference(estabelecimentoId, plan) {
-  const base = `plan:${plan}:est:${estabelecimentoId}`
+function buildExternalReference(estabelecimentoId, plan, cycle) {
+  const normalizedCycle = normalizeBillingCycle(cycle)
+  const base = `plan:${plan}:cycle:${normalizedCycle}:est:${estabelecimentoId}`
   return `${base}:${randomUUID()}`
 }
 
@@ -134,15 +141,22 @@ async function persistUserFromSubscription(subscription, planStatus, preapproval
   }
 
   let planValue = null
+  let planCycleValue = subscription?.billingCycle ? normalizeBillingCycle(subscription.billingCycle) : null
   if (planStatus === 'active') {
     planValue = subscription.plan
   } else if (planStatus === 'canceled' || planStatus === 'expired') {
     planValue = 'starter'
+    planCycleValue = 'mensal'
   }
 
   if (planValue) {
     updates.push('plan=?')
     values.push(planValue)
+  }
+
+  if (planCycleValue) {
+    updates.push('plan_cycle=?')
+    values.push(planCycleValue)
   }
 
   if (planStatus !== 'trialing') {
@@ -165,7 +179,14 @@ async function persistUserFromSubscription(subscription, planStatus, preapproval
   await pool.query(sql, values)
 }
 
-export async function createMercadoPagoCheckout({ estabelecimento, plan, successUrl, failureUrl, pendingUrl }) {
+export async function createMercadoPagoCheckout({
+  estabelecimento,
+  plan,
+  billingCycle,
+  successUrl,
+  failureUrl,
+  pendingUrl,
+}) {
   if (!estabelecimento?.id) {
     throw new Error('Estabelecimento invalido')
   }
@@ -174,7 +195,10 @@ export async function createMercadoPagoCheckout({ estabelecimento, plan, success
     throw new Error('Plano invalido')
   }
 
-  const priceCents = getPlanPriceCents(normalizedPlan)
+  const normalizedCycle = normalizeBillingCycle(billingCycle)
+  const cycleCfg = getBillingCycleConfig(normalizedCycle)
+
+  const priceCents = getPlanPriceCents(normalizedPlan, normalizedCycle)
   const amountNum = Number((Number(priceCents || 0) / 100).toFixed(2))
   if (!priceCents) {
     throw new Error('Preco do plano nao configurado')
@@ -199,8 +223,8 @@ export async function createMercadoPagoCheckout({ estabelecimento, plan, success
     reason: `Agendamentos Online - Plano ${getPlanLabel(normalizedPlan)}`,
     back_url: pickValidUrl(config.billing?.mercadopago?.successUrl) || undefined,
     auto_recurring: {
-      frequency: 1,
-      frequency_type: 'months',
+      frequency: cycleCfg.frequency,
+      frequency_type: cycleCfg.frequencyType,
       transaction_amount: amountNum,
       currency_id: BILLING_CURRENCY,
     },
@@ -215,7 +239,7 @@ export async function createMercadoPagoCheckout({ estabelecimento, plan, success
   }
   if (!planResp?.id) throw new Error('mercadopago_preapproval_error: plano sem id retornado')
 
-  const externalReference = buildExternalReference(estabelecimento.id, normalizedPlan)
+  const externalReference = buildExternalReference(estabelecimento.id, normalizedPlan, normalizedCycle)
   const subscription = await createSubscription({
     estabelecimentoId: estabelecimento.id,
     plan: normalizedPlan,
@@ -225,6 +249,7 @@ export async function createMercadoPagoCheckout({ estabelecimento, plan, success
     gatewaySubscriptionId: null,
     gatewayPreferenceId: String(planResp.id),
     externalReference,
+    billingCycle: normalizedCycle,
   })
   await appendSubscriptionEvent(subscription.id, {
     eventType: 'preapproval_plan.create',
@@ -251,6 +276,9 @@ export async function syncMercadoPagoPreapproval(preapprovalId, eventPayload = n
     throw new Error('Preapproval nao encontrado')
   }
 
+  const recurringType = String(preapproval?.auto_recurring?.frequency_type || '').toLowerCase()
+  const derivedCycle = recurringType === 'years' ? 'anual' : 'mensal'
+
   let subscription = await getSubscriptionByGatewayId(preapproval.id)
   if (!subscription) {
     // Tenta localizar pelo plano vinculado (preapproval.preapproval_plan_id)
@@ -263,14 +291,23 @@ export async function syncMercadoPagoPreapproval(preapprovalId, eventPayload = n
         status: String(preapproval.status || 'pending').toLowerCase(),
         currency: (preapproval.auto_recurring?.currency_id || BILLING_CURRENCY).toUpperCase(),
         amountCents: Math.round(Number(preapproval.auto_recurring?.transaction_amount || byPlan.amountCents / 100) * 100),
+        billingCycle: normalizeBillingCycle(derivedCycle),
       })
     } else {
       // Último recurso: inferir pelo external_reference
       let estabelecimentoId = null;
       let inferredPlan = 'starter';
+      const tokens = {};
       const parts = String(preapproval.external_reference || '').split(':');
-      const planToken = String(parts[1] || parts[0] || '').toLowerCase();
-      const estabToken = parts[3];
+      for (let i = 0; i < parts.length - 1; i += 2) {
+        const key = parts[i];
+        const value = parts[i + 1];
+        if (!key) continue;
+        tokens[key] = value;
+      }
+      const planToken = String(tokens.plan || parts[1] || parts[0] || '').toLowerCase();
+      const cycleToken = normalizeBillingCycle(tokens.cycle || derivedCycle);
+      const estabToken = tokens.est;
       if (PLAN_TIERS.includes(planToken)) inferredPlan = planToken;
       if (estabToken) {
         const candidateId = Number(estabToken);
@@ -282,11 +319,14 @@ export async function syncMercadoPagoPreapproval(preapprovalId, eventPayload = n
       subscription = await createSubscription({
         estabelecimentoId,
         plan: inferredPlan,
-        amountCents: Math.round(Number(preapproval.auto_recurring?.transaction_amount || 0) * 100) || getPlanPriceCents(inferredPlan),
+        amountCents:
+          Math.round(Number(preapproval.auto_recurring?.transaction_amount || 0) * 100) ||
+          getPlanPriceCents(inferredPlan, cycleToken),
         currency: (preapproval.auto_recurring?.currency_id || BILLING_CURRENCY).toUpperCase(),
         status: String(preapproval.status || 'pending').toLowerCase(),
         gatewaySubscriptionId: preapproval.id,
         externalReference: preapproval.external_reference || null,
+        billingCycle: cycleToken,
       })
     }
   }
@@ -297,6 +337,7 @@ export async function syncMercadoPagoPreapproval(preapprovalId, eventPayload = n
     amountCents: Math.round(Number(preapproval.auto_recurring?.transaction_amount || subscription.amountCents / 100) * 100),
     currentPeriodEnd: computeActiveUntil(preapproval),
     lastEventId: eventPayload?.id ? String(eventPayload.id) : eventPayload?.action || null,
+    billingCycle: normalizeBillingCycle(subscription.billingCycle || derivedCycle),
   }
 
   subscription = await updateSubscription(subscription.id, updates)

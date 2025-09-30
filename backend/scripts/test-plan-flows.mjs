@@ -68,6 +68,7 @@ function seedScenario({ user = {}, services = null, bloqueios = [], report = nul
     tipo: 'estabelecimento',
     plan: 'starter',
     plan_status: 'trialing',
+    plan_cycle: 'mensal',
     plan_trial_ends_at: null,
     plan_active_until: null,
     plan_subscription_id: null,
@@ -119,6 +120,20 @@ pool.query = async (sql, params = []) => {
       plan_status: user.plan_status,
       plan_trial_ends_at: user.plan_trial_ends_at ? new Date(user.plan_trial_ends_at) : null,
       plan_active_until: user.plan_active_until ? new Date(user.plan_active_until) : null
+    }], []]
+  }
+
+  if (norm.startsWith("SELECT plan, plan_status, plan_trial_ends_at, plan_active_until, plan_subscription_id, plan_cycle FROM usuarios WHERE id=?")) {
+    const id = params[0]
+    const user = findUserById(id)
+    if (!user) return [[], []]
+    return [[{
+      plan: user.plan,
+      plan_status: user.plan_status,
+      plan_trial_ends_at: user.plan_trial_ends_at ? new Date(user.plan_trial_ends_at) : null,
+      plan_active_until: user.plan_active_until ? new Date(user.plan_active_until) : null,
+      plan_subscription_id: user.plan_subscription_id || null,
+      plan_cycle: user.plan_cycle || 'mensal'
     }], []]
   }
 
@@ -177,15 +192,40 @@ pool.query = async (sql, params = []) => {
     return [clone(state.report.services), []]
   }
 
-  if (norm.startsWith("UPDATE usuarios SET plan=")) {
-    const [plan, status, trialEndsAt, activeUntil, subId, id] = params
+  if (norm.startsWith("UPDATE usuarios SET")) {
+    const assignments = norm.substring("UPDATE usuarios SET ".length, norm.indexOf(' WHERE'))
+      .split(', ')
+      .map((part) => part.trim())
+
+    const id = params[assignments.length]
     const user = findUserById(id)
     if (!user) return [{ affectedRows: 0 }, []]
-    user.plan = plan
-    user.plan_status = status
-    user.plan_trial_ends_at = trialEndsAt ? new Date(trialEndsAt) : null
-    user.plan_active_until = activeUntil ? new Date(activeUntil) : null
-    user.plan_subscription_id = subId || null
+    assignments.forEach((assignment, index) => {
+      const [column] = assignment.split('=')
+      const value = params[index]
+      switch (column) {
+        case 'plan':
+          user.plan = value
+          break
+        case 'plan_status':
+          user.plan_status = value
+          break
+        case 'plan_cycle':
+          user.plan_cycle = value || 'mensal'
+          break
+        case 'plan_trial_ends_at':
+          user.plan_trial_ends_at = value ? new Date(value) : null
+          break
+        case 'plan_active_until':
+          user.plan_active_until = value ? new Date(value) : null
+          break
+        case 'plan_subscription_id':
+          user.plan_subscription_id = value || null
+          break
+        default:
+          break
+      }
+    })
     return [{ affectedRows: 1 }, []]
   }
 

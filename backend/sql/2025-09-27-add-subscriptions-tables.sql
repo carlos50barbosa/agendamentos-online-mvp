@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS subscriptions (
   status ENUM('initiated','pending','authorized','active','paused','past_due','canceled','expired') NOT NULL DEFAULT 'initiated',
   amount_cents INT NOT NULL,
   currency CHAR(3) NOT NULL DEFAULT 'BRL',
+  billing_cycle ENUM('mensal','anual') NOT NULL DEFAULT 'mensal',
   trial_ends_at DATETIME NULL,
   current_period_end DATETIME NULL,
   cancel_at DATETIME NULL,

@@ -116,11 +116,18 @@ export const Api = {
   listServices: (establishmentId) => req(`/servicos${toQuery({ establishmentId })}`),
 
   // Billing (assinaturas Mercado Pago)
-  billingCreateCheckout: (payload) =>
-    req('/billing/checkout-session', { method: 'POST', body: JSON.stringify(payload) }),
+  billingCreateCheckout: (payload) => {
+    const body = { ...payload };
+    if (body.billing_cycle == null) body.billing_cycle = 'mensal';
+    return req('/billing/checkout-session', { method: 'POST', body: JSON.stringify(body) });
+  },
   billingSubscription: () => req('/billing/subscription'),
   billingSync: (preapproval_id) => req(`/billing/sync${toQuery({ preapproval_id })}`),
-  billingChangeCheckout: (target_plan) => req('/billing/change', { method: 'POST', body: JSON.stringify({ target_plan }) }),
+  billingChangeCheckout: (target_plan, billing_cycle) => {
+    const payload = { target_plan };
+    if (billing_cycle) payload.billing_cycle = billing_cycle;
+    return req('/billing/change', { method: 'POST', body: JSON.stringify(payload) });
+  },
 
   // ServiÃ§os (rotas existentes)
   servicosList: () => req('/servicos'),

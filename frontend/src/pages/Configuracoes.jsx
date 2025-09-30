@@ -258,13 +258,13 @@ export default function Configuracoes() {
     })();
   }, [isEstab, user?.id, fetchBilling]);
 
-  const handleCheckout = useCallback(async (targetPlan) => {
+  const handleCheckout = useCallback(async (targetPlan, targetCycle = 'mensal') => {
     if (!isEstab) return;
     setCheckoutError('');
     setCheckoutLoading(true);
     checkoutIntentRef.current = true;
     try {
-      const payload = { plan: targetPlan };
+      const payload = { plan: targetPlan, billing_cycle: targetCycle };
       const data = await Api.billingCreateCheckout(payload);
       if (data?.subscription) {
         setBilling((prev) => ({ ...prev, subscription: data.subscription }));
@@ -295,7 +295,10 @@ export default function Configuracoes() {
     } finally {
       setCheckoutLoading(false);
       checkoutIntentRef.current = false;
-      try { localStorage.removeItem('intent_plano'); } catch {}
+      try {
+        localStorage.removeItem('intent_plano');
+        localStorage.removeItem('intent_plano_ciclo');
+      } catch {}
     }
   }, [fetchBilling, isEstab]);
 
@@ -330,20 +333,28 @@ export default function Configuracoes() {
   useEffect(() => {
     if (!isEstab) return;
     let storedPlan = null;
+    let storedCycle = 'mensal';
     try { storedPlan = localStorage.getItem('intent_plano'); } catch {}
+    try {
+      const rawCycle = localStorage.getItem('intent_plano_ciclo');
+      if (rawCycle) storedCycle = rawCycle;
+    } catch {}
     if (storedPlan && !checkoutIntentRef.current) {
       checkoutIntentRef.current = true;
       (async () => {
         try {
           // Se há assinatura ativa e o plano desejado difere do atual, usar rota de change
           if (planInfo.status === 'active' && storedPlan !== planInfo.plan) {
-            const data = await Api.billingChangeCheckout(storedPlan);
+            const data = await Api.billingChangeCheckout(storedPlan, storedCycle);
             if (data?.init_point) window.location.href = data.init_point;
           } else {
-            await handleCheckout(storedPlan);
+            await handleCheckout(storedPlan, storedCycle);
           }
         } finally {
-          try { localStorage.removeItem('intent_plano'); } catch {}
+          try {
+            localStorage.removeItem('intent_plano');
+            localStorage.removeItem('intent_plano_ciclo');
+          } catch {}
           checkoutIntentRef.current = false;
         }
       })();

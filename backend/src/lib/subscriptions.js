@@ -11,6 +11,7 @@ const COLUMN_MAP = {
   status: 'status',
   amountCents: 'amount_cents',
   currency: 'currency',
+  billingCycle: 'billing_cycle',
   trialEndsAt: 'trial_ends_at',
   currentPeriodEnd: 'current_period_end',
   cancelAt: 'cancel_at',
@@ -31,6 +32,7 @@ function mapRow(row) {
     status: row.status,
     amountCents: row.amount_cents,
     currency: row.currency,
+    billingCycle: row.billing_cycle || 'mensal',
     trialEndsAt: row.trial_ends_at ? new Date(row.trial_ends_at) : null,
     currentPeriodEnd: row.current_period_end ? new Date(row.current_period_end) : null,
     cancelAt: row.cancel_at ? new Date(row.cancel_at) : null,
@@ -89,6 +91,7 @@ export async function createSubscription(data) {
     ...data,
     gateway: data.gateway || 'mercadopago',
     currency: data.currency || 'BRL',
+    billingCycle: data.billingCycle || 'mensal',
   }
 
   for (const [key, column] of Object.entries(COLUMN_MAP)) {
@@ -158,6 +161,7 @@ export function serializeSubscription(subscription) {
     status: subscription.status,
     amount_cents: subscription.amountCents,
     currency: subscription.currency,
+     billing_cycle: subscription.billingCycle || 'mensal',
     gateway: subscription.gateway,
     gateway_subscription_id: subscription.gatewaySubscriptionId,
     gateway_preference_id: subscription.gatewayPreferenceId,
