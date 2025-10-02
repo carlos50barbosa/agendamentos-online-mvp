@@ -51,6 +51,7 @@ router.post('/checkout-session', auth, isEstabelecimento, async (req, res) => {
   try {
     const { plan, billing_cycle: rawCycle, successUrl, failureUrl, pendingUrl } = req.body || {}
     const billingCycle = normalizeBillingCycle(rawCycle)
+    const forceNew = /^(1|true|yes)$/i.test(String(req.query?.force || req.body?.force || ''))
 
     // 1) Trava: se já está ativo e ainda dentro do período, não criar novo checkout
     const ctx = await getPlanContext(req.user.id)
@@ -62,18 +63,21 @@ router.post('/checkout-session', auth, isEstabelecimento, async (req, res) => {
       })
     }
 
-    // 2) Reuso: se há assinatura pendente com plano criado, reusar o init_point
-    const last = await getLatestSubscriptionForEstabelecimento(req.user.id)
-    if (last && last.status === 'pending' && last.gatewayPreferenceId) {
-      const init = await getPlanInitPoint(last.gatewayPreferenceId)
-      if (init) {
-        return res.json({
-          ok: true,
-          init_point: init,
-          plan_status: 'pending',
-          subscription: serializeSubscription(last),
-          reused: true,
-        })
+    // 2) Reuso: se há assinatura pendente com plano criado, reusar o init_point (a menos que forceNew ou reuse desativado)
+    const allowReuse = config.billing?.reusePending !== false && !forceNew
+    if (allowReuse) {
+      const last = await getLatestSubscriptionForEstabelecimento(req.user.id)
+      if (last && last.status === 'pending' && last.gatewayPreferenceId) {
+        const init = await getPlanInitPoint(last.gatewayPreferenceId)
+        if (init) {
+          return res.json({
+            ok: true,
+            init_point: init,
+            plan_status: 'pending',
+            subscription: serializeSubscription(last),
+            reused: true,
+          })
+        }
       }
     }
 
@@ -177,6 +181,7 @@ router.post('/change', auth, isEstabelecimento, async (req, res) => {
   try {
     const target = String(req.body?.target_plan || req.body?.plan || '').toLowerCase()
     const billingCycle = normalizeBillingCycle(req.body?.billing_cycle)
+    const forceNew = /^(1|true|yes)$/i.test(String(req.query?.force || req.body?.force || ''))
     if (!PLAN_TIERS.includes(target)) {
       return res.status(400).json({ error: 'invalid_plan' })
     }
@@ -212,12 +217,15 @@ router.post('/change', auth, isEstabelecimento, async (req, res) => {
       }
     }
 
-    // Reusar link pendente para o mesmo destino
-    const last = await getLatestSubscriptionForEstabelecimento(req.user.id)
-    if (last && last.status === 'pending' && last.plan === target && last.gatewayPreferenceId) {
-      const init = await getPlanInitPoint(last.gatewayPreferenceId)
-      if (init) {
-        return res.json({ ok: true, init_point: init, plan_status: 'pending', subscription: serializeSubscription(last), reused: true })
+    // Reusar link pendente para o mesmo destino (a menos que forceNew ou reuse desativado)
+    const allowReuse = config.billing?.reusePending !== false && !forceNew
+    if (allowReuse) {
+      const last = await getLatestSubscriptionForEstabelecimento(req.user.id)
+      if (last && last.status === 'pending' && last.plan === target && last.gatewayPreferenceId) {
+        const init = await getPlanInitPoint(last.gatewayPreferenceId)
+        if (init) {
+          return res.json({ ok: true, init_point: init, plan_status: 'pending', subscription: serializeSubscription(last), reused: true })
+        }
       }
     }
 

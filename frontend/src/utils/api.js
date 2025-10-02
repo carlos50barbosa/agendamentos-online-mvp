@@ -219,6 +219,13 @@ export const Api = {
   },
   requestOtp: (channel, value) => req('/public/otp/request', { method: 'POST', body: JSON.stringify({ channel, value }) }),
   verifyOtp: (request_id, code) => req('/public/otp/verify', { method: 'POST', body: JSON.stringify({ request_id, code }) }),
+  
+  // Profissionais
+  profissionaisPublicList: (establishmentId) => req(`/profissionais${toQuery({ establishmentId })}`),
+  profissionaisList: () => req('/profissionais'),
+  profissionaisCreate: (payload) => req('/profissionais', { method: 'POST', body: JSON.stringify(payload) }),
+  profissionaisUpdate: (id, payload) => req(`/profissionais/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
+  profissionaisDelete: (id) => req(`/profissionais/${id}`, { method: 'DELETE' }),
 };
 
 // Exporta para depuraÃ§Ã£o no console do navegador

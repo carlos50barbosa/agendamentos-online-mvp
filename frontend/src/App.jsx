@@ -8,6 +8,7 @@ import Cadastro from './pages/Cadastro.jsx';
 import DashboardCliente from './pages/DashboardCliente.jsx';
 import DashboardEstabelecimento from './pages/DashboardEstabelecimento.jsx';
 import ServicosEstabelecimento from './pages/ServicosEstabelecimento.jsx';
+import ProfissionaisEstabelecimento from './pages/ProfissionaisEstabelecimento.jsx';
 import NovoAgendamento from './pages/NovoAgendamento.jsx';
 import EstabelecimentosList from './pages/EstabelecimentosList.jsx';
 import {
@@ -62,6 +63,7 @@ const APP_ROUTES = [
   { path: '/cliente', element: <DashboardCliente /> },
   { path: '/estab', element: <DashboardEstabelecimento /> },
   { path: '/servicos', element: <ServicosEstabelecimento /> },
+  { path: '/profissionais', element: <ProfissionaisEstabelecimento /> },
   { path: '/novo', element: <NovoAgendamento /> },
   { path: '/configuracoes', element: <Configuracoes /> },
   { path: '/loading', element: <Loading /> },
@@ -241,6 +243,10 @@ function Sidebar({ open, user }) {
                       <NavLink to="/servicos" className={({ isActive }) => `sidelist__item${isActive ? ' active' : ''}`}>
                         <IconList className="sidelist__icon" aria-hidden="true" />
                         <span>Serviços</span>
+                      </NavLink>
+                      <NavLink to="/profissionais" className={({ isActive }) => `sidelist__item${isActive ? ' active' : ''}`}>
+                        <IconList className="sidelist__icon" aria-hidden="true" />
+                        <span>Profissionais</span>
                       </NavLink>
                       <NavLink to="/relatorios" className={({ isActive }) => `sidelist__item${isActive ? ' active' : ''}`}>
                         <IconChart className="sidelist__icon" aria-hidden="true" />

@@ -51,6 +51,10 @@ export async function getPlanInitPoint(preApprovalPlanId) {
   const client = ensureMercadoPagoPlan()
   try {
     const plan = await client.get({ preApprovalPlanId })
+    const accessToken = config.billing?.mercadopago?.accessToken || ''
+    const isTestToken = /^TEST-/.test(accessToken)
+    // Em modo teste, prefira o sandbox_init_point quando disponível
+    if (isTestToken) return plan?.sandbox_init_point || plan?.init_point || null
     return plan?.init_point || plan?.sandbox_init_point || null
   } catch (e) {
     console.warn('[mp][preapproval_plan.get] failed', preApprovalPlanId, e?.message || e)
@@ -259,7 +263,14 @@ export async function createMercadoPagoCheckout({
   await persistUserFromSubscription(subscription, 'pending', null)
 
   return {
-    initPoint: planResp.init_point || planResp.sandbox_init_point || null,
+    // Em modo teste, prefira usar o sandbox_init_point para evitar mensagens de ambiente misto
+    initPoint: (() => {
+      const accessToken = config.billing?.mercadopago?.accessToken || ''
+      const isTestToken = /^TEST-/.test(accessToken)
+      return isTestToken
+        ? (planResp.sandbox_init_point || planResp.init_point || null)
+        : (planResp.init_point || planResp.sandbox_init_point || null)
+    })(),
     subscription,
     preapproval: null,
     planStatus: 'pending',

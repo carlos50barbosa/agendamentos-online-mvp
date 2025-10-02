@@ -8,6 +8,7 @@ import dotenv from 'dotenv'; dotenv.config();
 import { notifyEmail } from '../lib/notifications.js';
 import crypto from 'crypto';
 import { consumeLinkToken } from '../lib/wa_store.js';
+import { saveAvatarFromDataUrl, removeAvatarFile } from '../lib/avatar.js';
 
 const router = Router();
 
@@ -87,7 +88,7 @@ router.post('/register', async (req, res) => {
 
     const hash = await bcrypt.hash(String(senha), 10);
     const [r] = await pool.query(
-      'INSERT INTO usuarios (nome, email, telefone, cep, endereco, numero, complemento, bairro, cidade, estado, senha_hash, tipo) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
+      'INSERT INTO usuarios (nome, email, telefone, cep, endereco, numero, complemento, bairro, cidade, estado, avatar_url, senha_hash, tipo) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
       [
         nomeTrim,
         emailTrim,
@@ -99,6 +100,7 @@ router.post('/register', async (req, res) => {
         bairroTrim || null,
         cidadeTrim || null,
         estadoTrim || null,
+        null,
         hash,
         tipo,
       ]
@@ -154,7 +156,7 @@ router.post('/login', async (req, res) => {
     const email = String(emailRaw).trim().toLowerCase();
 
     const [rows] = await pool.query(
-      'SELECT id, nome, email, telefone, cep, endereco, numero, complemento, bairro, cidade, estado, senha_hash, tipo, plan, plan_status, plan_trial_ends_at, plan_active_until, plan_subscription_id FROM usuarios WHERE LOWER(email)=? LIMIT 1',
+      'SELECT id, nome, email, telefone, cep, endereco, numero, complemento, bairro, cidade, estado, avatar_url, senha_hash, tipo, plan, plan_status, plan_trial_ends_at, plan_active_until, plan_subscription_id FROM usuarios WHERE LOWER(email)=? LIMIT 1',
       [email]
     );
     if (!rows.length) return res.status(401).json({ error: 'invalid_credentials' });
@@ -185,6 +187,7 @@ router.post('/login', async (req, res) => {
       bairro: u.bairro || null,
       cidade: u.cidade || null,
       estado: u.estado || null,
+      avatar_url: u.avatar_url || null,
       tipo: u.tipo || 'cliente',
       plan: u.plan || 'starter',
       plan_status: u.plan_status || 'trialing',
@@ -314,6 +317,39 @@ router.put('/me', auth, async (req, res) => {
       return res.status(400).json({ error: 'senha_incorreta', message: 'Senha atual incorreta.' });
     }
 
+    const previousAvatar = req.user?.avatar_url || null;
+    const avatarRaw = typeof req.body?.avatar === 'string' ? req.body.avatar.trim() : '';
+    const wantsRemoveAvatar = req.body?.avatarRemove === true || req.body?.avatarRemove === 'true';
+    let nextAvatar = previousAvatar;
+
+    if (wantsRemoveAvatar && previousAvatar) {
+      try {
+        await removeAvatarFile(previousAvatar);
+      } catch (err) {
+        if (err?.code !== 'ENOENT') console.warn('[auth/me][avatar] remove failed', err?.message || err);
+      }
+      nextAvatar = null;
+    }
+
+    if (avatarRaw) {
+      if (!avatarRaw.startsWith('data:image/')) {
+        return res.status(400).json({ error: 'avatar_invalido', message: 'Envie uma imagem PNG, JPG ou WEBP.' });
+      }
+      try {
+        const previousForSave = wantsRemoveAvatar ? null : previousAvatar;
+        nextAvatar = await saveAvatarFromDataUrl(avatarRaw, userId, previousForSave);
+      } catch (err) {
+        if (err?.code === 'AVATAR_TOO_LARGE') {
+          return res.status(400).json({ error: 'avatar_grande', message: 'A imagem deve ter no maximo 2MB.' });
+        }
+        if (err?.code === 'AVATAR_INVALID') {
+          return res.status(400).json({ error: 'avatar_invalido', message: 'Envie uma imagem PNG, JPG ou WEBP.' });
+        }
+        console.error('[auth/me][avatar] erro:', err);
+        return res.status(500).json({ error: 'avatar_falhou', message: 'Nao foi possivel salvar a foto de perfil.' });
+      }
+    }
+
     if (senhaNova) {
       const nova = String(senhaNova || '');
       if (nova.length < 6) {
@@ -336,8 +372,8 @@ router.put('/me', auth, async (req, res) => {
 
     if (emailChanged) {
       await pool.query(
-        'UPDATE usuarios SET nome=?, telefone=?, cep=?, endereco=?, numero=?, complemento=?, bairro=?, cidade=?, estado=? WHERE id=?',
-        [nome, phoneClean || null, cepValue, enderecoValue, numeroValue, complementoValue, bairroValue, cidadeValue, estadoValue, userId]
+        'UPDATE usuarios SET nome=?, telefone=?, cep=?, endereco=?, numero=?, complemento=?, bairro=?, cidade=?, estado=?, avatar_url=? WHERE id=?',
+        [nome, phoneClean || null, cepValue, enderecoValue, numeroValue, complementoValue, bairroValue, cidadeValue, estadoValue, nextAvatar, userId]
       );
       await pool.query('DELETE FROM email_change_tokens WHERE user_id=?', [userId]);
       const code = String(Math.floor(100000 + Math.random() * 900000));
@@ -348,7 +384,7 @@ router.put('/me', auth, async (req, res) => {
       const html = `<p>Ola!</p><p>Use o codigo <strong>${code}</strong> para confirmar seu novo email.</p><p>O codigo expira em 30 minutos.</p>`;
       try { await notifyEmail(emailNorm, subject, html); } catch (err) { console.error('[auth/me][email]', err); }
 
-      const [[userRow]] = await pool.query("SELECT id, nome, email, telefone, cep, endereco, numero, complemento, bairro, cidade, estado, tipo, plan, plan_status, plan_trial_ends_at, plan_active_until, plan_subscription_id FROM usuarios WHERE id=? LIMIT 1", [userId]);
+      const [[userRow]] = await pool.query("SELECT id, nome, email, telefone, cep, endereco, numero, complemento, bairro, cidade, estado, avatar_url, tipo, plan, plan_status, plan_trial_ends_at, plan_active_until, plan_subscription_id FROM usuarios WHERE id=? LIMIT 1", [userId]);
       if (!userRow) {
         return res.status(404).json({ error: 'not_found', message: 'Usuario nao encontrado.' });
       }
@@ -364,6 +400,7 @@ router.put('/me', auth, async (req, res) => {
         bairro: userRow.bairro || bairroValue,
         cidade: userRow.cidade || cidadeValue,
         estado: userRow.estado || estadoValue,
+        avatar_url: userRow.avatar_url || nextAvatar || null,
       };
       req.user = { ...req.user, ...mergedUser };
 
@@ -375,11 +412,11 @@ router.put('/me', auth, async (req, res) => {
     }
 
     await pool.query(
-      'UPDATE usuarios SET nome=?, email=?, telefone=?, cep=?, endereco=?, numero=?, complemento=?, bairro=?, cidade=?, estado=? WHERE id=?',
-      [nome, email, phoneClean || null, cepValue, enderecoValue, numeroValue, complementoValue, bairroValue, cidadeValue, estadoValue, userId]
+      'UPDATE usuarios SET nome=?, email=?, telefone=?, cep=?, endereco=?, numero=?, complemento=?, bairro=?, cidade=?, estado=?, avatar_url=? WHERE id=?',
+      [nome, email, phoneClean || null, cepValue, enderecoValue, numeroValue, complementoValue, bairroValue, cidadeValue, estadoValue, nextAvatar, userId]
     );
 
-    const [[userRow]] = await pool.query("SELECT id, nome, email, telefone, cep, endereco, numero, complemento, bairro, cidade, estado, tipo, plan, plan_status, plan_trial_ends_at, plan_active_until, plan_subscription_id FROM usuarios WHERE id=? LIMIT 1", [userId]);
+    const [[userRow]] = await pool.query("SELECT id, nome, email, telefone, cep, endereco, numero, complemento, bairro, cidade, estado, avatar_url, tipo, plan, plan_status, plan_trial_ends_at, plan_active_until, plan_subscription_id FROM usuarios WHERE id=? LIMIT 1", [userId]);
     if (!userRow) {
       return res.status(404).json({ error: 'not_found', message: 'Usuario nao encontrado.' });
     }
@@ -429,7 +466,7 @@ router.post('/me/email-confirm', auth, async (req, res) => {
     await pool.query('UPDATE usuarios SET email=? WHERE id=?', [newEmail, userId]);
     await pool.query('DELETE FROM email_change_tokens WHERE id=?', [token.id]);
 
-    const [[userRow]] = await pool.query("SELECT id, nome, email, telefone, cep, endereco, numero, complemento, bairro, cidade, estado, tipo, plan, plan_status, plan_trial_ends_at, plan_active_until, plan_subscription_id FROM usuarios WHERE id=? LIMIT 1", [userId]);
+    const [[userRow]] = await pool.query("SELECT id, nome, email, telefone, cep, endereco, numero, complemento, bairro, cidade, estado, avatar_url, tipo, plan, plan_status, plan_trial_ends_at, plan_active_until, plan_subscription_id FROM usuarios WHERE id=? LIMIT 1", [userId]);
     if (!userRow) {
       return res.status(404).json({ error: 'not_found', message: 'Usuario nao encontrado.' });
     }

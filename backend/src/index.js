@@ -3,6 +3,9 @@ import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import morgan from 'morgan';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { mkdir } from 'node:fs/promises';
 
 import authRouter from './routes/auth.js';
 import servicosRouter from './routes/servicos.js';
@@ -17,11 +20,20 @@ import billingRouter from './routes/billing.js';
 import waWebhookRouter from './routes/whatsapp_webhook.js';
 import publicAgendamentosRouter from './routes/agendamentos_public.js';
 import otpPublicRouter from './routes/otp_public.js';
+import profissionaisRouter from './routes/profissionais.js';
 import { pool } from './lib/db.js';
 import { startMaintenance } from './lib/maintenance.js';
+import { mountWebhooks } from './routes/webhooks.js';
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const UPLOADS_DIR = path.join(__dirname, '..', 'uploads');
+mkdir(UPLOADS_DIR, { recursive: true }).catch(() => {});
 
 const app = express();
+
+// Se hoje o Nginx mantém /api até o Node, passe withApiPrefix=true (mas aceitamos ambos):
+mountWebhooks(app, true);
 
 app.set('trust proxy', 1);
 app.use(morgan('dev'));
@@ -37,7 +49,10 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization', 'Idempotency-Key', 'X-Admin-Token', 'X-Admin-Allow-Write', 'X-OTP-Token'],
 }));
 app.options('*', cors());
-app.use(express.json());
+app.use(express.json({ limit: '5mb' }));
+
+app.use('/uploads', express.static(UPLOADS_DIR, { maxAge: '7d' }));
+app.use('/api/uploads', express.static(UPLOADS_DIR, { maxAge: '7d' }));
 
 // Health
 app.get('/health', (_req, res) => res.status(200).send('ok'));
@@ -69,6 +84,7 @@ app.use('/slots', slotsRouter);
 app.use('/notifications', notificationsRouter);
 app.use('/establishments', estabelecimentosRoutes);
 app.use('/estabelecimentos', estabelecimentosRoutes);
+app.use('/profissionais', profissionaisRouter);
 app.use('/notify', notifyRouter);
 app.use('/public/otp', otpPublicRouter);
 app.use('/public/agendamentos', publicAgendamentosRouter);
@@ -85,6 +101,7 @@ app.use('/api/slots', slotsRouter);
 app.use('/api/notifications', notificationsRouter);
 app.use('/api/establishments', estabelecimentosRoutes);
 app.use('/api/estabelecimentos', estabelecimentosRoutes);
+app.use('/api/profissionais', profissionaisRouter);
 app.use('/api/notify', notifyRouter);
 app.use('/api/public/otp', otpPublicRouter);
 app.use('/api/public/agendamentos', publicAgendamentosRouter);

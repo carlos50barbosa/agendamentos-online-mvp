@@ -41,6 +41,12 @@ export const config = {
   billing: {
     provider: getAny('BILLING_PROVIDER', 'PAYMENT_PROVIDER') || 'mercadopago',
     currency: getAny('BILLING_CURRENCY') || 'BRL',
+    // Controla se devemos reutilizar um checkout/Plano pendente existente
+    // BILLING_REUSE_PENDING=false para sempre gerar um novo link
+    reusePending: (() => {
+      const v = String(getAny('BILLING_REUSE_PENDING') ?? 'true').toLowerCase()
+      return !(v === '0' || v === 'false' || v === 'no')
+    })(),
     mercadopago: {
       accessToken: getAny('MERCADOPAGO_ACCESS_TOKEN', 'MP_ACCESS_TOKEN'),
       publicKey: getAny('MERCADOPAGO_PUBLIC_KEY', 'MP_PUBLIC_KEY'),

@@ -1,6 +1,7 @@
-ï»¿// backend/src/routes/estabelecimentos.js
+// backend/src/routes/estabelecimentos.js
 import { Router } from "express";
 import { pool } from "../lib/db.js";
+import { resolveEstablishmentCoordinates } from "../lib/geocode.js";
 import { auth, isEstabelecimento } from "../middleware/auth.js";
 import {
   PLAN_TIERS,
@@ -16,32 +17,54 @@ import {
 
 const router = Router();
 
+const LIST_QUERY = "SELECT id, nome, email, telefone, cep, endereco, numero, complemento, bairro, cidade, estado, avatar_url FROM usuarios WHERE tipo = 'estabelecimento' ORDER BY nome";
+
+const toFiniteOrNull = (value) => {
+  const num = Number(value);
+  return Number.isFinite(num) ? num : null;
+};
+
+async function attachCoordinates(rows, includeCoords) {
+  if (!includeCoords) return rows;
+  const enriched = [];
+  for (const est of rows) {
+    const lat = toFiniteOrNull(est?.latitude ?? est?.lat ?? est?.coord_lat);
+    const lng = toFiniteOrNull(est?.longitude ?? est?.lng ?? est?.coord_lng);
+    if (lat !== null && lng !== null) {
+      enriched.push({ ...est, latitude: lat, longitude: lng });
+      continue;
+    }
+    let coords = null;
+    try {
+      coords = await resolveEstablishmentCoordinates(est);
+    } catch (err) {
+      console.warn('[establishments] geocode failed id=%s: %s', est?.id, err?.message || err);
+    }
+    enriched.push({
+      ...est,
+      latitude: coords?.lat ?? null,
+      longitude: coords?.lng ?? null,
+    });
+  }
+  return enriched;
+}
+
+async function listEstablishmentsHandler(req, res) {
+  try {
+    const [rows] = await pool.query(LIST_QUERY);
+    const includeCoords = String((req.query?.coords ?? '1')).toLowerCase() !== '0';
+    const payload = await attachCoordinates(rows, includeCoords);
+    res.json(payload);
+  } catch (e) {
+    console.error('GET ' + req.path, e);
+    res.status(500).json({ error: 'list_establishments_failed' });
+  }
+}
+
 // Lista todos os usuarios com perfil de estabelecimento
-router.get("/", async (req, res) => {
-  try {
-    const [rows] = await pool.query(
-      "SELECT id, nome, email FROM usuarios WHERE tipo = 'estabelecimento' ORDER BY nome"
-    );
-    res.json(rows);
-  } catch (e) {
-    console.error("GET /establishments", e);
-    res.status(500).json({ error: "list_establishments_failed" });
-  }
-});
-
+router.get('/', listEstablishmentsHandler);
 // Alias em pt-BR (opcional): /estabelecimentos
-router.get("/pt", async (req, res) => {
-  try {
-    const [rows] = await pool.query(
-      "SELECT id, nome, email FROM usuarios WHERE tipo = 'estabelecimento' ORDER BY nome"
-    );
-    res.json(rows);
-  } catch (e) {
-    console.error("GET /estabelecimentos", e);
-    res.status(500).json({ error: "list_establishments_failed" });
-  }
-});
-
+router.get('/pt', listEstablishmentsHandler);
 // Detalhe por ID ou slug
 router.get('/:idOrSlug', async (req, res) => {
   try {
@@ -50,12 +73,12 @@ router.get('/:idOrSlug', async (req, res) => {
     const id = Number(idOrSlug);
     if (Number.isFinite(id)) {
       [rows] = await pool.query(
-        "SELECT id, nome, email, telefone, slug, plan, plan_status, plan_trial_ends_at, plan_active_until, plan_subscription_id FROM usuarios WHERE id=? AND tipo='estabelecimento' LIMIT 1",
+        "SELECT id, nome, email, telefone, slug, avatar_url, plan, plan_status, plan_trial_ends_at, plan_active_until, plan_subscription_id FROM usuarios WHERE id=? AND tipo='estabelecimento' LIMIT 1",
         [id]
       );
     } else {
       [rows] = await pool.query(
-        "SELECT id, nome, email, telefone, slug, plan, plan_status, plan_trial_ends_at, plan_active_until, plan_subscription_id FROM usuarios WHERE slug=? AND tipo='estabelecimento' LIMIT 1",
+        "SELECT id, nome, email, telefone, slug, avatar_url, plan, plan_status, plan_trial_ends_at, plan_active_until, plan_subscription_id FROM usuarios WHERE slug=? AND tipo='estabelecimento' LIMIT 1",
         [idOrSlug]
       );
     }
@@ -186,9 +209,9 @@ router.put('/:id/plan', auth, isEstabelecimento, async (req, res) => {
     } else if (req.body?.trialDays) {
       let days = Number(req.body.trialDays);
       if (!Number.isFinite(days) || days <= 0) {
-        return res.status(400).json({ error: 'invalid_trial', message: 'trialDays deve ser um nÃºmero positivo.' });
+        return res.status(400).json({ error: 'invalid_trial', message: 'trialDays deve ser um número positivo.' });
       }
-      // PolÃ­tica: teste grÃ¡tis de 7 dias
+      // Política: teste grátis de 7 dias
       if (days > 7) days = 7;
       const dt = new Date();
       dt.setDate(dt.getDate() + days);
@@ -245,13 +268,13 @@ router.put('/:id/plan', auth, isEstabelecimento, async (req, res) => {
   }
 });
 
-// EstatÃ­sticas rÃ¡pidas do estabelecimento (serviÃ§os e profissionais)
+// Estatísticas rápidas do estabelecimento (serviços e profissionais)
 router.get('/:id/stats', auth, isEstabelecimento, async (req, res) => {
   try {
     const id = Number(req.params.id)
     if (!Number.isFinite(id) || req.user.id !== id) return res.status(403).json({ error: 'forbidden' })
 
-    // Conta serviÃ§os
+    // Conta serviços
     const [[svcRow]] = await pool.query(
       'SELECT COUNT(*) AS total FROM servicos WHERE estabelecimento_id=?',
       [id]
@@ -269,6 +292,12 @@ router.get('/:id/stats', auth, isEstabelecimento, async (req, res) => {
 })
 
 export default router;
+
+
+
+
+
+
 
 
 

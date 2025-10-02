@@ -50,10 +50,15 @@ function fireAndForget(fn) {
 router.get('/', authRequired, isCliente, async (req, res) => {
   const clienteId = req.user.id;
   const [rows] = await pool.query(`
-    SELECT a.*, s.nome AS servico_nome, u.nome AS estabelecimento_nome
+    SELECT a.*,
+           s.nome AS servico_nome,
+           u.nome AS estabelecimento_nome,
+           p.nome AS profissional_nome,
+           p.avatar_url AS profissional_avatar_url
     FROM agendamentos a
     JOIN servicos s   ON s.id=a.servico_id
     JOIN usuarios u   ON u.id=a.estabelecimento_id
+    LEFT JOIN profissionais p ON p.id = a.profissional_id
     WHERE a.cliente_id=?
     ORDER BY a.inicio DESC
   `, [clienteId]);
@@ -77,10 +82,15 @@ router.get('/estabelecimento', authRequired, isEstabelecimento, async (req, res)
   }
 
   const [rows] = await pool.query(
-    `SELECT a.*, s.nome AS servico_nome, u.nome AS cliente_nome
+    `SELECT a.*,
+            s.nome AS servico_nome,
+            u.nome AS cliente_nome,
+            p.nome AS profissional_nome,
+            p.avatar_url AS profissional_avatar_url
      FROM agendamentos a
      JOIN servicos s ON s.id=a.servico_id
      JOIN usuarios u ON u.id=a.cliente_id
+     LEFT JOIN profissionais p ON p.id = a.profissional_id
      WHERE ${where}
      ORDER BY a.inicio DESC`,
     params
@@ -94,7 +104,13 @@ router.get('/estabelecimento', authRequired, isEstabelecimento, async (req, res)
 router.post('/', authRequired, isCliente, async (req, res) => {
   let conn;
   try {
-    const { estabelecimento_id, servico_id, inicio } = req.body;
+    const { estabelecimento_id, servico_id, inicio, profissional_id: profissionalIdRaw, profissionalId } = req.body || {};
+    const professionalCandidate = profissionalIdRaw != null ? profissionalIdRaw : profissionalId;
+    const profissional_id = professionalCandidate == null ? null : Number(professionalCandidate);
+
+    if (profissional_id !== null && !Number.isFinite(profissional_id)) {
+      return res.status(400).json({ error: 'profissional_invalido', message: 'Profissional invalido.' });
+    }
 
     // 1) validacao basica
     if (!estabelecimento_id || !servico_id || !inicio) {
@@ -131,6 +147,35 @@ router.post('/', authRequired, isCliente, async (req, res) => {
     if (!svc) {
       return res.status(400).json({ error: 'servico_invalido', message: 'Servico invalido ou inativo para este estabelecimento.' });
     }
+
+    const [serviceProfessionals] = await pool.query(
+      'SELECT profissional_id FROM servico_profissionais WHERE servico_id=?',
+      [servico_id]
+    );
+    const linkedProfessionalIds = serviceProfessionals.map((row) => row.profissional_id);
+    let profissionalRow = null;
+
+    if (linkedProfessionalIds.length && profissional_id == null) {
+      return res.status(400).json({ error: 'profissional_obrigatorio', message: 'Escolha um profissional para este servico.' });
+    }
+
+    if (profissional_id != null) {
+      const [[profRow]] = await pool.query(
+        'SELECT id, nome, avatar_url, ativo FROM profissionais WHERE id=? AND estabelecimento_id=?',
+        [profissional_id, estabelecimento_id]
+      );
+      if (!profRow) {
+        return res.status(400).json({ error: 'profissional_invalido', message: 'Profissional nao encontrado para este estabelecimento.' });
+      }
+      if (!profRow.ativo) {
+        return res.status(400).json({ error: 'profissional_inativo', message: 'Profissional inativo.' });
+      }
+      if (linkedProfessionalIds.length && !linkedProfessionalIds.includes(profissional_id)) {
+        return res.status(400).json({ error: 'profissional_servico', message: 'Profissional nao esta associado a este servico.' });
+      }
+      profissionalRow = profRow;
+    }
+
     const dur = Number(svc.duracao_min || 0);
     if (!Number.isFinite(dur) || dur <= 0) {
       return res.status(400).json({ error: 'duracao_invalida', message: 'Duracao do servico invalida.' });
@@ -142,12 +187,19 @@ router.post('/', authRequired, isCliente, async (req, res) => {
     await conn.beginTransaction();
 
     // Conflito por sobreposicao: a.inicio < novoFim AND a.fim > novoInicio
-    const [conf] = await conn.query(`
+    let conflictSql = `
       SELECT id FROM agendamentos
       WHERE estabelecimento_id = ? AND status IN ('confirmado','pendente')
         AND (inicio < ? AND fim > ?)
-      FOR UPDATE
-    `, [estabelecimento_id, fimDate, inicioDate]);
+    `;
+    const conflictParams = [estabelecimento_id, fimDate, inicioDate];
+    if (profissional_id != null && linkedProfessionalIds.length) {
+      conflictSql += ' AND (profissional_id IS NULL OR profissional_id=?)';
+      conflictParams.push(profissional_id);
+    }
+    conflictSql += ' FOR UPDATE';
+
+    const [conf] = await conn.query(conflictSql, conflictParams);
 
     if (conf.length) {
       await conn.rollback();
@@ -155,11 +207,11 @@ router.post('/', authRequired, isCliente, async (req, res) => {
       return res.status(409).json({ error: 'slot_ocupado', message: 'Horario indisponivel.' });
     }
 
-    // 4) insere
-    const [r] = await conn.query(`
-      INSERT INTO agendamentos (cliente_id, estabelecimento_id, servico_id, inicio, fim, status)
-      VALUES (?,?,?,?,?,'confirmado')
-    `, [req.user.id, estabelecimento_id, servico_id, inicioDate, fimDate]);
+    // 4) insere (status usa default 'confirmado')
+    const [r] = await conn.query(
+      'INSERT INTO agendamentos (cliente_id, estabelecimento_id, servico_id, profissional_id, inicio, fim) VALUES (?,?,?,?,?,?)',
+      [req.user.id, estabelecimento_id, servico_id, profissional_id || null, inicioDate, fimDate]
+    );
 
     // 5) le dados consistentes ainda na transacao
     const [[novo]] = await conn.query('SELECT * FROM agendamentos WHERE id=?', [r.insertId]);
@@ -179,6 +231,8 @@ router.post('/', authRequired, isCliente, async (req, res) => {
     const telEst = toDigits(est?.telefone);
     const estNome = est?.nome || '';
     const estNomeFriendly = estNome || 'nosso estabelecimento';
+    const profNome = profissionalRow?.nome || '';
+    const profLabel = profNome ? ` com ${profNome}` : '';
 
     // (a) Emails (background)
     fireAndForget(async () => {
@@ -186,14 +240,14 @@ router.post('/', authRequired, isCliente, async (req, res) => {
         await notifyEmail(
           cli.email,
           'Agendamento confirmado',
-          `<p>Ola, <b>${cli?.nome ?? 'cliente'}</b>! Seu agendamento de <b>${svc.nome}</b> foi confirmado para <b>${inicioBR}</b>.</p>`
+          `<p>Ola, <b>${cli?.nome ?? 'cliente'}</b>! Seu agendamento de <b>${svc.nome}</b>${profLabel ? ` com <b>${profNome}</b>` : ''} foi confirmado para <b>${inicioBR}</b>.</p>`
         );
       }
       if (est?.email) {
         await notifyEmail(
           est.email,
           'Novo agendamento recebido',
-          `<p>Voce recebeu um novo agendamento de <b>${svc.nome}</b> em <b>${inicioBR}</b> para o cliente <b>${cli?.nome ?? ''}</b>.</p>`
+          `<p>Voce recebeu um novo agendamento de <b>${svc.nome}</b>${profLabel ? ` com <b>${profNome}</b>` : ''} em <b>${inicioBR}</b> para o cliente <b>${cli?.nome ?? ''}</b>.</p>`
         );
       }
     });
@@ -208,14 +262,14 @@ router.post('/', authRequired, isCliente, async (req, res) => {
         if (/^triple|3$/.test(paramMode)) {
           try { await sendTemplate({ to: telCli, name: tplName, lang: tplLang, bodyParams: [svc.nome, inicioBR, estNomeLabel] }); } catch (e) { console.warn('[wa/confirm cli]', e?.message || e); }
         } else {
-          await notifyWhatsapp(`[OK] Confirmacao: ${svc.nome} em ${inicioBR} - ${estNomeLabel}`, telCli);
+          await notifyWhatsapp(`[OK] Confirmacao: ${svc.nome}${profNome ? ' / ' + profNome : ''} em ${inicioBR} - ${estNomeLabel}`, telCli);
         }
       }
       if (telEst && telEst !== telCli) {
         if (/^triple|3$/.test(paramMode)) {
           try { await sendTemplate({ to: telEst, name: tplName, lang: tplLang, bodyParams: [svc.nome, inicioBR, estNomeLabel] }); } catch (e) { console.warn('[wa/confirm est]', e?.message || e); }
         } else {
-          await notifyWhatsapp(`[Novo] Agendamento: ${svc.nome} em ${inicioBR} - Cliente: ${cli?.nome ?? ''}`, telEst);
+          await notifyWhatsapp(`[Novo] Agendamento: ${svc.nome}${profNome ? ' / ' + profNome : ''} em ${inicioBR} - Cliente: ${cli?.nome ?? ''}`, telEst);
         }
       }
     });
@@ -224,7 +278,7 @@ router.post('/', authRequired, isCliente, async (req, res) => {
     const now = Date.now();
     const reminderTime = new Date(inicioDate.getTime() - 8 * 60 * 60 * 1000); // -8h
 
-    const msgCliReminder = `[Lembrete] Faltam 8 horas para o seu ${svc.nome} em ${estNomeFriendly} (${hora} de ${data}).`;
+    const msgCliReminder = `[Lembrete] Faltam 8 horas para o seu ${svc.nome}${profNome ? ' com ' + profNome : ''} em ${estNomeFriendly} (${hora} de ${data}).`;
 
     fireAndForget(async () => {
       if (telCli && reminderTime.getTime() > now) {
@@ -257,6 +311,9 @@ router.post('/', authRequired, isCliente, async (req, res) => {
       cliente_id: novo.cliente_id,
       estabelecimento_id: novo.estabelecimento_id,
       servico_id: novo.servico_id,
+      profissional_id: novo.profissional_id,
+      profissional_nome: profissionalRow?.nome || null,
+      profissional_avatar_url: profissionalRow?.avatar_url || null,
       inicio: novo.inicio,
       fim: novo.fim,
       status: novo.status

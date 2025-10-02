@@ -2,7 +2,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { getUser, saveUser } from '../utils/auth';
-import { Api } from '../utils/api';
+import { Api, API_BASE_URL } from '../utils/api';
 import { IconChevronRight } from '../components/Icons.jsx';
 import { mergePreferences, readPreferences, writePreferences, broadcastPreferences } from '../utils/preferences';
 
@@ -26,6 +26,17 @@ const formatCep = (value = '') => {
   const digits = value.replace(/\D/g, '').slice(0, 8);
   if (digits.length <= 5) return digits;
   return `${digits.slice(0, 5)}-${digits.slice(5)}`;
+};
+
+const resolveAssetUrl = (value) => {
+  if (!value) return '';
+  if (value.startsWith('data:')) return value;
+  if (/^https?:\/\//i.test(value)) return value;
+  try {
+    return new URL(value, API_BASE_URL).toString();
+  } catch {
+    return value;
+  }
 };
 
 export default function Configuracoes() {
@@ -57,10 +68,17 @@ export default function Configuracoes() {
     bairro: '',
     cidade: '',
     estado: '',
+    avatar_url: '',
   });
   const [passwordForm, setPasswordForm] = useState({ atual: '', nova: '', confirmar: '' });
   const [profileStatus, setProfileStatus] = useState({ type: '', message: '' });
   const [profileSaving, setProfileSaving] = useState(false);
+
+  const [avatarPreview, setAvatarPreview] = useState(() => resolveAssetUrl(user?.avatar_url || ''));
+  const [avatarData, setAvatarData] = useState('');
+  const [avatarRemove, setAvatarRemove] = useState(false);
+  const [avatarError, setAvatarError] = useState('');
+  const avatarInputRef = useRef(null);
 
   const cepLookupRef = useRef('');
 
@@ -128,7 +146,12 @@ export default function Configuracoes() {
       bairro: user.bairro || '',
       cidade: user.cidade || '',
       estado: (user.estado || '').toUpperCase(),
+      avatar_url: user.avatar_url || '',
     });
+    setAvatarPreview(resolveAssetUrl(user.avatar_url || ''));
+    setAvatarData('');
+    setAvatarRemove(false);
+    setAvatarError('');
   }, [user?.id]);
 
   useEffect(() => {
@@ -414,6 +437,59 @@ export default function Configuracoes() {
     setProfileForm((prev) => ({ ...prev, [key]: value }));
   };
 
+  const handleAvatarFile = useCallback((event) => {
+    const input = event?.target || null;
+    const file = input?.files?.[0];
+    if (!file) return;
+    setAvatarError('');
+    const type = (file.type || '').toLowerCase();
+    if (!/^image\/(png|jpe?g|webp)$/.test(type)) {
+      setAvatarError('Selecione uma imagem PNG, JPG ou WEBP.');
+      if (input) input.value = '';
+      return;
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      setAvatarError('A imagem deve ter no m�ximo 2MB.');
+      if (input) input.value = '';
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result;
+      if (typeof result === 'string') {
+        setAvatarPreview(result);
+        setAvatarData(result);
+        setAvatarRemove(false);
+        setProfileForm((prev) => ({ ...prev, avatar_url: '' }));
+      } else {
+        setAvatarError('Falha ao processar a imagem.');
+      }
+    };
+    reader.onerror = () => {
+      setAvatarError('Falha ao processar a imagem.');
+    };
+    reader.onloadend = () => {
+      if (input) input.value = '';
+    };
+    reader.readAsDataURL(file);
+  }, []);
+
+  const handleAvatarPick = useCallback(() => {
+    setAvatarError('');
+    const input = avatarInputRef.current;
+    if (input) input.click();
+  }, []);
+
+  const handleAvatarRemove = useCallback(() => {
+    setAvatarPreview('');
+    setAvatarData('');
+    setAvatarRemove(true);
+    setAvatarError('');
+    setProfileForm((prev) => ({ ...prev, avatar_url: '' }));
+    const input = avatarInputRef.current;
+    if (input) input.value = '';
+  }, []);
+
   const handlePasswordChange = (key, value) => {
     setPasswordForm((prev) => ({ ...prev, [key]: value }));
   };
@@ -450,9 +526,23 @@ export default function Configuracoes() {
         cidade: profileForm.cidade.trim() || undefined,
         estado: profileForm.estado.trim().toUpperCase() || undefined,
       };
+      if (avatarData) {
+        payload.avatar = avatarData;
+      } else if (avatarRemove && !avatarData) {
+        payload.avatarRemove = true;
+      }
       const response = await Api.updateProfile(payload);
       if (response?.user) {
-        saveUser(response.user);
+        const updatedUser = response.user;
+        saveUser(updatedUser);
+        setProfileForm((prev) => ({ ...prev, avatar_url: updatedUser.avatar_url || '' }));
+        setAvatarPreview(resolveAssetUrl(updatedUser.avatar_url || ''));
+        setAvatarData('');
+        setAvatarRemove(false);
+        setAvatarError('');
+      }
+      if (avatarInputRef.current) {
+        avatarInputRef.current.value = '';
       }
       handlePasswordChange('atual', '');
       handlePasswordChange('nova', '');
@@ -467,6 +557,9 @@ export default function Configuracoes() {
     } catch (e) {
       const msg = e?.message || 'Falha ao atualizar perfil.';
       setProfileStatus({ type: 'error', message: msg });
+      if (typeof msg === 'string' && msg.toLowerCase().includes('imagem')) {
+        setAvatarError(msg);
+      }
     } finally {
       setProfileSaving(false);
     }
@@ -507,6 +600,35 @@ export default function Configuracoes() {
       title: 'Perfil e SeguranÃ§a',
       content: (
         <form onSubmit={handleSaveProfile} className="grid" style={{ gap: 10 }}>
+          <div className="profile-avatar">
+            <div className="profile-avatar__preview" aria-live="polite">
+              {avatarPreview ? (
+                <img src={avatarPreview} alt="Foto do perfil" />
+              ) : (
+                <span>Sem foto</span>
+              )}
+            </div>
+            <div className="profile-avatar__controls">
+              <input
+                ref={avatarInputRef}
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+                onChange={handleAvatarFile}
+                style={{ display: 'none' }}
+              />
+              <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
+                <button type="button" className="btn btn--outline btn--sm" onClick={handleAvatarPick}>Selecionar foto</button>
+                {avatarPreview && (
+                  <button type="button" className="btn btn--ghost btn--sm" onClick={handleAvatarRemove}>Remover</button>
+                )}
+              </div>
+              {avatarError ? (
+                <span className="profile-avatar__error">{avatarError}</span>
+              ) : (
+                <span className="profile-avatar__hint">PNG, JPG ou WEBP ate 2MB.</span>
+              )}
+            </div>
+          </div>
           <label className="label">
             <span>Nome</span>
             <input className="input" value={profileForm.nome} onChange={(e) => handleProfileChange('nome', e.target.value)} required />
@@ -874,6 +996,8 @@ export default function Configuracoes() {
     passwordForm,
     profileSaving,
     profileStatus,
+    avatarPreview,
+    avatarError,
     prefs,
     notifStatus,
     billing,

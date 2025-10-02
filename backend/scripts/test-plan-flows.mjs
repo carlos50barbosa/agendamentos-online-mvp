@@ -16,6 +16,8 @@ const relatoriosRouter = (await import('../src/routes/relatorios.js')).default
 const state = {
   usuarios: new Map(),
   servicos: [],
+  profissionais: [],
+  servicoProfissionais: new Map(),
   bloqueios: [],
   report: defaultReport()
 }
@@ -57,7 +59,7 @@ function clone(value) {
   return JSON.parse(JSON.stringify(value))
 }
 
-function seedScenario({ user = {}, services = null, bloqueios = [], report = null } = {}) {
+function seedScenario({ user = {}, services = null, professionals = [], serviceProfessionals = [], bloqueios = [], report = null } = {}) {
   state.usuarios.clear()
   state.usuarios.set(1, {
     id: 1,
@@ -90,6 +92,41 @@ function seedScenario({ user = {}, services = null, bloqueios = [], report = nul
     ]
   }
 
+  state.profissionais = professionals.map((prof, index) => ({
+    id: prof.id ?? 100 + index,
+    estabelecimento_id: prof.estabelecimento_id ?? 1,
+    nome: prof.nome ?? `Profissional ${index + 1}`,
+    descricao: prof.descricao ?? null,
+    avatar_url: prof.avatar_url ?? null,
+    ativo: prof.ativo ?? 1,
+    created_at: prof.created_at ? new Date(prof.created_at) : new Date(),
+    updated_at: prof.updated_at ? new Date(prof.updated_at) : new Date()
+  }))
+
+  state.servicoProfissionais = new Map()
+  if (Array.isArray(serviceProfessionals)) {
+    serviceProfessionals.forEach((entry) => {
+      if (!entry) return
+      const serviceId = Number(entry.servico_id ?? entry.serviceId)
+      const professionalId = Number(entry.profissional_id ?? entry.professionalId)
+      if (!Number.isFinite(serviceId) || !Number.isFinite(professionalId)) return
+      const set = state.servicoProfissionais.get(serviceId) || new Set()
+      set.add(professionalId)
+      state.servicoProfissionais.set(serviceId, set)
+    })
+  } else if (serviceProfessionals instanceof Map) {
+    serviceProfessionals.forEach((value, key) => {
+      const serviceId = Number(key)
+      const set = new Set()
+      if (Array.isArray(value) || value instanceof Set) {
+        Array.from(value).forEach((id) => {
+          if (Number.isFinite(Number(id))) set.add(Number(id))
+        })
+      }
+      if (set.size) state.servicoProfissionais.set(serviceId, set)
+    })
+  }
+
   state.bloqueios = bloqueios.map((item, index) => ({
     id: item.id ?? index + 1,
     estabelecimento_id: item.estabelecimento_id ?? 1,
@@ -103,6 +140,16 @@ function seedScenario({ user = {}, services = null, bloqueios = [], report = nul
 function findUserById(id) {
   return state.usuarios.get(Number(id)) || null
 }
+
+function findProfessionalById(id) {
+  return state.profissionais.find((p) => p.id === Number(id)) || null
+}
+
+function getProfessionalsByService(serviceId) {
+  const set = state.servicoProfissionais.get(Number(serviceId)) || new Set()
+  return Array.from(set).map((id) => findProfessionalById(id)).filter(Boolean)
+}
+
 
 function normalize(sql) {
   return sql.replace(/\s+/g, ' ').trim()
@@ -150,14 +197,14 @@ pool.query = async (sql, params = []) => {
     }], []]
   }
 
-  if (norm.startsWith("SELECT id, nome, email, telefone, slug, plan, plan_status, plan_trial_ends_at, plan_active_until, plan_subscription_id FROM usuarios WHERE id")) {
+  if (norm.startsWith("SELECT id, nome, email, telefone, slug, avatar_url, plan, plan_status, plan_trial_ends_at, plan_active_until, plan_subscription_id FROM usuarios WHERE id")) {
     const id = params[0]
     const user = findUserById(id)
     if (!user) return [[], []]
     return [[clone(user)], []]
   }
 
-  if (norm.startsWith("SELECT id, nome, email, telefone, slug, plan, plan_status, plan_trial_ends_at, plan_active_until, plan_subscription_id FROM usuarios WHERE slug")) {
+  if (norm.startsWith("SELECT id, nome, email, telefone, slug, avatar_url, plan, plan_status, plan_trial_ends_at, plan_active_until, plan_subscription_id FROM usuarios WHERE slug")) {
     const slug = params[0]
     const user = [...state.usuarios.values()].find((u) => u.slug === slug)
     if (!user) return [[], []]
@@ -170,14 +217,21 @@ pool.query = async (sql, params = []) => {
     return [[{ total }], []]
   }
 
-  if (norm.startsWith("SELECT duracao_min, nome FROM servicos WHERE id=?")) {
+  if (norm.startsWith("SELECT duracao_min, nome FROM servicos WHERE id=? AND estabelecimento_id=?")) {
     const [svcId, estId] = params
     const svc = state.servicos.find((s) => s.id === svcId && s.estabelecimento_id === estId && s.ativo)
     return [svc ? [{ duracao_min: svc.duracao_min, nome: svc.nome }] : [], []]
   }
+  if (norm.startsWith("SELECT duracao_min, nome FROM servicos WHERE id=?")) {
+    const [svcId] = params
+    const svc = state.servicos.find((s) => s.id === svcId && s.ativo)
+    return [svc ? [{ duracao_min: svc.duracao_min, nome: svc.nome }] : [], []]
+  }
 
-  if (norm.startsWith("SELECT COUNT(*) AS total FROM profissionais")) {
-    return [[{ total: 0 }], []]
+  if (norm.startsWith("SELECT COUNT(*) AS total FROM profissionais WHERE estabelecimento_id")) {
+    const estId = params[0]
+    const total = state.profissionais.filter((p) => p.estabelecimento_id === estId).length
+    return [[{ total }], []]
   }
 
   if (norm.includes('FROM agendamentos a') && norm.includes('receita_perdida')) {
@@ -233,6 +287,21 @@ pool.query = async (sql, params = []) => {
     return [[], []]
   }
 
+  if (norm.startsWith('SELECT id, ativo FROM profissionais WHERE estabelecimento_id=? AND id IN (')) {
+    const estId = params[0]
+    const ids = params.slice(1)
+    const rows = state.profissionais
+      .filter((p) => p.estabelecimento_id === estId && ids.includes(p.id))
+      .map((p) => ({ id: p.id, ativo: p.ativo ? 1 : 0 }))
+    return [rows, []]
+  }
+
+  if (norm.startsWith('SELECT id, nome, avatar_url, ativo FROM profissionais WHERE id=? AND estabelecimento_id=?')) {
+    const [id, estId] = params
+    const p = state.profissionais.find((row) => row.id === id && row.estabelecimento_id === estId)
+    return [p ? [{ id: p.id, nome: p.nome, avatar_url: p.avatar_url || null, ativo: p.ativo ? 1 : 0 }] : [], []]
+  }
+
   if (norm.startsWith("INSERT INTO servicos")) {
     const [estId, nome, duracaoMin, precoCentavos, ativoFlag] = params
     const nextId = state.servicos.reduce((max, svc) => Math.max(max, svc.id), 0) + 1
@@ -252,6 +321,46 @@ pool.query = async (sql, params = []) => {
     const id = params[0]
     const svc = state.servicos.find((s) => s.id === id)
     return [svc ? [clone(svc)] : [], []]
+  }
+
+  if (norm.startsWith('SELECT * FROM servicos WHERE id=? AND estabelecimento_id=?')) {
+    const [id, estId] = params
+    const svc = state.servicos.find((s) => s.id === id && s.estabelecimento_id === estId)
+    return [svc ? [clone(svc)] : [], []]
+  }
+
+  if (norm.startsWith('SELECT sp.servico_id, p.id, p.nome, p.descricao, p.avatar_url FROM servico_profissionais sp JOIN profissionais p ON p.id = sp.profissional_id WHERE sp.servico_id IN (')) {
+    const serviceIds = params.map(Number)
+    const rows = []
+    for (const svcId of serviceIds) {
+      const set = state.servicoProfissionais.get(svcId) || new Set()
+      for (const profId of set) {
+        const p = findProfessionalById(profId)
+        if (p) rows.push({ servico_id: svcId, id: p.id, nome: p.nome, descricao: p.descricao || null, avatar_url: p.avatar_url || null })
+      }
+    }
+    rows.sort((a, b) => String(a.nome || '').localeCompare(String(b.nome || '')))
+    return [rows, []]
+  }
+
+  if (norm.startsWith('DELETE FROM servico_profissionais WHERE servico_id=?')) {
+    const [svcId] = params
+    state.servicoProfissionais.delete(Number(svcId))
+    return [{ affectedRows: 1 }, []]
+  }
+
+  if (norm.startsWith('INSERT INTO servico_profissionais (servico_id, profissional_id) VALUES (?,?)')) {
+    const [svcId, profId] = params.map(Number)
+    const set = state.servicoProfissionais.get(svcId) || new Set()
+    set.add(profId)
+    state.servicoProfissionais.set(svcId, set)
+    return [{ affectedRows: 1, insertId: null }, []]
+  }
+
+  if (norm.startsWith('SELECT profissional_id FROM servico_profissionais WHERE servico_id=?')) {
+    const [svcId] = params
+    const set = state.servicoProfissionais.get(Number(svcId)) || new Set()
+    return [Array.from(set).map((id) => ({ profissional_id: id })), []]
   }
 
   if (norm.startsWith("SELECT id FROM bloqueios")) {
@@ -283,7 +392,13 @@ pool.query = async (sql, params = []) => {
 }
 
 pool.getConnection = async () => {
-  throw new Error('pool.getConnection not supported in these tests')
+  return {
+    async beginTransaction() { return },
+    async commit() { return },
+    async rollback() { return },
+    async release() { return },
+    async query(sql, params = []) { return pool.query(sql, params) },
+  }
 }
 
 function getRouteHandler(router, path, method) {

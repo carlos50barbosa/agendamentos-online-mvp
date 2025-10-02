@@ -59,12 +59,37 @@ CREATE TABLE IF NOT EXISTS servicos (
   INDEX idx_servicos_estab_ativo (estabelecimento_id, ativo)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
+-- Profissionais
+CREATE TABLE IF NOT EXISTS profissionais (
+  id                 INT AUTO_INCREMENT PRIMARY KEY,
+  estabelecimento_id INT          NOT NULL,
+  nome               VARCHAR(120) NOT NULL,
+  descricao          TEXT         NULL,
+  avatar_url         VARCHAR(255) NULL,
+  ativo              TINYINT(1)   NOT NULL DEFAULT 1,
+  created_at         TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at         TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_profissionais_estab (estabelecimento_id),
+  CONSTRAINT fk_profissionais_estab FOREIGN KEY (estabelecimento_id) REFERENCES usuarios(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- Relacao servico x profissionais
+CREATE TABLE IF NOT EXISTS servico_profissionais (
+  servico_id       INT NOT NULL,
+  profissional_id  INT NOT NULL,
+  PRIMARY KEY (servico_id, profissional_id),
+  INDEX idx_servico_prof_prof (profissional_id),
+  CONSTRAINT fk_servico_prof_servico FOREIGN KEY (servico_id) REFERENCES servicos(id) ON DELETE CASCADE,
+  CONSTRAINT fk_servico_prof_prof   FOREIGN KEY (profissional_id) REFERENCES profissionais(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
 -- Agendamentos
 CREATE TABLE IF NOT EXISTS agendamentos (
   id                 INT AUTO_INCREMENT PRIMARY KEY,
   cliente_id         INT          NOT NULL,
   estabelecimento_id INT          NOT NULL,
   servico_id         INT          NOT NULL,
+  profissional_id    INT          NULL,
   inicio             DATETIME     NOT NULL,
   fim                DATETIME     NOT NULL,
   status             ENUM('confirmado','cancelado') NOT NULL DEFAULT 'confirmado',
@@ -76,6 +101,7 @@ CREATE TABLE IF NOT EXISTS agendamentos (
   CONSTRAINT fk_ag_cli   FOREIGN KEY (cliente_id)         REFERENCES usuarios(id) ON DELETE CASCADE,
   CONSTRAINT fk_ag_estab FOREIGN KEY (estabelecimento_id) REFERENCES usuarios(id) ON DELETE CASCADE,
   CONSTRAINT fk_ag_srv   FOREIGN KEY (servico_id)         REFERENCES servicos(id) ON DELETE CASCADE,
+  CONSTRAINT fk_ag_prof  FOREIGN KEY (profissional_id)    REFERENCES profissionais(id) ON DELETE SET NULL,
 
   -- indices uteis para consultas
   INDEX idx_ag_estab_inicio (estabelecimento_id, inicio),

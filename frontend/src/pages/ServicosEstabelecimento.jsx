@@ -6,6 +6,7 @@ export default function ServicosEstabelecimento() {
   // Lista
   const [list, setList] = useState([]);
   const [loadingList, setLoadingList] = useState(true);
+  const [pros, setPros] = useState([]);
 
   // Formulario
   const [form, setForm] = useState({
@@ -16,6 +17,7 @@ export default function ServicosEstabelecimento() {
   });
   const [precoStr, setPrecoStr] = useState("R$ 0,00");
   const [saving, setSaving] = useState(false);
+  const [selectedProsNew, setSelectedProsNew] = useState([]);
 
   // UI extras
   const [query, setQuery] = useState("");
@@ -32,6 +34,7 @@ export default function ServicosEstabelecimento() {
   const [editForm, setEditForm] = useState({ nome: '', duracao_min: 30, preco_centavos: 0 });
   const [editPrecoStr, setEditPrecoStr] = useState('R$ 0,00');
   const [editSaving, setEditSaving] = useState(false);
+  const [selectedProsEdit, setSelectedProsEdit] = useState([]);
 
   // Toast
   const [toast, setToast] = useState(null); // {type:'success'|'error'|'info', msg:string}
@@ -48,6 +51,7 @@ export default function ServicosEstabelecimento() {
       try {
         const rows = await Api.servicosList();
         setList(rows || []);
+        try { setPros(await Api.profissionaisList()); } catch {}
       } catch (e) {
         showToast("error", "Nao foi possivel carregar os servicos.");
       } finally {
@@ -105,10 +109,15 @@ export default function ServicosEstabelecimento() {
     }
     setSaving(true);
     try {
-      const novo = await Api.servicosCreate(form);
+      const payload = { ...form };
+      if (Array.isArray(selectedProsNew) && selectedProsNew.length) {
+        payload.professionalIds = selectedProsNew;
+      }
+      const novo = await Api.servicosCreate(payload);
       setList((curr) => [novo, ...curr]);
       setForm({ nome: "", duracao_min: 30, preco_centavos: 0, ativo: true });
       setPrecoStr("R$ 0,00");
+      setSelectedProsNew([]);
       showToast("success", "Servico cadastrado!");
     } catch (err) {
       if (err?.data?.error === 'plan_limit') {
@@ -133,6 +142,8 @@ export default function ServicosEstabelecimento() {
     setEditItem(svc);
     setEditForm({ nome: svc.nome || '', duracao_min: svc.duracao_min || 30, preco_centavos: svc.preco_centavos || 0 });
     setEditPrecoStr(formatBRL(svc.preco_centavos || 0));
+    const profIds = Array.isArray(svc.professionals) ? svc.professionals.map(p => p.id) : [];
+    setSelectedProsEdit(profIds);
     setEditOpen(true);
   }
 
@@ -145,8 +156,9 @@ export default function ServicosEstabelecimento() {
     setEditSaving(true);
     try{
       const payload = { nome: editForm.nome.trim(), duracao_min: editForm.duracao_min, preco_centavos: editForm.preco_centavos };
-      await Api.servicosUpdate(editItem.id, payload);
-      setList(curr => curr.map(x => x.id === editItem.id ? { ...x, ...payload } : x));
+      if (Array.isArray(selectedProsEdit)) payload.professionalIds = selectedProsEdit;
+      const updated = await Api.servicosUpdate(editItem.id, payload);
+      setList(curr => curr.map(x => x.id === editItem.id ? { ...x, ...updated } : x));
       setEditOpen(false);
       setEditItem(null);
       showToast('success', 'Servico atualizado.');
@@ -286,6 +298,28 @@ export default function ServicosEstabelecimento() {
             />
             <span>Ativo</span>
           </label>
+
+          {pros.length > 0 && (
+            <div className="grid" style={{ gap: 4, width: '100%', marginTop: 4 }}>
+              <div className="muted" style={{ fontSize: 12 }}>Vincular profissionais (opcional)</div>
+              <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
+                {pros.map((p) => (
+                  <label key={p.id} className={`chip ${selectedProsNew.includes(p.id) ? 'chip--active' : ''}`} style={{ cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      style={{ display: 'none' }}
+                      checked={selectedProsNew.includes(p.id)}
+                      onChange={(e) => {
+                        const checked = e.target.checked;
+                        setSelectedProsNew((curr) => checked ? Array.from(new Set([...curr, p.id])) : curr.filter((id) => id !== p.id));
+                      }}
+                    />
+                    {p.nome}
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
 
           <button className="btn btn--primary" disabled={saving || formInvalid}>
             {saving ? <span className="spinner" /> : "Salvar"}
@@ -465,6 +499,27 @@ export default function ServicosEstabelecimento() {
               value={editPrecoStr}
               onChange={handleEditPrecoChange}
             />
+            {pros.length > 0 && (
+              <div className="grid" style={{ gap: 4 }}>
+                <div className="muted" style={{ fontSize: 12 }}>Vincular profissionais</div>
+                <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
+                  {pros.map((p) => (
+                    <label key={p.id} className={`chip ${selectedProsEdit.includes(p.id) ? 'chip--active' : ''}`} style={{ cursor: 'pointer' }}>
+                      <input
+                        type="checkbox"
+                        style={{ display: 'none' }}
+                        checked={selectedProsEdit.includes(p.id)}
+                        onChange={(e) => {
+                          const checked = e.target.checked;
+                          setSelectedProsEdit((curr) => checked ? Array.from(new Set([...curr, p.id])) : curr.filter((id) => id !== p.id));
+                        }}
+                      />
+                      {p.nome}
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
           <div className="row" style={{ gap: 8, justifyContent: 'flex-end', marginTop: 12 }}>
             <button className="btn btn--outline" onClick={()=>setEditOpen(false)}>Cancelar</button>

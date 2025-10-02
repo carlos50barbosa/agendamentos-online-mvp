@@ -1,0 +1,14 @@
+{
+  "nome": "Loja Teste MP",
+  "email": "loja.mptest+1@example.com",
+  "senha": "Senha123!",
+  "tipo": "estabelecimento",
+  "telefone": "5511999999",
+  "cep": "01001000",
+  "endereco": "Rua Teste",
+  "numero": "123",
+  "complemento": "Sala 1",
+  "bairro": "Centro",
+  "cidade": "Sao Paulo",
+  "estado": "SP"
+}
