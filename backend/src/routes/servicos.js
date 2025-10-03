@@ -112,7 +112,7 @@ router.get('/', async (req, res, next) => {
 
   try {
     const [rows] = await pool.query(
-      `SELECT id, nome AS title, nome, duracao_min, preco_centavos, ativo
+      `SELECT id, nome AS title, nome, descricao, duracao_min, preco_centavos, ativo
          FROM servicos
         WHERE estabelecimento_id=?
           AND (ativo IS NULL OR ativo=1)
@@ -153,8 +153,13 @@ router.post('/', auth, isEstabelecimento, async (req, res) => {
   let conn;
   try {
     const estId = req.user.id;
-    const { nome, duracao_min, preco_centavos, ativo = 1, professionalIds } = req.body || {};
-    if (!nome || !duracao_min) {
+    const { nome, descricao, duracao_min, preco_centavos, ativo = 1, professionalIds } = req.body || {};
+    const nomeTrim = String(nome || '').trim();
+    const descricaoTrim = descricao != null ? String(descricao).trim() : null;
+    const duracao = Number(duracao_min);
+    const preco = Number(preco_centavos ?? 0);
+    const isActive = toBoolean(ativo);
+    if (!nomeTrim || !duracao) {
       return res.status(400).json({ error: 'invalid_payload', message: 'Informe nome e duracao.' });
     }
 
@@ -205,8 +210,8 @@ router.post('/', auth, isEstabelecimento, async (req, res) => {
     await conn.beginTransaction();
 
     const [insert] = await conn.query(
-      'INSERT INTO servicos (estabelecimento_id, nome, duracao_min, preco_centavos, ativo) VALUES (?,?,?,?,?)',
-      [estId, nome, duracao_min, preco_centavos || 0, ativo ? 1 : 0]
+      'INSERT INTO servicos (estabelecimento_id, nome, descricao, duracao_min, preco_centavos, ativo) VALUES (?,?,?,?,?,?)',
+      [estId, nomeTrim, descricaoTrim || null, Number.isFinite(duracao) ? Math.max(0, Math.round(duracao)) : 0, Number.isFinite(preco) ? Math.max(0, Math.round(preco)) : 0, isActive ? 1 : 0]
     );
     const serviceId = insert.insertId;
 
@@ -256,10 +261,21 @@ router.put('/:id', auth, isEstabelecimento, async (req, res) => {
 
     const updates = {
       nome: req.body?.nome != null ? String(req.body.nome).trim() : current.nome,
+      descricao: Object.prototype.hasOwnProperty.call(req.body || {}, 'descricao')
+        ? (req.body.descricao != null ? String(req.body.descricao).trim() : null)
+        : current.descricao,
       duracao_min: req.body?.duracao_min != null ? Number(req.body.duracao_min) : current.duracao_min,
       preco_centavos: req.body?.preco_centavos != null ? Number(req.body.preco_centavos) : current.preco_centavos,
       ativo: req.body?.ativo != null ? (toBoolean(req.body.ativo) ? 1 : 0) : current.ativo,
     };
+
+    updates.nome = String(updates.nome || '').trim();
+    if (updates.descricao != null) {
+      updates.descricao = String(updates.descricao).trim();
+      if (!updates.descricao) updates.descricao = null;
+    }
+    updates.duracao_min = Number.isFinite(updates.duracao_min) ? Math.max(0, Math.round(updates.duracao_min)) : 0;
+    updates.preco_centavos = Number.isFinite(updates.preco_centavos) ? Math.max(0, Math.round(updates.preco_centavos)) : 0;
 
     if (!updates.nome || !updates.duracao_min) {
       return res.status(400).json({ error: 'invalid_payload', message: 'Informe nome e duracao.' });
@@ -288,8 +304,8 @@ router.put('/:id', auth, isEstabelecimento, async (req, res) => {
     await conn.beginTransaction();
 
     await conn.query(
-      'UPDATE servicos SET nome=?, duracao_min=?, preco_centavos=?, ativo=? WHERE id=? AND estabelecimento_id=?',
-      [updates.nome, updates.duracao_min, updates.preco_centavos, updates.ativo ? 1 : 0, serviceId, estId]
+      'UPDATE servicos SET nome=?, descricao=?, duracao_min=?, preco_centavos=?, ativo=? WHERE id=? AND estabelecimento_id=?',
+      [updates.nome, updates.descricao, updates.duracao_min, updates.preco_centavos, updates.ativo ? 1 : 0, serviceId, estId]
     );
 
     if (professionalIdsToLink !== null) {

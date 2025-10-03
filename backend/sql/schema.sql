@@ -52,6 +52,7 @@ CREATE TABLE IF NOT EXISTS servicos (
   id                 INT AUTO_INCREMENT PRIMARY KEY,
   estabelecimento_id INT              NOT NULL,
   nome               VARCHAR(120)     NOT NULL,
+  descricao          TEXT             NULL,
   duracao_min        INT              NOT NULL,
   preco_centavos     INT              DEFAULT 0,
   ativo              TINYINT(1)       DEFAULT 1,
@@ -131,3 +132,4 @@ CREATE TABLE IF NOT EXISTS email_change_tokens (
   KEY idx_email_change_expires (expires_at),
   CONSTRAINT fk_email_change_user FOREIGN KEY (user_id) REFERENCES usuarios(id) ON DELETE CASCADE
 );
+

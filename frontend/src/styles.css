@@ -310,6 +310,13 @@ body{
 .mini-card--selected{ outline:2px solid var(--brand); }
 .mini-card__title{ font-weight:600; font-size:14px; margin-bottom:4px; }
 .mini-card__meta{ display:flex; gap:8px; color:var(--muted); font-size:12px; }
+.mini-card__content{ display:flex; justify-content:space-between; gap:12px; align-items:flex-start; }
+.mini-card__main{ flex:1; min-width:0; display:flex; flex-direction:column; gap:4px; }
+.mini-card__description{ font-size:13px; color:var(--muted); line-height:1.4; word-break:break-word; }
+.mini-card__side{ text-align:right; display:flex; flex-direction:column; align-items:flex-end; gap:4px; min-width:72px; }
+.mini-card__price{ font-weight:600; font-size:14px; color:var(--text-primary); }
+.mini-card__duration{ font-size:12px; color:var(--muted); }
+
 
 /* =======================
    Sumário sticky
@@ -1733,6 +1740,19 @@ button.danger:disabled,
 .novo-agendamento__week-info{font-size:.85rem;color:var(--muted);}
 .novo-agendamento__summary{display:flex;flex-wrap:wrap;gap:16px;align-items:center;padding-top:12px;border-top:1px solid var(--border);}
 .novo-agendamento__summary-label{display:block;font-size:.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:2px;}
+.novo-agendamento__summary--establishment{align-items:flex-start;gap:12px;}
+.novo-agendamento__summary-avatar{width:52px;height:52px;border-radius:14px;overflow:hidden;display:flex;align-items:center;justify-content:center;background:var(--surface-soft);border:1px solid var(--border);color:var(--brand);font-weight:700;font-size:18px;}
+.novo-agendamento__summary-avatar img{width:100%;height:100%;object-fit:cover;}
+.novo-agendamento__summary-content{flex:1;min-width:0;display:flex;flex-direction:column;gap:4px;}
+.novo-agendamento__summary-name{font-size:1rem;font-weight:600;}
+.novo-agendamento__summary-address{font-size:.8rem;color:var(--muted);line-height:1.3;}
+.novo-agendamento__summary-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:6px;}
+.summary-action{font-size:.75rem;color:var(--primary-600);display:inline-flex;align-items:center;gap:4px;padding:4px 8px;border-radius:999px;background:var(--surface-soft);border:1px solid var(--border);}
+.summary-action--muted{color:var(--muted);}
+.novo-agendamento__summary-service{margin-left:auto;text-align:right;display:flex;flex-direction:column;gap:4px;}
+.novo-agendamento__services{display:grid;gap:10px;grid-template-columns:1fr;}
+.novo-agendamento__services .mini-card{width:100%;min-width:0;max-width:none;}
+
 .novo-agendamento__section{border:1px solid var(--border);border-radius:12px;padding:12px;background:var(--surface-soft);display:flex;flex-direction:column;gap:12px;}
 .novo-agendamento__select{display:flex;align-items:center;gap:10px;width:100%;padding:8px 12px;border-radius:10px;border:1px solid var(--border);background:var(--surface);cursor:pointer;transition:border-color .18s ease,box-shadow .18s ease;text-align:left;}
 .novo-agendamento__select:hover,.novo-agendamento__select:focus-visible{border-color:var(--primary-400);box-shadow:var(--shadow-soft);outline:none;}

@@ -132,6 +132,7 @@ const ServiceHelpers = {
   title: (s) => s?.title || s?.nome || `ServiÃ§o #${s?.id ?? ""}`,
   duration: (s) => Number(s?.duracao_min ?? s?.duration ?? 0),
   price: (s) => Number(s?.preco_centavos ?? s?.preco ?? s?.price_centavos ?? 0),
+  description: (s) => (s?.descricao || s?.description || '').trim(),
   formatPrice: (centavos) =>
     (Number(centavos || 0) / 100).toLocaleString("pt-BR", { style: "currency", currency: "BRL" }),
 };
@@ -333,6 +334,16 @@ const displayEstablishmentName = (est) => {
   return est?.nome || est?.name || est?.fantasia || est?.razao_social || '';
 };
 
+const displayEstablishmentAddress = (est) => {
+  if (!est) return '';
+  const parts = [
+    [est?.endereco, est?.numero].filter(Boolean).join(', '),
+    est?.bairro,
+    [est?.cidade, est?.estado].filter(Boolean).join(' - '),
+  ].filter(Boolean);
+  return parts.join(' • ');
+};
+
 /* =================== UI Components =================== */
 const Modal = ({ children, onClose }) => (
   <div className="modal-backdrop" onClick={onClose}>
@@ -394,12 +405,23 @@ const SlotButton = ({ slot, isSelected, onClick, density = "compact" }) => {
 const ServiceCard = ({ service, selected, onSelect }) => {
   const duration = ServiceHelpers.duration(service);
   const price = ServiceHelpers.formatPrice(ServiceHelpers.price(service));
+  const description = ServiceHelpers.description(service);
+  const showPrice = price !== 'R$ 0,00';
+  const showDuration = duration > 0;
+  const cardClass = ['mini-card', selected ? 'mini-card--selected' : ''].filter(Boolean).join(' ');
   return (
-    <div className={`mini-card ${selected ? "mini-card--selected" : ""}`} onClick={() => onSelect(service)}>
-      <div className="mini-card__title">{ServiceHelpers.title(service)}</div>
-      <div className="mini-card__meta">
-        {duration > 0 && <span>{duration} min</span>}
-        {price !== "R$\u00A00,00" && <span>{price}</span>}
+    <div className={cardClass} onClick={() => onSelect(service)}>
+      <div className="mini-card__content">
+        <div className="mini-card__main">
+          <div className="mini-card__title">{ServiceHelpers.title(service)}</div>
+          {description && <div className="mini-card__description">{description}</div>}
+        </div>
+        {(showPrice || showDuration) && (
+          <div className="mini-card__side">
+            {showPrice && <div className="mini-card__price">{price}</div>}
+            {showDuration && <div className="mini-card__duration">{duration} min</div>}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -614,6 +636,17 @@ export default function NovoAgendamento() {
     [establishments, establishmentId]
   );
   const selectedEstablishmentName = useMemo(() => displayEstablishmentName(selectedEstablishment), [selectedEstablishment]);
+  const selectedEstablishmentAddress = useMemo(() => displayEstablishmentAddress(selectedEstablishment), [selectedEstablishment]);
+
+  const establishmentAvatar = useMemo(() => {
+    const source = selectedEstablishment?.avatar_url || selectedEstablishment?.logo_url || selectedEstablishment?.foto_url;
+    if (!source) return '';
+    try {
+      return new URL(source, API_BASE_URL).toString();
+    } catch {
+      return source;
+    }
+  }, [selectedEstablishment]);
   const normalizedQuery = useMemo(() => normalizeText(estQuery.trim()), [estQuery]);
   const queryTokens = useMemo(
     () => (normalizedQuery ? normalizedQuery.split(/\s+/).filter(Boolean) : []),
@@ -1450,7 +1483,7 @@ export default function NovoAgendamento() {
         </button>
       </div>
       <p className="muted" style={{ marginTop: 8 }}>Escolha um serviço:</p>
-      <div className="row-wrap">
+      <div className="novo-agendamento__services">
         {services.length === 0 ? (
           <div className="empty small">Sem serviços cadastrados.</div>
         ) : (
@@ -1698,14 +1731,26 @@ export default function NovoAgendamento() {
 
           {step === 1 && renderEstablishmentSearch()}
           {step > 1 && (
-            <div className="novo-agendamento__summary">
-              <div>
-                <span className="novo-agendamento__summary-label">Estabelecimento</span>
-                <strong>{selectedEstablishmentName || '-'}</strong>
+            <div className="novo-agendamento__summary novo-agendamento__summary--establishment">
+              <div className="novo-agendamento__summary-avatar">
+                {establishmentAvatar ? (
+                  <img src={establishmentAvatar} alt={`Logo de ${selectedEstablishmentName || 'estabelecimento'}`} />
+                ) : (
+                  <span>{(selectedEstablishmentName || 'AO').slice(0, 2).toUpperCase()}</span>
+                )}
+              </div>
+              <div className="novo-agendamento__summary-content">
+                <strong className="novo-agendamento__summary-name">{selectedEstablishmentName || 'Estabelecimento'}</strong>
+                <span className="novo-agendamento__summary-address">{selectedEstablishmentAddress || 'Endereço não informado'}</span>
+                <div className="novo-agendamento__summary-actions">
+                  <span className="summary-action summary-action--muted">☆ Sem avaliações</span>
+                  <span className="summary-action">🛈 Informações</span>
+                  <span className="summary-action">♡ Favoritar</span>
+                </div>
               </div>
               {selectedService && (
-                <div>
-                  <span className="novo-agendamento__summary-label">Serviço</span>
+                <div className="novo-agendamento__summary-service">
+                  <span className="novo-agendamento__summary-label">Serviço selecionado</span>
                   <strong>{ServiceHelpers.title(selectedService)}</strong>
                 </div>
               )}
@@ -1767,3 +1812,4 @@ export default function NovoAgendamento() {
     </div>
   );
 }
+

@@ -11,6 +11,7 @@ export default function ServicosEstabelecimento() {
   // Formulario
   const [form, setForm] = useState({
     nome: "",
+    descricao: "",
     duracao_min: 30,
     preco_centavos: 0,
     ativo: true,
@@ -31,7 +32,7 @@ export default function ServicosEstabelecimento() {
   // Editar
   const [editOpen, setEditOpen] = useState(false);
   const [editItem, setEditItem] = useState(null);
-  const [editForm, setEditForm] = useState({ nome: '', duracao_min: 30, preco_centavos: 0 });
+  const [editForm, setEditForm] = useState({ nome: '', descricao: '', duracao_min: 30, preco_centavos: 0 });
   const [editPrecoStr, setEditPrecoStr] = useState('R$ 0,00');
   const [editSaving, setEditSaving] = useState(false);
   const [selectedProsEdit, setSelectedProsEdit] = useState([]);
@@ -109,13 +110,19 @@ export default function ServicosEstabelecimento() {
     }
     setSaving(true);
     try {
-      const payload = { ...form };
+      const payload = {
+        nome: form.nome.trim(),
+        descricao: form.descricao?.trim() || null,
+        duracao_min: form.duracao_min,
+        preco_centavos: form.preco_centavos,
+        ativo: form.ativo,
+      };
       if (Array.isArray(selectedProsNew) && selectedProsNew.length) {
         payload.professionalIds = selectedProsNew;
       }
       const novo = await Api.servicosCreate(payload);
       setList((curr) => [novo, ...curr]);
-      setForm({ nome: "", duracao_min: 30, preco_centavos: 0, ativo: true });
+      setForm({ nome: "", descricao: "", duracao_min: 30, preco_centavos: 0, ativo: true });
       setPrecoStr("R$ 0,00");
       setSelectedProsNew([]);
       showToast("success", "Servico cadastrado!");
@@ -140,7 +147,12 @@ export default function ServicosEstabelecimento() {
   // Abrir edicao
   function openEdit(svc){
     setEditItem(svc);
-    setEditForm({ nome: svc.nome || '', duracao_min: svc.duracao_min || 30, preco_centavos: svc.preco_centavos || 0 });
+    setEditForm({
+      nome: svc.nome || '',
+      descricao: svc.descricao || '',
+      duracao_min: svc.duracao_min || 30,
+      preco_centavos: svc.preco_centavos || 0,
+    });
     setEditPrecoStr(formatBRL(svc.preco_centavos || 0));
     const profIds = Array.isArray(svc.professionals) ? svc.professionals.map(p => p.id) : [];
     setSelectedProsEdit(profIds);
@@ -155,7 +167,12 @@ export default function ServicosEstabelecimento() {
     }
     setEditSaving(true);
     try{
-      const payload = { nome: editForm.nome.trim(), duracao_min: editForm.duracao_min, preco_centavos: editForm.preco_centavos };
+      const payload = {
+        nome: editForm.nome.trim(),
+        descricao: editForm.descricao?.trim() || null,
+        duracao_min: editForm.duracao_min,
+        preco_centavos: editForm.preco_centavos,
+      };
       if (Array.isArray(selectedProsEdit)) payload.professionalIds = selectedProsEdit;
       const updated = await Api.servicosUpdate(editItem.id, payload);
       setList(curr => curr.map(x => x.id === editItem.id ? { ...x, ...updated } : x));
@@ -218,7 +235,11 @@ export default function ServicosEstabelecimento() {
     let arr = list;
     if (query.trim()) {
       const q = query.trim().toLowerCase();
-      arr = arr.filter((s) => s.nome?.toLowerCase().includes(q));
+      arr = arr.filter((s) => {
+        const nomeMatch = s.nome?.toLowerCase().includes(q);
+        const descMatch = s.descricao?.toLowerCase().includes(q);
+        return nomeMatch || descMatch;
+      });
     }
     if (statusFilter !== "todos") {
       const target = statusFilter === "ativos";
@@ -264,6 +285,15 @@ export default function ServicosEstabelecimento() {
             value={form.nome}
             onChange={(e) => setForm((f) => ({ ...f, nome: e.target.value }))}
             maxLength={80}
+          />
+          <textarea
+            className="input"
+            placeholder="Descrição (opcional)"
+            value={form.descricao}
+            onChange={(e) => setForm((f) => ({ ...f, descricao: e.target.value }))}
+            rows={2}
+            maxLength={200}
+            style={{ flex: '1 1 220px', minHeight: 64 }}
           />
 
           <select
@@ -383,6 +413,7 @@ export default function ServicosEstabelecimento() {
               <thead>
                 <tr>
                   <th>Nome</th>
+                  <th>Descrição</th>
                   <th>Duração</th>
                   <th>Preço</th>
                   <th className="service-status__header">Status</th>
@@ -393,6 +424,7 @@ export default function ServicosEstabelecimento() {
                 {filtered.map((s) => (
                   <tr key={s.id} className={s._updating ? "updating" : ""}>
                     <td>{s.nome}</td>
+                    <td>{s.descricao || '-'}</td>
                     <td>{s.duracao_min} min</td>
                     <td>{formatBRL(s.preco_centavos ?? 0)}</td>
                     <td className="service-status-cell">
@@ -499,6 +531,15 @@ export default function ServicosEstabelecimento() {
               value={editPrecoStr}
               onChange={handleEditPrecoChange}
             />
+            <textarea
+              className="input"
+              placeholder="Descrição (opcional)"
+              value={editForm.descricao}
+              onChange={(e) => setEditForm((f) => ({ ...f, descricao: e.target.value }))}
+              rows={2}
+              maxLength={200}
+              style={{ minHeight: 64 }}
+            />
             {pros.length > 0 && (
               <div className="grid" style={{ gap: 4 }}>
                 <div className="muted" style={{ fontSize: 12 }}>Vincular profissionais</div>
@@ -541,6 +582,7 @@ function SkeletonTable() {
       <thead>
         <tr>
           <th>Nome</th>
+          <th>Descricao</th>
           <th>Duracao</th>
           <th>Preco</th>
           <th>Status</th>
@@ -552,6 +594,9 @@ function SkeletonTable() {
           <tr key={i}>
             <td>
               <div className="shimmer" style={{ width: "60%" }} />
+            </td>
+            <td>
+              <div className="shimmer" style={{ width: "80%" }} />
             </td>
             <td>
               <div className="shimmer" style={{ width: "40%" }} />
