@@ -1527,8 +1527,10 @@ export default function NovoAgendamento() {
     </>
   );
 
-  const renderScheduleContent = () => (
-    <>
+  const renderScheduleContent = () => {
+    const todayIso = DateHelpers.toISODate(new Date());
+    return (
+      <>
       {serviceProfessionals.length > 0 && (
         <div className="novo-agendamento__section">
           <div className="grid" style={{ gap: 6 }}>
@@ -1655,14 +1657,23 @@ export default function NovoAgendamento() {
                 <div key={`${d}-${index}`} className="month__dow muted">{d}</div>
               ))}
               {DateHelpers.monthGrid(monthStart).map(({ iso, inMonth, date }) => {
-                const isToday = DateHelpers.sameYMD(iso, DateHelpers.toISODate(new Date()));
+                const isToday = DateHelpers.sameYMD(iso, todayIso);
+                const isPastDay = iso < todayIso;
                 const isSelected = selectedDate && DateHelpers.sameYMD(selectedDate, iso);
+                const classNameParts = ['month__day'];
+                if (!inMonth) classNameParts.push('is-dim');
+                if (isToday) classNameParts.push('is-today');
+                if (isSelected) classNameParts.push('is-selected');
+                if (isPastDay) classNameParts.push('is-past');
+                const className = classNameParts.join(' ');
                 return (
                   <button
                     key={iso}
-                    className={`month__day${inMonth ? '' : ' is-dim'}${isToday ? ' is-today' : ''}${isSelected ? ' is-selected' : ''}`}
-                    onClick={() => handlePickDay(iso)}
+                    type="button"
+                    className={className}
+                    onClick={isPastDay ? undefined : () => handlePickDay(iso)}
                     title={date.toLocaleDateString('pt-BR')}
+                    disabled={isPastDay}
                   >
                     {date.getDate()}
                   </button>
@@ -1746,7 +1757,8 @@ export default function NovoAgendamento() {
         </div>
       </div>
     </>
-  );
+    );
+  };
 
   return (
     <div className="novo-agendamento">
