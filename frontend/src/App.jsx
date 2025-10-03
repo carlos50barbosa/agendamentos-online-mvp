@@ -230,7 +230,7 @@ function Sidebar({ open, user }) {
                   <div className="sidelist__heading">Principal</div>
                   <NavLink to={isEstab ? '/estab' : '/cliente'} className={({ isActive }) => `sidelist__item${isActive ? ' active' : ''}`}>
                     <IconHome className="sidelist__icon" aria-hidden="true" />
-                    <span>Dashboard</span>
+                    <span>Meus Agendamentos</span>
                   </NavLink>
                   {!isEstab && (
                     <NavLink to="/novo" className={({ isActive }) => `sidelist__item${isActive ? ' active' : ''}`}>

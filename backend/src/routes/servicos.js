@@ -194,6 +194,13 @@ router.post('/', auth, isEstabelecimento, async (req, res) => {
       throw err;
     }
 
+    if (!professionalIdsToLink.length) {
+      return res.status(400).json({
+        error: 'missing_professionals',
+        message: 'Associe pelo menos um profissional ao serviço.',
+      });
+    }
+
     conn = await pool.getConnection();
     await conn.beginTransaction();
 
@@ -270,6 +277,13 @@ router.put('/:id', auth, isEstabelecimento, async (req, res) => {
       }
     }
 
+    if (professionalIdsToLink !== null && !professionalIdsToLink.length) {
+      return res.status(400).json({
+        error: 'missing_professionals',
+        message: 'Associe pelo menos um profissional ao serviço.',
+      });
+    }
+
     conn = await pool.getConnection();
     await conn.beginTransaction();
 
@@ -316,6 +330,17 @@ router.delete('/:id', auth, isEstabelecimento, async (req, res) => {
     const serviceId = Number(req.params.id);
     if (!Number.isFinite(serviceId)) {
       return res.status(400).json({ error: 'invalid_id' });
+    }
+
+    const [[lockedAppointment]] = await pool.query(
+      "SELECT id FROM agendamentos WHERE servico_id=? AND estabelecimento_id=? AND status IN ('confirmado','pendente') LIMIT 1",
+      [serviceId, estId]
+    );
+    if (lockedAppointment) {
+      return res.status(409).json({
+        error: 'service_has_appointments',
+        message: 'Não é possível excluir um serviço com agendamentos confirmados.',
+      });
     }
 
     const [result] = await pool.query(

@@ -1,8 +1,10 @@
 // src/pages/NovoAgendamento.jsx
 import React, { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { Api } from "../utils/api";
+import { Api, API_BASE_URL } from "../utils/api";
 import { getUser } from "../utils/auth";
+
+import { IconSearch, IconMapPin } from "../components/Icons.jsx";
 
 /* =================== Helpers de Data =================== */
 const TZ = Intl.DateTimeFormat().resolvedOptions().timeZone || "America/Sao_Paulo";
@@ -216,6 +218,121 @@ const slotStatusClass = (label) => {
   return 'ok';
 };
 
+const resolveAssetUrl = (value) => {
+  if (!value) return '';
+  if (value.startsWith('data:')) return value;
+  if (/^https?:\/\//i.test(value)) return value;
+  try {
+    return new URL(value, API_BASE_URL).toString();
+  } catch {
+    return value;
+  }
+};
+
+const STORAGE_KEY = 'ao:lastLocation';
+
+const normalizeText = (value) =>
+  String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+
+const buildEstablishmentSearchText = (est) =>
+  normalizeText(
+    [
+      est?.nome,
+      est?.name,
+      est?.fantasia,
+      est?.razao_social,
+      est?.endereco,
+      est?.numero,
+      est?.bairro,
+      est?.cidade,
+      est?.estado,
+      est?.cep,
+    ]
+      .filter(Boolean)
+      .join(' ')
+  );
+
+const formatAddress = (est) => {
+  const street = [est?.endereco, est?.numero].filter(Boolean).join(', ');
+  const district = est?.bairro ? est.bairro : '';
+  const cityState = [est?.cidade, est?.estado].filter(Boolean).join(' - ');
+  const parts = [street, district, cityState].filter(Boolean);
+  if (est?.cep) parts.push(`CEP ${est.cep}`);
+  return parts.join(', ');
+};
+
+const fallbackAvatar = (label) => {
+  const name = encodeURIComponent(String(label || 'AO'));
+  return `https://ui-avatars.com/api/?name=${name}&size=128&background=1C64F2&color=ffffff&rounded=true`;
+};
+
+const haversineDistance = (origin, point) => {
+  if (!origin || !point) return null;
+  const toRad = (value) => (value * Math.PI) / 180;
+  const R = 6371;
+  const dLat = toRad(point.lat - origin.lat);
+  const dLon = toRad(point.lng - origin.lng);
+  const lat1 = toRad(origin.lat);
+  const lat2 = toRad(point.lat);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+};
+
+const geocodeEstablishment = async (est) => {
+  const lat = Number(est?.latitude ?? est?.lat ?? null);
+  const lng = Number(est?.longitude ?? est?.lng ?? null);
+  if (Number.isFinite(lat) && Number.isFinite(lng)) return { lat, lng };
+
+  const parts = [];
+  const street = [est?.endereco, est?.numero].filter(Boolean).join(' ');
+  if (street) parts.push(street);
+  if (est?.bairro) parts.push(est.bairro);
+  if (est?.cidade) parts.push(est.cidade);
+  if (est?.estado) parts.push(est.estado);
+  if (est?.cep) parts.push(est.cep);
+  if (!parts.length) return null;
+  parts.push('Brasil');
+
+  const query = encodeURIComponent(parts.join(', '));
+  const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&addressdetails=0&countrycodes=br&q=${query}&email=contato@agendamentos.app`;
+
+  try {
+    const response = await fetch(url, {
+      headers: { 'Accept-Language': 'pt-BR' },
+    });
+    if (!response.ok) return null;
+    const data = await response.json();
+    if (!Array.isArray(data) || !data.length) return null;
+    const { lat: resLat, lon } = data[0] || {};
+    const latNum = Number(resLat);
+    const lonNum = Number(lon);
+    if (!Number.isFinite(latNum) || !Number.isFinite(lonNum)) return null;
+    return { lat: latNum, lng: lonNum };
+  } catch {
+    return null;
+  }
+};
+
+const professionalInitials = (name) => {
+  const parts = String(name || '')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2);
+  if (!parts.length) return '??';
+  return parts.map((word) => word.charAt(0).toUpperCase()).join('');
+};
+
+const displayEstablishmentName = (est) => {
+  return est?.nome || est?.name || est?.fantasia || est?.razao_social || '';
+};
+
 /* =================== UI Components =================== */
 const Modal = ({ children, onClose }) => (
   <div className="modal-backdrop" onClick={onClose}>
@@ -241,26 +358,6 @@ const Chip = ({ active, onClick, children, title }) => (
   <button className={`chip ${active ? "chip--active" : ""}`} onClick={onClick} title={title}>
     {children}
   </button>
-);
-
-const DensityToggle = ({ value, onChange }) => (
-  <div className="segmented" role="tablist" aria-label="Densidade">
-    {[
-      { value: "compact", label: "Compacto" },
-      { value: "comfortable", label: "Confortável" },
-    ].map((opt) => (
-      <button
-        key={opt.value}
-        role="tab"
-        aria-selected={value === opt.value}
-        className={`segmented__btn ${value === opt.value ? "is-active" : ""}`}
-        onClick={() => onChange(opt.value)}
-        title={opt.label}
-      >
-        {opt.label}
-      </button>
-    ))}
-  </div>
 );
 
 const SlotButton = ({ slot, isSelected, onClick, density = "compact" }) => {
@@ -308,11 +405,105 @@ const ServiceCard = ({ service, selected, onSelect }) => {
   );
 };
 
-const EstablishmentCard = ({ est, selected, onSelect }) => {
-  const displayName = est?.nome || est?.name || est?.fantasia || est?.razao_social || "Estabelecimento";
+const ProfessionalTile = ({ professional, selected, onSelect }) => {
+  const avatar = resolveAssetUrl(professional?.avatar_url || '');
+  const initials = useMemo(() => professionalInitials(professional?.nome), [professional?.nome]);
+
   return (
-    <div className={`mini-card ${selected ? "mini-card--selected" : ""}`} onClick={() => onSelect(est)}>
-      <div className="mini-card__title">{displayName}</div>
+    <button
+      type="button"
+      onClick={onSelect}
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+        width: '100%',
+        padding: '6px 8px',
+        borderRadius: 8,
+        border: 'none',
+        background: selected ? 'var(--primary-bg, rgba(11,94,215,0.12))' : 'transparent',
+        color: 'var(--text-primary)',
+        cursor: 'pointer',
+        textAlign: 'left',
+      }}
+    >
+      {avatar ? (
+        <img
+          src={avatar}
+          alt={`Foto de ${professional?.nome || ''}`}
+
+          style={{ width: 36, height: 36, borderRadius: '50%', objectFit: 'cover', border: '1px solid var(--border)' }}
+        />
+      ) : (
+        <div
+          style={{
+            width: 36,
+            height: 36,
+            borderRadius: '50%',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: 'var(--border)',
+            color: 'var(--text-primary)',
+            fontWeight: 600,
+            fontSize: 12,
+          }}
+        >
+          {initials}
+        </div>
+      )}
+      <span style={{ fontSize: 13, fontWeight: selected ? 600 : 500 }}>
+        {professional?.nome || 'Profissional'}
+      </span>
+    </button>
+  );
+};
+
+
+const EstablishmentCard = ({ est, selected, onSelect, distance, userLocation, formatter }) => {
+  const name = est?.nome || est?.name || est?.fantasia || est?.razao_social || `Estabelecimento #${est?.id || ''}`;
+  const address = formatAddress(est);
+  const avatarSource = est?.foto_url || est?.avatar_url || '';
+  const distanceLabel = userLocation
+    ? Number.isFinite(distance)
+      ? `${formatter.format(distance)} km`
+      : 'Distancia indisponivel'
+    : 'Ative a localizacao para ver a distancia';
+
+  const handleKeyDown = (event) => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      onSelect(est);
+    }
+  };
+
+  return (
+    <div
+      className={`establishment-card ${selected ? 'establishment-card--selected' : ''}`}
+      role="button"
+      tabIndex={0}
+      aria-pressed={selected}
+      onClick={() => onSelect(est)}
+      onKeyDown={handleKeyDown}
+    >
+      <div className="establishment-card__avatar">
+        <img
+          src={avatarSource ? resolveAssetUrl(avatarSource) : fallbackAvatar(name)}
+          alt={`Foto do estabelecimento ${name}`}
+          onError={(event) => {
+            const target = event.currentTarget;
+            if (!target.dataset.fallback) {
+              target.dataset.fallback = '1';
+              target.src = fallbackAvatar(name);
+            }
+          }}
+        />
+      </div>
+      <div className="establishment-card__info">
+        <h3 className="establishment-card__name">{name}</h3>
+        <p className="establishment-card__address">{address || 'Endereco nao informado'}</p>
+        <span className="establishment-card__distance">{distanceLabel}</span>
+      </div>
     </div>
   );
 };
@@ -339,6 +530,8 @@ export default function NovoAgendamento() {
     services: [],
     establishmentId: user?.tipo === "estabelecimento" ? String(user.id) : "",
     serviceId: "",
+
+    professionalId: "",
     currentWeek: DateHelpers.weekStartISO(),
     slots: [],
     loading: false,
@@ -350,6 +543,14 @@ export default function NovoAgendamento() {
   });
   const [estQuery, setEstQuery] = useState("");
   const [searchParams, setSearchParams] = useSearchParams();
+  const [userLocation, setUserLocation] = useState(null);
+  const [locating, setLocating] = useState(false);
+  const [geoError, setGeoError] = useState('');
+  const [geocoding, setGeocoding] = useState(false);
+  const coordsCacheRef = useRef(new Map());
+  const [distanceMap, setDistanceMap] = useState({});
+  const [establishmentsLoading, setEstablishmentsLoading] = useState(true);
+  const [establishmentsError, setEstablishmentsError] = useState('');
 
   // Inicializa estQuery a partir de ?q= da URL e reage a mudanÃ§as no histÃ³rico
   useEffect(() => {
@@ -357,6 +558,24 @@ export default function NovoAgendamento() {
     if (q !== estQuery) setEstQuery(q);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
+
+  useEffect(() => {
+    try {
+      const stored = sessionStorage.getItem(STORAGE_KEY);
+      if (!stored) return;
+      const parsed = JSON.parse(stored);
+      if (parsed && Number.isFinite(parsed.lat) && Number.isFinite(parsed.lng)) {
+        setUserLocation(parsed);
+      }
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    try {
+      if (userLocation) sessionStorage.setItem(STORAGE_KEY, JSON.stringify(userLocation));
+      else sessionStorage.removeItem(STORAGE_KEY);
+    } catch {}
+  }, [userLocation]);
 
   // Inicializa/normaliza a semana a partir de ?week=YYYY-MM-DD
   // Sempre forÃ§a a segunda-feira correspondente
@@ -376,6 +595,7 @@ export default function NovoAgendamento() {
   const [viewMode] = useState('month'); // por ora, Mês Ã© o padrÃ£o
   const [monthStart, setMonthStart] = useState(() => DateHelpers.firstOfMonthISO(new Date()));
   const [selectedDate, setSelectedDate] = useState(null); // YYYY-MM-DD
+  const [professionalMenuOpen, setProfessionalMenuOpen] = useState(false);
 
   const {
     establishments, services, establishmentId, serviceId,
@@ -393,11 +613,113 @@ export default function NovoAgendamento() {
     () => establishments.find((e) => String(e.id) === establishmentId),
     [establishments, establishmentId]
   );
+  const selectedEstablishmentName = useMemo(() => displayEstablishmentName(selectedEstablishment), [selectedEstablishment]);
+  const normalizedQuery = useMemo(() => normalizeText(estQuery.trim()), [estQuery]);
+  const queryTokens = useMemo(
+    () => (normalizedQuery ? normalizedQuery.split(/\s+/).filter(Boolean) : []),
+    [normalizedQuery]
+  );
+
   const filteredEstablishments = useMemo(() => {
-    const q = estQuery.trim().toLowerCase();
-    if (!q) return establishments;
-    return establishments.filter((e) => String(e?.nome || e?.name || "").toLowerCase().includes(q));
-  }, [establishments, estQuery]);
+    if (!queryTokens.length) return establishments;
+    return establishments.filter((est) => {
+      const haystack = buildEstablishmentSearchText(est);
+      return queryTokens.every((token) => haystack.includes(token));
+    });
+  }, [establishments, queryTokens]);
+
+  const kmFormatter = useMemo(
+    () => new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 }),
+    []
+  );
+
+  useEffect(() => {
+    const cache = coordsCacheRef.current;
+    let changed = false;
+    establishments.forEach((est) => {
+      const lat = Number(est?.latitude ?? est?.lat ?? null);
+      const lng = Number(est?.longitude ?? est?.lng ?? null);
+      if (Number.isFinite(lat) && Number.isFinite(lng) && !cache.has(est.id)) {
+        cache.set(est.id, { lat, lng });
+        changed = true;
+      }
+    });
+    if (changed && userLocation) {
+      const next = {};
+      cache.forEach((coords, id) => {
+        next[id] = haversineDistance(userLocation, coords);
+      });
+      setDistanceMap(next);
+    }
+  }, [establishments, userLocation]);
+
+  useEffect(() => {
+    if (!userLocation) {
+      setDistanceMap({});
+      return;
+    }
+    const next = {};
+    coordsCacheRef.current.forEach((coords, id) => {
+      if (coords) next[id] = haversineDistance(userLocation, coords);
+    });
+    setDistanceMap(next);
+  }, [userLocation]);
+
+  useEffect(() => {
+    if (!userLocation) {
+      setGeocoding(false);
+      return;
+    }
+    const pending = filteredEstablishments.filter((est) => !coordsCacheRef.current.has(est.id));
+    if (!pending.length) {
+      setGeocoding(false);
+      return;
+    }
+
+    let cancelled = false;
+    setGeocoding(true);
+
+    (async () => {
+      for (const est of pending) {
+        if (cancelled) break;
+        const coords = await geocodeEstablishment(est);
+        if (cancelled) break;
+        coordsCacheRef.current.set(est.id, coords);
+        if (coords) {
+          setDistanceMap((prev) => ({
+            ...prev,
+            [est.id]: haversineDistance(userLocation, coords),
+          }));
+        }
+      }
+      if (!cancelled) setGeocoding(false);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [filteredEstablishments, userLocation]);
+
+  const establishmentResults = useMemo(() => {
+    const mapped = filteredEstablishments.map((est) => ({
+      est,
+      distance: distanceMap[est.id],
+    }));
+    const sortKey = (value) =>
+      normalizeText(value?.nome || value?.name || value?.fantasia || value?.razao_social || `est-${value?.id || ''}`);
+    const sorted = [...mapped];
+    if (userLocation) {
+      sorted.sort((a, b) => {
+        const da = Number.isFinite(a.distance) ? a.distance : Number.POSITIVE_INFINITY;
+        const db = Number.isFinite(b.distance) ? b.distance : Number.POSITIVE_INFINITY;
+        if (da !== db) return da - db;
+        return sortKey(a.est).localeCompare(sortKey(b.est));
+      });
+    } else {
+      sorted.sort((a, b) => sortKey(a.est).localeCompare(sortKey(b.est)));
+    }
+    return sorted;
+  }, [distanceMap, filteredEstablishments, userLocation]);
 
   // Passo da grade
   const stepMinutes = useMemo(() => {
@@ -419,9 +741,9 @@ export default function NovoAgendamento() {
   }, []);
   useEffect(() => {
     try {
-      localStorage.setItem("novo-agendamento-ui", JSON.stringify({ filters, density }));
+      localStorage.setItem("novo-agendamento-ui", JSON.stringify({ filters }));
     } catch {}
-  }, [filters, density]);
+  }, [filters]);
 
   // Toast helper
   const showToast = useCallback((type, message, duration = 4500) => {
@@ -437,48 +759,38 @@ export default function NovoAgendamento() {
     if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
   }, []);
 
-  // Copiar link compartilhÃ¡vel (preserva q, estabelecimento e servico)
-  const copyShareLink = useCallback(async () => {
-    try{
-      const sp = new URLSearchParams(searchParams);
-      // Garante que os parÃ¢metros atuais estÃ£o refletidos
-      if (estQuery && estQuery.trim()) sp.set('q', estQuery.trim()); else sp.delete('q');
-      if (establishmentId) sp.set('estabelecimento', String(establishmentId)); else sp.delete('estabelecimento');
-      if (serviceId) sp.set('servico', String(serviceId)); else sp.delete('servico');
-      if (currentWeek) sp.set('week', String(currentWeek)); else sp.delete('week');
-      const url = `${window.location.origin}/novo${sp.toString() ? `?${sp.toString()}` : ''}`;
-      if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(url);
-      } else {
-        const ta = document.createElement('textarea');
-        ta.value = url; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta);
-      }
-      showToast('info', 'Link copiado para a Ã¡rea de transferÃªncia.');
-    }catch{
-      showToast('error', 'Não foi possÃ­vel copiar o link.');
-    }
-  }, [searchParams, estQuery, establishmentId, serviceId, currentWeek, showToast]);
 
   /* ====== Carregar Estabelecimentos ====== */
   useEffect(() => {
+    let cancelled = false;
     (async () => {
       try {
+        setEstablishmentsLoading(true);
+        setEstablishmentsError('');
         const list = await Api.listEstablishments();
+        if (cancelled) return;
         setState((prev) => ({
           ...prev,
-          establishments: list || [],
+          establishments: Array.isArray(list) ? list : [],
         }));
       } catch {
-        showToast("error", "Não foi possÃ­vel carregar estabelecimentos.");
+        if (cancelled) return;
+        setEstablishmentsError('Nao foi possivel carregar estabelecimentos.');
+        showToast('error', 'Nao foi possivel carregar estabelecimentos.');
+      } finally {
+        if (!cancelled) setEstablishmentsLoading(false);
       }
     })();
+    return () => {
+      cancelled = true;
+    };
   }, [showToast]);
 
   // Se vier ?estabelecimento= na URL, seleciona automaticamente apÃ³s carregar a lista
   useEffect(() => {
     const estParam = (searchParams.get('estabelecimento') || '').trim();
     if (establishments.length && estParam && estParam !== state.establishmentId) {
-      setState((p) => ({ ...p, establishmentId: estParam, serviceId: "", slots: [], selectedSlot: null }));
+      setState((p) => ({ ...p, establishmentId: estParam, serviceId: "", professionalId: "", slots: [], selectedSlot: null }));
     }
   }, [establishments, searchParams, state.establishmentId]);
 
@@ -486,7 +798,7 @@ export default function NovoAgendamento() {
   useEffect(() => {
     (async () => {
       if (!establishmentId) {
-        setState((p) => ({ ...p, services: [], serviceId: "", slots: [], selectedSlot: null }));
+        setState((p) => ({ ...p, services: [], serviceId: "", professionalId: "", slots: [], selectedSlot: null }));
         try{
           const sp = new URLSearchParams(searchParams);
           sp.delete('servico');
@@ -499,7 +811,9 @@ export default function NovoAgendamento() {
         setState((p) => ({
           ...p,
           services: list || [],
-          serviceId: "", // aguarda o clique do usuÃ¡rio
+          serviceId: "",
+
+    professionalId: "", // aguarda o clique do usuÃ¡rio
           slots: [],
           selectedSlot: null,
         }));
@@ -516,7 +830,7 @@ export default function NovoAgendamento() {
           }
         }catch{}
       } catch {
-        setState((p) => ({ ...p, services: [], serviceId: "", slots: [], selectedSlot: null }));
+        setState((p) => ({ ...p, services: [], serviceId: "", professionalId: "", slots: [], selectedSlot: null }));
         showToast("error", "Não foi possÃ­vel carregar os serviÃ§os.");
       }
     })();
@@ -660,6 +974,10 @@ export default function NovoAgendamento() {
     loadSlots();
   }, [loadSlots]);
 
+  useEffect(() => {
+    setProfessionalMenuOpen(false);
+  }, [serviceId]);
+
   // Teclas semana
   useEffect(() => {
     const onKey = (e) => {
@@ -800,16 +1118,24 @@ export default function NovoAgendamento() {
       showToast("error", "Este horário está fora do perí­odo de 07:00•22:00.");
       return;
     }
+    if (serviceProfessionals.length && !state.professionalId) {
+      showToast("error", "Selecione um profissional para continuar.");
+      return;
+    }
 
     setModal((p) => ({ ...p, isSaving: true }));
     let success = false;
 
     try {
-      await Api.agendar({
+      const payload = {
         estabelecimento_id: Number(establishmentId),
         servico_id: Number(serviceId),
         inicio: selectedSlot.datetime,
-      });
+      };
+      if (serviceProfessionals.length && state.professionalId) {
+        payload.profissional_id = Number(state.professionalId);
+      }
+      await Api.agendar(payload);
 
       success = true;
       setModal((p) => ({ ...p, isOpen: false }));
@@ -888,8 +1214,44 @@ export default function NovoAgendamento() {
   ]);
 
   /* ====== Handlers ====== */
+  const handleQueryChange = useCallback(
+    (value) => {
+      setEstQuery(value);
+      const trimmed = value.trim();
+      const sp = new URLSearchParams(searchParams);
+      if (trimmed) sp.set('q', trimmed);
+      else sp.delete('q');
+      setSearchParams(sp, { replace: true });
+    },
+    [searchParams, setSearchParams]
+  );
+
+  const handleUseLocation = useCallback(() => {
+    if (!navigator?.geolocation) {
+      setGeoError('Geolocalizacao nao esta disponivel neste dispositivo.');
+      return;
+    }
+    setGeoError('');
+    setLocating(true);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setLocating(false);
+        const coords = {
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude,
+        };
+        setUserLocation(coords);
+      },
+      () => {
+        setLocating(false);
+        setGeoError('Nao foi possivel obter sua localizacao.');
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
+    );
+  }, []);
+
   const handleEstablishmentClick = (est) => {
-    setState((p) => ({ ...p, establishmentId: String(est.id), serviceId: "", slots: [], selectedSlot: null }));
+    setState((p) => ({ ...p, establishmentId: String(est.id), serviceId: "", professionalId: "", slots: [], selectedSlot: null }));
     try{
       const sp = new URLSearchParams(searchParams);
       sp.set('estabelecimento', String(est.id));
@@ -898,7 +1260,8 @@ export default function NovoAgendamento() {
   };
 
   const handleServiceClick = (svc) => {
-    setState((p) => ({ ...p, serviceId: String(svc.id), slots: [], selectedSlot: null }));
+    setState((p) => ({ ...p, serviceId: String(svc.id), professionalId: "", slots: [], selectedSlot: null }));
+    setProfessionalMenuOpen(false);
     try{
       const sp = new URLSearchParams(searchParams);
       sp.set('servico', String(svc.id));
@@ -928,6 +1291,21 @@ export default function NovoAgendamento() {
 
   const serviceDuration = ServiceHelpers.duration(selectedService);
   const servicePrice = ServiceHelpers.formatPrice(ServiceHelpers.price(selectedService));
+  const serviceProfessionals = Array.isArray(selectedService?.professionals) ? selectedService.professionals : [];
+  const selectedProfessional = useMemo(() => {
+    if (!serviceProfessionals.length || !state.professionalId) return null;
+    return serviceProfessionals.find((p) => String(p.id) === String(state.professionalId)) || null;
+  }, [serviceProfessionals, state.professionalId]);
+  useEffect(() => {
+    if (serviceProfessionals.length === 1) {
+      const only = String(serviceProfessionals[0]?.id || "");
+      if (state.professionalId !== only) {
+        setState((p) => ({ ...p, professionalId: only }));
+      }
+      setProfessionalMenuOpen(false);
+    }
+  }, [serviceProfessionals, state.professionalId]);
+
   const endTimeLabel = useMemo(() => {
     if (!selectedSlot || !serviceDuration) return null;
     const end = DateHelpers.addMinutes(new Date(selectedSlot.datetime), serviceDuration);
@@ -955,7 +1333,7 @@ export default function NovoAgendamento() {
     if (wk !== currentWeek) setState((p) => ({ ...p, currentWeek: wk }));
   }, [currentWeek]);
 
-  // Quando o Mês visÃ­vel contÃ©m hoje, prÃ©-seleciona o dia atual se nada estiver selecionado
+  // Quando o mês visível contém hoje, pré-seleciona o dia atual se nada estiver selecionado
   useEffect(() => {
     const todayIso = DateHelpers.toISODate(new Date());
     if (DateHelpers.isSameMonth(todayIso, monthStart)) {
@@ -967,312 +1345,425 @@ export default function NovoAgendamento() {
     }
   }, [monthStart, selectedDate, currentWeek]);
 
-  return (
-    <div className="grid" style={{ gap: 12 }}>
-      {toast && <Toast type={toast.type} message={toast.message} onDismiss={() => setToast(null)} />}
+  const introSubtitle = step === 1
+    ? 'Encontre um estabelecimento para iniciar um novo agendamento.'
+    : selectedEstablishmentName
+    ? `Agendamento em ${selectedEstablishmentName}.`
+    : 'Selecione um estabelecimento para continuar.';
 
-      <div className="card">
-        {/* Header fino */}
-        <div className="row spread" style={{ marginBottom: 8, alignItems: "center" }}>
-          <div>
-            <h2 style={{ margin: 0 }}>Novo Agendamento</h2>
-            <div className="row" style={{ gap: 6, alignItems: "center" }}>
+  const renderEstablishmentSearch = () => (
+    <>
+      <div className="novo-agendamento__search">
+        <div className="novo-agendamento__searchbox">
+          <IconSearch className="novo-agendamento__search-icon" aria-hidden />
+          <input
+            className="input novo-agendamento__search-input"
+            type="search"
+            placeholder="Buscar por nome, bairro ou cidade"
+            value={estQuery}
+            onChange={(event) => handleQueryChange(event.target.value)}
+            aria-label="Buscar estabelecimentos"
+          />
+          <span className="novo-agendamento__search-caret" aria-hidden>▾</span>
+        </div>
+        <button
+          type="button"
+          className="novo-agendamento__location"
+          onClick={handleUseLocation}
+          disabled={locating}
+        >
+          <IconMapPin className="novo-agendamento__location-icon" aria-hidden />
+          <span>{locating ? 'Localizando...' : 'Usar minha localização'}</span>
+        </button>
+      </div>
+      {geoError && <div className="notice notice--error" role="alert">{geoError}</div>}
+      {userLocation && !geoError && (
+        <div className="novo-agendamento__status muted" aria-live="polite">
+          Resultados ordenados pela sua localização atual.
+        </div>
+      )}
+      {geocoding && (
+        <div className="novo-agendamento__status muted" aria-live="polite">
+          Calculando distâncias dos estabelecimentos...
+        </div>
+      )}
+    </>
+  );
+  const renderEstablishmentResults = () => {
+    if (establishmentsLoading) {
+      return (
+        <div className="card">
+          <div className="empty">Carregando...</div>
+        </div>
+      );
+    }
+    if (establishmentsError) {
+      return (
+        <div className="card">
+          <div className="empty error">{establishmentsError}</div>
+        </div>
+      );
+    }
+    if (!establishmentResults.length) {
+      return (
+        <div className="card">
+          <div className="empty">Nenhum estabelecimento encontrado.</div>
+        </div>
+      );
+    }
+    return (
+      <div className="establishments__grid">
+        {establishmentResults.map(({ est, distance }) => (
+          <EstablishmentCard
+            key={est.id}
+            est={est}
+            selected={String(est.id) === establishmentId}
+            onSelect={handleEstablishmentClick}
+            distance={distance}
+            userLocation={userLocation}
+            formatter={kmFormatter}
+          />
+        ))}
+      </div>
+    );
+  };
+
+  const renderServiceStep = () => (
+    <>
+      <div className="row spread" style={{ alignItems: 'center' }}>
+        <div className="muted">
+          <b>Estabelecimento:</b> {selectedEstablishmentName || '-'}
+        </div>
+        <button
+          className="btn btn--outline btn--sm"
+          onClick={() => {
+            setState((p) => ({ ...p, establishmentId: '', services: [], serviceId: '', professionalId: '', slots: [], selectedSlot: null }));
+            try {
+              const sp = new URLSearchParams(searchParams);
+              sp.delete('estabelecimento');
+              sp.delete('servico');
+              setSearchParams(sp, { replace: true });
+            } catch {}
+          }}
+        >
+          Trocar
+        </button>
+      </div>
+      <p className="muted" style={{ marginTop: 8 }}>Escolha um serviço:</p>
+      <div className="row-wrap">
+        {services.length === 0 ? (
+          <div className="empty small">Sem serviços cadastrados.</div>
+        ) : (
+          services.map((s) => (
+            <ServiceCard
+              key={s.id}
+              service={s}
+              selected={String(s.id) === serviceId}
+              onSelect={handleServiceClick}
+            />
+          ))
+        )}
+      </div>
+    </>
+  );
+
+  const renderScheduleContent = () => (
+    <>
+      {serviceProfessionals.length > 0 && (
+        <div className="novo-agendamento__section">
+          <div className="grid" style={{ gap: 6 }}>
+            <div className="row" style={{ gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <strong>Profissional</strong>
+              <span className="muted" style={{ fontSize: 12 }}>
+                {serviceProfessionals.length === 1 ? '1 profissional disponível' : `${serviceProfessionals.length} profissionais disponíveis`}
+              </span>
+            </div>
+            <div style={{ position: 'relative', maxWidth: 240 }}>
               <button
-                className="btn btn--sm"
-                aria-label="Semana anterior"
-                onClick={() => handleWeekChange(DateHelpers.addWeeksISO(currentWeek, -1))}
+                type="button"
+                onClick={() => setProfessionalMenuOpen((open) => !open)}
+                className="novo-agendamento__select"
               >
-                ⬅️
+                {selectedProfessional ? (
+                  <img
+                    src={resolveAssetUrl(selectedProfessional?.avatar_url)}
+                    alt={`Foto de ${(selectedProfessional?.nome || selectedProfessional?.name || '').trim()}`}
+                    className="novo-agendamento__select-avatar"
+                  />
+                ) : (
+                  <div className="novo-agendamento__select-avatar novo-agendamento__select-avatar--fallback">
+                    {professionalInitials(serviceProfessionals[0]?.nome || serviceProfessionals[0]?.name)}
+                  </div>
+                )}
+                <div className="novo-agendamento__select-label">
+                  <div>{selectedProfessional ? (selectedProfessional.nome || selectedProfessional.name) : 'Selecione um profissional'}</div>
+                </div>
+                <span className="novo-agendamento__select-caret" aria-hidden>▾</span>
               </button>
-              <small className="muted" title={`Fuso: ${TZ} • Janela: 07:00-22:00`}>
-                Semana: {weekLabel}
+              {professionalMenuOpen && (
+                <div className="novo-agendamento__select-menu">
+                  {serviceProfessionals.map((p) => (
+                    <ProfessionalTile
+                      key={p.id}
+                      professional={p}
+                      selected={String(state.professionalId) === String(p.id)}
+                      onSelect={() => {
+                        setState((s) => ({ ...s, professionalId: String(p.id) }));
+                        setProfessionalMenuOpen(false);
+                      }}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+            {!selectedProfessional && (
+              <small className="muted" style={{ fontSize: 11 }}>
+                Selecione o profissional desejado para confirmar o agendamento.
               </small>
-              <button
-                className="btn btn--sm"
-                aria-label="Próxima semana"
-                onClick={() => handleWeekChange(DateHelpers.addWeeksISO(currentWeek, 1))}
-              >
-                ➡️
-              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      <div className="novo-agendamento__section">
+        <div className="row spread" style={{ alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 6 }}>
+          <div className="row" style={{ gap: 8, alignItems: 'center' }}>
+            <span className="muted"><b>Estabelecimento:</b> {selectedEstablishmentName}</span>
+            <span className="muted">•</span>
+            <span className="muted">
+              <b>Serviço:</b> {ServiceHelpers.title(selectedService)}
+              {serviceDuration ? ` • ${serviceDuration} min` : ''}
+              {servicePrice !== 'R$ 0,00' ? ` • ${servicePrice}` : ''}
+            </span>
+          </div>
+          <details className="filters" style={{ marginLeft: 'auto' }}>
+            <summary>Filtros</summary>
+            <div className="filters__content">
+              <label className="label">
+                <span>Início da semana</span>
+                <input
+                  type="date"
+                  value={currentWeek}
+                  onChange={(event) => handleWeekChange(DateHelpers.toISODate(event.target.value))}
+                  className="input"
+                  title="Segunda-feira da semana"
+                />
+              </label>
+              <div className="row" style={{ alignItems: 'center', gap: 10 }}>
+                <label className="checkbox">
+                  <input type="checkbox" checked={filters.onlyAvailable} onChange={() => handleFilterToggle('onlyAvailable')} />
+                  <span>Somente disponíveis</span>
+                </label>
+                <label className="checkbox">
+                  <input type="checkbox" checked={filters.hidePast} onChange={() => handleFilterToggle('hidePast')} />
+                  <span>Ocultar horários passados</span>
+                </label>
+              </div>
+              <div className="row" style={{ gap: 6, flexWrap: 'wrap', marginTop: 6 }} role="group" aria-label="Período do dia">
+                <Chip active={filters.timeRange === 'all'} onClick={() => handleTimeRange('all')} title="Todos os horários">Todos</Chip>
+                <Chip active={filters.timeRange === 'morning'} onClick={() => handleTimeRange('morning')} title="Manhã (07-12)">Manhã</Chip>
+                <Chip active={filters.timeRange === 'afternoon'} onClick={() => handleTimeRange('afternoon')} title="Tarde (12-18)">Tarde</Chip>
+                <Chip active={filters.timeRange === 'evening'} onClick={() => handleTimeRange('evening')} title="Noite (18-22)">Noite</Chip>
+              </div>
+            </div>
+          </details>
+        </div>
+
+        <div className="novo-agendamento__calendar">
+          <div className="month card" style={{ padding: 8, marginBottom: 8 }}>
+            <div className="row spread" style={{ alignItems: 'center', marginBottom: 6 }}>
+              <div className="row" style={{ gap: 6, alignItems: 'center' }}>
+                <button
+                  className="btn btn--sm"
+                  aria-label="Mês anterior"
+                  onClick={() => setMonthStart(DateHelpers.formatLocalISO(DateHelpers.addMonths(monthStart, -1)))}
+                >
+                  ‹
+                </button>
+                <strong>{new Date(monthStart + 'T00:00:00').toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })}</strong>
+                <button
+                  className="btn btn--sm"
+                  aria-label="Próximo mês"
+                  onClick={() => setMonthStart(DateHelpers.formatLocalISO(DateHelpers.addMonths(monthStart, 1)))}
+                >
+                  ›
+                </button>
+              </div>
+            </div>
+            <div className="month__grid">
+              {['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'].map((d, index) => (
+                <div key={`${d}-${index}`} className="month__dow muted">{d}</div>
+              ))}
+              {DateHelpers.monthGrid(monthStart).map(({ iso, inMonth, date }) => {
+                const isToday = DateHelpers.sameYMD(iso, DateHelpers.toISODate(new Date()));
+                const isSelected = selectedDate && DateHelpers.sameYMD(selectedDate, iso);
+                return (
+                  <button
+                    key={iso}
+                    className={`month__day${inMonth ? '' : ' is-dim'}${isToday ? ' is-today' : ''}${isSelected ? ' is-selected' : ''}`}
+                    onClick={() => handlePickDay(iso)}
+                    title={date.toLocaleDateString('pt-BR')}
+                  >
+                    {date.getDate()}
+                  </button>
+                );
+              })}
             </div>
           </div>
-          <div className="row" style={{ gap: 8 }}>
-            <DensityToggle value={density} onChange={(v) => setState((p) => ({ ...p, density: v }))} />
-            <button className="btn btn--outline btn--sm" onClick={copyShareLink} title="Copiar link desta seleÃ§Ã£o">
-              Copiar link
+
+          {error && (
+            <div className="box error" style={{ marginTop: 8 }}>
+              {error}
+              <div className="row" style={{ marginTop: 6 }}>
+                <button className="btn btn--sm" onClick={loadSlots}>Tentar novamente</button>
+              </div>
+            </div>
+          )}
+
+          {selectedSlot && (
+            <div className="box box--highlight sticky-bar" aria-live="polite" id="resumo-agendamento">
+              <div className="appointment-summary">
+                <strong>{DateHelpers.formatDateFull(selectedSlot.datetime)}</strong>
+                <span>{DateHelpers.formatTime(selectedSlot.datetime)}{endTimeLabel ? ` • ${endTimeLabel}` : ''}</span>
+              </div>
+              <div className="row" style={{ gap: 6, marginLeft: 'auto' }}>
+                <button className="btn btn--outline btn--sm" onClick={() => setState((p) => ({ ...p, selectedSlot: null }))}>Limpar</button>
+              </div>
+            </div>
+          )}
+
+          <div className="card" style={{ marginTop: 8 }}>
+            <h3 style={{ marginTop: 0, marginBottom: 8 }}>
+              {selectedDate
+                ? new Date(selectedDate + 'T00:00:00').toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' })
+                : 'Selecione uma data'}
+            </h3>
+            {selectedDate ? (
+              <div className={density === 'compact' ? 'slots--grid' : 'slots--list'}>
+                {loading ? (
+                  Array.from({ length: 8 }).map((_, i) => <div key={i} className="shimmer pill" />)
+                ) : ((groupedSlots.grouped[selectedDate] || []).filter(isSlotVisible)).length === 0 ? (
+                  <div className="empty">Sem horários para este dia.</div>
+                ) : (
+                  groupedSlots.grouped[selectedDate].filter(isSlotVisible).map((slot) => (
+                    <SlotButton
+                      key={slot.datetime}
+                      slot={slot}
+                      isSelected={selectedSlot?.datetime === slot.datetime}
+                      onClick={() => handleSlotSelect(slot)}
+                      density={density}
+                    />
+                  ))
+                )}
+              </div>
+            ) : (
+              <div className="empty">Escolha uma data no calendário acima.</div>
+            )}
+          </div>
+
+          <div className="row" style={{ marginTop: 8, justifyContent: 'flex-end', gap: 6 }}>
+            <button className="btn" onClick={() => setState((p) => ({ ...p, selectedSlot: null }))} disabled={!selectedSlot}>
+              Limpar seleção
+            </button>
+            <button
+              className="btn btn--primary"
+              onClick={() => setModal((m) => ({ ...m, isOpen: true }))}
+              disabled={
+                !selectedSlot || !serviceId || modal.isSaving ||
+                (serviceProfessionals.length && !state.professionalId) ||
+                (selectedSlotNow && !isAvailableLabel(selectedSlotNow.label)) ||
+                DateHelpers.isPastSlot(selectedSlot.datetime) ||
+                !inBusinessHours(selectedSlot.datetime)
+              }
+            >
+              {modal.isSaving ? <span className="spinner" /> : 'Confirmar agendamento'}
             </button>
           </div>
         </div>
+      </div>
+    </>
+  );
 
-        {/* Passo 1 • Estabelecimento */}
-        {step === 1 && (
-          <>
-            <p className="muted" style={{ marginTop: 0 }}>Escolha um estabelecimento:</p>
-            <div className="row" style={{ gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
-              <input
-                className="input"
-                type="search"
-                placeholder="Buscar estabelecimento"
-                value={estQuery}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  setEstQuery(v);
-                  const sp = new URLSearchParams(searchParams);
-                  if (v && v.trim()) sp.set('q', v.trim());
-                  else sp.delete('q');
-                  setSearchParams(sp, { replace: true });
-                }}
-                style={{ minWidth: 240 }}
-              />
-            </div>
-            <div className="row-wrap">
-              {filteredEstablishments.map((est) => (
-                <EstablishmentCard
-                  key={est.id}
-                  est={est}
-                  selected={String(est.id) === establishmentId}
-                  onSelect={handleEstablishmentClick}
-                />
-              ))}
-              {filteredEstablishments.length === 0 && (
-                <div className="empty small" style={{ width: '100%' }}>Nenhum estabelecimento encontrado.</div>
+  return (
+    <div className="novo-agendamento">
+      {toast && (
+        <div className="novo-agendamento__toast">
+          <Toast type={toast.type} message={toast.message} onDismiss={() => setToast(null)} />
+        </div>
+      )}
+      <div className="establishments">
+        <div className="card establishments__intro novo-agendamento__intro">
+          <h1 className="establishments__title">Novo agendamento</h1>
+          <p className="muted establishments__subtitle">{introSubtitle}</p>
+
+          {step === 1 && renderEstablishmentSearch()}
+          {step > 1 && (
+            <div className="novo-agendamento__summary">
+              <div>
+                <span className="novo-agendamento__summary-label">Estabelecimento</span>
+                <strong>{selectedEstablishmentName || '-'}</strong>
+              </div>
+              {selectedService && (
+                <div>
+                  <span className="novo-agendamento__summary-label">Serviço</span>
+                  <strong>{ServiceHelpers.title(selectedService)}</strong>
+                </div>
               )}
             </div>
-          </>
-        )}
+          )}
+        </div>
 
-        {/* Passo 2 • Serviço */}
-        {step === 2 && (
-          <>
-            <div className="row spread" style={{ alignItems: "center" }}>
-              <div className="muted">
-                <b>Estabelecimento:</b> {selectedEstablishment?.name || "•"}
-              </div>
-              <button
-                className="btn btn--outline btn--sm"
-                onClick={() => {
-                  setState((p) => ({ ...p, establishmentId: "", services: [], serviceId: "", slots: [], selectedSlot: null }));
-                  try{
-                    const sp = new URLSearchParams(searchParams);
-                    sp.delete('estabelecimento');
-                    sp.delete('servico');
-                    setSearchParams(sp, { replace: true });
-                  }catch{}
-                }}
-              >
-                Trocar
-              </button>
+        <div className="establishments__results novo-agendamento__results">
+          {step === 1 && renderEstablishmentResults()}
+          {step === 2 && (
+            <div className="card novo-agendamento__panel">
+              {renderServiceStep()}
             </div>
-            <p className="muted" style={{ marginTop: 8 }}>Escolha um serviços:</p>
-            <div className="row-wrap">
-              {services.length === 0 ? (
-                <div className="empty small">Sem serviços cadastrados.</div>
-              ) : (
-                services.map((s) => (
-                  <ServiceCard
-                    key={s.id}
-                    service={s}
-                    selected={String(s.id) === serviceId}
-                    onSelect={handleServiceClick}
-                  />
-                ))
-              )}
-            </div>
-          </>
-        )}
-
-        {/* Passo 3 • Calendário mensal e horários do dia */}
-        {step === 3 && (
-          <>
-            <div className="row spread" style={{ alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 6 }}>
-              <div className="row" style={{ gap: 8, alignItems: "center" }}>
-                <span className="muted"><b>Estabelecimento:</b> {selectedEstablishment?.name}</span>
-                <span className="muted">─</span>
-                <span className="muted">
-                  <b>serviço:</b> {ServiceHelpers.title(selectedService)}
-                  {serviceDuration ? ` ─ ${serviceDuration} min` : ""}
-                  {servicePrice !== "R$\u00A00,00" ? ` ─ ${servicePrice}` : ""}
-                </span>
+          )}
+          {step === 3 && (
+            <div className="card novo-agendamento__panel">
+              <div className="novo-agendamento__toolbar">
+                <h2 className="novo-agendamento__title">Agenda da semana</h2>
+                <small className="novo-agendamento__week-info" title={`Fuso: ${TZ} — Janela: 07:00-22:00`}>
+                  Semana: {weekLabel}
+                </small>
               </div>
-              <details className="filters" style={{ marginLeft: "auto" }}>
-                <summary>Filtros</summary>
-                <div className="filters__content">
-                  <label className="label">
-                    <span>Início da semana</span>
-                    <input
-                      type="date"
-                      value={currentWeek}
-                      onChange={(e) => handleWeekChange(DateHelpers.toISODate(e.target.value))}
-                      className="input"
-                      title="Segunda-feira da semana"
-                    />
-                  </label>
-                  <div className="row" style={{ alignItems: "center", gap: 10 }}>
-                    <label className="switch">
-                      <input type="checkbox" checked={filters.onlyAvailable} onChange={() => handleFilterToggle("onlyAvailable")} />
-                      <span>Somente disponí­veis</span>
-                    </label>
-                    <label className="switch">
-                      <input type="checkbox" checked={filters.hidePast} onChange={() => handleFilterToggle("hidePast")} />
-                      <span>Ocultar passados</span>
-                    </label>
-                  </div>
-                  <div className="row" style={{ gap: 6, flexWrap: "wrap", marginTop: 6 }} role="group" aria-label="PerÃ­odo do dia">
-                    <Chip active={filters.timeRange === "all"} onClick={() => handleTimeRange("all")} title="Todos os horÃ¡rios">Todos</Chip>
-                    <Chip active={filters.timeRange === "morning"} onClick={() => handleTimeRange("morning")} title="Manhã (07•12)">Manhã</Chip>
-                    <Chip active={filters.timeRange === "afternoon"} onClick={() => handleTimeRange("afternoon")} title="Tarde (12•18)">Tarde</Chip>
-                    <Chip active={filters.timeRange === "evening"} onClick={() => handleTimeRange("evening")} title="Noite (18•22)">Noite</Chip>
-                  </div>
-                </div>  
-              </details>
+
+              {renderScheduleContent()}
             </div>
-
-            {/* CalendÃ¡rio mensal */}
-            <div className="month card" style={{ padding: 8, marginBottom: 8 }}>
-              <div className="row spread" style={{ alignItems: 'center', marginBottom: 6 }}>
-                <div className="row" style={{ gap: 6, alignItems: 'center' }}>
-                  <button className="btn btn--sm" aria-label="Mês anterior" onClick={() => setMonthStart(DateHelpers.firstOfMonthISO(DateHelpers.addMonths(monthStart, -1)))}>⬅️</button>
-                  <strong>{new Date(monthStart + 'T00:00:00').toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })}</strong>
-                  <button className="btn btn--sm" aria-label="PrÃ³ximo Mês" onClick={() => setMonthStart(DateHelpers.firstOfMonthISO(DateHelpers.addMonths(monthStart, 1)))}>➡️</button>
-                </div>
-                <button
-                  className="btn btn--outline btn--sm"
-                  onClick={() => {
-                    const todayIso = DateHelpers.toISODate(new Date());
-                    setMonthStart(DateHelpers.firstOfMonthISO(todayIso));
-                    setSelectedDate(todayIso);
-                    const wk = DateHelpers.weekStartISO(todayIso);
-                    if (wk !== currentWeek) setState((p) => ({ ...p, currentWeek: wk }));
-                  }}
-                >
-                  Hoje
-                </button>
-              </div>
-              <div className="month__grid">
-                {['S', 'T', 'Q', 'Q', 'S', 'S', 'D'].map((d, index) => (
-                  <div key={`${d}-${index}`} className="month__dow muted">{d}</div>
-                ))}
-                {DateHelpers.monthGrid(monthStart).map(({ iso, inMonth, date }) => {
-                  const isToday = DateHelpers.sameYMD(iso, DateHelpers.toISODate(new Date()));
-                  const isSelected = selectedDate && DateHelpers.sameYMD(selectedDate, iso);
-                  return (
-                    <button
-                      key={iso}
-                      className={`month__day${inMonth ? '' : ' is-dim'}${isToday ? ' is-today' : ''}${isSelected ? ' is-selected' : ''}`}
-                      onClick={() => handlePickDay(iso)}
-                      title={date.toLocaleDateString('pt-BR')}
-                    >
-                      {date.getDate()}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Erro de carga */}
-            {error && (
-              <div className="box error" style={{ marginTop: 8 }}>
-                {error}
-                <div className="row" style={{ marginTop: 6 }}>
-                  <button className="btn btn--sm" onClick={loadSlots}>Tentar novamente</button>
-                </div>
-              </div>
-            )}
-
-            {/* SumÃ¡rio selecionado */}
-            {selectedSlot && (
-              <div className="box box--highlight sticky-bar" aria-live="polite" id="resumo-agendamento">
-                <div className="appointment-summary">
-                  <strong>{DateHelpers.formatDateFull(selectedSlot.datetime)}</strong>
-                  <span> ─ {DateHelpers.formatTime(selectedSlot.datetime)}{endTimeLabel ? ` • ${endTimeLabel}` : ""}</span>
-                </div>
-                <div className="row" style={{ gap: 6, marginLeft: "auto" }}>
-                  <button className="btn btn--outline btn--sm" onClick={() => setState((p) => ({ ...p, selectedSlot: null }))}>Limpar</button>
-                </div>
-              </div>
-            )}
-
-            {/* HorÃ¡rios do dia selecionado */}
-            <div className="card" style={{ marginTop: 8 }}>
-              <h3 style={{ marginTop: 0, marginBottom: 8 }}>
-                {selectedDate
-                  ? new Date(selectedDate + 'T00:00:00').toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' })
-                  : 'Selecione uma data'}
-              </h3>
-              {selectedDate ? (
-                <div className={density === 'compact' ? 'slots--grid' : 'slots--list'}>
-                  {loading ? (
-                    Array.from({ length: 8 }).map((_, i) => <div key={i} className="shimmer pill" />)
-                  ) : ((groupedSlots.grouped[selectedDate] || []).filter(isSlotVisible)).length === 0 ? (
-                    <div className="empty">Sem horários para este dia.</div>
-                  ) : (
-                    groupedSlots.grouped[selectedDate].filter(isSlotVisible).map((slot) => (
-                      <SlotButton
-                        key={slot.datetime}
-                        slot={slot}
-                        isSelected={selectedSlot?.datetime === slot.datetime}
-                        onClick={() => handleSlotSelect(slot)}
-                        density={density}
-                      />
-                    ))
-                  )}
-                </div>
-              ) : (
-                <div className="empty">Escolha uma data no calendário acima.</div>
-              )}
-            </div>
-
-            {/* RodapÃ© aÃ§Ãµes */}
-            <div className="row" style={{ marginTop: 8, justifyContent: "flex-end", gap: 6 }}>
-              <button className="btn" onClick={() => setState((p) => ({ ...p, selectedSlot: null }))} disabled={!selectedSlot}>
-                Limpar seleção
-              </button>
-              <button
-                className="btn btn--primary"
-                onClick={() => setModal((m) => ({ ...m, isOpen: true }))}
-                disabled={
-                  !selectedSlot || !serviceId || modal.isSaving ||
-                  selectedSlotNow && !isAvailableLabel(selectedSlotNow.label) ||
-                  DateHelpers.isPastSlot(selectedSlot.datetime) ||
-                  !inBusinessHours(selectedSlot.datetime)
-                }
-              >
-                {modal.isSaving ? <span className="spinner" /> : "Confirmar agendamento"}
-              </button>
-            </div>
-          </>
-        )}
+          )}
+        </div>
       </div>
 
-      {/* Modal de confirmaÃ§Ã£o */}
       {modal.isOpen && selectedSlot && selectedService && (
         <Modal onClose={() => setModal((m) => ({ ...m, isOpen: false }))}>
           <h3>Confirmar agendamento?</h3>
           <div className="confirmation-details">
-            <div className="confirmation-details__item"><span className="confirmation-details__label">Estabelecimento:</span><span className="confirmation-details__value">{selectedEstablishment?.name}</span></div>
+            <div className="confirmation-details__item"><span className="confirmation-details__label">Estabelecimento:</span><span className="confirmation-details__value">{selectedEstablishmentName}</span></div>
             <div className="confirmation-details__item"><span className="confirmation-details__label">Serviço:</span><span className="confirmation-details__value">{ServiceHelpers.title(selectedService)}</span></div>
+            {selectedProfessional && (
+              <div className="confirmation-details__item"><span className="confirmation-details__label">Profissional:</span><span className="confirmation-details__value">{selectedProfessional?.nome || selectedProfessional?.name}</span></div>
+            )}
             {serviceDuration > 0 && (
               <div className="confirmation-details__item"><span className="confirmation-details__label">Duração:</span><span className="confirmation-details__value">{serviceDuration} minutos</span></div>
             )}
-            {servicePrice !== "R$\u00A00,00" && (
+            {servicePrice !== 'R$ 0,00' && (
               <div className="confirmation-details__item"><span className="confirmation-details__label">Preço:</span><span className="confirmation-details__value">{servicePrice}</span></div>
             )}
             <div className="confirmation-details__item"><span className="confirmation-details__label">Data:</span><span className="confirmation-details__value">{DateHelpers.formatDateFull(selectedSlot.datetime)}</span></div>
             <div className="confirmation-details__item"><span className="confirmation-details__label">Horário:</span><span className="confirmation-details__value">
-              {DateHelpers.formatTime(selectedSlot.datetime)}{endTimeLabel ? ` • ${endTimeLabel}` : ""}
+              {DateHelpers.formatTime(selectedSlot.datetime)}{endTimeLabel ? ` • ${endTimeLabel}` : ''}
             </span></div>
           </div>
-          <div className="row" style={{ justifyContent: "flex-end", gap: 6, marginTop: 8 }}>
+          <div className="row" style={{ justifyContent: 'flex-end', gap: 6, marginTop: 8 }}>
             <button className="btn btn--outline" onClick={() => setModal((m) => ({ ...m, isOpen: false }))} disabled={modal.isSaving}>Cancelar</button>
             <button className="btn btn--primary" onClick={confirmBooking} disabled={modal.isSaving}>
-              {modal.isSaving ? <span className="spinner" /> : "Confirmar Agendamento"}
+              {modal.isSaving ? <span className="spinner" /> : 'Confirmar Agendamento'}
             </button>
           </div>
         </Modal>
       )}
-
       <div className="sr-only" aria-live="polite" ref={liveRef} />
     </div>
   );
 }
-

@@ -128,6 +128,24 @@ export function IconDownload(props){
   );
 }
 
+export function IconSearch(props){
+  return (
+    <svg {...base} viewBox="0 0 24 24" aria-hidden="true" {...props}>
+      <circle cx="11" cy="11" r="7"/>
+      <path d="M20 20l-3.5-3.5"/>
+    </svg>
+  );
+}
+
+export function IconMapPin(props){
+  return (
+    <svg {...base} viewBox="0 0 24 24" aria-hidden="true" {...props}>
+      <path d="M21 10c0 6-9 12-9 12S3 16 3 10a9 9 0 0118 0z"/>
+      <circle cx="12" cy="10" r="3"/>
+    </svg>
+  );
+}
+
 export function IconSun(props){
   return (
     <svg {...base} viewBox="0 0 24 24" aria-hidden="true" {...props}>
@@ -161,4 +179,6 @@ export default {
   IconList,
   IconChart,
   IconDownload,
+  IconSearch,
+  IconMapPin,
 };

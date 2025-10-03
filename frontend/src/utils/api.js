@@ -79,10 +79,10 @@ async function req(path, opt = {}) {
     if (res.status === 401 && tokenStillPresent && !isAuthRoute) {
       try { logout(); } catch {}
       try {
-        const msg = (data && (data.message || data.error)) || 'Sua sessÃ£o expirou. FaÃ§a login novamente.';
+        const msg = (data && (data.message || data.error)) || 'Sua sessão expirou. Faça login novamente.';
         localStorage.setItem('session_message', String(msg).toLowerCase().includes('expir')
-          ? 'Sua sessÃ£o expirou. FaÃ§a login novamente.'
-          : 'Seu acesso nÃ£o Ã© mais vÃ¡lido. FaÃ§a login novamente.');
+          ? 'Sua sessão expirou. Faça login novamente.'
+          : 'Seu acesso não é mais válido. Faça login novamente.');
       } catch {}
       if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/login')) {
         window.location.assign('/login');

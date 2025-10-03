@@ -449,7 +449,7 @@ export default function Configuracoes() {
       return;
     }
     if (file.size > 2 * 1024 * 1024) {
-      setAvatarError('A imagem deve ter no m�ximo 2MB.');
+      setAvatarError('A imagem deve ter no máximo 2MB.');
       if (input) input.value = '';
       return;
     }
@@ -597,7 +597,7 @@ export default function Configuracoes() {
 
     list.push({
       id: 'profile',
-      title: 'Perfil e SeguranÃ§a',
+      title: 'Perfil e Segurança',
       content: (
         <form onSubmit={handleSaveProfile} className="grid" style={{ gap: 10 }}>
           <div className="profile-avatar">
@@ -710,7 +710,7 @@ export default function Configuracoes() {
           )}
           <div className="row" style={{ justifyContent: 'flex-end', gap: 8 }}>
             <button type="submit" className="btn btn--primary" disabled={profileSaving}>
-              {profileSaving ? <span className="spinner" /> : 'Salvar alteraÃ§Ãµes'}
+              {profileSaving ? <span className="spinner" /> : 'Salvar alterações'}
             </button>
           </div>
         </form>
@@ -743,7 +743,7 @@ export default function Configuracoes() {
               </div>
             )}
             {billingLoading && (
-              <div className="small muted">Atualizando informa??es de cobran?a...</div>
+              <div className="small muted">Atualizando informações de cobrança...</div>
             )}
             {planInfo.status === 'delinquent' && (
               <div className="notice notice--error" role="alert">
@@ -752,7 +752,7 @@ export default function Configuracoes() {
             )}
             {planInfo.status === 'pending' && (
               <div className="notice notice--warn" role="alert">
-                <strong>Pagamento pendente.</strong> Finalize o checkout para concluir a contrata??o.
+                <strong>Pagamento pendente.</strong> Finalize o checkout para concluir a contratação.
               </div>
             )}
             {checkoutError && (
@@ -870,7 +870,7 @@ export default function Configuracoes() {
       });
       list.push({
         id: 'public-link',
-        title: 'Link pÃºblico e mensagens',
+        title: 'Link público e mensagens',
         content: (
           <div className="grid" style={{ gap: 8 }}>
             <label className="label">
@@ -889,11 +889,11 @@ export default function Configuracoes() {
                   try { navigator.clipboard.writeText(publicLink); } catch {}
                 }}
               >
-                Copiar link pÃºblico
+                Copiar link público
               </button>
             </div>
             <label className="label">
-              <span>Assunto do email de confirmaÃ§Ã£o</span>
+              <span>Assunto do email de confirmação</span>
               <input className="input" value={msg.email_subject} onChange={(e) => setMsg((m) => ({ ...m, email_subject: e.target.value }))} />
             </label>
             <label className="label">
@@ -932,7 +932,7 @@ export default function Configuracoes() {
 
     list.push({
       id: 'notifications',
-      title: 'NotificaÃ§Ãµes',
+      title: 'Notificações',
       content: (
         <div className="grid" style={{ gap: 10 }}>
           <label className="config-toggle">
@@ -942,8 +942,8 @@ export default function Configuracoes() {
               onChange={() => handleTogglePref('notificationsEmail')}
             />
             <span>
-              <strong>Receber emails de confirmaÃ§Ã£o</strong>
-              <small>Envia emails de confirmaÃ§Ã£o e atualizacoes de agendamentos.</small>
+              <strong>Receber emails de confirmação</strong>
+              <small>Envia emails de confirmação e atualizações de agendamentos.</small>
             </span>
           </label>
           <label className="config-toggle">
@@ -954,7 +954,7 @@ export default function Configuracoes() {
             />
             <span>
               <strong>Receber lembretes pelo WhatsApp</strong>
-              <small>Utiliza o numero cadastrado para enviar lembretes automatizados.</small>
+              <small>Utiliza o número cadastrado para enviar lembretes automatizados.</small>
             </span>
           </label>
           {notifStatus && <small className="muted">{notifStatus}</small>}
@@ -967,7 +967,7 @@ export default function Configuracoes() {
       title: 'Ajuda',
       content: (
         <>
-          <p className="muted">Tire dÃºvidas, veja perguntas frequentes e formas de contato.</p>
+          <p className="muted">Tire dúvidas, veja perguntas frequentes e formas de contato.</p>
           <div className="row" style={{ gap: 8, justifyContent: 'flex-end' }}>
             <Link className="btn btn--outline" to="/ajuda">Abrir Ajuda</Link>
           </div>
@@ -1012,7 +1012,7 @@ export default function Configuracoes() {
     <div className="grid" style={{ gap: 12 }}>
       <div className="card">
         <h2 style={{ marginTop: 0 }}>Configuracoes</h2>
-        <p className="muted" style={{ marginTop: 0 }}>Gerencie sua conta e preferÃªncias.</p>
+        <p className="muted" style={{ marginTop: 0 }}>Gerencie sua conta e preferências.</p>
       </div>
 
       {sections.map(({ id, title, content }) => {

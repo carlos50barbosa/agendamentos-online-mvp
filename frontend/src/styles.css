@@ -1710,3 +1710,38 @@ button.danger:disabled,
   .profile-avatar{flex-direction:column;}
   .profile-avatar__controls{width:100%;}
 }
+.novo-agendamento{display:flex;flex-direction:column;gap:16px;padding:16px 0;}
+.novo-agendamento__toast{margin-bottom:12px;}
+.novo-agendamento__intro{display:flex;flex-direction:column;gap:12px;}
+.novo-agendamento__status{margin-top:8px;font-size:.85rem;}
+.novo-agendamento__search{display:flex;align-items:center;gap:12px;flex-wrap:wrap;}
+.novo-agendamento__searchbox{flex:1;display:flex;align-items:center;gap:10px;background:var(--surface-soft);border-radius:999px;border:1px solid var(--border);padding:8px 14px;transition:border-color .18s ease,box-shadow .18s ease;}
+.novo-agendamento__searchbox:focus-within{border-color:var(--primary-400);box-shadow:var(--shadow-soft);}
+.novo-agendamento__search-icon{width:18px;height:18px;color:var(--muted);flex-shrink:0;}
+.novo-agendamento__search-input{flex:1;border:none;background:transparent;font-size:.95rem;padding:0;}
+.novo-agendamento__search-input:focus{outline:none;}
+.novo-agendamento__search-input::placeholder{color:var(--muted);}
+.novo-agendamento__search-caret{font-size:.85rem;color:var(--muted);}
+.novo-agendamento__location{display:flex;align-items:center;gap:6px;padding:6px 10px;border:none;background:transparent;color:var(--primary-600);font-weight:600;cursor:pointer;border-radius:999px;transition:color .18s ease,background-color .18s ease;}
+.novo-agendamento__location:hover:not(:disabled),.novo-agendamento__location:focus-visible{background:rgba(37,99,235,0.12);outline:none;}
+.novo-agendamento__location:disabled{color:var(--muted);cursor:default;}
+.novo-agendamento__location-icon{width:18px;height:18px;flex-shrink:0;}
+.novo-agendamento__results{display:flex;flex-direction:column;gap:16px;}
+.novo-agendamento__panel{display:flex;flex-direction:column;gap:16px;}
+.novo-agendamento__toolbar{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;padding-bottom:12px;border-bottom:1px solid var(--border);}
+.novo-agendamento__title{margin:0;font-size:1.15rem;font-weight:600;}
+.novo-agendamento__week-info{font-size:.85rem;color:var(--muted);}
+.novo-agendamento__summary{display:flex;flex-wrap:wrap;gap:16px;align-items:center;padding-top:12px;border-top:1px solid var(--border);}
+.novo-agendamento__summary-label{display:block;font-size:.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:2px;}
+.novo-agendamento__section{border:1px solid var(--border);border-radius:12px;padding:12px;background:var(--surface-soft);display:flex;flex-direction:column;gap:12px;}
+.novo-agendamento__select{display:flex;align-items:center;gap:10px;width:100%;padding:8px 12px;border-radius:10px;border:1px solid var(--border);background:var(--surface);cursor:pointer;transition:border-color .18s ease,box-shadow .18s ease;text-align:left;}
+.novo-agendamento__select:hover,.novo-agendamento__select:focus-visible{border-color:var(--primary-400);box-shadow:var(--shadow-soft);outline:none;}
+.novo-agendamento__select-avatar{width:36px;height:36px;border-radius:50%;object-fit:cover;border:1px solid var(--border);}
+.novo-agendamento__select-avatar--fallback{display:flex;align-items:center;justify-content:center;background:var(--border);color:var(--text);font-weight:600;}
+.novo-agendamento__select-label{flex:1;font-weight:600;font-size:.95rem;}
+.novo-agendamento__select-caret{font-size:.75rem;color:var(--muted);}
+.novo-agendamento__select-menu{position:absolute;top:calc(100% + 6px);left:0;z-index:25;width:100%;max-height:240px;overflow-y:auto;background:var(--surface);border:1px solid var(--border);border-radius:10px;box-shadow:var(--shadow-soft);padding:4px;display:flex;flex-direction:column;gap:4px;}
+.novo-agendamento__calendar{display:flex;flex-direction:column;gap:12px;}
+@media (max-width:720px){
+  .novo-agendamento__toolbar{align-items:flex-start;}
+}
