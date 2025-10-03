@@ -390,6 +390,8 @@ a:hover { opacity: 1; text-decoration: underline; }
   content:""; position:absolute; bottom:6px; width:6px; height:6px; border-radius:50%; background: var(--brand);
 }
 .month__day.is-selected{ background: var(--brand-100); box-shadow: 0 0 0 1px var(--brand-200) inset; }
+.month__day.is-past{ text-decoration: line-through; color: var(--muted); }
+.month__day[disabled]{ cursor: not-allowed; }
 .month__day:not(.is-dim):hover{ transform: translateY(-1px); box-shadow: 0 6px 18px rgba(0,0,0,.08); }
 .month__day:not(.is-dim):active{ transform: translateY(0); box-shadow: 0 2px 8px rgba(0,0,0,.06); }
 .month__day:focus-visible{ outline: none; box-shadow: var(--ring-shadow); }
@@ -683,17 +685,18 @@ a:hover { opacity: 1; text-decoration: underline; }
 .slot-btn--compact{ padding:4px 6px; font-size:12px; line-height:1.1; }
 .slot-btn--comfortable{ padding:8px 10px; font-size:14px; }
 /* Estilo forte para agendados (vermelho claro) */
-.calendar .slot-btn.busy{
+.slot-btn.busy{
   background:var(--danger-bg);   /* vermelho claro */
   border-color:var(--danger-border);
   color:var(--danger-text);
   border-style:solid;
+  text-decoration: line-through;
 }
 .slot-btn.busy:hover{ transform:none; box-shadow:none; }
 .slot-btn.busy:disabled{ cursor:not-allowed; }
 .slot-btn.block{ background:var(--surface-soft); color:var(--muted); border-style:dotted; }
 .slot-btn.is-selected{ outline:2px solid var(--brand); outline-offset:0; }
-.slot-btn.is-past{ opacity:.5; }
+.slot-btn.is-past{ opacity:.5; text-decoration: line-through; color: var(--muted); }
 .slot-btn:not(:disabled):hover{ transform:translateY(-1px); }
 
 /* Placeholder mínimo para “Sem horários” */
@@ -1750,6 +1753,10 @@ button.danger:disabled,
 .summary-action{font-size:.75rem;color:var(--primary-600);display:inline-flex;align-items:center;gap:4px;padding:4px 8px;border-radius:999px;background:var(--surface-soft);border:1px solid var(--border);}
 .summary-action--muted{color:var(--muted);}
 .novo-agendamento__summary-service{margin-left:auto;text-align:right;display:flex;flex-direction:column;gap:4px;}
+.novo-agendamento__change-service{border:1px solid rgba(37,99,235,0.28);background:var(--surface);color:var(--primary-600);font-size:.75rem;font-weight:600;cursor:pointer;padding:4px 12px;margin-top:6px;align-self:flex-end;border-radius:999px;display:inline-flex;align-items:center;gap:6px;box-shadow:0 1px 2px rgba(15,23,42,0.08);transition:color .18s ease,background .18s ease,border-color .18s ease,box-shadow .18s ease,transform .18s ease;}
+.novo-agendamento__change-service-icon{display:inline-flex;align-items:center;justify-content:center;font-size:.85rem;}
+.novo-agendamento__change-service:hover,.novo-agendamento__change-service:focus-visible{color:var(--primary-700);background:rgba(37,99,235,0.12);border-color:var(--primary-400);outline:none;box-shadow:0 4px 12px rgba(37,99,235,0.18);transform:translateY(-1px);}
+.novo-agendamento__change-service:focus-visible{box-shadow:0 0 0 3px rgba(37,99,235,0.2);}
 .novo-agendamento__services{display:grid;gap:10px;grid-template-columns:1fr;}
 .novo-agendamento__services .mini-card{width:100%;min-width:0;max-width:none;}
 
@@ -1765,3 +1772,6 @@ button.danger:disabled,
 @media (max-width:720px){
   .novo-agendamento__toolbar{align-items:flex-start;}
 }
+
+
+

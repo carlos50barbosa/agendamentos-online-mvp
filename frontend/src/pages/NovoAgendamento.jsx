@@ -570,6 +570,7 @@ export default function NovoAgendamento() {
   const [geoError, setGeoError] = useState('');
   const [geocoding, setGeocoding] = useState(false);
   const coordsCacheRef = useRef(new Map());
+  const servicesSectionRef = useRef(null);
   const [distanceMap, setDistanceMap] = useState({});
   const [establishmentsLoading, setEstablishmentsLoading] = useState(true);
   const [establishmentsError, setEstablishmentsError] = useState('');
@@ -888,54 +889,43 @@ export default function NovoAgendamento() {
     });
   }, []);
 
-  /* ====== Hidratar ocupados por agendamentos (somente ativos) ====== */
+  /* ====== Hidratar ocupados por agendamentos (contagem por minuto) ====== */
   const getBusyFromAppointments = useCallback(async () => {
-    const keys = new Set();
+    const counts = new Map();
     const { start, end } = weekRangeMs(currentWeek);
+    const add = (iso) => {
+      const key = minuteISO(iso);
+      counts.set(key, (counts.get(key) || 0) + 1);
+    };
 
-    // meus agendamentos
     try {
-      if (typeof Api.meusAgendamentos === "function") {
+      if (typeof Api.meusAgendamentos === 'function') {
         const mine = await Api.meusAgendamentos();
         (mine || []).forEach((a) => {
           if (!isActiveStatus(a.status)) return;
+          if (serviceId && a.servico_id && String(a.servico_id) !== String(serviceId)) return;
+          if (state.professionalId && a.profissional_id != null && String(a.profissional_id) !== String(state.professionalId)) return;
           const t = +new Date(a.inicio);
-          if (t >= start && t < end) keys.add(minuteISO(a.inicio));
+          if (t >= start && t < end) add(a.inicio);
         });
       }
-    } catch (e) {
-      // silencioso; Não deve quebrar UI por causa de falha de leitura
-    }
-
-    // agendamentos do estabelecimento
-    // try {
-    //   if (typeof Api.agendamentosEstabelecimento === "function") {
-    //     const est = await Api.agendamentosEstabelecimento();
-    //     (est || []).forEach((a) => {
-    //       if (!isActiveStatus(a.status)) return;
-    //       const t = +new Date(a.inicio);
-    //       if (t >= start && t < end) keys.add(minuteISO(a.inicio));
-    //     });
-    //   }
-    // } catch {}
+    } catch {}
 
     try {
-      if (user?.tipo === 'estabelecimento' && typeof Api.agendamentosEstabelecimento === "function") {
+      if (user?.tipo === 'estabelecimento' && typeof Api.agendamentosEstabelecimento === 'function') {
         const est = await Api.agendamentosEstabelecimento();
         (est || []).forEach((a) => {
-          const t = new Date(a.inicio);
-          if (t >= start && t < end) keys.add(minuteISO(a.inicio));
+          if (!isActiveStatus(a.status)) return;
+          if (serviceId && a.servico_id && String(a.servico_id) !== String(serviceId)) return;
+          if (state.professionalId && a.profissional_id != null && String(a.profissional_id) !== String(state.professionalId)) return;
+          const t = +new Date(a.inicio);
+          if (t >= start && t < end) add(a.inicio);
         });
       }
-    } catch (e) {
-      // se for 403 (Forbidden), ignorar • rota Ã© restrita a estabelecimento
-      if (!String(e?.message || '').includes('HTTP 403')) {
-        // outros erros tambÃ©m Não devem quebrar a UI
-      }
-    }
+    } catch {}
 
-    return Array.from(keys);
-  }, [currentWeek, user?.tipo]);
+    return counts;
+  }, [currentWeek, user?.tipo, serviceId, state.professionalId]);
 
   /* ====== Carregar Slots ====== */
   const loadSlots = useCallback(async () => {
@@ -953,10 +943,19 @@ export default function NovoAgendamento() {
       // B) grade completa
       const grid = fillBusinessGrid({ currentWeek, slots: normalized, stepMinutes });
 
-      // C) conjuntos de ocupados por fonte
-      const busyFromApi = new Set(
-        normalized.filter((s) => !isAvailableLabel(s.label)).map((s) => minuteISO(s.datetime))
-      );
+      // C) conjuntos/contagens de ocupados por fonte
+      const busyFromApiCount = new Map();
+      const blockedSet = new Set();
+      for (const s of normalized) {
+        const k = minuteISO(s.datetime);
+        if (!isAvailableLabel(s.label)) {
+          if (normalizeSlotLabel(s.label) === 'bloqueado') {
+            blockedSet.add(k);
+          } else {
+            busyFromApiCount.set(k, (busyFromApiCount.get(k) || 0) + 1);
+          }
+        }
+      }
 
       let persisted = [];
       try {
@@ -964,24 +963,37 @@ export default function NovoAgendamento() {
         if (!Array.isArray(persisted)) persisted = [];
       } catch {}
 
-      const fromAppts = await getBusyFromAppointments();
-      const apptSet = new Set(fromAppts);
+      const apptCounts = await getBusyFromAppointments();
 
-      // D) aplica overlay e limpa o que jÃ¡ estÃ¡ ocupado no backend ou tem agendamento ativo
+      // D) aplica overlay considerando capacidade por profissional/serviço
       setState((prev) => {
-        const prevForced = Array.from(new Set([...prev.forceBusy, ...persisted]));
-        const busyKnownSet = new Set([...busyFromApi, ...apptSet, ...prevForced]);
-
-        const overlayed = grid.map((s) =>
-          busyKnownSet.has(minuteISO(s.datetime)) ? { ...s, label: "agendado" } : s
+        const rawForced = Array.from(new Set([...prev.forceBusy, ...persisted]));
+        const filteredForced = rawForced.filter(
+          (k) => busyFromApiCount.has(k) || (apptCounts && typeof apptCounts.has === 'function' && apptCounts.has(k))
         );
+        const forcedSet = new Set(filteredForced);
 
-        // mantÃ©m no overlay apenas o que AINDA Ã© reconhecido como ocupado por API ou agendamento ativo
-        const cleaned = prevForced.filter((k) => busyFromApi.has(k) || apptSet.has(k));
-        try { localStorage.setItem(fbKey(establishmentId, currentWeek), JSON.stringify(cleaned)); } catch {}
+        const capacity = state.professionalId
+          ? 1
+          : Math.max(1, Array.isArray(selectedService?.professionals) ? selectedService.professionals.length : 1);
+
+        const overlayed = grid.map((s) => {
+          const k = minuteISO(s.datetime);
+          if (blockedSet.has(k)) return { ...s, label: 'bloqueado' };
+          const countApi = state.professionalId ? 0 : busyFromApiCount.get(k) || 0;
+          const countAppt = apptCounts && typeof apptCounts.get === 'function' ? apptCounts.get(k) || 0 : 0;
+          const countForced = forcedSet.has(k) ? capacity : 0;
+          const total = countApi + countAppt + countForced;
+          if (total >= capacity) return { ...s, label: 'agendado' };
+          return { ...s, label: 'disponivel' };
+        });
+
+        try {
+          localStorage.setItem(fbKey(establishmentId, currentWeek), JSON.stringify(filteredForced));
+        } catch {}
 
         const firstAvailable = overlayed.find(
-          (s) => s.label === "disponí­vel" && !DateHelpers.isPastSlot(s.datetime) && inBusinessHours(s.datetime)
+          (s) => isAvailableLabel(s.label) && !DateHelpers.isPastSlot(s.datetime) && inBusinessHours(s.datetime)
         );
 
         return {
@@ -989,9 +1001,10 @@ export default function NovoAgendamento() {
           slots: overlayed,
           selectedSlot: firstAvailable || prev.selectedSlot || null,
           loading: false,
-          forceBusy: cleaned,
+          forceBusy: filteredForced,
         };
       });
+
     } catch {
       setState((p) => ({
         ...p,
@@ -1001,7 +1014,7 @@ export default function NovoAgendamento() {
         error: "Não foi possível carregar os horários.",
       }));
     }
-  }, [establishmentId, serviceId, currentWeek, normalizeSlots, stepMinutes, getBusyFromAppointments]);
+  }, [establishmentId, serviceId, currentWeek, normalizeSlots, stepMinutes, getBusyFromAppointments, selectedService, state.professionalId]);
 
   useEffect(() => {
     loadSlots();
@@ -1292,6 +1305,20 @@ export default function NovoAgendamento() {
     }catch{}
   };
 
+  const handleChangeService = () => {
+    setState((p) => ({ ...p, serviceId: '', professionalId: '', slots: [], selectedSlot: null }));
+    setProfessionalMenuOpen(false);
+    try {
+      const sp = new URLSearchParams(searchParams);
+      sp.delete('servico');
+      setSearchParams(sp, { replace: true });
+    } catch {}
+    const el = servicesSectionRef.current;
+    if (typeof window !== 'undefined' && el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  };
+
   const handleServiceClick = (svc) => {
     setState((p) => ({ ...p, serviceId: String(svc.id), professionalId: "", slots: [], selectedSlot: null }));
     setProfessionalMenuOpen(false);
@@ -1483,7 +1510,7 @@ export default function NovoAgendamento() {
         </button>
       </div>
       <p className="muted" style={{ marginTop: 8 }}>Escolha um serviço:</p>
-      <div className="novo-agendamento__services">
+      <div ref={servicesSectionRef} className="novo-agendamento__services">
         {services.length === 0 ? (
           <div className="empty small">Sem serviços cadastrados.</div>
         ) : (
@@ -1672,23 +1699,27 @@ export default function NovoAgendamento() {
                 : 'Selecione uma data'}
             </h3>
             {selectedDate ? (
-              <div className={density === 'compact' ? 'slots--grid' : 'slots--list'}>
-                {loading ? (
-                  Array.from({ length: 8 }).map((_, i) => <div key={i} className="shimmer pill" />)
-                ) : ((groupedSlots.grouped[selectedDate] || []).filter(isSlotVisible)).length === 0 ? (
-                  <div className="empty">Sem horários para este dia.</div>
-                ) : (
-                  groupedSlots.grouped[selectedDate].filter(isSlotVisible).map((slot) => (
-                    <SlotButton
-                      key={slot.datetime}
-                      slot={slot}
-                      isSelected={selectedSlot?.datetime === slot.datetime}
-                      onClick={() => handleSlotSelect(slot)}
-                      density={density}
-                    />
-                  ))
-                )}
-              </div>
+              serviceProfessionals.length > 0 && !selectedProfessional ? (
+                <div className="empty">Selecione um profissional para ver os horários.</div>
+              ) : (
+                <div className={density === 'compact' ? 'slots--grid' : 'slots--list'}>
+                  {loading ? (
+                    Array.from({ length: 8 }).map((_, i) => <div key={i} className="shimmer pill" />)
+                  ) : ((groupedSlots.grouped[selectedDate] || []).filter(isSlotVisible)).length === 0 ? (
+                    <div className="empty">Sem horários para este dia.</div>
+                  ) : (
+                    groupedSlots.grouped[selectedDate].filter(isSlotVisible).map((slot) => (
+                      <SlotButton
+                        key={slot.datetime}
+                        slot={slot}
+                        isSelected={selectedSlot?.datetime === slot.datetime}
+                        onClick={() => handleSlotSelect(slot)}
+                        density={density}
+                      />
+                    ))
+                  )}
+                </div>
+              )
             ) : (
               <div className="empty">Escolha uma data no calendário acima.</div>
             )}
@@ -1752,6 +1783,7 @@ export default function NovoAgendamento() {
                 <div className="novo-agendamento__summary-service">
                   <span className="novo-agendamento__summary-label">Serviço selecionado</span>
                   <strong>{ServiceHelpers.title(selectedService)}</strong>
+                  <button type="button" className="novo-agendamento__change-service" onClick={handleChangeService}>Trocar serviço</button>
                 </div>
               )}
             </div>
