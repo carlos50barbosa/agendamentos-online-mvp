@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Api, resolveAssetUrl } from '../utils/api';
-import { getUser } from '../utils/auth';
+import LogoAO from '../components/LogoAO.jsx';
+import { IconMapPin } from '../components/Icons.jsx';
 
 const STORAGE_KEY = 'ao:lastLocation';
 
@@ -24,6 +25,9 @@ const buildSearchText = (est) =>
   ]
     .filter(Boolean)
     .join(' '));
+
+const HEADLINE_TEXT = 'O jeito mais simples de agendar servicos de beleza e bem-estar';
+const NBSP = String.fromCharCode(160);
 
 const formatAddress = (est) => {
   const street = [est?.endereco, est?.numero].filter(Boolean).join(', ');
@@ -88,22 +92,67 @@ const geocodeEstablishment = async (est) => {
 };
 
 export default function EstabelecimentosList() {
-  const user = getUser();
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [query, setQuery] = useState('');
   const [searchParams, setSearchParams] = useSearchParams();
+  const [showResults, setShowResults] = useState(() => {
+    const initial = (searchParams.get('q') || '').trim();
+    return initial.length > 0;
+  });
+  const [pendingScroll, setPendingScroll] = useState(false);
+  const [prefersReducedMotion, setPrefersReducedMotion] = useState(false);
+  const [headingText, setHeadingText] = useState('');
+  const [isTyping, setIsTyping] = useState(false);
   const [userLocation, setUserLocation] = useState(null);
   const [locating, setLocating] = useState(false);
   const [geoError, setGeoError] = useState('');
   const [geocoding, setGeocoding] = useState(false);
   const coordsCacheRef = useRef(new Map());
   const [distanceMap, setDistanceMap] = useState({});
+  const searchInputRef = useRef(null);
+  const resultsSectionRef = useRef(null);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.matchMedia) return;
+    const media = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const update = () => setPrefersReducedMotion(media.matches);
+    update();
+    if (media.addEventListener) media.addEventListener('change', update);
+    else media.addListener(update);
+    return () => {
+      if (media.removeEventListener) media.removeEventListener('change', update);
+      else media.removeListener(update);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (prefersReducedMotion || typeof window === 'undefined') {
+      setHeadingText(HEADLINE_TEXT);
+      setIsTyping(false);
+      return;
+    }
+    let index = 0;
+    setHeadingText('');
+    setIsTyping(true);
+    const interval = window.setInterval(() => {
+      index += 1;
+      setHeadingText(HEADLINE_TEXT.slice(0, index));
+      if (index >= HEADLINE_TEXT.length) {
+        window.clearInterval(interval);
+        setIsTyping(false);
+      }
+    }, 35);
+    return () => {
+      window.clearInterval(interval);
+    };
+  }, [prefersReducedMotion]);
 
   useEffect(() => {
     const q = (searchParams.get('q') || '').trim();
     setQuery(q);
+    if (q) setShowResults(true);
   }, [searchParams]);
 
   useEffect(() => {
@@ -195,10 +244,10 @@ export default function EstabelecimentosList() {
       return;
     }
     const pending = filteredItems.filter((est) => !coordsCacheRef.current.has(est.id));
-    if (!pending.length) {
-      setGeocoding(false);
-      return;
-    }
+  if (!pending.length) {
+    setGeocoding(false);
+    return;
+  }
 
     let cancelled = false;
     setGeocoding(true);
@@ -228,7 +277,6 @@ export default function EstabelecimentosList() {
     () => new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 }),
     []
   );
-
   const results = useMemo(() => {
     const mapped = filteredItems.map((est) => ({
       est,
@@ -249,6 +297,28 @@ export default function EstabelecimentosList() {
     return sorted;
   }, [distanceMap, filteredItems, userLocation]);
 
+  useEffect(() => {
+    if (!showResults || !pendingScroll) return;
+    if (typeof window === 'undefined') {
+      setPendingScroll(false);
+      return;
+    }
+    const section = resultsSectionRef.current;
+    if (!section) {
+      setPendingScroll(false);
+      return;
+    }
+    const frame = window.requestAnimationFrame(() => {
+      try {
+        section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      } catch {
+        section.scrollIntoView();
+      }
+      setPendingScroll(false);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [showResults, pendingScroll]);
+
   const handleQueryChange = useCallback(
     (value) => {
       setQuery(value);
@@ -266,6 +336,8 @@ export default function EstabelecimentosList() {
       setGeoError('Geolocalizacao nao esta disponivel neste dispositivo.');
       return;
     }
+    setShowResults(true);
+    setPendingScroll(true);
     setGeoError('');
     setLocating(true);
     navigator.geolocation.getCurrentPosition(
@@ -287,62 +359,95 @@ export default function EstabelecimentosList() {
 
   const handleSubmit = useCallback((event) => {
     event.preventDefault();
+    setShowResults(true);
+    setPendingScroll(true);
   }, []);
 
+  const displayHeading = headingText.length
+    ? headingText
+    : prefersReducedMotion
+    ? HEADLINE_TEXT
+    : NBSP;
+
   return (
-    <div className="establishments">
-      <div className="card establishments__intro">
-        <h1 className="establishments__title">Encontre um estabelecimento</h1>
-        <p className="muted establishments__subtitle">
-          {user?.tipo === 'estabelecimento'
-            ? 'Somente clientes podem criar agendamentos, mas voce pode consultar seus dados aqui.'
-            : 'Busque por nome ou localizacao para encontrar o estabelecimento ideal.'}
-        </p>
-        <form className="establishments__search" onSubmit={handleSubmit}>
-          <input
-            className="input establishments__search-input"
-            type="search"
-            placeholder="Buscar por nome, bairro ou cidade"
-            value={query}
-            onChange={(e) => handleQueryChange(e.target.value)}
-            aria-label="Buscar estabelecimentos"
-          />
+    <div className="home">
+      <section className="home-hero" aria-labelledby="home-hero-title">
+        <div className="home-hero__inner">
+          <LogoAO size={72} className="home-hero__logo" />
+          <h1 id="home-hero-title" className="home-hero__heading">
+            <span className="home-hero__heading-text">{displayHeading}</span>
+            {!prefersReducedMotion && isTyping && <span className="home-hero__caret" aria-hidden="true" />}
+          </h1>
+          <p className="home-hero__subtitle">
+            Descubra estabelecimentos perto de voce, escolha o horario ideal e confirme em segundos.
+          </p>
+          <form className="home-search-box" onSubmit={handleSubmit}>
+            <div className="home-search-box__field">
+              <IconMapPin className="home-search-box__icon" />
+              <input
+                ref={searchInputRef}
+                className="home-search-box__input"
+                type="search"
+                placeholder="Em qual endereco voce esta?"
+                value={query}
+                onChange={(e) => handleQueryChange(e.target.value)}
+                aria-label="Buscar estabelecimentos por endereco, servico ou nome"
+              />
+              <button type="submit" className="home-search-box__button">
+                Buscar
+              </button>
+            </div>
+          </form>
           <button
             type="button"
-            className="btn btn--outline establishments__search-action"
+            className="home-search-box__geo"
             onClick={handleUseLocation}
             disabled={locating}
           >
-            {locating ? 'Localizando...' : 'Usar minha localizacao'}
+            {locating ? 'Localizando...' : 'Usar minha localizacao atual'}
           </button>
-        </form>
-        {geoError && <div className="notice notice--error" role="alert">{geoError}</div>}
-        {userLocation && !geoError && (
-          <div className="establishments__status muted" aria-live="polite">
-            Resultados ordenados pela sua localizacao atual.
-          </div>
-        )}
-        {geocoding && (
-          <div className="establishments__status muted" aria-live="polite">
-            Calculando distancias dos estabelecimentos...
-          </div>
-        )}
-      </div>
+          {geoError && (
+            <div className="home-search-box__status home-search-box__status--error" role="alert">
+              {geoError}
+            </div>
+          )}
+          {!geoError && userLocation && (
+            <div className="home-search-box__status" aria-live="polite">
+              Resultados ordenados pela sua localizacao atual.
+            </div>
+          )}
+          {!geoError && geocoding && (
+            <div className="home-search-box__status" aria-live="polite">
+              Calculando distancias dos estabelecimentos...
+            </div>
+          )}
+        </div>
+      </section>
 
-      <div className="establishments__results">
-        {loading && <div className="card"><div className="empty">Carregando...</div></div>}
-        {!loading && error && <div className="card"><div className="empty error">{error}</div></div>}
-        {!loading && !error && results.length === 0 && (
-          <div className="card"><div className="empty">Nenhum estabelecimento encontrado.</div></div>
-        )}
-        {!loading && !error && results.length > 0 && (
-          <div className="establishments__grid">
-            {results.map(({ est, distance }) => {
-              const name = est?.nome || est?.name || `Estabelecimento #${est?.id || ''}`;
-              const address = formatAddress(est);
-              const sp = new URLSearchParams();
-              sp.set('estabelecimento', String(est.id));
-              const currentQuery = (query || '').trim();
+      {showResults && (
+        <section
+          ref={resultsSectionRef}
+          className="home-results"
+          aria-labelledby="home-results-title"
+        >
+          <h2 id="home-results-title" className="home-results__title">
+            Estabelecimentos
+          </h2>
+          {loading && <div className="home-results__state">Carregando...</div>}
+          {!loading && error && (
+            <div className="home-results__state home-results__state--error">{error}</div>
+          )}
+          {!loading && !error && results.length === 0 && (
+            <div className="home-results__state">Nenhum estabelecimento encontrado.</div>
+          )}
+          {!loading && !error && results.length > 0 && (
+            <div className="home-results__grid">
+              {results.map(({ est, distance }) => {
+                const name = est?.nome || est?.name || `Estabelecimento #${est?.id || ''}`;
+                const address = formatAddress(est);
+                const sp = new URLSearchParams();
+                sp.set('estabelecimento', String(est.id));
+                const currentQuery = (query || '').trim();
               if (currentQuery) sp.set('q', currentQuery);
               const avatarSource = est?.foto_url || est?.avatar_url || '';
               const image = avatarSource ? resolveAssetUrl(avatarSource) : fallbackAvatar(name);
@@ -381,10 +486,11 @@ export default function EstabelecimentosList() {
                   </div>
                 </Link>
               );
-            })}
-          </div>
-        )}
-      </div>
+              })}
+            </div>
+          )}
+        </section>
+      )}
     </div>
   );
 }
