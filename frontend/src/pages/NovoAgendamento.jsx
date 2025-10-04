@@ -1,7 +1,7 @@
 // src/pages/NovoAgendamento.jsx
 import React, { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { Api, API_BASE_URL } from "../utils/api";
+import { Api, resolveAssetUrl } from "../utils/api";
 import { getUser } from "../utils/auth";
 
 import { IconSearch, IconMapPin } from "../components/Icons.jsx";
@@ -217,17 +217,6 @@ const slotStatusClass = (label) => {
   if (normalized === 'agendado' || normalized === 'ocupado') return 'busy';
   if (normalized === 'bloqueado') return 'block';
   return 'ok';
-};
-
-const resolveAssetUrl = (value) => {
-  if (!value) return '';
-  if (value.startsWith('data:')) return value;
-  if (/^https?:\/\//i.test(value)) return value;
-  try {
-    return new URL(value, API_BASE_URL).toString();
-  } catch {
-    return value;
-  }
 };
 
 const STORAGE_KEY = 'ao:lastLocation';
@@ -641,12 +630,7 @@ export default function NovoAgendamento() {
 
   const establishmentAvatar = useMemo(() => {
     const source = selectedEstablishment?.avatar_url || selectedEstablishment?.logo_url || selectedEstablishment?.foto_url;
-    if (!source) return '';
-    try {
-      return new URL(source, API_BASE_URL).toString();
-    } catch {
-      return source;
-    }
+    return resolveAssetUrl(source || '');
   }, [selectedEstablishment]);
   const normalizedQuery = useMemo(() => normalizeText(estQuery.trim()), [estQuery]);
   const queryTokens = useMemo(
@@ -1856,4 +1840,3 @@ export default function NovoAgendamento() {
     </div>
   );
 }
-

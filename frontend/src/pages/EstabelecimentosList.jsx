@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { Api, API_BASE_URL } from '../utils/api';
+import { Api, resolveAssetUrl } from '../utils/api';
 import { getUser } from '../utils/auth';
 
 const STORAGE_KEY = 'ao:lastLocation';
@@ -10,17 +10,6 @@ const normalize = (value) =>
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase();
-
-const resolveAssetUrl = (value) => {
-  if (!value) return '';
-  if (value.startsWith('data:')) return value;
-  if (/^https?:\/\//i.test(value)) return value;
-  try {
-    return new URL(value, API_BASE_URL).toString();
-  } catch {
-    return value;
-  }
-};
 
 const buildSearchText = (est) =>
   normalize([

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Api, API_BASE_URL } from '../utils/api';
+import { Api, resolveAssetUrl } from '../utils/api';
 
 const MAX_AVATAR_SIZE = 2 * 1024 * 1024; // 2MB
 
@@ -11,17 +11,6 @@ function readFileAsDataUrl(file) {
     reader.readAsDataURL(file);
   });
 }
-
-const resolveAssetUrl = (value) => {
-  if (!value) return '';
-  if (value.startsWith('data:')) return value;
-  if (/^https?:\/\//i.test(value)) return value;
-  try {
-    return new URL(value, API_BASE_URL).toString();
-  } catch {
-    return value;
-  }
-};
 
 export default function ProfissionaisEstabelecimento() {
   const [list, setList] = useState([]);

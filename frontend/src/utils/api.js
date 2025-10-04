@@ -10,6 +10,11 @@ const BASE = (
   (import.meta.env.DEV ? 'http://localhost:3002' : window.location.origin)
 ).replace(/\/$/, '');
 
+let BASE_URL_OBJ = null;
+try {
+  BASE_URL_OBJ = new URL(BASE);
+} catch {}
+
 function join(base, path) {
   const p = path.startsWith('/') ? path : `/${path}`;
   return `${base}${p}`;
@@ -92,6 +97,39 @@ async function req(path, opt = {}) {
   }
 
   return isJson ? data : text || null;
+}
+
+function normalizeAssetPath(value) {
+  const raw = String(value || '').replace(/\\/g, '/');
+  if (!raw) return '';
+  return raw.startsWith('/') ? raw : `/${raw}`;
+}
+
+export function resolveAssetUrl(value) {
+  if (!value) return '';
+  if (value.startsWith('data:')) return value;
+  if (/^https?:\/\//i.test(value)) return value;
+
+  const path = normalizeAssetPath(value);
+
+  if (BASE_URL_OBJ) {
+    const origin = BASE_URL_OBJ.origin;
+    if (path.startsWith('/uploads/')) {
+      return `${origin}/api${path}`;
+    }
+    if (path.startsWith('/api/uploads/')) {
+      return `${origin}${path}`;
+    }
+    try {
+      return new URL(path, BASE_URL_OBJ).toString();
+    } catch {}
+  }
+
+  try {
+    return new URL(path, BASE).toString();
+  } catch {
+    return path;
+  }
 }
 
 export const Api = {

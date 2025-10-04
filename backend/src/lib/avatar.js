@@ -8,7 +8,28 @@ const __dirname = path.dirname(__filename);
 const ROOT_DIR = path.join(__dirname, '..', '..');
 const UPLOADS_DIR = path.join(ROOT_DIR, 'uploads');
 const AVATAR_DIR = path.join(UPLOADS_DIR, 'avatars');
-const PUBLIC_PREFIX = '/uploads/avatars';
+
+function normalizePrefix(value) {
+  if (!value) return null;
+  let trimmed = String(value).trim();
+  if (!trimmed) return null;
+  trimmed = trimmed.replace(/\\/g, '/');
+  if (!trimmed.startsWith('/')) trimmed = `/${trimmed}`;
+  return trimmed.replace(/\/+$/, '');
+}
+
+const FALLBACK_PUBLIC_PREFIX = normalizePrefix('/api/uploads/avatars');
+const PREFERRED_PUBLIC_PREFIX =
+  normalizePrefix(process.env.UPLOADS_PUBLIC_PREFIX) || FALLBACK_PUBLIC_PREFIX;
+const PUBLIC_PREFIXES = Array.from(
+  new Set(
+    [
+      PREFERRED_PUBLIC_PREFIX,
+      FALLBACK_PUBLIC_PREFIX,
+      normalizePrefix('/uploads/avatars'),
+    ].filter(Boolean)
+  )
+);
 
 const SUPPORTED_MIME = new Map([
   ['image/png', '.png'],
@@ -24,14 +45,17 @@ async function ensureDirs() {
 function sanitizePublicPath(value) {
   if (!value) return null;
   const normalized = value.replace(/\\/g, '/');
-  if (!normalized.startsWith(PUBLIC_PREFIX)) return null;
-  return normalized;
+  const prefix = PUBLIC_PREFIXES.find((item) => normalized.startsWith(item));
+  if (!prefix) return null;
+  return { normalized, prefix };
 }
 
 function toAbsolutePath(publicPath) {
   const sanitized = sanitizePublicPath(publicPath);
   if (!sanitized) return null;
-  const relative = sanitized.slice(PUBLIC_PREFIX.length).replace(/^\/+/, '');
+  const relative = sanitized.normalized
+    .slice(sanitized.prefix.length)
+    .replace(/^\/+/, '');
   const absolute = path.join(AVATAR_DIR, relative);
   if (!absolute.startsWith(AVATAR_DIR)) return null;
   return absolute;
@@ -67,7 +91,7 @@ export async function saveAvatarFromDataUrl(dataUrl, userId, previousPath) {
   const filename = `${userId}-${Date.now()}-${crypto.randomBytes(4).toString('hex')}${parsed.ext}`;
   const absolute = path.join(AVATAR_DIR, filename);
   await fs.writeFile(absolute, parsed.buffer);
-  const publicPath = `${PUBLIC_PREFIX}/${filename}`;
+  const publicPath = `${PREFERRED_PUBLIC_PREFIX}/${filename}`;
   if (previousPath && previousPath !== publicPath) {
     await removeAvatarFile(previousPath).catch(() => {});
   }
@@ -87,7 +111,7 @@ export async function removeAvatarFile(publicPath) {
 }
 
 export function getAvatarPublicPath(fileName) {
-  return `${PUBLIC_PREFIX}/${fileName}`;
+  return `${PREFERRED_PUBLIC_PREFIX}/${fileName}`;
 }
 
 export { AVATAR_DIR };

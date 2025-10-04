@@ -2,7 +2,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { getUser, saveUser } from '../utils/auth';
-import { Api, API_BASE_URL } from '../utils/api';
+import { Api, resolveAssetUrl } from '../utils/api';
 import { IconChevronRight } from '../components/Icons.jsx';
 import { mergePreferences, readPreferences, writePreferences, broadcastPreferences } from '../utils/preferences';
 
@@ -26,17 +26,6 @@ const formatCep = (value = '') => {
   const digits = value.replace(/\D/g, '').slice(0, 8);
   if (digits.length <= 5) return digits;
   return `${digits.slice(0, 5)}-${digits.slice(5)}`;
-};
-
-const resolveAssetUrl = (value) => {
-  if (!value) return '';
-  if (value.startsWith('data:')) return value;
-  if (/^https?:\/\//i.test(value)) return value;
-  try {
-    return new URL(value, API_BASE_URL).toString();
-  } catch {
-    return value;
-  }
 };
 
 export default function Configuracoes() {
