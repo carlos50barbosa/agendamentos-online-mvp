@@ -8,6 +8,7 @@ import {
   serializePlanContext,
   PLAN_TIERS,
   isDowngrade,
+  isUpgrade,
   resolvePlanConfig,
   countProfessionals,
   formatPlanLimitExceeded,
@@ -24,10 +25,11 @@ import { config } from '../lib/config.js'
 const router = Router()
 
 function verifyWebhookSignature(req, resourceId) {
-  const secret = config.billing?.mercadopago?.webhookSecret
-  if (!secret) return { valid: true }
+  const secretA = (config.billing?.mercadopago?.webhookSecret || '').trim()
+  const secretB = (config.billing?.mercadopago?.webhookSecret2 || '').trim()
+  const secrets = [secretA, secretB].filter(Boolean)
+  if (!secrets.length) return { valid: true, method: 'none', using_secret_index: null }
   const header = req.headers['x-signature']
-  const requestId = req.headers['x-request-id'] || ''
   if (!header) return { valid: false, reason: 'missing_signature' }
 
   const parts = String(header)
@@ -38,13 +40,35 @@ function verifyWebhookSignature(req, resourceId) {
   const data = Object.fromEntries(parts)
   const ts = data.ts || data.time || data.timestamp || ''
   const signature = data.v1 || data.sign || data.signature || ''
-
   if (!ts || !signature) return { valid: false, reason: 'invalid_signature_header' }
 
-  const payload = `id:${resourceId};request-id:${requestId};ts:${ts}`
-  const expected = createHmac('sha256', secret).update(payload).digest('hex')
-  const valid = expected === signature
-  return { valid, expected, signature, payload }
+  // Alguns ambientes do MP usam request-id na mensagem, outros usam topic (type)
+  const requestId = req.headers['x-request-id'] || ''
+  const topic = req.query?.type || req.body?.type || req.headers['x-topic'] || ''
+
+  let matched = false
+  let method = 'none'
+  let usingSecretIndex = null
+  const variants = []
+
+  for (let i = 0; i < secrets.length; i++) {
+    const sec = secrets[i]
+    const payloadReqId = `id:${resourceId};request-id:${requestId};ts:${ts}`
+    const expectedReqId = createHmac('sha256', sec).update(payloadReqId).digest('hex')
+    const payloadTopic = `id:${resourceId};topic:${topic};ts:${ts}`
+    const expectedTopic = createHmac('sha256', sec).update(payloadTopic).digest('hex')
+    const validReq = expectedReqId === signature
+    const validTop = expectedTopic === signature
+    variants.push({ index: i, expected_request_id: expectedReqId, expected_topic: expectedTopic, payload_request_id: payloadReqId, payload_topic: payloadTopic })
+    if (validReq || validTop) {
+      matched = true
+      method = validReq ? 'request-id' : 'topic'
+      usingSecretIndex = i
+      break
+    }
+  }
+
+  return { valid: matched, signature, ts, method, using_secret_index: usingSecretIndex, topic, request_id: requestId, variants }
 }
 
 router.post('/checkout-session', auth, isEstabelecimento, async (req, res) => {
@@ -144,11 +168,16 @@ router.post('/webhook', async (req, res) => {
   const verification = verifyWebhookSignature(req, resourceId)
   if (!verification.valid) {
     console.warn('[billing:webhook] assinatura invalida', verification)
+    return res.status(401).json({ ok: false, reason: 'invalid_signature' })
   }
 
   try {
     const result = await syncMercadoPagoPreapproval(resourceId, event)
-    console.log('[billing:webhook] sincronizado', resourceId, result.planStatus)
+    // Loga status e status_detail (quando disponível) para facilitar diagnóstico de recusas/cancelamentos
+    const preStatus = result?.preapproval?.status || null
+    const preDetail = result?.preapproval?.status_detail || null
+    const action = event?.action || null
+    console.log('[billing:webhook] sincronizado', resourceId, result.planStatus, { preapproval_status: preStatus, preapproval_status_detail: preDetail, action })
   } catch (error) {
     console.error('[billing:webhook] falha ao sincronizar', resourceId, error)
     return res.status(200).json({ ok: false })
@@ -162,6 +191,46 @@ router.get('/webhook', (req, res) => {
   return res.status(200).json({ ok: true, message: 'billing webhook up; send POST with Mercado Pago event body' })
 })
 router.head('/webhook', (req, res) => res.sendStatus(200))
+
+// Health/diagnóstico do webhook: sinaliza se segredo está configurado e permite calcular assinatura esperada
+router.get('/webhook/health', (req, res) => {
+  const secretA = (config.billing?.mercadopago?.webhookSecret || '').trim()
+  const secretB = (config.billing?.mercadopago?.webhookSecret2 || '').trim()
+  const secrets = [secretA, secretB].filter(Boolean)
+  const hasSecret = secrets.length > 0
+
+  const id = String(req.query.id || req.query['data.id'] || '').trim()
+  const requestId = String(req.query['request-id'] || req.query.request_id || '').trim()
+  const ts = String(req.query.ts || '').trim()
+  const topic = String(req.query.type || req.query.topic || '').trim()
+
+  const base = {
+    ok: true,
+    signature_required: hasSecret,
+    algorithm: 'HMAC-SHA256',
+    header_format: "x-signature: ts=<unix>, v1=<hex>",
+    uses_request_id: true,
+  }
+
+  if (!hasSecret) return res.status(200).json(base)
+
+  if (id && ts) {
+    try {
+      const results = secrets.map((sec, idx) => {
+        const payloadReqId = `id:${id};request-id:${requestId || ''};ts:${ts}`
+        const expectedReqId = createHmac('sha256', sec).update(payloadReqId).digest('hex')
+        const payloadTopic = `id:${id};topic:${topic || ''};ts:${ts}`
+        const expectedTopic = createHmac('sha256', sec).update(payloadTopic).digest('hex')
+        return { index: idx, request_id_variant: { payload: payloadReqId, expected: expectedReqId }, topic_variant: { payload: payloadTopic, expected: expectedTopic } }
+      })
+      return res.status(200).json({ ...base, provided: { id, request_id: requestId, topic, ts }, secrets: results })
+    } catch (e) {
+      return res.status(200).json({ ...base, error: 'failed_to_compute_signature', detail: e?.message || String(e) })
+    }
+  }
+
+  return res.status(200).json(base)
+})
 
 // Utilitário: sincroniza manualmente uma assinatura a partir do preapproval_id (ex.: retornado no back_url)
 router.get('/sync', auth, isEstabelecimento, async (req, res) => {
@@ -233,6 +302,14 @@ router.post('/change', auth, isEstabelecimento, async (req, res) => {
       estabelecimento: { id: req.user.id, email: req.user.email },
       plan: target,
       billingCycle,
+      deferStartDate: (() => {
+        // Opção A: se upgrade com assinatura ativa, agenda primeira cobrança do novo valor para a virada do ciclo atual
+        if (isUpgrade(currentPlan, target) && ctx?.status === 'active' && ctx?.activeUntil) {
+          const nextAt = new Date(ctx.activeUntil)
+          if (!Number.isNaN(nextAt.getTime()) && nextAt > new Date()) return nextAt.toISOString()
+        }
+        return null
+      })(),
     })
     return res.json({
       ok: true,

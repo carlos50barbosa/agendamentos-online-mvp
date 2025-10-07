@@ -302,8 +302,9 @@ export default function App() {
   const loc = useLocation();
   const isBook = (loc?.pathname || '').startsWith('/book');
   const [currentUser, setCurrentUser] = useState(() => getUser());
-  const { isDark, chatEnabled, toggleTheme } = useAppPreferences();
+  const { preferences, isDark, chatEnabled, toggleTheme } = useAppPreferences();
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const isPlanos = (loc?.pathname || '') === '/planos';
 
   useEffect(() => {
     const handleUserEvent = (event) => {
@@ -333,6 +334,26 @@ export default function App() {
       if (window.matchMedia('(max-width: 780px)').matches) setSidebarOpen(false);
     } catch {}
   }, []);
+
+  useEffect(() => {
+    if (!isPlanos) return undefined;
+
+    const root = typeof document !== 'undefined' ? document.documentElement : null;
+    if (!root) return undefined;
+
+    const previousTheme = root.getAttribute('data-theme');
+    root.setAttribute('data-theme', 'dark');
+
+    return () => {
+      if (preferences?.theme) {
+        applyThemePreference(preferences.theme);
+      } else if (previousTheme) {
+        root.setAttribute('data-theme', previousTheme);
+      } else {
+        root.removeAttribute('data-theme');
+      }
+    };
+  }, [isPlanos, preferences?.theme]);
 
   return (
     <div className={`app-shell ${sidebarOpen ? 'sidebar-open' : 'is-collapsed'}`}>
@@ -366,12 +387,13 @@ export default function App() {
             <div className="app-topbar__actions">
               <button
                 type="button"
-                className="theme-toggle"
-                onClick={toggleTheme}
-                aria-label={`Ativar tema ${isDark ? 'claro' : 'escuro'}`}
-                title={isDark ? 'Alternar para tema claro' : 'Alternar para tema escuro'}
+                className={`theme-toggle${isPlanos ? ' is-disabled' : ''}`}
+                onClick={isPlanos ? undefined : toggleTheme}
+                disabled={isPlanos}
+                aria-label={isPlanos ? 'Tema fixo no modo escuro' : `Ativar tema ${isDark ? 'claro' : 'escuro'}`}
+                title={isPlanos ? 'Tema fixo no modo escuro' : isDark ? 'Alternar para tema claro' : 'Alternar para tema escuro'}
               >
-                {isDark ? <IconSun aria-hidden="true" /> : <IconMoon aria-hidden="true" />}
+                {(isPlanos || !isDark) ? <IconMoon aria-hidden="true" /> : <IconSun aria-hidden="true" />}
               </button>
             </div>
           </div>

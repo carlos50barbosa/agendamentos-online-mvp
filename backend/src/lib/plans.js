@@ -1,4 +1,4 @@
-﻿// backend/src/lib/plans.js
+// backend/src/lib/plans.js
 import { pool } from './db.js';
 
 export const PLAN_TIERS = ['starter', 'pro', 'premium'];
@@ -20,8 +20,8 @@ const PLAN_CONFIG = {
   pro: {
     code: 'pro',
     label: 'Pro',
-    priceCents: 9900,
-    annualPriceCents: 99000,
+    priceCents: 4990,
+    annualPriceCents: 49900,
     maxServices: 100,
     maxProfessionals: 10,
     allowWhatsApp: true,
@@ -196,3 +196,5 @@ export function getPlanPriceCents(plan, cycle = 'mensal') {
 export function getPlanLabel(plan) {
   return resolvePlanConfig(plan).label;
 }
+
+

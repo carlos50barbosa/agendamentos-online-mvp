@@ -19,6 +19,13 @@ import {
 import { pool } from './db.js'
 
 const BILLING_CURRENCY = (config.billing?.currency || 'BRL').toUpperCase()
+const BILLING_DEBUG = (() => {
+  try {
+    const v = String(process.env.BILLING_DEBUG || '').toLowerCase()
+    return v === '1' || v === 'true' || v === 'yes'
+  } catch { return false }
+})()
+const dbg = (...args) => { if (BILLING_DEBUG) console.log('[billing][debug]', ...args) }
 
 let mercadoPagoClient = null
 let mercadoPagoPreapproval = null
@@ -30,6 +37,8 @@ function ensureMercadoPagoPreapproval() {
   if (!accessToken) {
     throw new Error('Mercado Pago access token is not configured')
   }
+  const isTestToken = /^TEST-/.test(accessToken || '')
+  dbg('init mp client (preapproval)', { tokenEnv: isTestToken ? 'TEST' : 'LIVE' })
   mercadoPagoClient = new MercadoPagoConfig({ accessToken })
   mercadoPagoPreapproval = new PreApproval(mercadoPagoClient)
   return mercadoPagoPreapproval
@@ -41,6 +50,8 @@ function ensureMercadoPagoPlan() {
   if (!accessToken) {
     throw new Error('Mercado Pago access token is not configured')
   }
+  const isTestToken = /^TEST-/.test(accessToken || '')
+  dbg('init mp client (preapproval_plan)', { tokenEnv: isTestToken ? 'TEST' : 'LIVE' })
   if (!mercadoPagoClient) mercadoPagoClient = new MercadoPagoConfig({ accessToken })
   mercadoPagoPlan = new PreApprovalPlan(mercadoPagoClient)
   return mercadoPagoPlan
@@ -54,8 +65,17 @@ export async function getPlanInitPoint(preApprovalPlanId) {
     const accessToken = config.billing?.mercadopago?.accessToken || ''
     const isTestToken = /^TEST-/.test(accessToken)
     // Em modo teste, prefira o sandbox_init_point quando disponível
-    if (isTestToken) return plan?.sandbox_init_point || plan?.init_point || null
-    return plan?.init_point || plan?.sandbox_init_point || null
+    const chosen = isTestToken
+      ? (plan?.sandbox_init_point || plan?.init_point || null)
+      : (plan?.init_point || plan?.sandbox_init_point || null)
+    dbg('getPlanInitPoint', {
+      planId: preApprovalPlanId,
+      tokenEnv: isTestToken ? 'TEST' : 'LIVE',
+      hasSandbox: Boolean(plan?.sandbox_init_point),
+      hasInit: Boolean(plan?.init_point),
+      chosen: chosen ? 'ok' : 'null',
+    })
+    return chosen
   } catch (e) {
     console.warn('[mp][preapproval_plan.get] failed', preApprovalPlanId, e?.message || e)
     return null
@@ -126,6 +146,39 @@ export function mapMercadoPagoStatus(status) {
   return MP_TO_PLAN_STATUS[key] || 'pending'
 }
 
+// Mapeia status do Preapproval do Mercado Pago para os valores aceitos pela coluna
+// subscriptions.status (ENUM: 'initiated','pending','authorized','active','paused','past_due','canceled','expired')
+function mapMpToSubscriptionStatus(status) {
+  const key = String(status || '').toLowerCase()
+  switch (key) {
+    case 'authorized':
+      return 'authorized'
+    case 'active':
+      return 'active'
+    case 'paused':
+    case 'halted':
+      return 'paused'
+    case 'stopped':
+    case 'cancelled':
+    case 'canceled':
+    case 'cancelled_by_collector':
+    case 'cancelled_by_merchant':
+      return 'canceled'
+    case 'expired':
+    case 'finished':
+      return 'expired'
+    case 'pending':
+    case 'inprocess':
+    case 'in_process':
+      return 'pending'
+    case 'charged_back':
+    case 'rejected':
+      return 'past_due'
+    default:
+      return 'pending'
+  }
+}
+
 function computeActiveUntil(preapproval) {
   const date = preapproval?.next_payment_date || preapproval?.auto_recurring?.end_date || null
   if (!date) return null
@@ -190,6 +243,7 @@ export async function createMercadoPagoCheckout({
   successUrl,
   failureUrl,
   pendingUrl,
+  deferStartDate, // opcional: agenda a primeira cobrança para esta data
 }) {
   if (!estabelecimento?.id) {
     throw new Error('Estabelecimento invalido')
@@ -223,6 +277,14 @@ export async function createMercadoPagoCheckout({
   // Em sandbox muitas contas exigem card_token na criação direta de preapproval.
   // Caminho estável: criar um Plano de Assinatura e usar o init_point do plano.
   const planClient = ensureMercadoPagoPlan()
+  dbg('createMercadoPagoCheckout:start', {
+    plan: normalizedPlan,
+    cycle: normalizedCycle,
+    amount: amountNum,
+    currency: BILLING_CURRENCY,
+    tokenEnv: isTestToken ? 'TEST' : 'LIVE',
+    payerIsTest: Boolean(testPayerEmail),
+  })
   const planBody = {
     reason: `Agendamentos Online - Plano ${getPlanLabel(normalizedPlan)}`,
     back_url: pickValidUrl(config.billing?.mercadopago?.successUrl) || undefined,
@@ -233,6 +295,17 @@ export async function createMercadoPagoCheckout({
       currency_id: BILLING_CURRENCY,
     },
   }
+  // Opção A: sem pró‑rata; se upgrade, empurra a primeira cobrança para o próximo ciclo
+  if (deferStartDate) {
+    try {
+      const d = new Date(deferStartDate)
+      if (!Number.isNaN(d.getTime())) {
+        // Algumas contas aceitam start_date diretamente, outras preferem free_trial em dias
+        // Tentamos start_date; caso não seja aceito pela conta, o MP ignora e cobra no fluxo padrão
+        planBody.auto_recurring.start_date = d.toISOString()
+      }
+    } catch {}
+  }
   let planResp
   try {
     planResp = await planClient.create({ body: planBody })
@@ -242,6 +315,22 @@ export async function createMercadoPagoCheckout({
     throw new Error('mercadopago_preapproval_error: ' + detail)
   }
   if (!planResp?.id) throw new Error('mercadopago_preapproval_error: plano sem id retornado')
+
+  const chosenInitPoint = (() => {
+    const accessToken = config.billing?.mercadopago?.accessToken || ''
+    const isTestToken = /^TEST-/.test(accessToken)
+    return isTestToken
+      ? (planResp.sandbox_init_point || planResp.init_point || null)
+      : (planResp.init_point || planResp.sandbox_init_point || null)
+  })()
+  dbg('createMercadoPagoCheckout:plan_created', {
+    planId: planResp.id,
+    application_id: planResp.application_id,
+    collector_id: planResp.collector_id,
+    hasSandbox: Boolean(planResp.sandbox_init_point),
+    hasInit: Boolean(planResp.init_point),
+    chosen: chosenInitPoint ? 'ok' : 'null',
+  })
 
   const externalReference = buildExternalReference(estabelecimento.id, normalizedPlan, normalizedCycle)
   const subscription = await createSubscription({
@@ -264,13 +353,7 @@ export async function createMercadoPagoCheckout({
 
   return {
     // Em modo teste, prefira usar o sandbox_init_point para evitar mensagens de ambiente misto
-    initPoint: (() => {
-      const accessToken = config.billing?.mercadopago?.accessToken || ''
-      const isTestToken = /^TEST-/.test(accessToken)
-      return isTestToken
-        ? (planResp.sandbox_init_point || planResp.init_point || null)
-        : (planResp.init_point || planResp.sandbox_init_point || null)
-    })(),
+    initPoint: chosenInitPoint,
     subscription,
     preapproval: null,
     planStatus: 'pending',
@@ -299,7 +382,7 @@ export async function syncMercadoPagoPreapproval(preapprovalId, eventPayload = n
       // amarra a assinatura ao registro existente
       subscription = await updateSubscription(byPlan.id, {
         gatewaySubscriptionId: preapproval.id,
-        status: String(preapproval.status || 'pending').toLowerCase(),
+        status: mapMpToSubscriptionStatus(preapproval.status || 'pending'),
         currency: (preapproval.auto_recurring?.currency_id || BILLING_CURRENCY).toUpperCase(),
         amountCents: Math.round(Number(preapproval.auto_recurring?.transaction_amount || byPlan.amountCents / 100) * 100),
         billingCycle: normalizeBillingCycle(derivedCycle),
@@ -334,7 +417,7 @@ export async function syncMercadoPagoPreapproval(preapprovalId, eventPayload = n
           Math.round(Number(preapproval.auto_recurring?.transaction_amount || 0) * 100) ||
           getPlanPriceCents(inferredPlan, cycleToken),
         currency: (preapproval.auto_recurring?.currency_id || BILLING_CURRENCY).toUpperCase(),
-        status: String(preapproval.status || 'pending').toLowerCase(),
+        status: mapMpToSubscriptionStatus(preapproval.status || 'pending'),
         gatewaySubscriptionId: preapproval.id,
         externalReference: preapproval.external_reference || null,
         billingCycle: cycleToken,
@@ -343,7 +426,7 @@ export async function syncMercadoPagoPreapproval(preapprovalId, eventPayload = n
   }
 
   const updates = {
-    status: String(preapproval.status || 'pending').toLowerCase(),
+    status: mapMpToSubscriptionStatus(preapproval.status || 'pending'),
     currency: (preapproval.auto_recurring?.currency_id || BILLING_CURRENCY).toUpperCase(),
     amountCents: Math.round(Number(preapproval.auto_recurring?.transaction_amount || subscription.amountCents / 100) * 100),
     currentPeriodEnd: computeActiveUntil(preapproval),

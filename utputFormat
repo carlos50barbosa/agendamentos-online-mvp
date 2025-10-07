@@ -1,0 +1,20 @@
+HTTP/1.1 405 Method Not Allowed
+Date: Mon, 06 Oct 2025 05:25:44 GMT
+Content-Type: application/json
+Transfer-Encoding: chunked
+Connection: keep-alive
+x-request-id: a7f9bca5-be32-4349-b1fd-16a3001c60fe
+allow: POST
+cache-control: must-revalidate,no-cache,no-store
+X-Content-Type-Options: nosniff
+X-XSS-Protection: 1; mode=block
+Strict-Transport-Security: max-age=16070400; includeSubDomains; preload
+Access-Control-Allow-Origin: *
+Access-Control-Allow-Headers: Content-Type
+Access-Control-Allow-Methods: PUT, GET, POST, DELETE, OPTIONS
+Access-Control-Max-Age: 86400
+Timing-Allow-Origin: *
+Strict-Transport-Security: max-age=31536000; includeSubDomains
+X-Request-Id: bbfd638d-35a4-4ca0-8a48-5faf2529a9a9
+
+{"timestamp":"2025-10-06T05:25:44Z","status":405,"error":"Method Not Allowed","path":"/template/"}

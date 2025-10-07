@@ -1,13 +1,25 @@
 ﻿// src/pages/Configuracoes.jsx
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { getUser, saveUser } from '../utils/auth';
+import { getUser, saveUser, saveToken } from '../utils/auth';
 import { Api, resolveAssetUrl } from '../utils/api';
 import { IconChevronRight } from '../components/Icons.jsx';
+import Modal from '../components/Modal.jsx';
 import { mergePreferences, readPreferences, writePreferences, broadcastPreferences } from '../utils/preferences';
 
 const formatPhoneLabel = (value = '') => {
-  const digits = value.replace(/\D/g, '').slice(0, 11);
+  let digits = value.replace(/\D/g, '');
+
+  if (!digits) return '';
+
+  if (digits.length > 11 && digits.startsWith('55')) {
+    digits = digits.slice(2);
+  }
+
+  if (digits.length > 11) {
+    digits = digits.slice(-11);
+  }
+
   if (digits.length <= 2) return digits;
   if (digits.length <= 6) return `(${digits.slice(0, 2)}) ${digits.slice(2)}`;
   if (digits.length <= 10) return `(${digits.slice(0, 2)}) ${digits.slice(2, 6)}-${digits.slice(6)}`;
@@ -83,6 +95,35 @@ export default function Configuracoes() {
   // Contagem simples para pré-validação de downgrade (serviços)
   const [serviceCount, setServiceCount] = useState(null);
   const [professionalCount, setProfessionalCount] = useState(null);
+  const [changePlanTarget, setChangePlanTarget] = useState(null);
+  const [changePlanPassword, setChangePlanPassword] = useState('');
+  const [changePlanError, setChangePlanError] = useState('');
+  const [changePlanSubmitting, setChangePlanSubmitting] = useState(false);
+
+  // Elegibilidade a teste grátis: somente Starter, sem trial em andamento e sem histórico de plano pago
+  const hasPaidHistory = useMemo(() => {
+    try {
+      if (!Array.isArray(billing?.history)) return false;
+      return billing.history.some((h) => {
+        const planPaid = h?.plan === 'pro' || h?.plan === 'premium';
+        const status = String(h?.status || '').toLowerCase();
+        const consideredAsContracted = ['active', 'authorized', 'paused', 'past_due', 'canceled', 'expired'].includes(status);
+        return planPaid && consideredAsContracted;
+      });
+    } catch { return false; }
+  }, [billing?.history]);
+  const trialEligible = useMemo(() => {
+    const isStarter = planInfo.plan === 'starter';
+    const noTrialRunning = !planInfo.trialEnd;
+    return isStarter && noTrialRunning && !hasPaidHistory;
+  }, [planInfo.plan, planInfo.trialEnd, hasPaidHistory]);
+  const hasActiveSubscription = useMemo(() => {
+    const statusPlan = String(planInfo.status || '').toLowerCase();
+    const statusSub = String(billing?.subscription?.status || '').toLowerCase();
+    return statusPlan === 'active' || statusSub === 'active';
+  }, [planInfo.status, billing?.subscription?.status]);
+
+  // Assinatura ativa (evita acionar checkout padrão e resultar em 409 "already_active")
 
   // Metadados dos planos (espelha backend)
   const PLAN_META = {
@@ -90,7 +131,6 @@ export default function Configuracoes() {
     pro: { label: 'Pro', maxServices: 100, maxProfessionals: 10 },
     premium: { label: 'Premium', maxServices: null, maxProfessionals: null },
   };
-  const PLAN_ORDER = { starter: 0, pro: 1, premium: 2 };
   const planLabel = (p) => PLAN_META[p]?.label || p?.toUpperCase() || '';
   const exceedsServices = (target) => {
     const limit = PLAN_META[target]?.maxServices;
@@ -314,23 +354,19 @@ export default function Configuracoes() {
     }
   }, [fetchBilling, isEstab]);
 
-  const handleChangePlan = useCallback(async (targetPlan) => {
+  const executePlanChange = useCallback(async (targetPlan) => {
     setCheckoutError('');
     setCheckoutLoading(true);
+    let success = false;
     try {
-      // Confirmação com aviso de cobrança no próximo ciclo para upgrades
-      const isUp = (PLAN_ORDER[targetPlan] ?? 0) > (PLAN_ORDER[planInfo.plan] ?? 0);
-      const extra = isUp ? '\n\nAviso: a cobrança do novo valor ocorre no próximo ciclo.' : '';
-      const msg = `Confirmar alteração para o plano ${planLabel(targetPlan)}?${extra}`;
-      // eslint-disable-next-line no-alert
-      const ok = typeof window !== 'undefined' ? window.confirm(msg) : true;
-      if (!ok) { setCheckoutLoading(false); return; }
       const data = await Api.billingChangeCheckout(targetPlan);
       if (data?.init_point) {
         window.location.href = data.init_point;
-        return;
+        success = true;
+        return success;
       }
       await fetchBilling();
+      success = true;
     } catch (err) {
       if (err?.status === 409 && (err?.data?.error === 'plan_downgrade_blocked' || err?.data?.error === 'same_plan')) {
         setCheckoutError(err?.data?.message || 'Não foi possível alterar o plano.');
@@ -340,7 +376,58 @@ export default function Configuracoes() {
     } finally {
       setCheckoutLoading(false);
     }
+    return success;
   }, [fetchBilling]);
+
+  const handleChangePlan = useCallback((targetPlan) => {
+    setChangePlanTarget(targetPlan);
+    setChangePlanPassword('');
+    setChangePlanError('');
+  }, []);
+
+  const closeChangePlanModal = useCallback(() => {
+    if (changePlanSubmitting) return;
+    setChangePlanTarget(null);
+    setChangePlanPassword('');
+    setChangePlanError('');
+  }, [changePlanSubmitting]);
+
+  const confirmChangePlan = useCallback(async () => {
+    if (!changePlanTarget) return;
+    if (!user?.email) {
+      setChangePlanError('Sessão expirada. Faça login novamente.');
+      return;
+    }
+    if (!changePlanPassword) {
+      setChangePlanError('Informe sua senha para confirmar.');
+      return;
+    }
+    setChangePlanError('');
+    setChangePlanSubmitting(true);
+    try {
+      const loginRes = await Api.login(user.email, changePlanPassword);
+      if (!loginRes?.token) {
+        setChangePlanError('Não foi possível validar sua senha.');
+        return;
+      }
+      saveToken(loginRes.token);
+      if (loginRes.user) saveUser(loginRes.user);
+
+      const ok = await executePlanChange(changePlanTarget);
+      if (ok) {
+        setChangePlanTarget(null);
+        setChangePlanPassword('');
+      }
+    } catch (err) {
+      if (err?.status === 401 || err?.data?.error === 'invalid_credentials') {
+        setChangePlanError('Senha incorreta. Tente novamente.');
+      } else {
+        setChangePlanError(err?.data?.message || err?.message || 'Falha ao validar senha.');
+      }
+    } finally {
+      setChangePlanSubmitting(false);
+    }
+  }, [changePlanTarget, changePlanPassword, executePlanChange, user?.email]);
 
   useEffect(() => {
     if (!isEstab) return;
@@ -721,14 +808,14 @@ export default function Configuracoes() {
             {planInfo.status && (
               <div className="small muted">
                 Status atual: {statusLabel}
-                {planInfo.status === 'active' && planInfo.activeUntil ? ` ? pr?xima cobran?a em ${fmtDate(planInfo.activeUntil)}` : ''}
+                {planInfo.status === 'active' && planInfo.activeUntil ? ` - próxima cobrança em ${fmtDate(planInfo.activeUntil)}` : ''}
               </div>
             )}
             {billing.subscription?.status && (
               <div className="small muted">
                 Assinatura Mercado Pago: {subscriptionStatusLabel}
-                {amountLabel ? ` ? ${amountLabel}/m?s` : ''}
-                {nextChargeLabel ? ` ? pr?ximo d?bito em ${nextChargeLabel}` : ''}
+                {amountLabel ? ` ? ${amountLabel}/mês` : ''}
+                {nextChargeLabel ? ` ? próximo débito em ${nextChargeLabel}` : ''}
               </div>
             )}
             {billingLoading && (
@@ -757,7 +844,11 @@ export default function Configuracoes() {
                 ) : (
                   <div className="box" style={{ borderColor: '#fde68a', background: '#fffbeb' }}>
                     <strong>Você está no plano Starter</strong>
-                    <div className="small muted">Ative 7 dias grátis do Pro para desbloquear campanhas no WhatsApp e relatórios avançados.</div>
+                    {hasPaidHistory ? (
+                      <div className="small muted">Teste grátis indisponível: já houve uma assinatura contratada nesta conta.</div>
+                    ) : trialEligible ? (
+                      <div className="small muted">Ative 7 dias grátis do Pro para desbloquear campanhas no WhatsApp e relatórios avançados.</div>
+                    ) : null}
                   </div>
                 )}
                 {/* Resumo de recursos do plano atual */}
@@ -765,9 +856,18 @@ export default function Configuracoes() {
                   <div><strong>Recursos do plano:</strong></div>
                   <div>WhatsApp: lembretes{planInfo.plan !== 'starter' ? ' + campanhas' : ''}</div>
                   <div>Relatórios: {planInfo.allowAdvanced ? 'avançados' : 'básicos'}</div>
+                  <div style={{ marginTop: 6 }}>
+                    <strong>Como funciona a contratação:</strong> você será redirecionado ao Mercado Pago para confirmar a assinatura.
+                    Cobrança recorrente mensal, sem fidelidade. Upgrades liberam recursos na hora; o valor muda no próximo ciclo.
+                  </div>
                 </div>
+                {hasActiveSubscription && (
+                  <div className="notice notice--info" role="status" style={{ marginTop: 8 }}>
+                    Sua assinatura já está ativa{planInfo.activeUntil ? ` até ${fmtDate(planInfo.activeUntil)}` : ''}. Para migrar para o Pro, use o botão abaixo.
+                  </div>
+                )}
                 <div className="row" style={{ gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
-                  {!planInfo.trialEnd && (
+                  {!planInfo.trialEnd && trialEligible && (
                     <button
                       className="btn btn--outline"
                       type="button"
@@ -780,10 +880,18 @@ export default function Configuracoes() {
                   <button
                     className="btn btn--primary"
                     type="button"
-                    onClick={() => handleCheckout('pro')}
+                    onClick={() => {
+                      if (hasActiveSubscription) {
+                        handleChangePlan('pro');
+                      } else {
+                        handleCheckout('pro');
+                      }
+                    }}
                     disabled={checkoutLoading}
                   >
-                    {checkoutLoading ? <span className="spinner" /> : 'Contratar plano Pro'}
+                    {checkoutLoading
+                      ? <span className="spinner" />
+                      : (hasActiveSubscription ? 'Alterar para plano Pro' : 'Contratar plano Pro')}
                   </button>
                   <Link className="btn btn--outline" to="/planos">Conhecer planos</Link>
                 </div>
@@ -995,6 +1103,10 @@ export default function Configuracoes() {
     checkoutError,
     startTrial,
     handleCheckout,
+    handleChangePlan,
+    hasPaidHistory,
+    trialEligible,
+    hasActiveSubscription,
   ]);
 
   return (
@@ -1021,6 +1133,53 @@ export default function Configuracoes() {
           </div>
         );
       })}
+      {changePlanTarget && (
+        <Modal
+          title={`Confirmar alteração para ${planLabel(changePlanTarget)}`}
+          onClose={closeChangePlanModal}
+          actions={[
+            <button
+              key="cancel"
+              type="button"
+              className="btn btn--outline"
+              onClick={closeChangePlanModal}
+              disabled={changePlanSubmitting}
+            >
+              Cancelar
+            </button>,
+            <button
+              key="confirm"
+              type="button"
+              className="btn btn--primary"
+              onClick={confirmChangePlan}
+              disabled={changePlanSubmitting}
+            >
+              {changePlanSubmitting ? <span className="spinner" /> : 'Confirmar alteração'}
+            </button>,
+          ]}
+        >
+          <p className="muted">
+            Informe sua senha para seguir com a mudança para <strong>{planLabel(changePlanTarget)}</strong>.
+            Upgrades liberam recursos imediatamente e a cobrança do novo valor acontece no próximo ciclo. Downgrades passam a valer no ciclo seguinte, desde que os limites sejam atendidos.
+          </p>
+          <label className="label" style={{ marginTop: 12 }}>
+            <span>Senha</span>
+            <input
+              className="input"
+              type="password"
+              value={changePlanPassword}
+              onChange={(e) => setChangePlanPassword(e.target.value)}
+              autoFocus
+              disabled={changePlanSubmitting}
+            />
+          </label>
+          {changePlanError && (
+            <div className="notice notice--error" role="alert" style={{ marginTop: 12 }}>
+              {changePlanError}
+            </div>
+          )}
+        </Modal>
+      )}
     </div>
   );
 }

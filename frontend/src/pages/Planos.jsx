@@ -162,7 +162,7 @@ const PRICING_PLANS = [
     key: 'pro',
     title: 'Pro',
     subtitle: 'O melhor custo-benefício',
-    prices: { mensal: '99,00', anual: '990,00' },
+    prices: { mensal: '49,90', anual: '499,00' },
     features: [
       'Tudo do Starter, sem limites',
       'Equipe completa e múltiplas agendas',
@@ -421,3 +421,4 @@ export default function Planos() {
     </div>
   );
 }
+

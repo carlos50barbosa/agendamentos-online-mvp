@@ -51,6 +51,7 @@ export const config = {
       accessToken: getAny('MERCADOPAGO_ACCESS_TOKEN', 'MP_ACCESS_TOKEN'),
       publicKey: getAny('MERCADOPAGO_PUBLIC_KEY', 'MP_PUBLIC_KEY'),
       webhookSecret: getAny('MERCADOPAGO_WEBHOOK_SECRET', 'MP_WEBHOOK_SECRET'),
+      webhookSecret2: getAny('MERCADOPAGO_WEBHOOK_SECRET_2', 'MP_WEBHOOK_SECRET_2'),
       successUrl: getAny('MERCADOPAGO_SUCCESS_URL') || null,
       failureUrl: getAny('MERCADOPAGO_FAILURE_URL') || null,
       pendingUrl: getAny('MERCADOPAGO_PENDING_URL') || null,
@@ -60,4 +61,3 @@ export const config = {
 }
 
 export const env = { getAny, requireAny }
-
