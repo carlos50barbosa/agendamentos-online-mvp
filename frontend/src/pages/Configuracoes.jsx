@@ -92,6 +92,8 @@ export default function Configuracoes() {
   const [checkoutLoading, setCheckoutLoading] = useState(false);
   const [checkoutError, setCheckoutError] = useState('');
   const checkoutIntentRef = useRef(false);
+  // Mensagens pós-checkout (retorno do Mercado Pago)
+  const [checkoutNotice, setCheckoutNotice] = useState({ kind: '', message: '', syncing: false });
   // Contagem simples para pré-validação de downgrade (serviços)
   const [serviceCount, setServiceCount] = useState(null);
   const [professionalCount, setProfessionalCount] = useState(null);
@@ -264,6 +266,38 @@ export default function Configuracoes() {
         const preId = url.searchParams.get('preapproval_id');
         if (preId) {
           await Api.billingSync(preId);
+        }
+        // Banner pós-retorno: checkout=sucesso|erro|pendente
+        const chk = (url.searchParams.get('checkout') || '').toLowerCase();
+        if (chk === 'sucesso') {
+          setCheckoutNotice({ kind: 'info', message: 'Pagamento aprovado. Sincronizando sua assinatura...', syncing: true });
+          // Poll curto para refletir ativação
+          const tryPoll = async () => {
+            let activated = false;
+            for (let i = 0; i < 6; i++) {
+              try {
+                const data = await Api.billingSubscription();
+                const planStatus = String(data?.plan?.status || '').toLowerCase();
+                const subStatus = String(data?.subscription?.status || '').toLowerCase();
+                if (planStatus === 'active' || subStatus === 'active' || subStatus === 'authorized') {
+                  activated = true;
+                  break;
+                }
+              } catch {}
+              await new Promise((r) => setTimeout(r, 1500));
+            }
+            if (activated) setCheckoutNotice({ kind: 'success', message: 'Assinatura atualizada com sucesso!', syncing: false });
+            else setCheckoutNotice({ kind: 'warn', message: 'Estamos processando sua assinatura. Ela deve atualizar em instantes.', syncing: false });
+          };
+          try { await tryPoll(); } catch {}
+          // Limpa o parâmetro da URL após tratar
+          try { url.searchParams.delete('checkout'); window.history.replaceState({}, '', url.toString()); } catch {}
+        } else if (chk === 'erro') {
+          setCheckoutNotice({ kind: 'error', message: 'O pagamento não foi concluído. Tente novamente.', syncing: false });
+          try { url.searchParams.delete('checkout'); window.history.replaceState({}, '', url.toString()); } catch {}
+        } else if (chk === 'pendente') {
+          setCheckoutNotice({ kind: 'warn', message: 'Pagamento pendente de confirmação.', syncing: false });
+          try { url.searchParams.delete('checkout'); window.history.replaceState({}, '', url.toString()); } catch {}
         }
       } catch {}
       try {
@@ -829,6 +863,11 @@ export default function Configuracoes() {
             {planInfo.status === 'pending' && (
               <div className="notice notice--warn" role="alert">
                 <strong>Pagamento pendente.</strong> Finalize o checkout para concluir a contratação.
+              </div>
+            )}
+            {checkoutNotice.message && (
+              <div className={`notice notice--${checkoutNotice.kind || 'info'}`} role="status">
+                {checkoutNotice.syncing ? (<><span className="spinner" /> {checkoutNotice.message}</>) : checkoutNotice.message}
               </div>
             )}
             {checkoutError && (

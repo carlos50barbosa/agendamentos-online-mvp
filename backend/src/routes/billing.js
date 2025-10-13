@@ -232,6 +232,33 @@ router.get('/webhook/health', (req, res) => {
   return res.status(200).json(base)
 })
 
+// Callback de sucesso do Mercado Pago (back_url): tenta sincronizar e redireciona ao front
+router.get('/callback', async (req, res) => {
+  try {
+    const preapprovalId = String(req.query.preapproval_id || req.query.id || req.query['data.id'] || '').trim()
+    if (preapprovalId) {
+      try {
+        await syncMercadoPagoPreapproval(preapprovalId, { action: 'callback' })
+      } catch (e) {
+        console.warn('[billing:callback] sync failed', preapprovalId, e?.message || e)
+      }
+    }
+  } catch (e) {
+    console.warn('[billing:callback] error', e)
+  }
+
+  // Redireciona para a tela de configurações (ou "next" fornecido)
+  const FRONT_BASE = String(process.env.FRONTEND_BASE_URL || process.env.APP_URL || 'http://localhost:3001').replace(/\/$/, '')
+  const next = String(req.query.next || '').trim()
+  const fallback = `${FRONT_BASE}/configuracoes?checkout=sucesso`
+  const target = next && /^https:\/\//i.test(next) ? next : fallback
+  try {
+    return res.redirect(302, target)
+  } catch {
+    return res.status(302).set('Location', target).end()
+  }
+})
+
 // Utilitário: sincroniza manualmente uma assinatura a partir do preapproval_id (ex.: retornado no back_url)
 router.get('/sync', auth, isEstabelecimento, async (req, res) => {
   try {

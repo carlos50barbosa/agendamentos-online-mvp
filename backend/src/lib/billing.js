@@ -285,9 +285,17 @@ export async function createMercadoPagoCheckout({
     tokenEnv: isTestToken ? 'TEST' : 'LIVE',
     payerIsTest: Boolean(testPayerEmail),
   })
+  // Callback: preferir passar pelo backend para sincronizar imediatamente (fallback ao webhook)
+  const FRONT_BASE = String(process.env.FRONTEND_BASE_URL || process.env.APP_URL || 'http://localhost:3001').replace(/\/$/, '')
+  const isDevFront = /^(https?:\/\/)?(localhost|127\.0\.0\.1):3001$/i.test(FRONT_BASE)
+  const DEFAULT_API_BASE = isDevFront ? 'http://localhost:3002' : `${FRONT_BASE}/api`
+  const API_BASE = String(process.env.API_BASE_URL || process.env.BACKEND_BASE_URL || DEFAULT_API_BASE).replace(/\/$/, '')
+  const uiSuccess = pickValidUrl(config.billing?.mercadopago?.successUrl) || `${FRONT_BASE}/configuracoes?checkout=sucesso`
+  const callbackUrl = `${API_BASE}/billing/callback?next=${encodeURIComponent(uiSuccess)}`
+
   const planBody = {
     reason: `Agendamentos Online - Plano ${getPlanLabel(normalizedPlan)}`,
-    back_url: pickValidUrl(config.billing?.mercadopago?.successUrl) || undefined,
+    back_url: callbackUrl,
     auto_recurring: {
       frequency: cycleCfg.frequency,
       frequency_type: cycleCfg.frequencyType,

@@ -1812,19 +1812,19 @@ export default function NovoAgendamento() {
         <Modal onClose={() => setModal((m) => ({ ...m, isOpen: false }))}>
           <h3>Confirmar agendamento?</h3>
           <div className="confirmation-details">
-            <div className="confirmation-details__item"><span className="confirmation-details__label">Estabelecimento:</span><span className="confirmation-details__value">{selectedEstablishmentName}</span></div>
-            <div className="confirmation-details__item"><span className="confirmation-details__label">Serviço:</span><span className="confirmation-details__value">{ServiceHelpers.title(selectedService)}</span></div>
+            <div className="confirmation-details__item"><span className="confirmation-details__label">Estabelecimento: </span><span className="confirmation-details__value">{selectedEstablishmentName}</span></div>
+            <div className="confirmation-details__item"><span className="confirmation-details__label">Serviço: </span><span className="confirmation-details__value">{ServiceHelpers.title(selectedService)}</span></div>
             {selectedProfessional && (
-              <div className="confirmation-details__item"><span className="confirmation-details__label">Profissional:</span><span className="confirmation-details__value">{selectedProfessional?.nome || selectedProfessional?.name}</span></div>
+              <div className="confirmation-details__item"><span className="confirmation-details__label">Profissional: </span><span className="confirmation-details__value">{selectedProfessional?.nome || selectedProfessional?.name}</span></div>
             )}
             {serviceDuration > 0 && (
-              <div className="confirmation-details__item"><span className="confirmation-details__label">Duração:</span><span className="confirmation-details__value">{serviceDuration} minutos</span></div>
+              <div className="confirmation-details__item"><span className="confirmation-details__label">Duração: </span><span className="confirmation-details__value">{serviceDuration} minutos</span></div>
             )}
             {servicePrice !== 'R$ 0,00' && (
-              <div className="confirmation-details__item"><span className="confirmation-details__label">Preço:</span><span className="confirmation-details__value">{servicePrice}</span></div>
+              <div className="confirmation-details__item"><span className="confirmation-details__label">Preço: </span><span className="confirmation-details__value">{servicePrice}</span></div>
             )}
-            <div className="confirmation-details__item"><span className="confirmation-details__label">Data:</span><span className="confirmation-details__value">{DateHelpers.formatDateFull(selectedSlot.datetime)}</span></div>
-            <div className="confirmation-details__item"><span className="confirmation-details__label">Horário:</span><span className="confirmation-details__value">
+            <div className="confirmation-details__item"><span className="confirmation-details__label">Data: </span><span className="confirmation-details__value">{DateHelpers.formatDateFull(selectedSlot.datetime)}</span></div>
+            <div className="confirmation-details__item"><span className="confirmation-details__label">Horário: </span><span className="confirmation-details__value">
               {DateHelpers.formatTime(selectedSlot.datetime)}{endTimeLabel ? ` • ${endTimeLabel}` : ''}
             </span></div>
           </div>
