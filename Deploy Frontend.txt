@@ -1,7 +1,7 @@
 # Subir no GITHUB
 cd /opt/apps/agendamentos-online-mvp
 git add .
-git commit -m "Atualização 07-10-2025 (Ajustes nas alterações de planos)"
+git commit -m "Atualização 18-10-2025 (Ajustes nas alterações de planos)"
 git push origin main
 
 ---------------------------------------------

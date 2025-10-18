@@ -250,12 +250,30 @@ router.get('/callback', async (req, res) => {
   // Redireciona para a tela de configurações (ou "next" fornecido)
   const FRONT_BASE = String(process.env.FRONTEND_BASE_URL || process.env.APP_URL || 'http://localhost:3001').replace(/\/$/, '')
   const next = String(req.query.next || '').trim()
-  const fallback = `${FRONT_BASE}/configuracoes?checkout=sucesso`
-  const target = next && /^https:\/\//i.test(next) ? next : fallback
+  // Sempre sinaliza sucesso e, quando disponível, inclui preapproval_id para o front sincronizar também
+  const fallbackUrl = new URL(`${FRONT_BASE}/configuracoes`)
+  fallbackUrl.searchParams.set('checkout', 'sucesso')
+  const pre = String(req.query.preapproval_id || req.query.id || req.query['data.id'] || '').trim()
+  if (pre) fallbackUrl.searchParams.set('preapproval_id', pre)
+
+  let targetUrl
+  if (next && /^https:\/\//i.test(next)) {
+    try {
+      const u = new URL(next)
+      if (pre) u.searchParams.set('preapproval_id', pre)
+      // Garante o banner de sucesso no front (se ele preservar o parâmetro)
+      if (!u.searchParams.has('checkout')) u.searchParams.set('checkout', 'sucesso')
+      targetUrl = u.toString()
+    } catch {
+      targetUrl = fallbackUrl.toString()
+    }
+  } else {
+    targetUrl = fallbackUrl.toString()
+  }
   try {
-    return res.redirect(302, target)
+    return res.redirect(302, targetUrl)
   } catch {
-    return res.status(302).set('Location', target).end()
+    return res.status(302).set('Location', targetUrl).end()
   }
 })
 
@@ -265,7 +283,13 @@ router.get('/sync', auth, isEstabelecimento, async (req, res) => {
     const preapprovalId = String(req.query.preapproval_id || req.query.id || '').trim()
     if (!preapprovalId) return res.status(400).json({ error: 'missing_preapproval_id' })
     const result = await syncMercadoPagoPreapproval(preapprovalId, { action: 'manual_sync' })
-    return res.json({ ok: true, plan_status: result.planStatus })
+    const det = {
+      status: result?.preapproval?.status || null,
+      status_detail: result?.preapproval?.status_detail || null,
+      reason: result?.preapproval?.reason || null,
+      preapproval_id: result?.preapproval?.id || preapprovalId,
+    }
+    return res.json({ ok: true, plan_status: result.planStatus, preapproval: det })
   } catch (e) {
     console.error('GET /billing/sync', e)
     return res.status(400).json({ error: 'sync_failed', message: e?.message || String(e) })

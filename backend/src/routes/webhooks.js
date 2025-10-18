@@ -1,5 +1,6 @@
 // backend/src/routes/webhooks.js
 import express from 'express';
+import { syncMercadoPagoPreapproval } from '../lib/billing.js';
 export const router = express.Router();
 
 // se você for validar assinatura do MP, salve o raw body:
@@ -15,19 +16,39 @@ export function mountWebhooks(app, withApiPrefix = false) {
 
   app.post(paths, async (req, res) => {
     try {
-      // Mercado Pago manda query params (data.id, type, etc.)
-      const { 'data.id': dataId, type } = req.query;
-      console.log('[MP] query:', req.query);
-      console.log('[MP] headers:', req.headers);
-      console.log('[MP] body:', req.body);
+      // Mercado Pago envia identificadores por query e/ou body
+      const q = req.query || {};
+      const b = req.body || {};
+      const resourceId =
+        q['data.id'] ||
+        b?.data?.id ||
+        q.id ||
+        b.id ||
+        b.resource ||
+        null;
 
-      // TODO: validar assinatura (x-signature/x-request-id) aqui se habilitado
+      console.log('[MP] webhook hit', { path: paths, query: q, headers: req.headers });
 
-      // TODO: enfileirar/confirmar processamento de dataId
-      res.status(200).send('OK'); // responda rápido para evitar retries
+      if (!resourceId) {
+        console.warn('[MP] webhook without resource id; skipping sync');
+        return res.status(200).send('OK');
+      }
+
+      // Sincroniza imediatamente a assinatura/preapproval.
+      // Observação: a verificação de assinatura completa existe em /billing/webhook.
+      try {
+        await syncMercadoPagoPreapproval(String(resourceId), b && Object.keys(b).length ? b : { action: 'mp_webhook' });
+        console.log('[MP] webhook synced', resourceId);
+      } catch (e) {
+        console.error('[MP] webhook sync failed', resourceId, e?.message || e);
+      }
+
+      // Responda rápido para evitar retries agressivos do MP
+      res.status(200).send('OK');
     } catch (e) {
       console.error('[MP] webhook error', e);
-      res.status(200).send('OK'); // ainda devolva 200 para o MP não retentar sem fim
+      // Ainda devolva 200 para o MP não retentar sem fim
+      res.status(200).send('OK');
     }
   });
 

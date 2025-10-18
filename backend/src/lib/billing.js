@@ -269,7 +269,8 @@ export async function createMercadoPagoCheckout({
     throw new Error('Configure MERCADOPAGO_TEST_PAYER_EMAIL com um e-mail de usuario de teste do Mercado Pago')
   }
 
-  const payerEmail = testPayerEmail || estabelecimento.email
+  // Em produção (token LIVE), nunca use o MERCADOPAGO_TEST_PAYER_EMAIL
+  const payerEmail = isTestToken ? (testPayerEmail || estabelecimento.email) : estabelecimento.email
   if (!payerEmail) {
     throw new Error('Email do pagador nao disponivel. Informe MERCADOPAGO_TEST_PAYER_EMAIL ou cadastre um email para o estabelecimento.')
   }
@@ -283,7 +284,7 @@ export async function createMercadoPagoCheckout({
     amount: amountNum,
     currency: BILLING_CURRENCY,
     tokenEnv: isTestToken ? 'TEST' : 'LIVE',
-    payerIsTest: Boolean(testPayerEmail),
+    payerIsTest: Boolean(isTestToken && testPayerEmail),
   })
   // Callback: preferir passar pelo backend para sincronizar imediatamente (fallback ao webhook)
   const FRONT_BASE = String(process.env.FRONTEND_BASE_URL || process.env.APP_URL || 'http://localhost:3001').replace(/\/$/, '')
