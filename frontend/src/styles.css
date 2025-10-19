@@ -1287,8 +1287,8 @@ button.danger:disabled,
     border-right: 0; border-top: 1px solid var(--border);
     background: var(--surface); z-index: 60;
     transform: none;
-    padding: 12px 16px calc(18px + env(safe-area-inset-bottom, 0px));
-    box-shadow: 0 -12px 32px rgba(15, 23, 42, 0.12);
+    padding: 12px 12px calc(18px + env(safe-area-inset-bottom, 0px));
+    box-shadow: 0 -12px 26px rgba(15, 23, 42, 0.12);
   }
   .sidebar .mainnav{
     display: flex !important;
@@ -1300,7 +1300,8 @@ button.danger:disabled,
     width: 100%;
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    align-items: stretch;
+    gap: 10px;
   }
   .sidebar .brand,
   .sidebar .profilebox,
@@ -1308,34 +1309,35 @@ button.danger:disabled,
   .mainnav--vertical{
     flex-direction: column;
     width: 100%;
-    gap: 12px;
+    gap: 10px;
   }
   .sidelist{
     width: 100%;
     display: flex;
-    flex-wrap: wrap;
-    justify-content: center;
-    gap: 10px;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    justify-content: flex-start;
+    gap: 8px;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
   }
   .sidelist__section{
     display: flex;
-    flex-wrap: wrap;
-    justify-content: center;
-    gap: 10px;
-    width: 100%;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    gap: 8px;
   }
   .sidelist__item{
-    flex: 0 1 88px;
-    min-width: 72px;
-    min-height: 58px;
-    padding: 8px 6px;
-    border-radius: 12px;
-    background: rgba(148, 163, 184, 0.08);
+    flex: 0 0 72px;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
     gap: 4px;
+    min-height: 60px;
+    padding: 8px 6px;
+    border-radius: 12px;
+    background: rgba(148, 163, 184, 0.08);
     text-align: center;
     color: var(--text) !important;
   }
@@ -1347,7 +1349,7 @@ button.danger:disabled,
   .sidelist__item > span{
     font-size: 11px;
     line-height: 1.2;
-    max-width: 88px;
+    max-width: 80px;
     white-space: normal;
   }
   .sidebar-toggle,
