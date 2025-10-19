@@ -100,12 +100,16 @@ export default function ServicosEstabelecimento() {
 
   // Validacao simples
   const formInvalid =
-    !form.nome.trim() || form.duracao_min <= 0 || form.preco_centavos <= 0;
+    !form.nome.trim() ||
+    form.duracao_min <= 0 ||
+    form.preco_centavos <= 0 ||
+    !Array.isArray(selectedProsNew) ||
+    !selectedProsNew.length;
 
   async function add(e) {
     e.preventDefault();
     if (formInvalid) {
-      showToast("error", "Preencha os campos corretamente.");
+      showToast("error", "Preencha nome, duração, preço e selecione pelo menos um profissional.");
       return;
     }
     setSaving(true);
@@ -117,9 +121,7 @@ export default function ServicosEstabelecimento() {
         preco_centavos: form.preco_centavos,
         ativo: form.ativo,
       };
-      if (Array.isArray(selectedProsNew) && selectedProsNew.length) {
-        payload.professionalIds = selectedProsNew;
-      }
+      payload.professionalIds = selectedProsNew;
       const novo = await Api.servicosCreate(payload);
       setList((curr) => [novo, ...curr]);
       setForm({ nome: "", descricao: "", duracao_min: 30, preco_centavos: 0, ativo: true });
@@ -130,6 +132,10 @@ export default function ServicosEstabelecimento() {
       if (err?.data?.error === 'plan_limit') {
         setPlanLimitMessage(err?.message || 'Seu plano atual nao permite adicionar mais servicos. Atualize o plano para continuar.');
         setPlanLimitOpen(true);
+      } else if (err?.data?.error === 'missing_professionals') {
+        showToast('error', err?.data?.message || 'Selecione pelo menos um profissional.');
+      } else if (err?.data?.message) {
+        showToast('error', err.data.message);
       } else {
         showToast("error", "Erro ao salvar o servico.");
       }
@@ -161,8 +167,14 @@ export default function ServicosEstabelecimento() {
 
   async function saveEdit(){
     if (!editItem) return;
-    if (!editForm.nome.trim() || !editForm.duracao_min || !editForm.preco_centavos){
-      showToast('error', 'Preencha os campos corretamente.');
+    if (
+      !editForm.nome.trim() ||
+      !editForm.duracao_min ||
+      !editForm.preco_centavos ||
+      !Array.isArray(selectedProsEdit) ||
+      !selectedProsEdit.length
+    ){
+      showToast('error', 'Preencha nome, duração, preço e selecione pelo menos um profissional.');
       return;
     }
     setEditSaving(true);
