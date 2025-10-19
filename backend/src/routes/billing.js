@@ -165,12 +165,36 @@ router.post('/checkout-session', auth, isEstabelecimento, async (req, res) => {
 router.get('/subscription', auth, isEstabelecimento, async (req, res) => {
   try {
     const planContext = await getPlanContext(req.user.id)
-    const subscription = await getLatestSubscriptionForEstabelecimento(req.user.id)
     const history = await listSubscriptionsForEstabelecimento(req.user.id)
+
+    // Escolhe uma assinatura "efetiva" priorizando status ativos
+    const priority = {
+      active: 60,
+      authorized: 50,
+      paused: 40,
+      past_due: 35,
+      pending: 20,
+      canceled: 10,
+      expired: 5,
+    }
+    let effective = null
+    for (const s of history) {
+      const key = String(s?.status || '').toLowerCase()
+      if (!effective) { effective = s; continue }
+      const pA = priority[key] || 0
+      const pB = priority[String(effective.status || '').toLowerCase()] || 0
+      if (pA > pB) {
+        effective = s
+      } else if (pA === pB) {
+        // desempate pelo id mais recente
+        if (Number(s.id || 0) > Number(effective.id || 0)) effective = s
+      }
+    }
+    if (!effective && history.length) effective = history[0]
 
     return res.json({
       plan: serializePlanContext(planContext),
-      subscription: serializeSubscription(subscription),
+      subscription: serializeSubscription(effective),
       history: history.map(serializeSubscription),
     })
   } catch (error) {
