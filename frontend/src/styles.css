@@ -1280,15 +1280,15 @@ button.danger:disabled,
   .row.spread .input,
   .row.spread select{ height: 36px; padding: 0 10px; font-size: 13px; }
 
-  /* Sidebar se torna um painel fixo compacto no rodapé */
+  /* Barra inferior (mobile) ajustada para exibir todos os itens compactos */
   .sidebar{
     position: fixed; left: 0; right: 0; bottom: 0; top: auto;
     width: 100%;
     border-right: 0; border-top: 1px solid var(--border);
     background: var(--surface); z-index: 60;
-    transform: none; overflow: visible;
-    padding: 12px 12px calc(16px + env(safe-area-inset-bottom, 0px));
-    box-shadow: 0 -12px 26px rgba(15, 23, 42, 0.12);
+    transform: none;
+    padding: 14px 16px calc(18px + env(safe-area-inset-bottom, 0px));
+    box-shadow: 0 -12px 32px rgba(15, 23, 42, 0.16);
   }
   .sidebar .mainnav{
     display: flex !important;
@@ -1301,7 +1301,6 @@ button.danger:disabled,
     flex-direction: column;
     align-items: stretch;
     gap: 12px;
-    overflow: visible;
   }
   .sidebar .brand,
   .sidebar .profilebox,
@@ -1314,37 +1313,37 @@ button.danger:disabled,
   }
   .sidelist{
     width: 100%;
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(88px, 1fr));
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
     gap: 10px;
   }
-  .sidelist__section{ display: contents; }
-  .sidelist__item{
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 4px;
-    min-height: 64px;
-    padding: 10px 6px;
-    border-radius: 14px;
-    color: var(--text) !important;
-    text-align: center;
+  .sidelist__section{
+    display: contents;
   }
+  .sidelist__item{
+    flex: 0 0 72px;
+    min-width: 72px;
+    min-height: 60px;
+    padding: 8px 6px;
+    border-radius: 14px;
+    background: rgba(148, 163, 184, 0.08);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 4px;
+    text-align: center;
+    color: var(--text) !important;
+  }
+  .sidelist__item.active{ background: rgba(99, 102, 241, 0.18); color: var(--brand-strong) !important; }
   .sidelist__icon{ width: 22px; height: 22px; stroke: currentColor; stroke-width: 2.1; }
   .sidelist__item > span{
-    display: block;
-    font-size: 12px;
-    line-height: 1.25;
-    max-width: 100%;
+    font-size: 11px; line-height: 1.2;
+    max-width: 80px;
     white-space: normal;
-    overflow: hidden;
-    text-overflow: ellipsis;
   }
   .sidebar-toggle,
   .sidebar-overlay{ display: none !important; }
   .app-shell.is-collapsed .sidebar{ transform: none; }
-  .app-main{ padding-bottom: calc(140px + env(safe-area-inset-bottom, 0px)); }
+  .app-main{ padding-bottom: calc(132px + env(safe-area-inset-bottom, 0px)); }
 
   html, body{ font-size: 16px; }
   .dashboard-narrow{ font-size: 16px; }
