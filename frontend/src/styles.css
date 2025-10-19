@@ -1373,6 +1373,7 @@ button.danger:disabled,
     flex-wrap: wrap;
     gap: 8px;
     overflow: visible;
+    padding-bottom: 8px;
   }
   .sidebar.sidebar--client .sidelist{
     flex-wrap: wrap;
@@ -1385,13 +1386,15 @@ button.danger:disabled,
     display: contents;
   }
   .sidebar.sidebar--client .sidelist__item{
-    flex: 0 0 70px;
-    min-width: 70px;
+    flex: 0 0 72px;
+    min-width: 72px;
+    min-height: 52px;
+    padding: 8px 4px;
   }
   .sidebar.sidebar--client .sidelist__item > span{
-    max-width: 70px;
+    max-width: 72px;
     white-space: normal;
-    line-height: 1.1;
+    line-height: 1.15;
   }
 }
 
