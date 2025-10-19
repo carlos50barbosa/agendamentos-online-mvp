@@ -160,7 +160,10 @@ router.post('/', auth, isEstabelecimento, async (req, res) => {
     const preco = Number(preco_centavos ?? 0);
     const isActive = toBoolean(ativo);
     if (!nomeTrim || !duracao) {
-      return res.status(400).json({ error: 'invalid_payload', message: 'Informe nome e duracao.' });
+      return res.status(400).json({
+        error: 'invalid_payload',
+        message: 'Preencha nome, duração e selecione pelo menos um profissional para cadastrar o serviço.',
+      });
     }
 
     const planContext = await getPlanContext(estId);
@@ -202,7 +205,7 @@ router.post('/', auth, isEstabelecimento, async (req, res) => {
     if (!professionalIdsToLink.length) {
       return res.status(400).json({
         error: 'missing_professionals',
-        message: 'Associe pelo menos um profissional ao serviço.',
+        message: 'Selecione pelo menos um profissional para vincular a este serviço.',
       });
     }
 
