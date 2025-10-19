@@ -1373,6 +1373,7 @@ button.danger:disabled,
     flex-wrap: wrap;
     row-gap: 8px;
     overflow: visible;
+    gap: 8px;
   }
   .sidebar.sidebar--client .sidelist{
     flex-wrap: wrap;
@@ -1383,18 +1384,20 @@ button.danger:disabled,
   }
   .sidebar.sidebar--client .sidelist__section{
     width: 100%;
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(72px, 1fr));
-    gap: 8px;
+    display: flex;
+    flex-wrap: wrap;
     justify-content: center;
+    gap: 8px;
   }
   .sidebar.sidebar--client .sidelist__item{
-    flex: 1 1 auto;
-    min-width: 72px;
+    flex: 0 0 68px;
+    min-width: 68px;
+    max-width: 84px;
   }
   .sidebar.sidebar--client .sidelist__item > span{
-    max-width: none;
+    max-width: 100%;
     white-space: normal;
+    line-height: 1.1;
   }
 }
 
