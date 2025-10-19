@@ -1299,22 +1299,23 @@ button.danger:disabled,
   /* Organiza conteúdo horizontalmente */
   .sidebar__inner{
     height: 100%; padding: 6px 10px;
-    display: flex; flex-direction: row; align-items: center; justify-content: space-around;
-    gap: 0; overflow: visible; /* evita clipar ícones */
+    display: flex; flex-direction: row; align-items: center; justify-content: center;
+    gap: 6px; overflow: visible; flex-wrap: wrap; row-gap: 10px;
   }
   /* Esconde elementos não essenciais SOMENTE na barra inferior (sidebar no mobile) */
   .sidebar .brand,
   .sidebar .profilebox,
   .sidebar .sidelist__heading{ display: none !important; }
   /* Navegação vira horizontal */
-  .mainnav--vertical{ flex-direction: row; align-items: center; width: 100%; }
-  .sidelist{ flex-direction: row; gap: 8px; align-items: center; width: 100%; justify-content: space-around; }
-  .sidelist__section{ display: flex; flex-direction: row; gap: 8px; }
+  .mainnav--vertical{ flex-direction: row; align-items: center; width: 100%; flex-wrap: wrap; justify-content: center; gap: 6px; }
+  .sidelist{ flex-direction: row; gap: 6px; align-items: center; width: 100%; justify-content: center; flex-wrap: wrap; }
+  .sidelist__section{ display: flex; flex-direction: row; gap: 6px; flex-wrap: wrap; justify-content: center; }
   .sidelist__item{
     width: auto; padding: 6px; border-radius: 10px;
     display: inline-flex; flex-direction: column; align-items: center; justify-content: center;
     gap: 2px;
     min-width: 44px; min-height: 44px; /* alvo de toque acessível */
+    flex: 1 1 72px; max-width: 92px;
     color: var(--text) !important;
     text-align: center;
   }
