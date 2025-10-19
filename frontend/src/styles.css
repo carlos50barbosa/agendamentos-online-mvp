@@ -1298,24 +1298,51 @@ button.danger:disabled,
   }
   /* Organiza conteúdo horizontalmente */
   .sidebar__inner{
-    height: 100%; padding: 6px 10px;
-    display: flex; flex-direction: row; align-items: center; justify-content: center;
-    gap: 6px; overflow: visible; flex-wrap: wrap; row-gap: 10px;
+    height: 100%;
+    padding: 6px;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 4px;
+    overflow-x: auto;
+    overflow-y: hidden;
   }
   /* Esconde elementos não essenciais SOMENTE na barra inferior (sidebar no mobile) */
   .sidebar .brand,
   .sidebar .profilebox,
   .sidebar .sidelist__heading{ display: none !important; }
   /* Navegação vira horizontal */
-  .mainnav--vertical{ flex-direction: row; align-items: center; width: 100%; flex-wrap: wrap; justify-content: center; gap: 6px; }
-  .sidelist{ flex-direction: row; gap: 6px; align-items: center; width: 100%; justify-content: center; flex-wrap: wrap; }
-  .sidelist__section{ display: flex; flex-direction: row; gap: 6px; flex-wrap: wrap; justify-content: center; }
+  .mainnav--vertical{
+    flex-direction: row;
+    align-items: center;
+    width: 100%;
+    gap: 4px;
+  }
+  .sidelist{
+    flex-direction: row;
+    gap: 0;
+    align-items: center;
+    width: auto;
+    justify-content: flex-start;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+  }
+  .sidelist::-webkit-scrollbar,
+  .sidebar__inner::-webkit-scrollbar{ display: none; height: 0; }
+  .sidelist__section{
+    display: flex;
+    flex-direction: row;
+    gap: 0;
+    align-items: center;
+  }
   .sidelist__item{
-    width: auto; padding: 6px; border-radius: 10px;
+    width: auto; padding: 6px 4px; border-radius: 10px;
     display: inline-flex; flex-direction: column; align-items: center; justify-content: center;
     gap: 2px;
-    min-width: 44px; min-height: 44px; /* alvo de toque acessível */
-    flex: 1 1 72px; max-width: 92px;
+    min-width: 60px; min-height: 44px; /* alvo de toque acessível */
+    flex: 0 0 64px;
     color: var(--text) !important;
     text-align: center;
   }
