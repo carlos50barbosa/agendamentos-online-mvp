@@ -1371,31 +1371,25 @@ button.danger:disabled,
   .sidebar.sidebar--client .sidebar__inner{
     justify-content: center;
     flex-wrap: wrap;
-    row-gap: 8px;
-    overflow: visible;
     gap: 8px;
+    overflow: visible;
   }
   .sidebar.sidebar--client .sidelist{
     flex-wrap: wrap;
-    width: 100%;
     justify-content: center;
     gap: 8px;
     overflow: visible;
+    width: 100%;
   }
   .sidebar.sidebar--client .sidelist__section{
-    width: 100%;
-    display: flex;
-    flex-wrap: wrap;
-    justify-content: center;
-    gap: 8px;
+    display: contents;
   }
   .sidebar.sidebar--client .sidelist__item{
-    flex: 0 0 68px;
-    min-width: 68px;
-    max-width: 84px;
+    flex: 0 0 70px;
+    min-width: 70px;
   }
   .sidebar.sidebar--client .sidelist__item > span{
-    max-width: 100%;
+    max-width: 70px;
     white-space: normal;
     line-height: 1.1;
   }
