@@ -1024,6 +1024,7 @@ export default function Configuracoes() {
               className="btn btn--outline btn--sm"
               type="button"
               onClick={async () => {
+                if (!confirm('Pausar a recorrência? Você pode retomar quando quiser.')) return;
                 setRecurringError(''); setRecurringNotice(''); setRecurringLoading(true);
                 try {
                   await Api.billingRecurringPause();
@@ -1363,4 +1364,3 @@ export default function Configuracoes() {
     </div>
   );
 }
-

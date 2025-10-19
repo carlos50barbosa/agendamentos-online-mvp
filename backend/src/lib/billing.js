@@ -145,9 +145,9 @@ function pickValidUrl(...candidates) {
 const MP_TO_PLAN_STATUS = {
   authorized: 'active',
   active: 'active',
-  paused: 'delinquent',
-  halted: 'delinquent',
-  stopped: 'delinquent',
+  paused: 'active',
+  halted: 'active',
+  stopped: 'canceled',
   cancelled: 'canceled',
   canceled: 'canceled',
   cancelled_by_collector: 'canceled',
@@ -212,16 +212,25 @@ async function persistUserFromSubscription(subscription, planStatus, preapproval
   const updates = []
   const values = []
 
-  if (planStatus) {
+  const normalizedCycle = subscription?.billingCycle ? normalizeBillingCycle(subscription.billingCycle) : null
+  const computedActiveUntil = preapproval ? computeActiveUntil(preapproval) : null
+  const effectiveActiveUntil = computedActiveUntil || subscription?.currentPeriodEnd || null
+  const now = new Date()
+  let nextPlanStatus = planStatus
+  if (planStatus === 'canceled' && effectiveActiveUntil && effectiveActiveUntil > now) {
+    nextPlanStatus = 'active'
+  }
+
+  if (nextPlanStatus) {
     updates.push('plan_status=?')
-    values.push(planStatus)
+    values.push(nextPlanStatus)
   }
 
   let planValue = null
-  let planCycleValue = subscription?.billingCycle ? normalizeBillingCycle(subscription.billingCycle) : null
-  if (planStatus === 'active') {
+  let planCycleValue = normalizedCycle
+  if (nextPlanStatus === 'active') {
     planValue = subscription.plan
-  } else if (planStatus === 'canceled' || planStatus === 'expired') {
+  } else if ((nextPlanStatus === 'canceled' || nextPlanStatus === 'expired') && (!effectiveActiveUntil || effectiveActiveUntil <= now)) {
     planValue = 'starter'
     planCycleValue = 'mensal'
   }
@@ -236,17 +245,18 @@ async function persistUserFromSubscription(subscription, planStatus, preapproval
     values.push(planCycleValue)
   }
 
-  if (planStatus !== 'trialing') {
+  if (nextPlanStatus !== 'trialing') {
     updates.push('plan_trial_ends_at=?')
     values.push(null)
   }
 
   updates.push('plan_active_until=?')
-  values.push(computeActiveUntil(preapproval))
+  values.push(effectiveActiveUntil)
 
   const subscriptionId = preapproval?.id || null
+  const shouldClearPlanSubscription = planStatus === 'canceled' || planStatus === 'expired'
   updates.push('plan_subscription_id=?')
-  values.push(planStatus === 'canceled' || planStatus === 'expired' ? null : subscriptionId)
+  values.push(shouldClearPlanSubscription ? null : subscriptionId)
 
   if (!updates.length) return
 
@@ -658,11 +668,12 @@ export async function syncMercadoPagoPreapproval(preapprovalId, eventPayload = n
     }
   }
 
+  const computedActiveUntil = computeActiveUntil(preapproval)
   const updates = {
     status: mapMpToSubscriptionStatus(preapproval.status || 'pending'),
     currency: (preapproval.auto_recurring?.currency_id || BILLING_CURRENCY).toUpperCase(),
     amountCents: Math.round(Number(preapproval.auto_recurring?.transaction_amount || subscription.amountCents / 100) * 100),
-    currentPeriodEnd: computeActiveUntil(preapproval),
+    currentPeriodEnd: computedActiveUntil || subscription.currentPeriodEnd || null,
     lastEventId: eventPayload?.id ? String(eventPayload.id) : eventPayload?.action || null,
     billingCycle: normalizeBillingCycle(subscription.billingCycle || derivedCycle),
   }

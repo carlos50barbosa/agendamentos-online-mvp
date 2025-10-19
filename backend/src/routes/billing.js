@@ -93,6 +93,23 @@ function verifyWebhookSignature(req, resourceId) {
   return { valid: matched, signature, ts, method, using_secret_index: usingSecretIndex, topics_tried: topicCandidates, request_id: requestId, variants }
 }
 
+function normalizeId(value) {
+  return String(value || '').trim()
+}
+
+async function resolveRecurringSubscription(estabelecimentoId, fallbackGatewayId) {
+  const history = await listSubscriptionsForEstabelecimento(estabelecimentoId)
+  const preferredStatuses = new Set(['active', 'authorized', 'paused', 'past_due'])
+  const preferred = history.find((item) => item.gatewaySubscriptionId && preferredStatuses.has(String(item.status || '').toLowerCase()))
+  if (preferred) return preferred
+  const normalizedFallback = normalizeId(fallbackGatewayId)
+  if (normalizedFallback) {
+    const match = history.find((item) => normalizeId(item.gatewaySubscriptionId) === normalizedFallback)
+    if (match) return match
+  }
+  return history.find((item) => item.gatewaySubscriptionId) || null
+}
+
 router.post('/checkout-session', auth, isEstabelecimento, async (req, res) => {
   try {
     const { plan, billing_cycle: rawCycle, successUrl, failureUrl, pendingUrl } = req.body || {}
@@ -498,8 +515,8 @@ router.post('/recurring/setup', auth, isEstabelecimento, async (req, res) => {
 // Pausar recorrência no cartão (preapproval)
 router.post('/recurring/pause', auth, isEstabelecimento, async (req, res) => {
   try {
-    const sub = await getLatestSubscriptionForEstabelecimento(req.user.id)
-    const preId = sub?.gatewaySubscriptionId || req.user?.plan_subscription_id || null
+    const sub = await resolveRecurringSubscription(req.user.id, req.user?.plan_subscription_id)
+    const preId = normalizeId(sub?.gatewaySubscriptionId || req.user?.plan_subscription_id || null)
     if (!preId) return res.status(409).json({ error: 'no_recurring', message: 'Nenhuma recorrência configurada.' })
     const result = await updateMercadoPagoPreapprovalStatus(preId, 'paused', 'recurring_pause')
     return res.json({ ok: true, status: result?.subscription?.status || null, preapproval: { id: result?.preapproval?.id || preId, status: result?.preapproval?.status || 'paused' } })
@@ -513,8 +530,8 @@ router.post('/recurring/pause', auth, isEstabelecimento, async (req, res) => {
 // Retomar recorrência
 router.post('/recurring/resume', auth, isEstabelecimento, async (req, res) => {
   try {
-    const sub = await getLatestSubscriptionForEstabelecimento(req.user.id)
-    const preId = sub?.gatewaySubscriptionId || req.user?.plan_subscription_id || null
+    const sub = await resolveRecurringSubscription(req.user.id, req.user?.plan_subscription_id)
+    const preId = normalizeId(sub?.gatewaySubscriptionId || req.user?.plan_subscription_id || null)
     if (!preId) return res.status(409).json({ error: 'no_recurring', message: 'Nenhuma recorrência configurada.' })
     const result = await updateMercadoPagoPreapprovalStatus(preId, 'authorized', 'recurring_resume')
     return res.json({ ok: true, status: result?.subscription?.status || null, preapproval: { id: result?.preapproval?.id || preId, status: result?.preapproval?.status || 'authorized' } })
@@ -528,8 +545,8 @@ router.post('/recurring/resume', auth, isEstabelecimento, async (req, res) => {
 // Cancelar recorrência
 router.post('/recurring/cancel', auth, isEstabelecimento, async (req, res) => {
   try {
-    const sub = await getLatestSubscriptionForEstabelecimento(req.user.id)
-    const preId = sub?.gatewaySubscriptionId || req.user?.plan_subscription_id || null
+    const sub = await resolveRecurringSubscription(req.user.id, req.user?.plan_subscription_id)
+    const preId = normalizeId(sub?.gatewaySubscriptionId || req.user?.plan_subscription_id || null)
     if (!preId) return res.status(409).json({ error: 'no_recurring', message: 'Nenhuma recorrência configurada.' })
     const result = await updateMercadoPagoPreapprovalStatus(preId, 'cancelled', 'recurring_cancel')
     return res.json({ ok: true, status: result?.subscription?.status || null, preapproval: { id: result?.preapproval?.id || preId, status: result?.preapproval?.status || 'cancelled' } })
