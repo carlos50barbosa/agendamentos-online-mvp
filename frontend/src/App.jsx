@@ -166,7 +166,6 @@ function Sidebar({ open, user }) {
   const [scrolled, setScrolled] = useState(false);
   const [el, setEl] = useState(null);
   const [logoutOpen, setLogoutOpen] = useState(false);
-  const [planLabel, setPlanLabel] = useState('');
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 2);
@@ -179,17 +178,6 @@ function Sidebar({ open, user }) {
       try { el.scrollTop = 0; } catch {}
     }
   }, [open, el]);
-
-  useEffect(() => {
-    try {
-      if (resolvedUser?.tipo === 'estabelecimento') {
-        const p = (localStorage.getItem('plan_current') || 'starter').toLowerCase();
-        setPlanLabel(p === 'pro' || p === 'premium' ? p.toUpperCase() : '');
-      } else {
-        setPlanLabel('');
-      }
-    } catch {}
-  }, [resolvedUser?.tipo]);
 
   const variantClass =
     resolvedUser?.tipo === 'cliente'
@@ -224,14 +212,6 @@ function Sidebar({ open, user }) {
                   {resolvedUser?.email && <div className="profilebox__sub">{resolvedUser.email}</div>}
                 </div>
               </div>
-              {planLabel && (
-                <div className="row" style={{ gap: 6 }}>
-                  <div className={`badge ${planLabel === 'PREMIUM' ? 'badge--premium' : 'badge--pro'}`} title="Plano atual">
-                    {planLabel}
-                  </div>
-                </div>
-              )}
-
               <div className="sidelist">
                 <div className="sidelist__section">
                   <div className="sidelist__heading">Principal</div>
