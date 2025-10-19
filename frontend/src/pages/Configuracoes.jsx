@@ -151,12 +151,20 @@ export default function Configuracoes() {
     const statusSub = String(billing?.subscription?.status || '').toLowerCase();
     return statusPlan === 'active' || statusSub === 'active';
   }, [planInfo.status, billing?.subscription?.status]);
+  const hasPreapprovalInHistory = useMemo(() => {
+    try {
+      const items = Array.isArray(billing?.history) ? billing.history : [];
+      return items.some((h) => {
+        const st = String(h?.status || '').toLowerCase();
+        return h?.gateway_subscription_id && (st === 'active' || st === 'authorized' || st === 'paused' || st === 'past_due');
+      });
+    } catch { return false; }
+  }, [billing?.history]);
   const needsRecurringSetup = useMemo(() => {
     const statusPlan = String(planInfo.status || '').toLowerCase();
-    const hasGatewaySub = !!(billing?.subscription?.gateway_subscription_id);
-    return statusPlan === 'active' && !hasGatewaySub; // ativo por PIX (sem preapproval)
-  }, [planInfo.status, billing?.subscription?.gateway_subscription_id]);
-  const hasGatewayRecurring = useMemo(() => !!(billing?.subscription?.gateway_subscription_id), [billing?.subscription?.gateway_subscription_id]);
+    return statusPlan === 'active' && !hasPreapprovalInHistory; // ativo por PIX (sem preapproval)
+  }, [planInfo.status, hasPreapprovalInHistory]);
+  const hasGatewayRecurring = useMemo(() => hasPreapprovalInHistory, [hasPreapprovalInHistory]);
   const subStatus = useMemo(() => String(billing?.subscription?.status || '').toLowerCase(), [billing?.subscription?.status]);
 
   // Assinatura ativa (evita acionar checkout padrão e resultar em 409 "already_active")
