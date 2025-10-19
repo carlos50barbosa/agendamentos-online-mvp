@@ -159,7 +159,8 @@ router.get('/subscription', auth, isEstabelecimento, async (req, res) => {
 
 router.post('/webhook', async (req, res) => {
   const event = req.body || {}
-  const resourceId = event?.data?.id || req.query?.id || event?.resource || event?.id || null
+  // MP pode mandar o id como body.data.id ou como query data.id
+  const resourceId = event?.data?.id || req.query?.id || req.query?.['data.id'] || event?.resource || event?.id || null
   if (!resourceId) {
     console.warn('[billing:webhook] evento sem resource id', event)
     return res.status(200).json({ ok: false, reason: 'missing_resource' })

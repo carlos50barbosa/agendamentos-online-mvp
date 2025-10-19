@@ -34,7 +34,7 @@ pm2 reload agendamento-api --update-env
 ATUALIZAR VIA GITHUB:
 
 # 1) Conecte por SSH
-ssh usuario@SEU_SERVIDOR
+ssh root@82.25.77.26
 
 # 2) Vá até a pasta do site
 cd /opt/apps/agendamentos-online-mvp
