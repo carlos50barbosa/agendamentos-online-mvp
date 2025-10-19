@@ -2,7 +2,7 @@
 import { Router } from 'express'
 import { createHmac } from 'node:crypto'
 import { auth, isEstabelecimento } from '../middleware/auth.js'
-import { createMercadoPagoCheckout, createMercadoPagoPixCheckout, syncMercadoPagoPreapproval, syncMercadoPagoPayment, getPlanInitPoint } from '../lib/billing.js'
+import { createMercadoPagoCheckout, createMercadoPagoPixCheckout, syncMercadoPagoPreapproval, syncMercadoPagoPayment, getPlanInitPoint, updateMercadoPagoPreapprovalStatus } from '../lib/billing.js'
 import {
   getPlanContext,
   serializePlanContext,
@@ -492,6 +492,51 @@ router.post('/recurring/setup', auth, isEstabelecimento, async (req, res) => {
       error?.message || 'Falha ao configurar recorrencia'
     console.error('POST /billing/recurring/setup', detail, cause || error)
     return res.status(400).json({ error: 'recurring_failed', message: detail, cause })
+  }
+})
+
+// Pausar recorrência no cartão (preapproval)
+router.post('/recurring/pause', auth, isEstabelecimento, async (req, res) => {
+  try {
+    const sub = await getLatestSubscriptionForEstabelecimento(req.user.id)
+    const preId = sub?.gatewaySubscriptionId || req.user?.plan_subscription_id || null
+    if (!preId) return res.status(409).json({ error: 'no_recurring', message: 'Nenhuma recorrência configurada.' })
+    const result = await updateMercadoPagoPreapprovalStatus(preId, 'paused', 'recurring_pause')
+    return res.json({ ok: true, status: result?.subscription?.status || null, preapproval: { id: result?.preapproval?.id || preId, status: result?.preapproval?.status || 'paused' } })
+  } catch (error) {
+    const detail = error?.message || 'Falha ao pausar recorrência'
+    console.error('POST /billing/recurring/pause', detail)
+    return res.status(400).json({ error: 'recurring_pause_failed', message: detail })
+  }
+})
+
+// Retomar recorrência
+router.post('/recurring/resume', auth, isEstabelecimento, async (req, res) => {
+  try {
+    const sub = await getLatestSubscriptionForEstabelecimento(req.user.id)
+    const preId = sub?.gatewaySubscriptionId || req.user?.plan_subscription_id || null
+    if (!preId) return res.status(409).json({ error: 'no_recurring', message: 'Nenhuma recorrência configurada.' })
+    const result = await updateMercadoPagoPreapprovalStatus(preId, 'authorized', 'recurring_resume')
+    return res.json({ ok: true, status: result?.subscription?.status || null, preapproval: { id: result?.preapproval?.id || preId, status: result?.preapproval?.status || 'authorized' } })
+  } catch (error) {
+    const detail = error?.message || 'Falha ao retomar recorrência'
+    console.error('POST /billing/recurring/resume', detail)
+    return res.status(400).json({ error: 'recurring_resume_failed', message: detail })
+  }
+})
+
+// Cancelar recorrência
+router.post('/recurring/cancel', auth, isEstabelecimento, async (req, res) => {
+  try {
+    const sub = await getLatestSubscriptionForEstabelecimento(req.user.id)
+    const preId = sub?.gatewaySubscriptionId || req.user?.plan_subscription_id || null
+    if (!preId) return res.status(409).json({ error: 'no_recurring', message: 'Nenhuma recorrência configurada.' })
+    const result = await updateMercadoPagoPreapprovalStatus(preId, 'cancelled', 'recurring_cancel')
+    return res.json({ ok: true, status: result?.subscription?.status || null, preapproval: { id: result?.preapproval?.id || preId, status: result?.preapproval?.status || 'cancelled' } })
+  } catch (error) {
+    const detail = error?.message || 'Falha ao cancelar recorrência'
+    console.error('POST /billing/recurring/cancel', detail)
+    return res.status(400).json({ error: 'recurring_cancel_failed', message: detail })
   }
 })
 

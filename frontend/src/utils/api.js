@@ -167,6 +167,9 @@ export const Api = {
     return req('/billing/change', { method: 'POST', body: JSON.stringify(payload) });
   },
   billingRecurringSetup: () => req('/billing/recurring/setup', { method: 'POST' }),
+  billingRecurringPause: () => req('/billing/recurring/pause', { method: 'POST' }),
+  billingRecurringResume: () => req('/billing/recurring/resume', { method: 'POST' }),
+  billingRecurringCancel: () => req('/billing/recurring/cancel', { method: 'POST' }),
   // PIX fallback (primeiro ciclo)
   billingPixCheckout: (payload) => {
     const body = { ...payload };

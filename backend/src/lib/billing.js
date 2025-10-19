@@ -680,3 +680,22 @@ export async function syncMercadoPagoPreapproval(preapprovalId, eventPayload = n
 
   return { subscription, preapproval, planStatus }
 }
+
+// Atualiza o status de um preapproval (recorrência) no Mercado Pago e sincroniza no banco
+export async function updateMercadoPagoPreapprovalStatus(preapprovalId, nextStatus, eventTag = 'manual_update') {
+  if (!preapprovalId) throw new Error('preapprovalId ausente')
+  const preapprovalClient = ensureMercadoPagoPreapproval()
+  const allowed = ['paused', 'authorized', 'cancelled', 'canceled']
+  const status = String(nextStatus || '').toLowerCase()
+  if (!allowed.includes(status)) throw new Error('status_invalido')
+  const body = { status }
+  try {
+    // SDK v1 usa { id, body }
+    await preapprovalClient.update({ id: preapprovalId, body })
+  } catch (e) {
+    const detail = extractMpError(e)
+    throw new Error('mercadopago_preapproval_update_error: ' + detail)
+  }
+  // Sincroniza após atualizar
+  return await syncMercadoPagoPreapproval(preapprovalId, { action: eventTag, set_status: status })
+}

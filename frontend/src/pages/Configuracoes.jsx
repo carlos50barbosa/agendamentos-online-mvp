@@ -91,6 +91,9 @@ export default function Configuracoes() {
   const [billingLoading, setBillingLoading] = useState(false);
   const [checkoutLoading, setCheckoutLoading] = useState(false);
   const [checkoutError, setCheckoutError] = useState('');
+  const [recurringLoading, setRecurringLoading] = useState(false);
+  const [recurringError, setRecurringError] = useState('');
+  const [recurringNotice, setRecurringNotice] = useState('');
   const checkoutIntentRef = useRef(false);
   // Mensagens pós-checkout (retorno do Mercado Pago)
   const [checkoutNotice, setCheckoutNotice] = useState({ kind: '', message: '', syncing: false });
@@ -153,6 +156,8 @@ export default function Configuracoes() {
     const hasGatewaySub = !!(billing?.subscription?.gateway_subscription_id);
     return statusPlan === 'active' && !hasGatewaySub; // ativo por PIX (sem preapproval)
   }, [planInfo.status, billing?.subscription?.gateway_subscription_id]);
+  const hasGatewayRecurring = useMemo(() => !!(billing?.subscription?.gateway_subscription_id), [billing?.subscription?.gateway_subscription_id]);
+  const subStatus = useMemo(() => String(billing?.subscription?.status || '').toLowerCase(), [billing?.subscription?.status]);
 
   // Assinatura ativa (evita acionar checkout padrão e resultar em 409 "already_active")
 
@@ -936,8 +941,8 @@ export default function Configuracoes() {
             {checkoutError && (
               <div className="notice notice--error" role="alert">{checkoutError}</div>
             )}
-            {planInfo.plan === 'starter' ? (
-              <>
+                {planInfo.plan === 'starter' ? (
+                  <>
                 {planInfo.trialEnd && daysLeft > 0 ? (
                   <div className="box box--highlight">
                     <strong>Teste grátis ativo</strong>
@@ -1017,6 +1022,62 @@ export default function Configuracoes() {
                       {checkoutLoading ? <span className="spinner" /> : 'Configurar recorrência no cartão'}
                     </button>
                   )}
+                  {hasGatewayRecurring && (
+                    <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+                      {subStatus !== 'paused' && (
+                        <button
+                          className="btn btn--outline btn--sm"
+                          type="button"
+                          onClick={async () => {
+                            setRecurringError(''); setRecurringNotice(''); setRecurringLoading(true);
+                            try { await Api.billingRecurringPause(); setRecurringNotice('Recorrência pausada.'); await fetchBilling(); }
+                            catch (e) { setRecurringError(e?.data?.message || e?.message || 'Falha ao pausar recorrência.'); }
+                            finally { setRecurringLoading(false); }
+                          }}
+                          disabled={recurringLoading}
+                          title="Pausar cobranças recorrentes"
+                        >
+                          {recurringLoading ? <span className="spinner" /> : 'Pausar recorrência'}
+                        </button>
+                      )}
+                      {subStatus === 'paused' && (
+                        <button
+                          className="btn btn--outline btn--sm"
+                          type="button"
+                          onClick={async () => {
+                            setRecurringError(''); setRecurringNotice(''); setRecurringLoading(true);
+                            try { await Api.billingRecurringResume(); setRecurringNotice('Recorrência retomada.'); await fetchBilling(); }
+                            catch (e) { setRecurringError(e?.data?.message || e?.message || 'Falha ao retomar recorrência.'); }
+                            finally { setRecurringLoading(false); }
+                          }}
+                          disabled={recurringLoading}
+                          title="Retomar cobranças recorrentes"
+                        >
+                          {recurringLoading ? <span className="spinner" /> : 'Retomar recorrência'}
+                        </button>
+                      )}
+                      <button
+                        className="btn btn--ghost btn--sm"
+                        type="button"
+                        onClick={async () => {
+                          if (!confirm('Cancelar a recorrência? Você continuará ativo até o fim do ciclo atual.')) return;
+                          setRecurringError(''); setRecurringNotice(''); setRecurringLoading(true);
+                          try { await Api.billingRecurringCancel(); setRecurringNotice('Recorrência cancelada.'); await fetchBilling(); }
+                          catch (e) { setRecurringError(e?.data?.message || e?.message || 'Falha ao cancelar recorrência.'); }
+                          finally { setRecurringLoading(false); }
+                        }}
+                        disabled={recurringLoading}
+                        title="Cancelar a recorrência (não renova na próxima data)"
+                      >
+                        {recurringLoading ? <span className="spinner" /> : 'Cancelar recorrência'}
+                      </button>
+                    </div>
+                  )}
+                  {(recurringError || recurringNotice) && (
+                    <div className={`notice notice--${recurringError ? 'error' : 'info'}`} role="status" style={{ marginTop: 6 }}>
+                      {recurringError || recurringNotice}
+                    </div>
+                  )}
                   {/* PIX fallback em seção separada */}
                   {!hasActiveSubscription && (
                     <div className="box" style={{ width: '100%' }}>
@@ -1086,6 +1147,86 @@ export default function Configuracoes() {
                   <div>WhatsApp: lembretes + campanhas</div>
                   <div>Relatórios: {planInfo.allowAdvanced ? 'avançados' : 'básicos'}</div>
                 </div>
+                {/* Controles de recorrência (cartão) para planos Pro/Premium */}
+                <div className="row" style={{ gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
+                  {needsRecurringSetup && (
+                    <button
+                      className="btn btn--brand-outline btn--sm"
+                      type="button"
+                      onClick={async () => {
+                        try {
+                          setCheckoutLoading(true);
+                          const data = await Api.billingRecurringSetup();
+                          if (data?.init_point) window.location.href = data.init_point;
+                        } catch (err) {
+                          setCheckoutError(err?.data?.message || err?.message || 'Falha ao configurar recorrência.');
+                        } finally {
+                          setCheckoutLoading(false);
+                        }
+                      }}
+                      disabled={checkoutLoading}
+                      title="Configurar cobrança recorrente no cartão para os próximos ciclos"
+                    >
+                      {checkoutLoading ? <span className="spinner" /> : 'Configurar recorrência no cartão'}
+                    </button>
+                  )}
+                  {hasGatewayRecurring && (
+                    <>
+                      {subStatus !== 'paused' && (
+                        <button
+                          className="btn btn--outline btn--sm"
+                          type="button"
+                          onClick={async () => {
+                            setRecurringError(''); setRecurringNotice(''); setRecurringLoading(true);
+                            try { await Api.billingRecurringPause(); setRecurringNotice('Recorrência pausada.'); await fetchBilling(); }
+                            catch (e) { setRecurringError(e?.data?.message || e?.message || 'Falha ao pausar recorrência.'); }
+                            finally { setRecurringLoading(false); }
+                          }}
+                          disabled={recurringLoading}
+                          title="Pausar cobranças recorrentes"
+                        >
+                          {recurringLoading ? <span className="spinner" /> : 'Pausar recorrência'}
+                        </button>
+                      )}
+                      {subStatus === 'paused' && (
+                        <button
+                          className="btn btn--outline btn--sm"
+                          type="button"
+                          onClick={async () => {
+                            setRecurringError(''); setRecurringNotice(''); setRecurringLoading(true);
+                            try { await Api.billingRecurringResume(); setRecurringNotice('Recorrência retomada.'); await fetchBilling(); }
+                            catch (e) { setRecurringError(e?.data?.message || e?.message || 'Falha ao retomar recorrência.'); }
+                            finally { setRecurringLoading(false); }
+                          }}
+                          disabled={recurringLoading}
+                          title="Retomar cobranças recorrentes"
+                        >
+                          {recurringLoading ? <span className="spinner" /> : 'Retomar recorrência'}
+                        </button>
+                      )}
+                      <button
+                        className="btn btn--ghost btn--sm"
+                        type="button"
+                        onClick={async () => {
+                          if (!confirm('Cancelar a recorrência? Você continuará ativo até o fim do ciclo atual.')) return;
+                          setRecurringError(''); setRecurringNotice(''); setRecurringLoading(true);
+                          try { await Api.billingRecurringCancel(); setRecurringNotice('Recorrência cancelada.'); await fetchBilling(); }
+                          catch (e) { setRecurringError(e?.data?.message || e?.message || 'Falha ao cancelar recorrência.'); }
+                          finally { setRecurringLoading(false); }
+                        }}
+                        disabled={recurringLoading}
+                        title="Cancelar a recorrência (não renova na próxima data)"
+                      >
+                        {recurringLoading ? <span className="spinner" /> : 'Cancelar recorrência'}
+                      </button>
+                    </>
+                  )}
+                </div>
+                {(recurringError || recurringNotice) && (
+                  <div className={`notice notice--${recurringError ? 'error' : 'info'}`} role="status" style={{ marginTop: 6 }}>
+                    {recurringError || recurringNotice}
+                  </div>
+                )}
                 <div className="row" style={{ gap: 8, justifyContent: 'space-between', flexWrap: 'wrap', alignItems: 'center' }}>
                   <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
                     <div className="small muted">Alterar plano:</div>
