@@ -754,7 +754,11 @@ export default function Configuracoes() {
       canceled: 'Cancelado',
       expired: 'Expirado',
     };
-    const statusLabel = statusLabelMap[planInfo.status] || (planInfo.status ? planInfo.status.toUpperCase() : '');
+    // Se a assinatura do MP estiver ativa/autorizada, tratamos como ativo para exibição
+    const subStatusRaw = String(billing.subscription?.status || '').toLowerCase();
+    const subscriptionIsActive = subStatusRaw === 'active' || subStatusRaw === 'authorized';
+    const effectivePlanStatus = subscriptionIsActive ? 'active' : (planInfo.status || '');
+    const statusLabel = statusLabelMap[effectivePlanStatus] || (effectivePlanStatus ? effectivePlanStatus.toUpperCase() : '');
     const subscriptionStatusLabel = billing.subscription?.status
       ? statusLabelMap[billing.subscription.status] || billing.subscription.status.toUpperCase()
       : null;
@@ -919,7 +923,7 @@ export default function Configuracoes() {
                 <strong>Pagamento em atraso.</strong> Regularize a assinatura para liberar os recursos.
               </div>
             )}
-            {planInfo.status === 'pending' && (
+            {effectivePlanStatus === 'pending' && (
               <div className="notice notice--warn" role="alert">
                 <strong>Pagamento pendente.</strong> Finalize o checkout para concluir a contratação.
               </div>
