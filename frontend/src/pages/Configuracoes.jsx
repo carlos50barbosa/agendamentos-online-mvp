@@ -906,453 +906,297 @@ export default function Configuracoes() {
     });
 
     if (isEstab) {
+      const planTierLabel = PLAN_META[planInfo.plan]?.label || planInfo.plan.toUpperCase();
+      const whatsappFeature = planInfo.plan === 'starter' ? 'Lembretes por WhatsApp' : 'WhatsApp com lembretes e campanhas';
+      const reportsFeature = planInfo.allowAdvanced ? 'Relatórios avançados' : 'Relatórios básicos';
+      const servicesLimit = PLAN_META[planInfo.plan]?.maxServices;
+      const professionalsLimit = PLAN_META[planInfo.plan]?.maxProfessionals;
+      const usageText = 'Seu uso: ' + (serviceCount == null ? '...' : serviceCount) + ' serviços · ' + (professionalCount == null ? '...' : professionalCount) + ' profissionais';
+      const limitsText = 'Limites do plano ' + planTierLabel + ': ' +
+        (servicesLimit == null ? 'serviços ilimitados' : 'até ' + servicesLimit + ' serviços') + ' · ' +
+        (professionalsLimit == null ? 'profissionais ilimitados' : 'até ' + professionalsLimit + ' profissionais');
+      const planFeatures = [whatsappFeature, reportsFeature];
+      const recurringDisplay = hasGatewayRecurring ? (subStatus === 'paused' ? 'Cartão (pausado)' : 'Cartão ativo') : 'Não configurada';
+      const pricedAmount = amountLabel ? amountLabel + '/mês' : null;
+      const summarySubscription = subscriptionStatusLabel
+        ? subscriptionStatusLabel + (pricedAmount ? ' · ' + pricedAmount : '')
+        : 'Sem cobrança recorrente';
+      const nextChargeDisplay = nextChargeLabel || (planInfo.activeUntil ? fmtDate(planInfo.activeUntil) : '—');
+
+      const planAlerts = [];
+      if (billingLoading) {
+        planAlerts.push({ key: 'loading', variant: 'info', message: 'Atualizando informações de cobrança...' });
+      }
+      if (planInfo.status === 'delinquent') planAlerts.push({ key: 'delinquent', variant: 'error', message: 'Pagamento em atraso. Regularize para manter o acesso aos recursos.' });
+      if (effectivePlanStatus === 'pending') planAlerts.push({ key: 'pending', variant: 'warn', message: 'Pagamento pendente. Finalize o checkout para concluir a contratação.' });
+      if (planInfo.plan === 'starter' && hasPaidHistory) planAlerts.push({ key: 'trial-blocked', variant: 'muted', message: 'Teste grátis indisponível: já houve uma assinatura contratada nesta conta.' });
+      else if (planInfo.plan === 'starter' && trialEligible) planAlerts.push({ key: 'trial-available', variant: 'info', message: 'Experimente o plano Pro gratuitamente por 7 dias quando desejar.' });
+      if (needsRecurringSetup && hasActiveSubscription) planAlerts.push({ key: 'rec-setup', variant: 'info', message: 'Configure a recorrência no cartão para automatizar as próximas cobranças.' });
+      if (recurringError) planAlerts.push({ key: 'rec-error', variant: 'error', message: recurringError });
+      else if (recurringNotice) planAlerts.push({ key: 'rec-notice', variant: 'info', message: recurringNotice });
+
+      const planChangeButtons = [];
+      if (planInfo.plan === 'starter') {
+        if (!planInfo.trialEnd && trialEligible) {
+          planChangeButtons.push(
+            <button
+              key="trial"
+              className="btn btn--ghost btn--sm"
+              type="button"
+              onClick={startTrial}
+              disabled={planInfo.status === 'delinquent' || checkoutLoading}
+            >
+              {checkoutLoading ? <span className="spinner" /> : 'Ativar 7 dias grátis'}
+            </button>
+          );
+        }
+        planChangeButtons.push(
+          <button
+            key="upgrade-pro"
+            className="btn btn--primary btn--sm"
+            type="button"
+            onClick={() => {
+              if (hasActiveSubscription) {
+                handleChangePlan('pro');
+              } else {
+                handleCheckout('pro');
+              }
+            }}
+            disabled={checkoutLoading}
+          >
+            {checkoutLoading ? <span className="spinner" /> : 'Alterar para plano Pro'}
+          </button>
+        );
+      } else {
+        PLAN_TIERS.filter((p) => p !== planInfo.plan).forEach((p) => {
+          const disabled = checkoutLoading || exceedsServices(p) || exceedsProfessionals(p);
+          planChangeButtons.push(
+            <button
+              key={'tier-' + p}
+              className="btn btn--outline btn--sm"
+              type="button"
+              disabled={disabled}
+              title={
+                exceedsServices(p)
+                  ? 'Reduza seus serviços para até ' + PLAN_META[p].maxServices + ' antes de migrar para o plano ' + planLabel(p) + '.'
+                  : exceedsProfessionals(p)
+                  ? 'Reduza seus profissionais para até ' + PLAN_META[p].maxProfessionals + ' antes de migrar para o plano ' + planLabel(p) + '.'
+                  : ''
+              }
+              onClick={() => handleChangePlan(p)}
+            >
+              {'Ir para ' + planLabel(p)}
+            </button>
+          );
+        });
+      }
+
+      const recurringButtons = [];
+      if (needsRecurringSetup) {
+        recurringButtons.push(
+          <button
+            key="recurring-setup"
+            className="btn btn--brand-outline btn--sm"
+            type="button"
+            onClick={async () => {
+              try {
+                setCheckoutLoading(true);
+                const data = await Api.billingRecurringSetup();
+                if (data?.init_point) window.location.href = data.init_point;
+              } catch (err) {
+                setCheckoutError(err?.data?.message || err?.message || 'Falha ao configurar recorrência.');
+              } finally {
+                setCheckoutLoading(false);
+              }
+            }}
+            disabled={checkoutLoading}
+          >
+            {checkoutLoading ? <span className="spinner" /> : 'Configurar recorrência no cartão'}
+          </button>
+        );
+      }
+      if (hasGatewayRecurring) {
+        if (subStatus !== 'paused') {
+          recurringButtons.push(
+            <button
+              key="recurring-pause"
+              className="btn btn--outline btn--sm"
+              type="button"
+              onClick={async () => {
+                setRecurringError(''); setRecurringNotice(''); setRecurringLoading(true);
+                try {
+                  await Api.billingRecurringPause();
+                  setRecurringNotice('Recorrência pausada.');
+                  await fetchBilling();
+                } catch (e) {
+                  setRecurringError(e?.data?.message || e?.message || 'Falha ao pausar recorrência.');
+                } finally {
+                  setRecurringLoading(false);
+                }
+              }}
+              disabled={recurringLoading}
+            >
+              {recurringLoading ? <span className="spinner" /> : 'Pausar recorrência'}
+            </button>
+          );
+        }
+        if (subStatus === 'paused') {
+          recurringButtons.push(
+            <button
+              key="recurring-resume"
+              className="btn btn--outline btn--sm"
+              type="button"
+              onClick={async () => {
+                setRecurringError(''); setRecurringNotice(''); setRecurringLoading(true);
+                try {
+                  await Api.billingRecurringResume();
+                  setRecurringNotice('Recorrência retomada.');
+                  await fetchBilling();
+                } catch (e) {
+                  setRecurringError(e?.data?.message || e?.message || 'Falha ao retomar recorrência.');
+                } finally {
+                  setRecurringLoading(false);
+                }
+              }}
+              disabled={recurringLoading}
+            >
+              {recurringLoading ? <span className="spinner" /> : 'Retomar recorrência'}
+            </button>
+          );
+        }
+        recurringButtons.push(
+          <button
+            key="recurring-cancel"
+            className="btn btn--ghost btn--sm"
+            type="button"
+            onClick={async () => {
+              if (!confirm('Cancelar a recorrência? Você continuará ativo até o fim do ciclo atual.')) return;
+              setRecurringError(''); setRecurringNotice(''); setRecurringLoading(true);
+              try {
+                await Api.billingRecurringCancel();
+                setRecurringNotice('Recorrência cancelada.');
+                await fetchBilling();
+              } catch (e) {
+                setRecurringError(e?.data?.message || e?.message || 'Falha ao cancelar recorrência.');
+              } finally {
+                setRecurringLoading(false);
+              }
+            }}
+            disabled={recurringLoading}
+          >
+            {recurringLoading ? <span className="spinner" /> : 'Cancelar recorrência'}
+          </button>
+        );
+      }
+
+      const secondaryActions = [
+        ...recurringButtons,
+        <Link key="plans-link" className="btn btn--ghost btn--sm" to="/planos">Conhecer planos</Link>,
+      ];
+      if (!hasActiveSubscription) {
+        secondaryActions.unshift(
+          <button
+            key="pix-checkout"
+            className="btn btn--chip btn--sm"
+            type="button"
+            onClick={() => handleCheckoutPix(planInfo.plan, pixCycle)}
+            disabled={checkoutLoading}
+            title="Gerar cobrança via PIX"
+          >
+            {checkoutLoading ? <span className="spinner" /> : 'Gerar PIX'}
+          </button>
+        );
+        secondaryActions.unshift(
+          <label key="pix-cycle" className="plan-card__pix-select">
+            <span>Ciclo</span>
+            <select value={pixCycle} onChange={(e) => setPixCycle(e.target.value)} disabled={checkoutLoading} className="input input--sm">
+              <option value="mensal">Mensal</option>
+              <option value="anual">Anual</option>
+            </select>
+          </label>
+        );
+      }
+      const planNotice = hasActiveSubscription
+        ? 'Assinatura ativa' + (planInfo.activeUntil ? ' até ' + fmtDate(planInfo.activeUntil) : '') + '.'
+        : 'Finalize o pagamento para ativar sua assinatura.';
+
       list.push({
         id: 'plan',
         title: 'Plano do Estabelecimento',
         content: (
-          <>
-            <div className="row spread" style={{ alignItems: 'center' }}>
-              <h3 style={{ margin: 0 }}>Plano do Estabelecimento</h3>
-              <div className={`badge ${planInfo.plan === 'premium' ? 'badge--premium' : planInfo.plan === 'pro' ? 'badge--pro' : ''}`}>
-                {planInfo.plan.toUpperCase()}
+          <article className="plan-card">
+            <header className="plan-card__header">
+              <div>
+                <h3 className="plan-card__title">{planTierLabel}</h3>
+                <div className="plan-card__chips">
+                  <span className={'chip chip--status-' + (effectivePlanStatus || 'default')}>{statusLabel || '—'}</span>
+                  {subscriptionStatusLabel && (
+                    <span className={'chip chip--status-' + (subStatus || 'default')}>{subscriptionStatusLabel}</span>
+                  )}
+                </div>
+              </div>
+              <span className="chip chip--tier">{planInfo.plan.toUpperCase()}</span>
+            </header>
+
+            <div className="plan-card__summary">
+              <div className="plan-card__summary-item">
+                <span className="plan-card__summary-label">Assinatura Mercado Pago</span>
+                <strong>{summarySubscription}</strong>
+              </div>
+              <div className="plan-card__summary-item">
+                <span className="plan-card__summary-label">Próxima cobrança</span>
+                <strong>{nextChargeDisplay}</strong>
+                {planInfo.activeUntil && !nextChargeLabel && <span className="plan-card__summary-extra">Plano ativo até {fmtDate(planInfo.activeUntil)}</span>}
+              </div>
+              <div className="plan-card__summary-item">
+                <span className="plan-card__summary-label">Recorrência</span>
+                <strong>{recurringDisplay}</strong>
+                {!hasGatewayRecurring && hasActiveSubscription && <span className="plan-card__summary-extra">Ative para automatizar as renovações</span>}
               </div>
             </div>
-            {planInfo.status && (
-              <div className="small muted">
-                Status atual: {statusLabel}
-                {planInfo.status === 'active' && planInfo.activeUntil ? ` - próxima cobrança em ${fmtDate(planInfo.activeUntil)}` : ''}
-              </div>
-            )}
-            {billing.subscription?.status && (
-              <div className="small muted">
-                Assinatura Mercado Pago: {subscriptionStatusLabel}
-                {amountLabel ? ` ? ${amountLabel}/mês` : ''}
-                {nextChargeLabel ? ` ? próximo débito em ${nextChargeLabel}` : ''}
-              </div>
-            )}
-            {billingLoading && (
-              <div className="small muted">Atualizando informações de cobrança...</div>
-            )}
-            {planInfo.status === 'delinquent' && (
-              <div className="notice notice--error" role="alert">
-                <strong>Pagamento em atraso.</strong> Regularize a assinatura para liberar os recursos.
-              </div>
-            )}
-            {effectivePlanStatus === 'pending' && (
-              <div className="notice notice--warn" role="alert">
-                <strong>Pagamento pendente.</strong> Finalize o checkout para concluir a contratação.
-              </div>
-            )}
+
+            {planAlerts.map((alert) => (
+              <div key={alert.key} className={'plan-card__alert plan-card__alert--' + alert.variant}>{alert.message}</div>
+            ))}
             {checkoutNotice.message && (
-              <div className={`notice notice--${checkoutNotice.kind || 'info'}`} role="status">
+              <div className={'plan-card__alert plan-card__alert--' + (checkoutNotice.kind || 'info')}>
                 {checkoutNotice.syncing ? (<><span className="spinner" /> {checkoutNotice.message}</>) : checkoutNotice.message}
               </div>
             )}
             {checkoutError && (
-              <div className="notice notice--error" role="alert">{checkoutError}</div>
+              <div className="plan-card__alert plan-card__alert--error">{checkoutError}</div>
             )}
-                {planInfo.plan === 'starter' ? (
-                  <>
-                {planInfo.trialEnd && daysLeft > 0 ? (
-                  <div className="box box--highlight">
-                    <strong>Teste grátis ativo</strong>
-                    <div className="small muted">Termina em {fmtDate(planInfo.trialEnd)} - {daysLeft} {daysLeft === 1 ? 'dia' : 'dias'} restantes</div>
-                  </div>
-                ) : (
-                  <div className="box" style={{ borderColor: '#fde68a', background: '#fffbeb' }}>
-                    <strong>Você está no plano Starter</strong>
-                    {hasPaidHistory ? (
-                      <div className="small muted">Teste grátis indisponível: já houve uma assinatura contratada nesta conta.</div>
-                    ) : trialEligible ? (
-                      <div className="small muted">Ative 7 dias grátis do Pro para desbloquear campanhas no WhatsApp e relatórios avançados.</div>
-                    ) : null}
-                  </div>
-                )}
-                {/* Resumo de recursos do plano atual */}
-                <div className="small muted" style={{ marginTop: 8 }}>
-                  <div><strong>Recursos do plano:</strong></div>
-                  <div>WhatsApp: lembretes{planInfo.plan !== 'starter' ? ' + campanhas' : ''}</div>
-                  <div>Relatórios: {planInfo.allowAdvanced ? 'avançados' : 'básicos'}</div>
-                  <div style={{ marginTop: 6 }}>
-                    <strong>Como funciona a contratação:</strong> você será redirecionado ao Mercado Pago para confirmar a assinatura.
-                    Cobrança recorrente mensal, sem fidelidade. Upgrades liberam recursos na hora; o valor muda no próximo ciclo.
-                  </div>
-                </div>
-                {hasActiveSubscription && (
-                  <div className="notice notice--info" role="status" style={{ marginTop: 8 }}>
-                    Sua assinatura já está ativa{planInfo.activeUntil ? ` até ${fmtDate(planInfo.activeUntil)}` : ''}.
-                    {needsRecurringSetup ? ' Configure a recorrência no cartão para as próximas cobranças.' : ' Para migrar de plano, use o botão abaixo.'}
-                  </div>
-               )}
-                <div className="row" style={{ gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
-                  {!planInfo.trialEnd && trialEligible && (
-                    <button
-                      className="btn btn--brand-outline btn--sm"
-                      type="button"
-                      onClick={startTrial}
-                      disabled={planInfo.status === 'delinquent' || checkoutLoading}
-                    >
-                      {checkoutLoading ? <span className="spinner" /> : 'Ativar 7 dias grátis'}
-                    </button>
-                  )}
-                  <button
-                    className="btn btn--primary btn--sm"
-                    type="button"
-                    onClick={() => {
-                      if (hasActiveSubscription) {
-                        handleChangePlan('pro');
-                      } else {
-                        handleCheckout('pro');
-                      }
-                    }}
-                    disabled={checkoutLoading}
-                  >
-                    {checkoutLoading
-                      ? <span className="spinner" />
-                      : (hasActiveSubscription ? 'Alterar para plano Pro' : 'Contratar plano Pro')}
-                  </button>
-                  {needsRecurringSetup && (
-                    <button
-                      className="btn btn--brand-outline btn--sm"
-                      type="button"
-                      onClick={async () => {
-                        try {
-                          setCheckoutLoading(true);
-                          const data = await Api.billingRecurringSetup();
-                          if (data?.init_point) window.location.href = data.init_point;
-                        } catch (err) {
-                          setCheckoutError(err?.data?.message || err?.message || 'Falha ao configurar recorrência.');
-                        } finally {
-                          setCheckoutLoading(false);
-                        }
-                      }}
-                      disabled={checkoutLoading}
-                      title="Configurar cobrança recorrente no cartão para os próximos ciclos"
-                    >
-                      {checkoutLoading ? <span className="spinner" /> : 'Configurar recorrência no cartão'}
-                    </button>
-                  )}
-                  {hasGatewayRecurring && (
-                    <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
-                      {subStatus !== 'paused' && (
-                        <button
-                          className="btn btn--outline btn--sm"
-                          type="button"
-                          onClick={async () => {
-                            setRecurringError(''); setRecurringNotice(''); setRecurringLoading(true);
-                            try { await Api.billingRecurringPause(); setRecurringNotice('Recorrência pausada.'); await fetchBilling(); }
-                            catch (e) { setRecurringError(e?.data?.message || e?.message || 'Falha ao pausar recorrência.'); }
-                            finally { setRecurringLoading(false); }
-                          }}
-                          disabled={recurringLoading}
-                          title="Pausar cobranças recorrentes"
-                        >
-                          {recurringLoading ? <span className="spinner" /> : 'Pausar recorrência'}
-                        </button>
-                      )}
-                      {subStatus === 'paused' && (
-                        <button
-                          className="btn btn--outline btn--sm"
-                          type="button"
-                          onClick={async () => {
-                            setRecurringError(''); setRecurringNotice(''); setRecurringLoading(true);
-                            try { await Api.billingRecurringResume(); setRecurringNotice('Recorrência retomada.'); await fetchBilling(); }
-                            catch (e) { setRecurringError(e?.data?.message || e?.message || 'Falha ao retomar recorrência.'); }
-                            finally { setRecurringLoading(false); }
-                          }}
-                          disabled={recurringLoading}
-                          title="Retomar cobranças recorrentes"
-                        >
-                          {recurringLoading ? <span className="spinner" /> : 'Retomar recorrência'}
-                        </button>
-                      )}
-                      <button
-                        className="btn btn--ghost btn--sm"
-                        type="button"
-                        onClick={async () => {
-                          if (!confirm('Cancelar a recorrência? Você continuará ativo até o fim do ciclo atual.')) return;
-                          setRecurringError(''); setRecurringNotice(''); setRecurringLoading(true);
-                          try { await Api.billingRecurringCancel(); setRecurringNotice('Recorrência cancelada.'); await fetchBilling(); }
-                          catch (e) { setRecurringError(e?.data?.message || e?.message || 'Falha ao cancelar recorrência.'); }
-                          finally { setRecurringLoading(false); }
-                        }}
-                        disabled={recurringLoading}
-                        title="Cancelar a recorrência (não renova na próxima data)"
-                      >
-                        {recurringLoading ? <span className="spinner" /> : 'Cancelar recorrência'}
-                      </button>
-                    </div>
-                  )}
-                  {(recurringError || recurringNotice) && (
-                    <div className={`notice notice--${recurringError ? 'error' : 'info'}`} role="status" style={{ marginTop: 6 }}>
-                      {recurringError || recurringNotice}
-                    </div>
-                  )}
-                  {/* PIX fallback em seção separada */}
-                  {!hasActiveSubscription && (
-                    <div className="box" style={{ width: '100%' }}>
-                      <div className="row" style={{ justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
-                        <strong>Ativar por PIX (primeiro ciclo)</strong>
-                        <label className="label" style={{ margin: 0 }}>
-                          <span style={{ fontSize: 12 }}>Ciclo</span>
-                          <select
-                            className="input input--sm"
-                            value={pixCycle}
-                            onChange={(e) => setPixCycle(e.target.value)}
-                            style={{ minWidth: 120 }}
-                          >
-                            <option value="mensal">Mensal</option>
-                            <option value="anual">Anual</option>
-                          </select>
-                        </label>
-                      </div>
-                      <div className="btn-row" style={{ marginTop: 8 }}>
-                        <button
-                          className="btn btn--chip btn--sm"
-                          type="button"
-                          onClick={() => handleCheckoutPix('starter', pixCycle)}
-                          disabled={checkoutLoading}
-                          title="Alternativa por PIX para o primeiro ciclo (Starter)"
-                        >
-                          {checkoutLoading ? <span className="spinner" /> : 'Ativar por PIX (Starter)'}
-                        </button>
-                        <button
-                          className="btn btn--chip btn--sm"
-                          type="button"
-                          onClick={() => handleCheckoutPix('pro', pixCycle)}
-                          disabled={checkoutLoading}
-                          title="Alternativa por PIX para o primeiro ciclo (Pro)"
-                        >
-                          {checkoutLoading ? <span className="spinner" /> : 'Ativar por PIX (Pro)'}
-                        </button>
-                        <button
-                          className="btn btn--chip btn--sm"
-                          type="button"
-                          onClick={() => handleCheckoutPix('premium', pixCycle)}
-                          disabled={checkoutLoading}
-                          title="Alternativa por PIX para o primeiro ciclo (Premium)"
-                        >
-                          {checkoutLoading ? <span className="spinner" /> : 'Ativar por PIX (Premium)'}
-                        </button>
-                      </div>
-                      <div className="small muted" style={{ marginTop: 6 }}>
-                        O PIX ativa o plano por 1 ciclo. Depois, use “Configurar recorrência no cartão” para automatizar as próximas cobranças.
-                      </div>
-                    </div>
-                  )}
-                  <Link className="btn btn--brand-outline btn--sm" to="/planos">Conhecer planos</Link>
-                </div>
-              </>
-            ) : (
-              <>
-                <div className="box box--highlight">
-                  <strong>{planInfo.plan === 'pro' ? 'Plano Pro' : 'Plano Premium'} {planInfo.status === 'active' ? 'ativo' : 'contratado'}</strong>
-                  <div className="small muted">
-                    {planInfo.status === 'active' ? 'Obrigado por apoiar o Agendamentos Online.' : 'Assim que o pagamento for confirmado, os recursos ser?o liberados.'}
-                  </div>
-                </div>
-                {/* Resumo de recursos do plano atual */}
-                <div className="small muted" style={{ marginTop: 8 }}>
-                  <div><strong>Recursos do plano:</strong></div>
-                  <div>WhatsApp: lembretes + campanhas</div>
-                  <div>Relatórios: {planInfo.allowAdvanced ? 'avançados' : 'básicos'}</div>
-                </div>
-                {/* Controles de recorrência (cartão) para planos Pro/Premium */}
-                <div className="row" style={{ gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
-                  {needsRecurringSetup && (
-                    <button
-                      className="btn btn--brand-outline btn--sm"
-                      type="button"
-                      onClick={async () => {
-                        try {
-                          setCheckoutLoading(true);
-                          const data = await Api.billingRecurringSetup();
-                          if (data?.init_point) window.location.href = data.init_point;
-                        } catch (err) {
-                          setCheckoutError(err?.data?.message || err?.message || 'Falha ao configurar recorrência.');
-                        } finally {
-                          setCheckoutLoading(false);
-                        }
-                      }}
-                      disabled={checkoutLoading}
-                      title="Configurar cobrança recorrente no cartão para os próximos ciclos"
-                    >
-                      {checkoutLoading ? <span className="spinner" /> : 'Configurar recorrência no cartão'}
-                    </button>
-                  )}
-                  {hasGatewayRecurring && (
-                    <>
-                      {subStatus !== 'paused' && (
-                        <button
-                          className="btn btn--outline btn--sm"
-                          type="button"
-                          onClick={async () => {
-                            setRecurringError(''); setRecurringNotice(''); setRecurringLoading(true);
-                            try { await Api.billingRecurringPause(); setRecurringNotice('Recorrência pausada.'); await fetchBilling(); }
-                            catch (e) { setRecurringError(e?.data?.message || e?.message || 'Falha ao pausar recorrência.'); }
-                            finally { setRecurringLoading(false); }
-                          }}
-                          disabled={recurringLoading}
-                          title="Pausar cobranças recorrentes"
-                        >
-                          {recurringLoading ? <span className="spinner" /> : 'Pausar recorrência'}
-                        </button>
-                      )}
-                      {subStatus === 'paused' && (
-                        <button
-                          className="btn btn--outline btn--sm"
-                          type="button"
-                          onClick={async () => {
-                            setRecurringError(''); setRecurringNotice(''); setRecurringLoading(true);
-                            try { await Api.billingRecurringResume(); setRecurringNotice('Recorrência retomada.'); await fetchBilling(); }
-                            catch (e) { setRecurringError(e?.data?.message || e?.message || 'Falha ao retomar recorrência.'); }
-                            finally { setRecurringLoading(false); }
-                          }}
-                          disabled={recurringLoading}
-                          title="Retomar cobranças recorrentes"
-                        >
-                          {recurringLoading ? <span className="spinner" /> : 'Retomar recorrência'}
-                        </button>
-                      )}
-                      <button
-                        className="btn btn--ghost btn--sm"
-                        type="button"
-                        onClick={async () => {
-                          if (!confirm('Cancelar a recorrência? Você continuará ativo até o fim do ciclo atual.')) return;
-                          setRecurringError(''); setRecurringNotice(''); setRecurringLoading(true);
-                          try { await Api.billingRecurringCancel(); setRecurringNotice('Recorrência cancelada.'); await fetchBilling(); }
-                          catch (e) { setRecurringError(e?.data?.message || e?.message || 'Falha ao cancelar recorrência.'); }
-                          finally { setRecurringLoading(false); }
-                        }}
-                        disabled={recurringLoading}
-                        title="Cancelar a recorrência (não renova na próxima data)"
-                      >
-                        {recurringLoading ? <span className="spinner" /> : 'Cancelar recorrência'}
-                      </button>
-                    </>
-                  )}
-                </div>
-                {(recurringError || recurringNotice) && (
-                  <div className={`notice notice--${recurringError ? 'error' : 'info'}`} role="status" style={{ marginTop: 6 }}>
-                    {recurringError || recurringNotice}
-                  </div>
-                )}
-                <div className="row" style={{ gap: 8, justifyContent: 'space-between', flexWrap: 'wrap', alignItems: 'center' }}>
-                  <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
-                    <div className="small muted">Alterar plano:</div>
-                    {(['starter','pro','premium'].filter(p => p !== planInfo.plan)).map((p) => (
-                      <button
-                        key={p}
-                        className="btn btn--outline"
-                        type="button"
-                        disabled={checkoutLoading || exceedsServices(p) || exceedsProfessionals(p)}
-                        title={
-                          exceedsServices(p)
-                            ? `Reduza seus serviços para até ${PLAN_META[p].maxServices} antes de ir para ${planLabel(p)}.`
-                            : exceedsProfessionals(p)
-                            ? `Reduza seus profissionais para até ${PLAN_META[p].maxProfessionals} antes de ir para ${planLabel(p)}.`
-                            : ''
-                        }
-                        onClick={() => handleChangePlan(p)}
-                      >
-                        {`Ir para ${planLabel(p)}`}
-                      </button>
-                    ))}
-                  </div>
-                  <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
-                  {planInfo.status !== 'active' && (
-                    <button
-                      className="btn"
-                      type="button"
-                      onClick={() => handleCheckout(planInfo.plan)}
-                      disabled={checkoutLoading}
-                    >
-                      {checkoutLoading ? <span className="spinner" /> : planInfo.status === 'pending' ? 'Finalizar pagamento' : 'Gerar link de pagamento'}
-                    </button>
-                  )}
-                  <Link className="btn btn--outline" to="/planos">Alterar plano</Link>
-                  </div>
-                </div>
-                {/* Aviso de política de cobrança em upgrades/downgrades */}
-                <div className="notice notice--warn" role="status">
-                  Upgrades liberam recursos imediatamente; a cobrança do novo valor ocorre no próximo ciclo. Downgrades passam a valer no ciclo seguinte, desde que os limites do plano sejam atendidos. Testes gratuitos têm duração de 7 dias.
-                </div>
-                {/* Resumo dos limites por plano */}
-                <div className="small muted" style={{ marginTop: 8 }}>
-                  <div>Seus serviços: {serviceCount == null ? '...' : serviceCount} · Profissionais: {professionalCount == null ? '...' : professionalCount}</div>
-                  <div>
-                    Limites:
-                    {' '}Starter (serviços: {PLAN_META.starter.maxServices}, profissionais: {PLAN_META.starter.maxProfessionals});
-                    {' '}Pro (serviços: {PLAN_META.pro.maxServices}, profissionais: {PLAN_META.pro.maxProfessionals});
-                    {' '}Premium (sem limites)
-                  </div>
-                </div>
-              </>
-            )}
-          </>
-        ),
-      });
-      list.push({
-        id: 'public-link',
-        title: 'Link público e mensagens',
-        content: (
-          <div className="grid" style={{ gap: 8 }}>
-            <label className="label">
-              <span>Slug do estabelecimento (apenas letras, nÃºmeros e hifens)</span>
-              <input className="input" placeholder="ex: studio-bela" value={slug} onChange={(e) => setSlug(e.target.value)} />
-            </label>
-            <div className="row" style={{ alignItems: 'center', gap: 8 }}>
-              <div className="small muted" style={{ userSelect: 'text' }}>
-                {publicLink ? `Link pÃºblico: ${publicLink}` : 'Link publico sera exibido aqui'}
+
+            <div className="plan-card__body">
+              <div className="plan-card__features">
+                <span className="plan-card__section-title">Recursos incluídos</span>
+                <ul>
+                  {planFeatures.map((feature) => (
+                    <li key={feature}>{feature}</li>
+                  ))}
+                </ul>
               </div>
-              <button
-                type="button"
-                className="btn btn--outline btn--sm"
-                onClick={() => {
-                  if (!publicLink) return;
-                  try { navigator.clipboard.writeText(publicLink); } catch {}
-                }}
-              >
-                Copiar link público
-              </button>
+              <div className="plan-card__notice muted">{planNotice}</div>
             </div>
-            <label className="label">
-              <span>Assunto do email de confirmação</span>
-              <input className="input" value={msg.email_subject} onChange={(e) => setMsg((m) => ({ ...m, email_subject: e.target.value }))} />
-            </label>
-            <label className="label">
-              <span>HTML do email</span>
-              <textarea className="input" rows={6} value={msg.email_html} onChange={(e) => setMsg((m) => ({ ...m, email_html: e.target.value }))} />
-            </label>
-            <label className="label">
-              <span>Mensagem WhatsApp</span>
-              <textarea className="input" rows={3} value={msg.wa_template} onChange={(e) => setMsg((m) => ({ ...m, wa_template: e.target.value }))} />
-            </label>
-            <div className="small muted">Placeholders: {'{{cliente_nome}}'}, {'{{servico_nome}}'}, {'{{data_hora}}'}, {'{{estabelecimento_nome}}'}</div>
-            <div className="row" style={{ gap: 8, justifyContent: 'flex-end' }}>
-              <button
-                className="btn btn--outline"
-                disabled={savingMessages}
-                onClick={async () => {
-                  try {
-                    setSavingMessages(true);
-                    if (slug) await Api.updateEstablishmentSlug(user.id, slug);
-                    await Api.updateEstablishmentMessages(user.id, msg);
-                    alert('Salvo com sucesso');
-                  } catch (e) {
-                    alert('Falha ao salvar');
-                  } finally {
-                    setSavingMessages(false);
-                  }
-                }}
-              >
-                Salvar
-              </button>
+
+            <div className="plan-card__actions">
+              {planChangeButtons.length > 0 && (
+                <div className="plan-card__actions-group">{planChangeButtons}</div>
+              )}
+              {secondaryActions.length > 0 && (
+                <div className="plan-card__actions-group plan-card__actions-group--secondary">{secondaryActions}</div>
+              )}
             </div>
-          </div>
+
+            <footer className="plan-card__foot">
+              <span>{usageText}</span>
+              <span>{limitsText}</span>
+            </footer>
+          </article>
         ),
       });
     }
+
 
     list.push({
       id: 'notifications',
@@ -1430,10 +1274,18 @@ export default function Configuracoes() {
     checkoutError,
     startTrial,
     handleCheckout,
+    handleCheckoutPix,
     handleChangePlan,
     hasPaidHistory,
     trialEligible,
     hasActiveSubscription,
+    needsRecurringSetup,
+    hasGatewayRecurring,
+    recurringLoading,
+    recurringError,
+    recurringNotice,
+    fetchBilling,
+    pixCycle,
   ]);
 
   return (
@@ -1510,9 +1362,5 @@ export default function Configuracoes() {
     </div>
   );
 }
-
-
-
-
 
 
