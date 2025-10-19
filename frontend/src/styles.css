@@ -1287,8 +1287,8 @@ button.danger:disabled,
     border-right: 0; border-top: 1px solid var(--border);
     background: var(--surface); z-index: 60;
     transform: none;
-    padding: 12px 12px calc(18px + env(safe-area-inset-bottom, 0px));
-    box-shadow: 0 -12px 26px rgba(15, 23, 42, 0.12);
+    padding: 8px 10px calc(10px + env(safe-area-inset-bottom, 0px));
+    box-shadow: 0 -8px 20px rgba(15, 23, 42, 0.1);
   }
   .sidebar .mainnav{
     display: flex !important;
@@ -1301,7 +1301,7 @@ button.danger:disabled,
     display: flex;
     flex-direction: column;
     align-items: stretch;
-    gap: 10px;
+    gap: 8px;
   }
   .sidebar .brand,
   .sidebar .profilebox,
@@ -1309,7 +1309,7 @@ button.danger:disabled,
   .mainnav--vertical{
     flex-direction: column;
     width: 100%;
-    gap: 10px;
+    gap: 6px;
   }
   .sidelist{
     width: 100%;
@@ -1317,7 +1317,7 @@ button.danger:disabled,
     flex-direction: row;
     flex-wrap: nowrap;
     justify-content: flex-start;
-    gap: 8px;
+    gap: 6px;
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
   }
@@ -1328,14 +1328,14 @@ button.danger:disabled,
     gap: 8px;
   }
   .sidelist__item{
-    flex: 0 0 72px;
+    flex: 0 0 70px;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
     gap: 4px;
-    min-height: 60px;
-    padding: 8px 6px;
+    min-height: 56px;
+    padding: 6px 6px;
     border-radius: 12px;
     background: rgba(148, 163, 184, 0.08);
     text-align: center;
