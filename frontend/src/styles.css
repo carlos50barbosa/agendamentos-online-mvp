@@ -1280,87 +1280,72 @@ button.danger:disabled,
   .row.spread .input,
   .row.spread select{ height: 36px; padding: 0 10px; font-size: 13px; }
 
-  /* Sidebar vira uma barra fixa no rodapé */
+  /* Sidebar se torna um painel fixo compacto no rodapé */
   .sidebar{
     position: fixed; left: 0; right: 0; bottom: 0; top: auto;
-    width: 100%; height: calc(74px + env(safe-area-inset-bottom, 0px));
+    width: 100%;
     border-right: 0; border-top: 1px solid var(--border);
     background: var(--surface); z-index: 60;
     transform: none; overflow: visible;
-    padding-bottom: env(safe-area-inset-bottom, 0px);
+    padding: 12px 12px calc(16px + env(safe-area-inset-bottom, 0px));
+    box-shadow: 0 -12px 26px rgba(15, 23, 42, 0.12);
   }
-  /* Garante que a navegação da sidebar apareça no mobile (sobrepõe regras do header) */
   .sidebar .mainnav{
     display: flex !important;
-    position: static;
-    left: auto; right: auto; top: auto;
-    background: transparent; border: 0; padding: 0;
-    gap: 8px;
+    width: 100%;
+    background: transparent; border: 0;
   }
-  /* Organiza conteúdo horizontalmente */
   .sidebar__inner{
-    height: 100%;
-    padding: 6px;
+    width: 100%;
     display: flex;
-    flex-direction: row;
-    align-items: center;
-    justify-content: flex-start;
-    gap: 4px;
-    overflow-x: auto;
-    overflow-y: hidden;
-    padding-bottom: env(safe-area-inset-bottom, 0px);
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+    overflow: visible;
   }
-  /* Esconde elementos não essenciais SOMENTE na barra inferior (sidebar no mobile) */
   .sidebar .brand,
   .sidebar .profilebox,
   .sidebar .sidelist__heading{ display: none !important; }
-  /* Navegação vira horizontal */
   .mainnav--vertical{
-    flex-direction: row;
-    align-items: center;
+    flex-direction: column;
     width: 100%;
-    gap: 4px;
+    align-items: stretch;
+    gap: 12px;
   }
   .sidelist{
-    flex-direction: row;
-    gap: 0;
-    align-items: center;
-    width: auto;
-    justify-content: flex-start;
-    overflow-x: auto;
-    overflow-y: hidden;
-    -webkit-overflow-scrolling: touch;
+    width: 100%;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(88px, 1fr));
+    gap: 10px;
   }
-  .sidelist::-webkit-scrollbar,
-  .sidebar__inner::-webkit-scrollbar{ display: none; height: 0; }
-  .sidelist__section{
-    display: flex;
-    flex-direction: row;
-    gap: 0;
-    align-items: center;
-  }
+  .sidelist__section{ display: contents; }
   .sidelist__item{
-    width: auto; padding: 6px 4px; border-radius: 10px;
-    display: inline-flex; flex-direction: column; align-items: center; justify-content: center;
-    gap: 2px;
-    min-width: 60px; min-height: 44px; /* alvo de toque acessível */
-    flex: 0 0 64px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    min-height: 64px;
+    padding: 10px 6px;
+    border-radius: 14px;
     color: var(--text) !important;
     text-align: center;
   }
-  /* Ícone acima, rótulo abaixo — compacto */
-  .sidelist__item > span{ display: block; font-size: 10px; line-height: 1; opacity: .9; max-width: 72px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .sidelist__icon{ width: 24px; height: 24px; display: block; color: var(--text); flex-shrink: 0; stroke: currentColor; stroke-width: 2.2; margin: 0 auto; }
-  .sidelist__item svg{ display: block; }
-  /* Esconde controles do drawer no mobile */
+  .sidelist__icon{ width: 22px; height: 22px; stroke: currentColor; stroke-width: 2.1; }
+  .sidelist__item > span{
+    display: block;
+    font-size: 12px;
+    line-height: 1.25;
+    max-width: 100%;
+    white-space: normal;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
   .sidebar-toggle,
   .sidebar-overlay{ display: none !important; }
-  /* Garante que a barra inferior não suma com .is-collapsed */
   .app-shell.is-collapsed .sidebar{ transform: none; }
-  /* Reserva espaço para a barra não cobrir o conteúdo */
-  .app-main{ padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px)); }
+  .app-main{ padding-bottom: calc(140px + env(safe-area-inset-bottom, 0px)); }
 
-  /* Aumenta fonte no mobile para legibilidade */
   html, body{ font-size: 16px; }
   .dashboard-narrow{ font-size: 16px; }
   .dashboard-narrow .card > table thead th{ font-size: 12px; padding: 6px 8px; }
@@ -1368,37 +1353,6 @@ button.danger:disabled,
   .dashboard-narrow .card > table tbody td .small{ font-size: 12px; }
   .dashboard-narrow .badge{ font-size: 11px; padding: 3px 8px; }
   .dashboard-narrow .btn{ height: 38px; padding: 0 12px; font-size: 13px; }
-
-  /* Layout específico para clientes: usa grade centralizada */
-  .sidebar.sidebar--client .sidebar__inner{
-    justify-content: center;
-    flex-wrap: wrap;
-    gap: 8px;
-    overflow: visible;
-    padding-bottom: 12px;
-  }
-  .sidebar.sidebar--client .sidelist{
-    flex-wrap: wrap;
-    justify-content: center;
-    gap: 8px;
-    overflow: visible;
-    width: 100%;
-  }
-  .sidebar.sidebar--client .sidelist__section{
-    display: contents;
-  }
-  .sidebar.sidebar--client .sidelist__item{
-    flex: 0 0 74px;
-    min-width: 74px;
-    min-height: 58px;
-    padding: 10px 6px;
-    border-radius: 12px;
-  }
-  .sidebar.sidebar--client .sidelist__item > span{
-    max-width: 74px;
-    white-space: normal;
-    line-height: 1.2;
-  }
 }
 
 /* Utilitários de visibilidade por breakpoint */
