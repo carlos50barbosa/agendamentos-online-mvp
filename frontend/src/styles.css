@@ -1888,3 +1888,27 @@ button.danger:disabled,
   .plan-card__actions{flex-direction:column;align-items:stretch;}
   .plan-card__actions-group,.plan-card__actions-group--secondary{width:100%;justify-content:flex-start;}
 }
+
+
+[data-theme='dark'] .plan-card{background:rgba(15,23,42,0.82);border-color:rgba(148,163,184,0.32);box-shadow:0 18px 40px rgba(2,6,23,0.45);}
+[data-theme='dark'] .plan-card__summary-item{background:rgba(15,23,42,0.65);}
+[data-theme='dark'] .plan-card__notice{background:rgba(15,23,42,0.65);color:#e2e8f0;}
+[data-theme='dark'] .plan-card__features li{color:#e2e8f0;}
+[data-theme='dark'] .plan-card__features li::before{background:#818cf8;}
+[data-theme='dark'] .chip{background:rgba(30,41,59,0.8);color:#e2e8f0;}
+[data-theme='dark'] .chip--tier{background:rgba(148,163,184,0.18);color:#f8fafc;}
+[data-theme='dark'] .chip--status-default{background:rgba(30,41,59,0.8);color:#cbd5f5;}
+[data-theme='dark'] .chip--status-active{background:rgba(22,101,52,0.35);color:#bbf7d0;}
+[data-theme='dark'] .chip--status-trialing{background:rgba(3,105,161,0.35);color:#bae6fd;}
+[data-theme='dark'] .chip--status-pending{background:rgba(146,64,14,0.35);color:#fde68a;}
+[data-theme='dark'] .chip--status-delinquent{background:rgba(185,28,28,0.35);color:#fecaca;}
+[data-theme='dark'] .chip--status-authorized{background:rgba(91,33,182,0.35);color:#e9d5ff;}
+[data-theme='dark'] .plan-card__alert--info{background:rgba(56,189,248,0.18);color:#bae6fd;}
+[data-theme='dark'] .plan-card__alert--warn{background:rgba(251,191,36,0.18);color:#fde68a;}
+[data-theme='dark'] .plan-card__alert--error{background:rgba(248,113,113,0.18);color:#fecaca;}
+[data-theme='dark'] .plan-card__alert--muted{background:rgba(30,41,59,0.65);color:#cbd5f5;}
+[data-theme='dark'] .plan-card__summary-label{color:#94a3b8;}
+[data-theme='dark'] .plan-card__summary-item strong{color:#f8fafc;}
+[data-theme='dark'] .plan-card__summary-extra{color:#94a3b8;}
+[data-theme='dark'] .plan-card__foot{color:#94a3b8;}
+[data-theme='dark'] .plan-card__pix-select{color:#94a3b8;}

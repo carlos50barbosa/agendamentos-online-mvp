@@ -175,6 +175,7 @@ export default function Configuracoes() {
     pro: { label: 'Pro', maxServices: 100, maxProfessionals: 10 },
     premium: { label: 'Premium', maxServices: null, maxProfessionals: null },
   };
+  const PLAN_TIERS = Object.keys(PLAN_META);
   const planLabel = (p) => PLAN_META[p]?.label || p?.toUpperCase() || '';
   const exceedsServices = (target) => {
     const limit = PLAN_META[target]?.maxServices;
@@ -1362,5 +1363,4 @@ export default function Configuracoes() {
     </div>
   );
 }
-
 
