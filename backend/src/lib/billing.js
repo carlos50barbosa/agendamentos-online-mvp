@@ -1,6 +1,6 @@
 ﻿// backend/src/lib/billing.js
 import { randomUUID } from 'node:crypto'
-import { MercadoPagoConfig, PreApproval, PreApprovalPlan } from 'mercadopago'
+import { MercadoPagoConfig, PreApproval, PreApprovalPlan, Preference, Payment } from 'mercadopago'
 import { config } from './config.js'
 import {
   PLAN_TIERS,
@@ -30,6 +30,8 @@ const dbg = (...args) => { if (BILLING_DEBUG) console.log('[billing][debug]', ..
 let mercadoPagoClient = null
 let mercadoPagoPreapproval = null
 let mercadoPagoPlan = null
+let mercadoPagoPreference = null
+let mercadoPagoPayment = null
 
 function ensureMercadoPagoPreapproval() {
   if (mercadoPagoPreapproval) return mercadoPagoPreapproval
@@ -55,6 +57,24 @@ function ensureMercadoPagoPlan() {
   if (!mercadoPagoClient) mercadoPagoClient = new MercadoPagoConfig({ accessToken })
   mercadoPagoPlan = new PreApprovalPlan(mercadoPagoClient)
   return mercadoPagoPlan
+}
+
+function ensureMercadoPagoPreference() {
+  if (mercadoPagoPreference) return mercadoPagoPreference
+  const accessToken = config.billing?.mercadopago?.accessToken
+  if (!accessToken) throw new Error('Mercado Pago access token is not configured')
+  if (!mercadoPagoClient) mercadoPagoClient = new MercadoPagoConfig({ accessToken })
+  mercadoPagoPreference = new Preference(mercadoPagoClient)
+  return mercadoPagoPreference
+}
+
+function ensureMercadoPagoPayment() {
+  if (mercadoPagoPayment) return mercadoPagoPayment
+  const accessToken = config.billing?.mercadopago?.accessToken
+  if (!accessToken) throw new Error('Mercado Pago access token is not configured')
+  if (!mercadoPagoClient) mercadoPagoClient = new MercadoPagoConfig({ accessToken })
+  mercadoPagoPayment = new Payment(mercadoPagoClient)
+  return mercadoPagoPayment
 }
 
 export async function getPlanInitPoint(preApprovalPlanId) {
@@ -367,6 +387,210 @@ export async function createMercadoPagoCheckout({
     preapproval: null,
     planStatus: 'pending',
   }
+}
+
+// Cria um Checkout Pro (preferência) exclusivamente para PIX como fallback do primeiro ciclo
+export async function createMercadoPagoPixCheckout({
+  estabelecimento,
+  plan,
+  billingCycle,
+  successUrl,
+  failureUrl,
+  pendingUrl,
+}) {
+  if (!estabelecimento?.id) throw new Error('Estabelecimento invalido')
+  const normalizedPlan = String(plan || '').toLowerCase()
+  if (!PLAN_TIERS.includes(normalizedPlan)) throw new Error('Plano invalido')
+  const normalizedCycle = normalizeBillingCycle(billingCycle)
+  const priceCents = getPlanPriceCents(normalizedPlan, normalizedCycle)
+  if (!priceCents) throw new Error('Preco do plano nao configurado')
+
+  const amountNum = Number((Number(priceCents || 0) / 100).toFixed(2))
+  const pref = ensureMercadoPagoPreference()
+
+  const FRONT_BASE = String(process.env.FRONTEND_BASE_URL || process.env.APP_URL || 'http://localhost:3001').replace(/\/$/, '')
+  const isDevFront = /^(https?:\/\/)?(localhost|127\.0\.0\.1):3001$/i.test(FRONT_BASE)
+  const DEFAULT_API_BASE = isDevFront ? 'http://localhost:3002' : `${FRONT_BASE}/api`
+  const API_BASE = String(process.env.API_BASE_URL || process.env.BACKEND_BASE_URL || DEFAULT_API_BASE).replace(/\/$/, '')
+  const uiSuccess = pickValidUrl(config.billing?.mercadopago?.successUrl) || `${FRONT_BASE}/configuracoes?checkout=sucesso`
+  const uiFailure = pickValidUrl(config.billing?.mercadopago?.failureUrl) || `${FRONT_BASE}/configuracoes?checkout=erro`
+  const uiPending = pickValidUrl(config.billing?.mercadopago?.pendingUrl) || `${FRONT_BASE}/configuracoes?checkout=pendente`
+
+  const externalReference = buildExternalReference(estabelecimento.id, normalizedPlan, normalizedCycle)
+
+  const body = {
+    items: [
+      {
+        id: `plan-${normalizedPlan}-${normalizedCycle}`,
+        title: `Agendamentos Online - ${getPlanLabel(normalizedPlan)} (${normalizedCycle})`,
+        description: `Assinatura - primeiro ciclo via PIX`,
+        quantity: 1,
+        currency_id: BILLING_CURRENCY,
+        unit_price: amountNum,
+      },
+    ],
+    external_reference: externalReference,
+    back_urls: {
+      success: uiSuccess,
+      failure: uiFailure,
+      pending: uiPending,
+    },
+    auto_return: 'approved',
+    payment_methods: {
+      excluded_payment_types: [
+        { id: 'credit_card' },
+        { id: 'debit_card' },
+        { id: 'ticket' },
+        { id: 'atm' },
+      ],
+      default_payment_method_id: 'pix',
+      installments: 1,
+    },
+    statement_descriptor: 'AGENDAMENTOS',
+    metadata: { kind: 'pix_fallback', plan: normalizedPlan, cycle: normalizedCycle, estabelecimento_id: String(estabelecimento.id) },
+    payer: estabelecimento?.email ? { email: estabelecimento.email } : undefined,
+    notification_url: `${API_BASE}/billing/webhook`,
+  }
+
+  let resp
+  try {
+    resp = await pref.create({ body })
+  } catch (e) {
+    const detail = extractMpError(e)
+    console.error('[mp][preference.create] error', detail)
+    throw new Error('mercadopago_preference_error: ' + detail)
+  }
+  if (!resp?.id) throw new Error('mercadopago_preference_error: preferencia sem id')
+
+  const subscription = await createSubscription({
+    estabelecimentoId: estabelecimento.id,
+    plan: normalizedPlan,
+    amountCents: priceCents,
+    currency: BILLING_CURRENCY,
+    status: 'pending',
+    gatewaySubscriptionId: null,
+    gatewayPreferenceId: String(resp.id),
+    externalReference,
+    billingCycle: normalizedCycle,
+  })
+  await appendSubscriptionEvent(subscription.id, {
+    eventType: 'preference.create',
+    gatewayEventId: String(resp.id),
+    payload: { preference: resp },
+  })
+
+  // Preferir init_point (ou sandbox_init_point em token TEST)
+  const accessToken = config.billing?.mercadopago?.accessToken || ''
+  const isTestToken = /^TEST-/.test(accessToken)
+  const chosenInitPoint = isTestToken ? (resp.sandbox_init_point || resp.init_point || null) : (resp.init_point || resp.sandbox_init_point || null)
+
+  return { initPoint: chosenInitPoint, subscription, planStatus: 'pending', preference: resp }
+}
+
+function addCycle(date, cycle) {
+  const d = new Date(date)
+  const c = normalizeBillingCycle(cycle)
+  if (c === 'anual') d.setFullYear(d.getFullYear() + 1)
+  else d.setMonth(d.getMonth() + 1)
+  return d
+}
+
+export async function syncMercadoPagoPayment(paymentId, eventPayload = null) {
+  if (!paymentId) throw new Error('paymentId ausente')
+  const client = ensureMercadoPagoPayment()
+  const payment = await client.get({ id: String(paymentId) })
+  if (!payment?.id) throw new Error('Pagamento nao encontrado')
+
+  const status = String(payment.status || '').toLowerCase()
+  const externalRef = String(payment.external_reference || '')
+  // Tenta extrair tokens do external_reference
+  const tokens = {}
+  const parts = externalRef.split(':')
+  for (let i = 0; i < parts.length - 1; i += 2) {
+    tokens[parts[i]] = parts[i + 1]
+  }
+  const planToken = String(tokens.plan || '').toLowerCase()
+  const cycleToken = normalizeBillingCycle(tokens.cycle)
+  const estabId = Number(tokens.est || 0)
+
+  // Recupera (se existir) a subscription criada ao gerar a preferência
+  let subscription = null
+  if (payment.order?.id) {
+    // às vezes, o order.id não corresponde à preference, então mantemos fallback por external_reference
+  }
+  // fallback: tente localizar pelo external_reference (se já tivermos salvo)
+  if (!subscription && externalRef) {
+    try {
+      const [rows] = await pool.query('SELECT * FROM subscriptions WHERE external_reference=? ORDER BY id DESC LIMIT 1', [externalRef])
+      subscription = rows?.[0] ? {
+        id: rows[0].id,
+        estabelecimentoId: rows[0].estabelecimento_id,
+        plan: rows[0].plan,
+        amountCents: rows[0].amount_cents,
+        currency: rows[0].currency,
+        billingCycle: rows[0].billing_cycle,
+        gateway: rows[0].gateway,
+        gatewaySubscriptionId: rows[0].gateway_subscription_id,
+        gatewayPreferenceId: rows[0].gateway_preference_id,
+      } : null
+    } catch {}
+  }
+
+  // Se não conseguimos inferir, mas temos tokens válidos, crie um registro minimamente coerente
+  if (!subscription && estabId && PLAN_TIERS.includes(planToken)) {
+    subscription = await createSubscription({
+      estabelecimentoId: estabId,
+      plan: planToken,
+      amountCents: Math.round(Number(payment.transaction_amount || 0) * 100),
+      currency: (payment.currency_id || BILLING_CURRENCY).toUpperCase(),
+      status: 'pending',
+      gatewaySubscriptionId: null,
+      gatewayPreferenceId: null,
+      externalReference: externalRef || null,
+      billingCycle: cycleToken || 'mensal',
+    })
+  }
+
+  if (status !== 'approved') {
+    if (subscription?.id) {
+      await appendSubscriptionEvent(subscription.id, {
+        eventType: `payment.${status}`,
+        gatewayEventId: String(payment.id),
+        payload: { event: eventPayload, payment },
+      })
+    }
+    return { ok: false, payment }
+  }
+
+  // status approved: ativa plano por 1 ciclo a partir de hoje (PIX fallback)
+  const effectivePlan = (PLAN_TIERS.includes(planToken) ? planToken : (subscription?.plan || 'pro'))
+  const effectiveCycle = cycleToken || subscription?.billingCycle || 'mensal'
+  const activeUntil = addCycle(new Date(), effectiveCycle)
+
+  if (subscription?.id) {
+    await updateSubscription(subscription.id, {
+      status: 'active',
+      amountCents: Math.round(Number(payment.transaction_amount || subscription.amountCents / 100) * 100),
+      currency: (payment.currency_id || BILLING_CURRENCY).toUpperCase(),
+      currentPeriodEnd: activeUntil,
+      lastEventId: String(payment.id),
+      billingCycle: effectiveCycle,
+    })
+    await appendSubscriptionEvent(subscription.id, {
+      eventType: 'payment.approved',
+      gatewayEventId: String(payment.id),
+      payload: { event: eventPayload, payment },
+    })
+  }
+
+  // Atualiza o usuário
+  if (subscription?.estabelecimentoId || estabId) {
+    const estabelecimentoId = subscription?.estabelecimentoId || estabId
+    const sql = `UPDATE usuarios SET plan=?, plan_status='active', plan_cycle=?, plan_trial_ends_at=NULL, plan_active_until=?, plan_subscription_id=NULL WHERE id=? AND tipo='estabelecimento' LIMIT 1`
+    await pool.query(sql, [effectivePlan, effectiveCycle, activeUntil, estabelecimentoId])
+  }
+
+  return { ok: true, payment, plan: effectivePlan, cycle: effectiveCycle, active_until: activeUntil }
 }
 
 export async function syncMercadoPagoPreapproval(preapprovalId, eventPayload = null) {

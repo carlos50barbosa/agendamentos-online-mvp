@@ -35,6 +35,7 @@ import RecuperarSenha from './pages/RecuperarSenha.jsx';
 import DefinirSenha from './pages/DefinirSenha.jsx';
 import AdminTools from './pages/AdminTools.jsx';
 import AdminDB from './pages/AdminDB.jsx';
+import AdminBilling from './pages/AdminBilling.jsx';
 import Contato from './pages/Contato.jsx';
 import ChatAgendamento from './components/ChatAgendamento.jsx';
 import LinkPhone from './pages/LinkPhone.jsx';
@@ -73,6 +74,7 @@ const APP_ROUTES = [
   { path: '/contato', element: <Contato /> },
   { path: '/admin-tools', element: <AdminTools /> },
   { path: '/admin/db', element: <AdminDB /> },
+  { path: '/admin/billing', element: <AdminBilling /> },
 ];
 
 function useAppPreferences() {

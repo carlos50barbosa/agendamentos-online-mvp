@@ -56,7 +56,7 @@ export default function Configuracoes() {
   const [slug, setSlug] = useState('');
   const [msg, setMsg] = useState({ email_subject: '', email_html: '', wa_template: '' });
   const [savingMessages, setSavingMessages] = useState(false);
-  const [openSections, setOpenSections] = useState({ profile: true });
+  const [openSections, setOpenSections] = useState({});
 
   const [profileForm, setProfileForm] = useState({
     nome: '',
@@ -101,6 +101,30 @@ export default function Configuracoes() {
   const [changePlanPassword, setChangePlanPassword] = useState('');
   const [changePlanError, setChangePlanError] = useState('');
   const [changePlanSubmitting, setChangePlanSubmitting] = useState(false);
+  // PIX fallback cycle selector
+  const [pixCycle, setPixCycle] = useState('mensal');
+
+  // Util: mapeia códigos do MP para mensagens amigáveis
+  const mapStatusDetailMessage = useCallback((code) => {
+    const c = String(code || '').toLowerCase();
+    const generic = 'O pagamento não foi concluído. Tente novamente em seu dispositivo habitual, faça login no Mercado Pago, use outro cartão ou ative por PIX.';
+    if (!c) return generic;
+    if (c.includes('high_risk')) return 'Pagamento recusado por segurança. Use o dispositivo/rede que você costuma comprar, faça login no Mercado Pago ou tente outro cartão. Alternativa: ative por PIX.';
+    if (c.includes('issuer') || c.includes('call_for_authorize') || c.includes('other_reason')) return 'O banco emissor recusou a transação. Tente outro cartão ou contate seu banco. Alternativa: ative por PIX.';
+    if (c.includes('insufficient')) return 'Sem limite/saldo disponível no cartão. Tente outro cartão. Alternativa: ative por PIX.';
+    if (c.includes('bad_filled')) return 'Dados do cartão inválidos. Revise número, validade e código (CVV).';
+    if (c.includes('blacklist')) return 'Pagamento bloqueado pelo Mercado Pago. Utilize outro cartão/conta ou ative por PIX.';
+    return generic;
+  }, []);
+
+  const inferMpStatusDetailFromError = useCallback((err) => {
+    // tenta extrair um status_detail da mensagem/cause do backend
+    try {
+      const raw = (err?.data?.message || err?.message || '') + ' ' + JSON.stringify(err?.data || {});
+      const m = raw.match(/cc_rejected_[a-z_]+|bad_filled_[a-z_]+|issuer|insufficient_amount|call_for_authorize|blacklist/gi);
+      return m && m[0] ? String(m[0]).toLowerCase() : '';
+    } catch { return ''; }
+  }, []);
 
   // Elegibilidade a teste grátis: somente Starter, sem trial em andamento e sem histórico de plano pago
   const hasPaidHistory = useMemo(() => {
@@ -124,6 +148,11 @@ export default function Configuracoes() {
     const statusSub = String(billing?.subscription?.status || '').toLowerCase();
     return statusPlan === 'active' || statusSub === 'active';
   }, [planInfo.status, billing?.subscription?.status]);
+  const needsRecurringSetup = useMemo(() => {
+    const statusPlan = String(planInfo.status || '').toLowerCase();
+    const hasGatewaySub = !!(billing?.subscription?.gateway_subscription_id);
+    return statusPlan === 'active' && !hasGatewaySub; // ativo por PIX (sem preapproval)
+  }, [planInfo.status, billing?.subscription?.gateway_subscription_id]);
 
   // Assinatura ativa (evita acionar checkout padrão e resultar em 409 "already_active")
 
@@ -293,7 +322,11 @@ export default function Configuracoes() {
           // Limpa o parâmetro da URL após tratar
           try { url.searchParams.delete('checkout'); window.history.replaceState({}, '', url.toString()); } catch {}
         } else if (chk === 'erro') {
-          setCheckoutNotice({ kind: 'error', message: 'O pagamento não foi concluído. Tente novamente.', syncing: false });
+          setCheckoutNotice({
+            kind: 'error',
+            message: 'O pagamento não foi concluído. Tente novamente no seu dispositivo habitual, faça login no Mercado Pago, use outro cartão ou ative por PIX.',
+            syncing: false,
+          });
           try { url.searchParams.delete('checkout'); window.history.replaceState({}, '', url.toString()); } catch {}
         } else if (chk === 'pendente') {
           setCheckoutNotice({ kind: 'warn', message: 'Pagamento pendente de confirmação.', syncing: false });
@@ -376,7 +409,9 @@ export default function Configuracoes() {
           setCheckoutError(err?.data?.message || 'Sua assinatura já está ativa.');
         }
       } else {
-        setCheckoutError(err?.data?.message || err?.message || 'Falha ao gerar link de pagamento.');
+        const code = inferMpStatusDetailFromError(err);
+        const friendly = mapStatusDetailMessage(code);
+        setCheckoutError(friendly);
       }
     } finally {
       setCheckoutLoading(false);
@@ -405,7 +440,9 @@ export default function Configuracoes() {
       if (err?.status === 409 && (err?.data?.error === 'plan_downgrade_blocked' || err?.data?.error === 'same_plan')) {
         setCheckoutError(err?.data?.message || 'Não foi possível alterar o plano.');
       } else {
-        setCheckoutError(err?.data?.message || err?.message || 'Falha ao alterar o plano.');
+        const code = inferMpStatusDetailFromError(err);
+        const friendly = mapStatusDetailMessage(code);
+        setCheckoutError(friendly);
       }
     } finally {
       setCheckoutLoading(false);
@@ -418,6 +455,28 @@ export default function Configuracoes() {
     setChangePlanPassword('');
     setChangePlanError('');
   }, []);
+
+  const handleCheckoutPix = useCallback(async (plan = 'pro', cycle = 'mensal') => {
+    if (!isEstab || !user?.id) return false;
+    setCheckoutError('');
+    setCheckoutLoading(true);
+    let success = false;
+    try {
+      const data = await Api.billingPixCheckout({ plan, billing_cycle: cycle });
+      if (data?.init_point) {
+        window.location.href = data.init_point;
+        success = true;
+        return success;
+      }
+      await fetchBilling();
+      success = true;
+    } catch (err) {
+      setCheckoutError(err?.data?.message || err?.message || 'Falha ao gerar cobrança PIX.');
+    } finally {
+      setCheckoutLoading(false);
+    }
+    return success;
+  }, [fetchBilling, isEstab, user?.id]);
 
   const closeChangePlanModal = useCallback(() => {
     if (changePlanSubmitting) return;
@@ -902,13 +961,14 @@ export default function Configuracoes() {
                 </div>
                 {hasActiveSubscription && (
                   <div className="notice notice--info" role="status" style={{ marginTop: 8 }}>
-                    Sua assinatura já está ativa{planInfo.activeUntil ? ` até ${fmtDate(planInfo.activeUntil)}` : ''}. Para migrar para o Pro, use o botão abaixo.
+                    Sua assinatura já está ativa{planInfo.activeUntil ? ` até ${fmtDate(planInfo.activeUntil)}` : ''}.
+                    {needsRecurringSetup ? ' Configure a recorrência no cartão para as próximas cobranças.' : ' Para migrar de plano, use o botão abaixo.'}
                   </div>
-                )}
+               )}
                 <div className="row" style={{ gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
                   {!planInfo.trialEnd && trialEligible && (
                     <button
-                      className="btn btn--outline"
+                      className="btn btn--brand-outline btn--sm"
                       type="button"
                       onClick={startTrial}
                       disabled={planInfo.status === 'delinquent' || checkoutLoading}
@@ -917,7 +977,7 @@ export default function Configuracoes() {
                     </button>
                   )}
                   <button
-                    className="btn btn--primary"
+                    className="btn btn--primary btn--sm"
                     type="button"
                     onClick={() => {
                       if (hasActiveSubscription) {
@@ -932,7 +992,80 @@ export default function Configuracoes() {
                       ? <span className="spinner" />
                       : (hasActiveSubscription ? 'Alterar para plano Pro' : 'Contratar plano Pro')}
                   </button>
-                  <Link className="btn btn--outline" to="/planos">Conhecer planos</Link>
+                  {needsRecurringSetup && (
+                    <button
+                      className="btn btn--brand-outline btn--sm"
+                      type="button"
+                      onClick={async () => {
+                        try {
+                          setCheckoutLoading(true);
+                          const data = await Api.billingRecurringSetup();
+                          if (data?.init_point) window.location.href = data.init_point;
+                        } catch (err) {
+                          setCheckoutError(err?.data?.message || err?.message || 'Falha ao configurar recorrência.');
+                        } finally {
+                          setCheckoutLoading(false);
+                        }
+                      }}
+                      disabled={checkoutLoading}
+                      title="Configurar cobrança recorrente no cartão para os próximos ciclos"
+                    >
+                      {checkoutLoading ? <span className="spinner" /> : 'Configurar recorrência no cartão'}
+                    </button>
+                  )}
+                  {/* PIX fallback em seção separada */}
+                  {!hasActiveSubscription && (
+                    <div className="box" style={{ width: '100%' }}>
+                      <div className="row" style={{ justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+                        <strong>Ativar por PIX (primeiro ciclo)</strong>
+                        <label className="label" style={{ margin: 0 }}>
+                          <span style={{ fontSize: 12 }}>Ciclo</span>
+                          <select
+                            className="input input--sm"
+                            value={pixCycle}
+                            onChange={(e) => setPixCycle(e.target.value)}
+                            style={{ minWidth: 120 }}
+                          >
+                            <option value="mensal">Mensal</option>
+                            <option value="anual">Anual</option>
+                          </select>
+                        </label>
+                      </div>
+                      <div className="btn-row" style={{ marginTop: 8 }}>
+                        <button
+                          className="btn btn--chip btn--sm"
+                          type="button"
+                          onClick={() => handleCheckoutPix('starter', pixCycle)}
+                          disabled={checkoutLoading}
+                          title="Alternativa por PIX para o primeiro ciclo (Starter)"
+                        >
+                          {checkoutLoading ? <span className="spinner" /> : 'Ativar por PIX (Starter)'}
+                        </button>
+                        <button
+                          className="btn btn--chip btn--sm"
+                          type="button"
+                          onClick={() => handleCheckoutPix('pro', pixCycle)}
+                          disabled={checkoutLoading}
+                          title="Alternativa por PIX para o primeiro ciclo (Pro)"
+                        >
+                          {checkoutLoading ? <span className="spinner" /> : 'Ativar por PIX (Pro)'}
+                        </button>
+                        <button
+                          className="btn btn--chip btn--sm"
+                          type="button"
+                          onClick={() => handleCheckoutPix('premium', pixCycle)}
+                          disabled={checkoutLoading}
+                          title="Alternativa por PIX para o primeiro ciclo (Premium)"
+                        >
+                          {checkoutLoading ? <span className="spinner" /> : 'Ativar por PIX (Premium)'}
+                        </button>
+                      </div>
+                      <div className="small muted" style={{ marginTop: 6 }}>
+                        O PIX ativa o plano por 1 ciclo. Depois, use “Configurar recorrência no cartão” para automatizar as próximas cobranças.
+                      </div>
+                    </div>
+                  )}
+                  <Link className="btn btn--brand-outline btn--sm" to="/planos">Conhecer planos</Link>
                 </div>
               </>
             ) : (

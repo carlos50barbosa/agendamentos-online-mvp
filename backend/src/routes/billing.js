@@ -2,7 +2,7 @@
 import { Router } from 'express'
 import { createHmac } from 'node:crypto'
 import { auth, isEstabelecimento } from '../middleware/auth.js'
-import { createMercadoPagoCheckout, syncMercadoPagoPreapproval, getPlanInitPoint } from '../lib/billing.js'
+import { createMercadoPagoCheckout, createMercadoPagoPixCheckout, syncMercadoPagoPreapproval, syncMercadoPagoPayment, getPlanInitPoint } from '../lib/billing.js'
 import {
   getPlanContext,
   serializePlanContext,
@@ -42,9 +42,18 @@ function verifyWebhookSignature(req, resourceId) {
   const signature = data.v1 || data.sign || data.signature || ''
   if (!ts || !signature) return { valid: false, reason: 'invalid_signature_header' }
 
-  // Alguns ambientes do MP usam request-id na mensagem, outros usam topic (type)
+  // Alguns ambientes do MP usam request-id na mensagem, outros usam topic (query "topic" ou "type")
   const requestId = req.headers['x-request-id'] || ''
-  const topic = req.query?.type || req.body?.type || req.headers['x-topic'] || ''
+  // Colete várias fontes possíveis de tópico (MP varia entre 'topic', 'type', 'entity' e header 'x-topic')
+  const topicCandidatesRaw = [
+    req.query?.topic,
+    req.query?.type,
+    req.headers['x-topic'],
+    req.body?.topic,
+    req.body?.type,
+    req.body?.entity,
+  ]
+  const topicCandidates = Array.from(new Set(topicCandidatesRaw.filter((v) => typeof v === 'string' && v.trim() !== '').map((v) => String(v).toLowerCase())))
 
   let matched = false
   let method = 'none'
@@ -55,20 +64,26 @@ function verifyWebhookSignature(req, resourceId) {
     const sec = secrets[i]
     const payloadReqId = `id:${resourceId};request-id:${requestId};ts:${ts}`
     const expectedReqId = createHmac('sha256', sec).update(payloadReqId).digest('hex')
-    const payloadTopic = `id:${resourceId};topic:${topic};ts:${ts}`
-    const expectedTopic = createHmac('sha256', sec).update(payloadTopic).digest('hex')
     const validReq = expectedReqId === signature
-    const validTop = expectedTopic === signature
-    variants.push({ index: i, expected_request_id: expectedReqId, expected_topic: expectedTopic, payload_request_id: payloadReqId, payload_topic: payloadTopic })
-    if (validReq || validTop) {
-      matched = true
-      method = validReq ? 'request-id' : 'topic'
-      usingSecretIndex = i
-      break
+    variants.push({ index: i, expected_request_id: expectedReqId, payload_request_id: payloadReqId })
+    if (validReq) { matched = true; method = 'request-id'; usingSecretIndex = i; break }
+
+    // Tente múltiplos candidatos de tópico
+    for (const t of (topicCandidates.length ? topicCandidates : [''])) {
+      const payloadTopic = `id:${resourceId};topic:${t};ts:${ts}`
+      const expectedTopic = createHmac('sha256', sec).update(payloadTopic).digest('hex')
+      variants.push({ index: i, expected_topic: expectedTopic, payload_topic: payloadTopic, topic: t })
+      if (expectedTopic === signature) {
+        matched = true
+        method = 'topic'
+        usingSecretIndex = i
+        break
+      }
     }
+    if (matched) break
   }
 
-  return { valid: matched, signature, ts, method, using_secret_index: usingSecretIndex, topic, request_id: requestId, variants }
+  return { valid: matched, signature, ts, method, using_secret_index: usingSecretIndex, topics_tried: topicCandidates, request_id: requestId, variants }
 }
 
 router.post('/checkout-session', auth, isEstabelecimento, async (req, res) => {
@@ -173,12 +188,18 @@ router.post('/webhook', async (req, res) => {
   }
 
   try {
+    const topic = String(req.query?.type || req.query?.topic || event?.type || event?.topic || req.headers['x-topic'] || '').toLowerCase()
+    if (topic === 'payment') {
+      const r = await syncMercadoPagoPayment(resourceId, event)
+      console.log('[billing:webhook] payment', resourceId, r?.ok ? 'approved' : 'ignored', { ok: r?.ok })
+      return res.status(200).json({ ok: true })
+    }
+
     const result = await syncMercadoPagoPreapproval(resourceId, event)
-    // Loga status e status_detail (quando disponível) para facilitar diagnóstico de recusas/cancelamentos
     const preStatus = result?.preapproval?.status || null
     const preDetail = result?.preapproval?.status_detail || null
     const action = event?.action || null
-    console.log('[billing:webhook] sincronizado', resourceId, result.planStatus, { preapproval_status: preStatus, preapproval_status_detail: preDetail, action })
+    console.log('[billing:webhook] preapproval', resourceId, result.planStatus, { preapproval_status: preStatus, preapproval_status_detail: preDetail, action })
   } catch (error) {
     console.error('[billing:webhook] falha ao sincronizar', resourceId, error)
     return res.status(200).json({ ok: false })
@@ -380,6 +401,66 @@ router.post('/change', auth, isEstabelecimento, async (req, res) => {
       'Falha ao alterar plano'
     console.error('POST /billing/change', detail, cause || error)
     return res.status(400).json({ error: 'change_failed', message: detail, cause })
+  }
+})
+
+// Fallback: cria preferência de PIX para primeiro ciclo
+router.post('/pix', auth, isEstabelecimento, async (req, res) => {
+  try {
+    const { plan, billing_cycle: rawCycle, successUrl, failureUrl, pendingUrl } = req.body || {}
+    const billingCycle = normalizeBillingCycle(rawCycle)
+    const result = await createMercadoPagoPixCheckout({
+      estabelecimento: { id: req.user.id, email: req.user.email },
+      plan,
+      billingCycle,
+      successUrl,
+      failureUrl,
+      pendingUrl,
+    })
+    return res.json({ ok: true, init_point: result.initPoint, plan_status: result.planStatus, subscription: serializeSubscription(result.subscription) })
+  } catch (error) {
+    const responseData = error?.response?.data
+    const cause = error?.cause || responseData || null
+    const detail =
+      (responseData && (responseData.message || responseData.error || responseData.error_message)) ||
+      (Array.isArray(error?.cause) && (error.cause[0]?.description || error.cause[0]?.error)) ||
+      error?.message || 'Falha ao criar cobrança PIX'
+    console.error('POST /billing/pix', detail, cause || error)
+    return res.status(400).json({ error: 'pix_failed', message: detail, cause })
+  }
+})
+
+// Configurar recorrência no cartão após ativação por PIX (gera preapproval com início na virada do ciclo atual)
+router.post('/recurring/setup', auth, isEstabelecimento, async (req, res) => {
+  try {
+    const ctx = await getPlanContext(req.user.id)
+    if (!ctx) return res.status(404).json({ error: 'not_found' })
+
+    const plan = ctx.plan
+    const billingCycle = ctx.cycle
+    const deferStartDate = ctx?.activeUntil || null
+
+    // Gera o preapproval mesmo estando ativo (não usar rota /checkout-session que bloqueia already_active)
+    const result = await createMercadoPagoCheckout({
+      estabelecimento: { id: req.user.id, email: req.user.email },
+      plan,
+      billingCycle,
+      successUrl: undefined,
+      failureUrl: undefined,
+      pendingUrl: undefined,
+      deferStartDate,
+    })
+
+    return res.json({ ok: true, init_point: result.initPoint, plan_status: result.planStatus, subscription: serializeSubscription(result.subscription), billing_cycle: billingCycle })
+  } catch (error) {
+    const responseData = error?.response?.data
+    const cause = error?.cause || responseData || null
+    const detail =
+      (responseData && (responseData.message || responseData.error || responseData.error_message)) ||
+      (Array.isArray(error?.cause) && (error.cause[0]?.description || error.cause[0]?.error)) ||
+      error?.message || 'Falha ao configurar recorrencia'
+    console.error('POST /billing/recurring/setup', detail, cause || error)
+    return res.status(400).json({ error: 'recurring_failed', message: detail, cause })
   }
 })
 

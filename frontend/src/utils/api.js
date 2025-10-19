@@ -166,6 +166,13 @@ export const Api = {
     if (billing_cycle) payload.billing_cycle = billing_cycle;
     return req('/billing/change', { method: 'POST', body: JSON.stringify(payload) });
   },
+  billingRecurringSetup: () => req('/billing/recurring/setup', { method: 'POST' }),
+  // PIX fallback (primeiro ciclo)
+  billingPixCheckout: (payload) => {
+    const body = { ...payload };
+    if (body.billing_cycle == null) body.billing_cycle = 'mensal';
+    return req('/billing/pix', { method: 'POST', body: JSON.stringify(body) });
+  },
 
   // ServiÃ§os (rotas existentes)
   servicosList: () => req('/servicos'),
