@@ -1283,10 +1283,11 @@ button.danger:disabled,
   /* Sidebar vira uma barra fixa no rodapé */
   .sidebar{
     position: fixed; left: 0; right: 0; bottom: 0; top: auto;
-    width: 100%; height: 64px;
+    width: 100%; height: calc(74px + env(safe-area-inset-bottom, 0px));
     border-right: 0; border-top: 1px solid var(--border);
     background: var(--surface); z-index: 60;
     transform: none; overflow: visible;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
   }
   /* Garante que a navegação da sidebar apareça no mobile (sobrepõe regras do header) */
   .sidebar .mainnav{
@@ -1307,6 +1308,7 @@ button.danger:disabled,
     gap: 4px;
     overflow-x: auto;
     overflow-y: hidden;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
   }
   /* Esconde elementos não essenciais SOMENTE na barra inferior (sidebar no mobile) */
   .sidebar .brand,
@@ -1356,7 +1358,7 @@ button.danger:disabled,
   /* Garante que a barra inferior não suma com .is-collapsed */
   .app-shell.is-collapsed .sidebar{ transform: none; }
   /* Reserva espaço para a barra não cobrir o conteúdo */
-  .app-main{ padding-bottom: 72px; }
+  .app-main{ padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px)); }
 
   /* Aumenta fonte no mobile para legibilidade */
   html, body{ font-size: 16px; }
@@ -1373,7 +1375,7 @@ button.danger:disabled,
     flex-wrap: wrap;
     gap: 8px;
     overflow: visible;
-    padding-bottom: 8px;
+    padding-bottom: 12px;
   }
   .sidebar.sidebar--client .sidelist{
     flex-wrap: wrap;
@@ -1386,15 +1388,16 @@ button.danger:disabled,
     display: contents;
   }
   .sidebar.sidebar--client .sidelist__item{
-    flex: 0 0 72px;
-    min-width: 72px;
-    min-height: 52px;
-    padding: 8px 4px;
+    flex: 0 0 74px;
+    min-width: 74px;
+    min-height: 58px;
+    padding: 10px 6px;
+    border-radius: 12px;
   }
   .sidebar.sidebar--client .sidelist__item > span{
-    max-width: 72px;
+    max-width: 74px;
     white-space: normal;
-    line-height: 1.15;
+    line-height: 1.2;
   }
 }
 
