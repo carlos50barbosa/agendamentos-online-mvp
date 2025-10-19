@@ -37,7 +37,6 @@ import AdminTools from './pages/AdminTools.jsx';
 import AdminDB from './pages/AdminDB.jsx';
 import AdminBilling from './pages/AdminBilling.jsx';
 import Contato from './pages/Contato.jsx';
-import ChatAgendamento from './components/ChatAgendamento.jsx';
 import LinkPhone from './pages/LinkPhone.jsx';
 import Book from './pages/Book.jsx';
 import {
@@ -155,7 +154,6 @@ function useAppPreferences() {
   return {
     preferences,
     isDark: resolvedTheme === 'dark',
-    chatEnabled: preferences.chatWidget !== false,
     toggleTheme,
   };
 }
@@ -311,7 +309,7 @@ export default function App() {
   const loc = useLocation();
   const isBook = (loc?.pathname || '').startsWith('/book');
   const [currentUser, setCurrentUser] = useState(() => getUser());
-  const { preferences, isDark, chatEnabled, toggleTheme } = useAppPreferences();
+  const { preferences, isDark, toggleTheme } = useAppPreferences();
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const isPlanos = (loc?.pathname || '') === '/planos';
 
@@ -415,7 +413,6 @@ export default function App() {
           </Routes>
         </div>
       </main>
-      {!isBook && chatEnabled && <ChatAgendamento />}
     </div>
   );
 }
