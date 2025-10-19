@@ -160,11 +160,12 @@ export default function Configuracoes() {
       });
     } catch { return false; }
   }, [billing?.history]);
+  const hasGatewaySub = !!(billing?.subscription?.gateway_subscription_id);
+  const hasGatewayRecurring = useMemo(() => hasGatewaySub || hasPreapprovalInHistory, [hasGatewaySub, hasPreapprovalInHistory]);
   const needsRecurringSetup = useMemo(() => {
     const statusPlan = String(planInfo.status || '').toLowerCase();
-    return statusPlan === 'active' && !hasPreapprovalInHistory; // ativo por PIX (sem preapproval)
-  }, [planInfo.status, hasPreapprovalInHistory]);
-  const hasGatewayRecurring = useMemo(() => hasPreapprovalInHistory, [hasPreapprovalInHistory]);
+    return statusPlan === 'active' && !hasGatewayRecurring; // ativo por PIX (sem preapproval)
+  }, [planInfo.status, hasGatewayRecurring]);
   const subStatus = useMemo(() => String(billing?.subscription?.status || '').toLowerCase(), [billing?.subscription?.status]);
 
   // Assinatura ativa (evita acionar checkout padrão e resultar em 409 "already_active")
@@ -346,6 +347,8 @@ export default function Configuracoes() {
           try { url.searchParams.delete('checkout'); window.history.replaceState({}, '', url.toString()); } catch {}
         }
       } catch {}
+      // Carrega billing (assinatura + histórico) para habilitar botões de recorrência
+      try { await fetchBilling(); } catch {}
       try {
         const est = await Api.getEstablishment(user.id);
         setSlug(est?.slug || '');
