@@ -193,8 +193,15 @@ function Sidebar({ open, user }) {
     } catch {}
   }, [resolvedUser?.tipo]);
 
+  const variantClass =
+    resolvedUser?.tipo === 'cliente'
+      ? 'sidebar--client'
+      : resolvedUser?.tipo === 'estabelecimento'
+      ? 'sidebar--estab'
+      : '';
+
   return (
-    <aside className={`sidebar ${scrolled ? 'is-scrolled' : ''}`} ref={setEl}>
+    <aside className={`sidebar ${variantClass} ${scrolled ? 'is-scrolled' : ''}`} ref={setEl}>
       <div className="sidebar__inner">
         <nav id="mainnav" className="mainnav mainnav--vertical">
           {!resolvedUser ? (

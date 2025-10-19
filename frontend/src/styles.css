@@ -1366,6 +1366,36 @@ button.danger:disabled,
   .dashboard-narrow .card > table tbody td .small{ font-size: 12px; }
   .dashboard-narrow .badge{ font-size: 11px; padding: 3px 8px; }
   .dashboard-narrow .btn{ height: 38px; padding: 0 12px; font-size: 13px; }
+
+  /* Layout específico para clientes: usa grade centralizada */
+  .sidebar.sidebar--client .sidebar__inner{
+    justify-content: center;
+    flex-wrap: wrap;
+    row-gap: 8px;
+    overflow: visible;
+  }
+  .sidebar.sidebar--client .sidelist{
+    flex-wrap: wrap;
+    width: 100%;
+    justify-content: center;
+    gap: 8px;
+    overflow: visible;
+  }
+  .sidebar.sidebar--client .sidelist__section{
+    width: 100%;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(72px, 1fr));
+    gap: 8px;
+    justify-content: center;
+  }
+  .sidebar.sidebar--client .sidelist__item{
+    flex: 1 1 auto;
+    min-width: 72px;
+  }
+  .sidebar.sidebar--client .sidelist__item > span{
+    max-width: none;
+    white-space: normal;
+  }
 }
 
 /* Utilitários de visibilidade por breakpoint */
