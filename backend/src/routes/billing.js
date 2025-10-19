@@ -29,6 +29,11 @@ function verifyWebhookSignature(req, resourceId) {
   const secretB = (config.billing?.mercadopago?.webhookSecret2 || '').trim()
   const secrets = [secretA, secretB].filter(Boolean)
   if (!secrets.length) return { valid: true, method: 'none', using_secret_index: null }
+  // Modo diagnóstico: permitir sem assinatura quando habilitado por env
+  if (config.billing?.mercadopago?.allowUnsigned) {
+    return { valid: true, method: 'unsigned-allowed', using_secret_index: null }
+  }
+  // Mercado Pago envia X-Signature: ts=<unix>, v1=<hex> (às vezes usa 't' em vez de 'ts')
   const header = req.headers['x-signature']
   if (!header) return { valid: false, reason: 'missing_signature' }
 
@@ -37,8 +42,10 @@ function verifyWebhookSignature(req, resourceId) {
     .map((segment) => segment.trim().split('='))
     .filter((pair) => pair.length === 2)
 
-  const data = Object.fromEntries(parts)
-  const ts = data.ts || data.time || data.timestamp || ''
+  const raw = Object.fromEntries(parts)
+  const normalizeVal = (v) => String(v || '').trim().replace(/^"|"$/g, '').replace(/^'|'$/g, '')
+  const data = Object.fromEntries(Object.entries(raw).map(([k, v]) => [k.trim().toLowerCase(), normalizeVal(v)]))
+  const ts = data.ts || data.t || data.time || data.timestamp || ''
   const signature = data.v1 || data.sign || data.signature || ''
   if (!ts || !signature) return { valid: false, reason: 'invalid_signature_header' }
 

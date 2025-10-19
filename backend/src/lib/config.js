@@ -52,6 +52,10 @@ export const config = {
       publicKey: getAny('MERCADOPAGO_PUBLIC_KEY', 'MP_PUBLIC_KEY'),
       webhookSecret: getAny('MERCADOPAGO_WEBHOOK_SECRET', 'MP_WEBHOOK_SECRET'),
       webhookSecret2: getAny('MERCADOPAGO_WEBHOOK_SECRET_2', 'MP_WEBHOOK_SECRET_2'),
+      allowUnsigned: (() => {
+        const v = String(getAny('MERCADOPAGO_ALLOW_UNSIGNED', 'BILLING_ALLOW_UNSIGNED') || '0').toLowerCase()
+        return v === '1' || v === 'true' || v === 'yes'
+      })(),
       successUrl: getAny('MERCADOPAGO_SUCCESS_URL') || null,
       failureUrl: getAny('MERCADOPAGO_FAILURE_URL') || null,
       pendingUrl: getAny('MERCADOPAGO_PENDING_URL') || null,
