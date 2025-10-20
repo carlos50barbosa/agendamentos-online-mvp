@@ -3,6 +3,7 @@ import React, { useEffect, useMemo, useState, useCallback, useRef } from "react"
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Api, resolveAssetUrl } from "../utils/api";
 import { getUser } from "../utils/auth";
+import Modal from "../components/Modal.jsx";
 
 import { IconSearch, IconMapPin } from "../components/Icons.jsx";
 
@@ -136,6 +137,39 @@ const ServiceHelpers = {
   formatPrice: (centavos) =>
     (Number(centavos || 0) / 100).toLocaleString("pt-BR", { style: "currency", currency: "BRL" }),
 };
+
+const SOCIAL_LINK_FIELDS = [
+  { key: "site_url", label: "Site" },
+  { key: "instagram_url", label: "Instagram" },
+  { key: "facebook_url", label: "Facebook" },
+  { key: "linkedin_url", label: "LinkedIn" },
+  { key: "youtube_url", label: "YouTube" },
+  { key: "tiktok_url", label: "TikTok" },
+];
+
+const ensureExternalUrl = (value) => {
+  if (!value) return "";
+  const trimmed = String(value || "").trim();
+  if (!trimmed) return "";
+  if (/^https?:\/\//i.test(trimmed)) return trimmed;
+  return `https://${trimmed.replace(/^https?:\/\//i, "")}`;
+};
+
+const formatPhoneDisplay = (value = "") => {
+  const digits = String(value || "").replace(/\D/g, "");
+  if (!digits) return "";
+  if (digits.length <= 2) return digits;
+  const ddd = digits.slice(0, 2);
+  const rest = digits.slice(2);
+  if (!rest) return `(${ddd})`;
+  if (rest.length <= 4) return `(${ddd}) ${rest}`;
+  if (rest.length === 7) return `(${ddd}) ${rest.slice(0, 3)}-${rest.slice(3)}`;
+  if (rest.length === 8) return `(${ddd}) ${rest.slice(0, 4)}-${rest.slice(4)}`;
+  if (rest.length === 9) return `(${ddd}) ${rest.slice(0, 5)}-${rest.slice(5)}`;
+  return `(${ddd}) ${rest.slice(0, rest.length - 4)}-${rest.slice(-4)}`;
+};
+
+
 
 /* =================== Janela 07•22 =================== */
 const BUSINESS_HOURS = { start: 7, end: 22 };
@@ -334,14 +368,6 @@ const displayEstablishmentAddress = (est) => {
 };
 
 /* =================== UI Components =================== */
-const Modal = ({ children, onClose }) => (
-  <div className="modal-backdrop" onClick={onClose}>
-    <div className="modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
-      {children}
-    </div>
-  </div>
-);
-
 const Toast = ({ type, message, onDismiss }) => (
   <div className={`toast ${type}`} role="status" aria-live="polite">
     <div className="toast-content">
@@ -563,6 +589,11 @@ export default function NovoAgendamento() {
   const [distanceMap, setDistanceMap] = useState({});
   const [establishmentsLoading, setEstablishmentsLoading] = useState(true);
   const [establishmentsError, setEstablishmentsError] = useState('');
+  const [establishmentExtras, setEstablishmentExtras] = useState({});
+  const [professionalsByEstab, setProfessionalsByEstab] = useState({});
+  const [infoModalOpen, setInfoModalOpen] = useState(false);
+  const [infoModalError, setInfoModalError] = useState('');
+  const [ratingModal, setRatingModal] = useState({ open: false, nota: 0, comentario: '', saving: false, error: '' });
 
   // Inicializa estQuery a partir de ?q= da URL e reage a mudanÃ§as no histÃ³rico
   useEffect(() => {
@@ -628,6 +659,10 @@ export default function NovoAgendamento() {
   const selectedEstablishmentName = useMemo(() => displayEstablishmentName(selectedEstablishment), [selectedEstablishment]);
   const selectedEstablishmentAddress = useMemo(() => displayEstablishmentAddress(selectedEstablishment), [selectedEstablishment]);
 
+  const selectedEstablishmentId = selectedEstablishment ? String(selectedEstablishment.id) : null;
+  const selectedExtras = selectedEstablishmentId ? establishmentExtras[selectedEstablishmentId] : null;
+  const selectedProfessionals = selectedEstablishmentId ? professionalsByEstab[selectedEstablishmentId] : null;
+
   const establishmentAvatar = useMemo(() => {
     const source = selectedEstablishment?.avatar_url || selectedEstablishment?.logo_url || selectedEstablishment?.foto_url;
     return resolveAssetUrl(source || '');
@@ -647,6 +682,11 @@ export default function NovoAgendamento() {
   }, [establishments, queryTokens]);
 
   const kmFormatter = useMemo(
+    () => new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 }),
+    []
+  );
+
+  const ratingFormatter = useMemo(
     () => new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 }),
     []
   );
@@ -853,6 +893,60 @@ export default function NovoAgendamento() {
       }
     })();
   }, [establishmentId, showToast, searchParams, setSearchParams]);
+
+  useEffect(() => {
+    if (!selectedEstablishmentId || !selectedEstablishment?.id) return;
+    if (selectedExtras && (selectedExtras.loading || selectedExtras.loaded)) return;
+
+    let cancelled = false;
+    const estId = selectedEstablishment.id;
+    setEstablishmentExtras((prev) => ({
+      ...prev,
+      [selectedEstablishmentId]: { ...(prev[selectedEstablishmentId] || {}), loading: true, error: '' },
+    }));
+
+    (async () => {
+      try {
+        const data = await Api.getEstablishment(estId);
+        if (cancelled) return;
+        setEstablishmentExtras((prev) => ({
+          ...prev,
+          [selectedEstablishmentId]: {
+            ...(prev[selectedEstablishmentId] || {}),
+            loading: false,
+            loaded: true,
+            profile: data?.profile || null,
+            rating: data?.rating || { average: null, count: 0, distribution: null },
+            user_review: data?.user_review || null,
+            is_favorite: Boolean(data?.is_favorite),
+          },
+        }));
+      } catch (err) {
+        if (cancelled) return;
+        setEstablishmentExtras((prev) => ({
+          ...prev,
+          [selectedEstablishmentId]: {
+            ...(prev[selectedEstablishmentId] || {}),
+            loading: false,
+            loaded: true,
+            error: 'Detalhes indisponíveis.',
+          },
+        }));
+        showToast('error', 'Não foi possível carregar detalhes do estabelecimento.');
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedEstablishmentId, selectedEstablishment, selectedExtras]);
+
+  useEffect(() => {
+    if (!selectedEstablishmentId) return;
+    setInfoModalOpen(false);
+    setInfoModalError('');
+    setRatingModal((prev) => (prev.open ? { open: false, nota: 0, comentario: '', saving: false, error: '' } : prev));
+  }, [selectedEstablishmentId]);
 
   /* ====== NormalizaÃ§Ã£o de slots ====== */
   const normalizeSlots = useCallback((data) => {
@@ -1333,6 +1427,204 @@ export default function NovoAgendamento() {
   const handleTimeRange = (value) =>
     setState((p) => ({ ...p, filters: { ...p.filters, timeRange: value } }));
 
+  const ensureProfessionalsLoaded = async (estId) => {
+    const key = String(estId);
+    const entry = professionalsByEstab[key];
+    if (entry && (entry.loading || entry.loaded)) return entry;
+    setProfessionalsByEstab((prev) => ({
+      ...prev,
+      [key]: { ...(prev[key] || {}), loading: true, error: '' },
+    }));
+    try {
+      const list = await Api.profissionaisPublicList(estId);
+      const payload = { loading: false, loaded: true, items: Array.isArray(list) ? list : [] };
+      setProfessionalsByEstab((prev) => ({ ...prev, [key]: payload }));
+      return payload;
+    } catch (err) {
+      const msg = err?.data?.message || 'Não foi possível carregar profissionais.';
+      const payload = { loading: false, loaded: true, items: [], error: msg };
+      setProfessionalsByEstab((prev) => ({ ...prev, [key]: payload }));
+      return payload;
+    }
+  };
+
+  const handleOpenInfo = async () => {
+    if (!selectedEstablishment || !selectedEstablishmentId) return;
+    setInfoModalError('');
+    setInfoModalOpen(true);
+    const entry = professionalsByEstab[selectedEstablishmentId];
+    if (!entry || (!entry.loaded && !entry.loading)) {
+      const result = await ensureProfessionalsLoaded(selectedEstablishment.id);
+      if (result?.error) setInfoModalError(result.error);
+    } else if (entry?.error) {
+      setInfoModalError(entry.error);
+    }
+  };
+
+  const handleCloseInfo = () => {
+    setInfoModalOpen(false);
+    setInfoModalError('');
+  };
+
+  const handleToggleFavorite = async () => {
+    if (!selectedEstablishment || !selectedEstablishmentId) return;
+    if (!user || user.tipo !== 'cliente') {
+      showToast('info', 'Faça login como cliente para favoritar.');
+      return;
+    }
+    if (selectedExtras?.favoriteUpdating) return;
+    const key = selectedEstablishmentId;
+    const nextState = !selectedExtras?.is_favorite;
+    setEstablishmentExtras((prev) => ({
+      ...prev,
+      [key]: { ...(prev[key] || {}), is_favorite: nextState, favoriteUpdating: true },
+    }));
+    try {
+      const response = nextState
+        ? await Api.favoriteEstablishment(selectedEstablishment.id)
+        : await Api.unfavoriteEstablishment(selectedEstablishment.id);
+      setEstablishmentExtras((prev) => ({
+        ...prev,
+        [key]: {
+          ...(prev[key] || {}),
+          is_favorite: response?.is_favorite ?? nextState,
+          favoriteUpdating: false,
+        },
+      }));
+      showToast('success', nextState ? 'Adicionado aos favoritos.' : 'Removido dos favoritos.');
+    } catch (err) {
+      setEstablishmentExtras((prev) => ({
+        ...prev,
+        [key]: { ...(prev[key] || {}), is_favorite: !nextState, favoriteUpdating: false },
+      }));
+      const msg = err?.data?.message || err?.message || 'Não foi possível atualizar favorito.';
+      showToast('error', msg);
+    }
+  };
+
+  const handleOpenRatingModal = () => {
+    if (!selectedEstablishment || !selectedEstablishmentId) return;
+    if (!user || user.tipo !== 'cliente') {
+      showToast('info', 'Faça login como cliente para avaliar.');
+      return;
+    }
+    const existing = selectedExtras?.user_review;
+    setRatingModal({
+      open: true,
+      nota: existing?.nota || 0,
+      comentario: existing?.comentario || '',
+      saving: false,
+      error: '',
+    });
+  };
+
+  const handleCloseRatingModal = () => {
+    setRatingModal({ open: false, nota: 0, comentario: '', saving: false, error: '' });
+  };
+
+  const handleRatingStar = (nota) => {
+    setRatingModal((prev) => ({ ...prev, nota, error: '' }));
+  };
+
+  const handleRatingCommentChange = (event) => {
+    const value = event.target.value.slice(0, 600);
+    setRatingModal((prev) => ({ ...prev, comentario: value }));
+  };
+
+  const handleSaveRating = async () => {
+    if (!selectedEstablishment || !selectedEstablishmentId) return;
+    if (!user || user.tipo !== 'cliente') {
+      showToast('info', 'Faça login como cliente para avaliar.');
+      return;
+    }
+    if (!ratingModal.nota || ratingModal.nota < 1) {
+      setRatingModal((prev) => ({ ...prev, error: 'Selecione uma nota de 1 a 5.' }));
+      return;
+    }
+    setRatingModal((prev) => ({ ...prev, saving: true, error: '' }));
+    try {
+      const payload = {
+        nota: ratingModal.nota,
+        comentario: ratingModal.comentario.trim() ? ratingModal.comentario.trim() : undefined,
+      };
+      const response = await Api.saveEstablishmentReview(selectedEstablishment.id, payload);
+      setEstablishmentExtras((prev) => {
+        const current = prev[selectedEstablishmentId] || {};
+        return {
+          ...prev,
+          [selectedEstablishmentId]: {
+            ...current,
+            loading: false,
+            loaded: true,
+            rating: response?.rating || current.rating || { average: null, count: 0, distribution: null },
+            user_review: response?.user_review || {
+              nota: ratingModal.nota,
+              comentario: payload.comentario ?? null,
+            },
+          },
+        };
+      });
+      setRatingModal({ open: false, nota: 0, comentario: '', saving: false, error: '' });
+      showToast('success', 'Avaliação registrada.');
+    } catch (err) {
+      const msg = err?.data?.message || err?.message || 'Não foi possível salvar a avaliação.';
+      setRatingModal((prev) => ({ ...prev, saving: false, error: msg }));
+    }
+  };
+
+  const handleDeleteRating = async () => {
+    if (!selectedEstablishment || !selectedEstablishmentId) return;
+    if (!user || user.tipo !== 'cliente') {
+      showToast('info', 'Faça login como cliente para avaliar.');
+      return;
+    }
+    if (!selectedExtras?.user_review) {
+      handleCloseRatingModal();
+      return;
+    }
+    setRatingModal((prev) => ({ ...prev, saving: true, error: '' }));
+    try {
+      const response = await Api.deleteEstablishmentReview(selectedEstablishment.id);
+      setEstablishmentExtras((prev) => {
+        const current = prev[selectedEstablishmentId] || {};
+        return {
+          ...prev,
+          [selectedEstablishmentId]: {
+            ...current,
+            rating: response?.rating || current.rating || { average: null, count: 0, distribution: null },
+            user_review: null,
+          },
+        };
+      });
+      setRatingModal({ open: false, nota: 0, comentario: '', saving: false, error: '' });
+      showToast('success', 'Avaliação removida.');
+    } catch (err) {
+      const msg = err?.data?.message || err?.message || 'Não foi possível remover a avaliação.';
+      setRatingModal((prev) => ({ ...prev, saving: false, error: msg }));
+    }
+  };
+
+  const ratingSummary = selectedExtras?.rating || null;
+  const ratingCount = Number(ratingSummary?.count || 0);
+  const ratingAverageValue = ratingSummary?.average != null ? Number(ratingSummary.average) : null;
+  const ratingAverageLabel = ratingAverageValue != null && Number.isFinite(ratingAverageValue)
+    ? ratingFormatter.format(ratingAverageValue)
+    : null;
+  const favoriteUpdating = Boolean(selectedExtras?.favoriteUpdating);
+  const profileData = selectedExtras?.profile || null;
+
+  const horariosList = Array.isArray(profileData?.horarios) ? profileData.horarios : [];
+  const socialLinks = SOCIAL_LINK_FIELDS
+    .map(({ key, label }) => {
+      const value = profileData ? profileData[key] : null;
+      if (!value) return null;
+      const url = ensureExternalUrl(value);
+      if (!url) return null;
+      return { key, label, url };
+    })
+    .filter(Boolean);
+  const contactEmail = profileData?.contato_email || selectedEstablishment?.email || null;
+  const contactPhone = profileData?.contato_telefone || selectedEstablishment?.telefone || null;
   const serviceDuration = ServiceHelpers.duration(selectedService);
   const servicePrice = ServiceHelpers.formatPrice(ServiceHelpers.price(selectedService));
   const serviceProfessionals = Array.isArray(selectedService?.professionals) ? selectedService.professionals : [];
@@ -1770,9 +2062,32 @@ export default function NovoAgendamento() {
                 <strong className="novo-agendamento__summary-name">{selectedEstablishmentName || 'Estabelecimento'}</strong>
                 <span className="novo-agendamento__summary-address">{selectedEstablishmentAddress || 'Endereço não informado'}</span>
                 <div className="novo-agendamento__summary-actions">
-                  <span className="summary-action summary-action--muted">☆ Sem avaliações</span>
-                  <span className="summary-action">🛈 Informações</span>
-                  <span className="summary-action">♡ Favoritar</span>
+                  <button
+                    type="button"
+                    className={`summary-action${ratingCount > 0 ? '' : ' summary-action--muted'}`}
+                    onClick={handleOpenRatingModal}
+                    disabled={selectedExtras?.loading}
+                  >
+                    <span aria-hidden>{ratingCount > 0 ? '★' : '☆'}</span>
+                    {selectedExtras?.loading
+                      ? 'Carregando...'
+                      : ratingCount > 0
+                      ? `${ratingAverageLabel ?? ratingFormatter.format(0)} (${ratingCount})`
+                      : 'Sem avaliações'}
+                  </button>
+                  <button type="button" className="summary-action" onClick={handleOpenInfo}>
+                    <span aria-hidden>🛈</span>
+                    Informações
+                  </button>
+                  <button
+                    type="button"
+                    className={`summary-action${selectedExtras?.is_favorite ? ' summary-action--highlight' : ''}`}
+                    onClick={handleToggleFavorite}
+                    disabled={favoriteUpdating}
+                  >
+                    <span aria-hidden>{selectedExtras?.is_favorite ? '♥' : '♡'}</span>
+                    {selectedExtras?.is_favorite ? 'Favorito' : 'Favoritar'}
+                  </button>
                 </div>
               </div>
               {selectedService && (
@@ -1808,6 +2123,184 @@ export default function NovoAgendamento() {
         </div>
       </div>
 
+      {infoModalOpen && selectedEstablishment && (
+        <Modal
+          title={`Informações de ${selectedEstablishmentName || 'Estabelecimento'}`}
+          onClose={handleCloseInfo}
+        >
+          <div className="estab-info">
+            {infoModalError && (
+              <div className="notice notice--error" role="alert">
+                {infoModalError}
+              </div>
+            )}
+            <section className="estab-info__section">
+              <h4>Endereço</h4>
+              <p>{selectedEstablishmentAddress || 'Endereço não informado.'}</p>
+            </section>
+            <section className="estab-info__section">
+              <h4>Contato</h4>
+              {contactPhone || contactEmail ? (
+                <ul className="estab-info__list">
+                  {contactPhone && <li>Telefone: {formatPhoneDisplay(contactPhone) || contactPhone}</li>}
+                  {contactEmail && (
+                    <li>
+                      Email: <a href={`mailto:${contactEmail}`}>{contactEmail}</a>
+                    </li>
+                  )}
+                </ul>
+              ) : (
+                <p className="muted">Contato não informado.</p>
+              )}
+            </section>
+            <section className="estab-info__section">
+              <h4>Sobre</h4>
+              {profileData?.sobre ? (
+                <p>{profileData.sobre}</p>
+              ) : (
+                <p className="muted">Informações não fornecidas.</p>
+              )}
+            </section>
+            <section className="estab-info__section">
+              <h4>Horários de atendimento</h4>
+              {horariosList.length ? (
+                <ul className="estab-info__list">
+                  {horariosList.map((item, index) => (
+                    <li key={`${item.label || 'horario'}-${index}`}>
+                      {item.label ? (
+                        <>
+                          <strong>{item.label}:</strong> {item.value || item.label}
+                        </>
+                      ) : (
+                        item.value || item.label
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="muted">Horários não informados.</p>
+              )}
+            </section>
+            <section className="estab-info__section">
+              <h4>Links</h4>
+              {socialLinks.length ? (
+                <ul className="estab-info__links">
+                  {socialLinks.map(({ key, label, url }) => (
+                    <li key={key}>
+                      <a href={url} target="_blank" rel="noopener noreferrer">{label}</a>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="muted">Nenhum link cadastrado.</p>
+              )}
+            </section>
+            <section className="estab-info__section">
+              <h4>Profissionais</h4>
+              {selectedProfessionals?.loading ? (
+                <p>Carregando...</p>
+              ) : selectedProfessionals?.error ? (
+                <p className="muted">{selectedProfessionals.error}</p>
+              ) : selectedProfessionals?.items?.length ? (
+                <ul className="estab-info__professionals">
+                  {selectedProfessionals.items.map((prof) => {
+                    const avatar = prof?.avatar_url ? resolveAssetUrl(prof.avatar_url) : "";
+                    const initials = professionalInitials(prof?.nome || prof?.name);
+                    return (
+                      <li key={prof.id} className="estab-info__professional">
+                        <div className="estab-info__professional-avatar">
+                          {avatar ? (
+                            <img src={avatar} alt={`Foto de ${prof.nome || prof.name || 'profissional'}`} />
+                          ) : (
+                            <span>{initials}</span>
+                          )}
+                        </div>
+                        <div className="estab-info__professional-info">
+                          <strong>{prof.nome || prof.name}</strong>
+                          {prof.descricao ? <span className="muted">{prof.descricao}</span> : null}
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              ) : (
+                <p className="muted">Nenhum profissional informado.</p>
+              )}
+            </section>
+          </div>
+        </Modal>
+      )}
+      {ratingModal.open && (
+        <Modal
+          title="Avaliar estabelecimento"
+          onClose={ratingModal.saving ? undefined : handleCloseRatingModal}
+          actions={[
+            <button
+              key="cancel"
+              type="button"
+              className="btn btn--outline"
+              onClick={handleCloseRatingModal}
+              disabled={ratingModal.saving}
+            >
+              Cancelar
+            </button>,
+            selectedExtras?.user_review ? (
+              <button
+                key="remove"
+                type="button"
+                className="btn btn--outline"
+                onClick={handleDeleteRating}
+                disabled={ratingModal.saving}
+              >
+                Remover avaliação
+              </button>
+            ) : null,
+            <button
+              key="save"
+              type="button"
+              className="btn btn--primary"
+              onClick={handleSaveRating}
+              disabled={ratingModal.saving || ratingModal.nota < 1}
+            >
+              {ratingModal.saving ? <span className="spinner" /> : 'Salvar'}
+            </button>,
+          ].filter(Boolean)}
+        >
+          <div className="rating-modal">
+            <div className="rating-modal__stars">
+              {[1, 2, 3, 4, 5].map((value) => (
+                <button
+                  key={value}
+                  type="button"
+                  className={`rating-star${ratingModal.nota >= value ? ' rating-star--active' : ''}`}
+                  onClick={() => handleRatingStar(value)}
+                  disabled={ratingModal.saving}
+                  aria-label={`${value} ${value === 1 ? 'estrela' : 'estrelas'}`}
+                >
+                  {ratingModal.nota >= value ? '★' : '☆'}
+                </button>
+              ))}
+            </div>
+            <textarea
+              className="input rating-modal__comment"
+              placeholder="Conte sua experiência (opcional)"
+              value={ratingModal.comentario}
+              onChange={handleRatingCommentChange}
+              rows={4}
+              maxLength={600}
+              disabled={ratingModal.saving}
+            />
+            <div className="rating-modal__hint muted">
+              {`${ratingModal.comentario.length}/600 caracteres`}
+            </div>
+            {ratingModal.error && (
+              <div className="notice notice--error" role="alert">
+                {ratingModal.error}
+              </div>
+            )}
+          </div>
+        </Modal>
+      )}
       {modal.isOpen && selectedSlot && selectedService && (
         <Modal onClose={() => setModal((m) => ({ ...m, isOpen: false }))}>
           <h3>Confirmar agendamento?</h3>

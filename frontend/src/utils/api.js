@@ -146,6 +146,11 @@ export const Api = {
   // Estabelecimentos + ServiÃ§os (NOVOS)
   listEstablishments: () => req('/establishments'),
   getEstablishment: (idOrSlug) => req(`/establishments/${idOrSlug}`),
+  saveEstablishmentReview: (id, payload) =>
+    req(`/establishments/${id}/review`, { method: 'PUT', body: JSON.stringify(payload) }),
+  deleteEstablishmentReview: (id) => req(`/establishments/${id}/review`, { method: 'DELETE' }),
+  favoriteEstablishment: (id) => req(`/establishments/${id}/favorite`, { method: 'POST' }),
+  unfavoriteEstablishment: (id) => req(`/establishments/${id}/favorite`, { method: 'DELETE' }),
   getEstablishmentMessages: (id) => req(`/establishments/${id}/messages`),
   updateEstablishmentMessages: (id, payload) => req(`/establishments/${id}/messages`, { method: 'PUT', body: JSON.stringify(payload) }),
   updateEstablishmentSlug: (id, slug) => req(`/establishments/${id}/slug`, { method: 'PUT', body: JSON.stringify({ slug }) }),

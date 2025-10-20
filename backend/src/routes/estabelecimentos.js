@@ -1,8 +1,9 @@
 // backend/src/routes/estabelecimentos.js
 import { Router } from "express";
+import jwt from "jsonwebtoken";
 import { pool } from "../lib/db.js";
 import { resolveEstablishmentCoordinates } from "../lib/geocode.js";
-import { auth, isEstabelecimento } from "../middleware/auth.js";
+import { auth, isEstabelecimento, isCliente } from "../middleware/auth.js";
 import {
   PLAN_TIERS,
   PLAN_STATUS,
@@ -23,6 +24,193 @@ const toFiniteOrNull = (value) => {
   const num = Number(value);
   return Number.isFinite(num) ? num : null;
 };
+
+const EMPTY_RATING_DISTRIBUTION = Object.freeze({ 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 });
+
+function cloneRatingDistribution() {
+  return { ...EMPTY_RATING_DISTRIBUTION };
+}
+
+async function resolveViewerFromRequest(req) {
+  const header = (req && req.headers && req.headers.authorization) || '';
+  if (!header.startsWith('Bearer ')) return null;
+  const token = header.slice(7).trim();
+  if (!token) return null;
+  try {
+    const payload = jwt.verify(token, process.env.JWT_SECRET || 'secret');
+    const userId = Number(payload?.id);
+    if (!Number.isFinite(userId)) return null;
+    const [rows] = await pool.query(
+      "SELECT id, nome, tipo, email FROM usuarios WHERE id=? LIMIT 1",
+      [userId]
+    );
+    const row = rows?.[0];
+    if (!row) return null;
+    return {
+      id: row.id,
+      nome: row.nome,
+      tipo: row.tipo || 'cliente',
+      email: row.email || null,
+    };
+  } catch (err) {
+    return null;
+  }
+}
+
+function parseHorarios(value) {
+  if (!value) return [];
+  const raw = String(value).trim();
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      return parsed
+        .map((item) => {
+          if (!item) return null;
+          if (typeof item === 'string') {
+            const text = item.trim();
+            if (!text) return null;
+            return { label: '', value: text };
+          }
+          if (typeof item === 'object') {
+            const label = String(item.label ?? item.day ?? item.dia ?? '').trim();
+            const valueText = String(item.value ?? item.horario ?? item.horarios ?? item.hours ?? '').trim();
+            if (!label && !valueText) return null;
+            return { label, value: valueText || label };
+          }
+          return null;
+        })
+        .filter(Boolean);
+    }
+    if (parsed && typeof parsed === 'object') {
+      return Object.entries(parsed)
+        .map(([key, val]) => {
+          const label = String(key || '').trim();
+          const valueText = String(val ?? '').trim();
+          if (!label && !valueText) return null;
+          return { label, value: valueText || label };
+        })
+        .filter(Boolean);
+    }
+  } catch (err) {
+    // fallback
+  }
+  const lines = raw
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  return lines.map((line) => {
+    const parts = line.split(/[:\-]/);
+    if (parts.length >= 2) {
+      const [label, ...rest] = parts;
+      const valueText = rest.join(' - ').trim();
+      return {
+        label: label.trim(),
+        value: valueText || line,
+      };
+    }
+    return { label: '', value: line };
+  });
+}
+
+function normalizeProfile(establishmentRow, profileRow) {
+  const fallbackEmail = establishmentRow?.email || null;
+  const fallbackPhone = establishmentRow?.telefone || null;
+  if (!profileRow) {
+    return {
+      sobre: null,
+      contato_email: fallbackEmail,
+      contato_telefone: fallbackPhone,
+      site_url: null,
+      instagram_url: null,
+      facebook_url: null,
+      linkedin_url: null,
+      youtube_url: null,
+      tiktok_url: null,
+      horarios: [],
+      horarios_raw: null,
+      updated_at: null,
+    };
+  }
+  const updatedAt = profileRow.updated_at ? new Date(profileRow.updated_at) : null;
+  return {
+    sobre: profileRow.sobre || null,
+    contato_email: profileRow.contato_email || fallbackEmail,
+    contato_telefone: profileRow.contato_telefone || fallbackPhone,
+    site_url: profileRow.site_url || null,
+    instagram_url: profileRow.instagram_url || null,
+    facebook_url: profileRow.facebook_url || null,
+    linkedin_url: profileRow.linkedin_url || null,
+    youtube_url: profileRow.youtube_url || null,
+    tiktok_url: profileRow.tiktok_url || null,
+    horarios: parseHorarios(profileRow.horarios_json),
+    horarios_raw: profileRow.horarios_json || null,
+    updated_at: updatedAt && !Number.isNaN(updatedAt.getTime()) ? updatedAt.toISOString() : null,
+  };
+}
+
+async function getRatingSummary(estabelecimentoId) {
+  const [[summary]] = await pool.query(
+    "SELECT AVG(nota) AS media, COUNT(*) AS total FROM estabelecimento_reviews WHERE estabelecimento_id=?",
+    [estabelecimentoId]
+  );
+  const [distRows] = await pool.query(
+    "SELECT nota, COUNT(*) AS total FROM estabelecimento_reviews WHERE estabelecimento_id=? GROUP BY nota",
+    [estabelecimentoId]
+  );
+  const distribution = cloneRatingDistribution();
+  for (const row of distRows || []) {
+    const score = Number(row?.nota);
+    const total = Number(row?.total || 0);
+    if (Number.isFinite(score) && score >= 1 && score <= 5) {
+      distribution[score] = total;
+    }
+  }
+  const total = Number(summary?.total || 0);
+  const avgRaw = summary?.media;
+  let average = null;
+  if (total > 0 && avgRaw != null) {
+    const numeric = Number(avgRaw);
+    if (Number.isFinite(numeric)) {
+      average = Math.round(numeric * 10) / 10;
+    }
+  }
+  return { average, count: total, distribution };
+}
+
+async function fetchUserReview(estabelecimentoId, clienteId) {
+  const [rows] = await pool.query(
+    "SELECT nota, comentario, updated_at FROM estabelecimento_reviews WHERE estabelecimento_id=? AND cliente_id=? LIMIT 1",
+    [estabelecimentoId, clienteId]
+  );
+  const row = rows?.[0];
+  if (!row) return null;
+  const nota = Number(row.nota);
+  const updatedAt = row.updated_at ? new Date(row.updated_at) : null;
+  return {
+    nota: Number.isFinite(nota) ? nota : null,
+    comentario: row.comentario || null,
+    updated_at: updatedAt && !Number.isNaN(updatedAt.getTime()) ? updatedAt.toISOString() : null,
+  };
+}
+
+async function isFavoriteFor(estabelecimentoId, clienteId) {
+  const [rows] = await pool.query(
+    "SELECT 1 FROM cliente_favoritos WHERE estabelecimento_id=? AND cliente_id=? LIMIT 1",
+    [estabelecimentoId, clienteId]
+  );
+  return Boolean(rows && rows.length);
+}
+
+async function ensureEstabelecimento(estabelecimentoId) {
+  const id = Number(estabelecimentoId);
+  if (!Number.isFinite(id)) return null;
+  const [rows] = await pool.query(
+    "SELECT id, nome, email, telefone FROM usuarios WHERE id=? AND tipo='estabelecimento' LIMIT 1",
+    [id]
+  );
+  return rows?.[0] || null;
+}
 
 async function attachCoordinates(rows, includeCoords) {
   if (!includeCoords) return rows;
@@ -84,8 +272,43 @@ router.get('/:idOrSlug', async (req, res) => {
     }
     if (!rows.length) return res.status(404).json({ error: 'not_found' });
     const est = rows[0];
-    const planContext = await getPlanContext(est.id);
-    return res.json({ ...est, plan_context: serializePlanContext(planContext) });
+
+    const viewer = await resolveViewerFromRequest(req);
+
+    const [planContext, profileResult, rating] = await Promise.all([
+      getPlanContext(est.id),
+      pool.query(
+        "SELECT estabelecimento_id, sobre, contato_email, contato_telefone, site_url, instagram_url, facebook_url, linkedin_url, youtube_url, tiktok_url, horarios_json, updated_at FROM estabelecimento_perfis WHERE estabelecimento_id=? LIMIT 1",
+        [est.id]
+      ),
+      getRatingSummary(est.id),
+    ]);
+
+    const [profileRows] = profileResult;
+    const profileRow = profileRows?.[0] || null;
+
+    let userReview = null;
+    let isFavorite = false;
+
+    if (viewer?.tipo === 'cliente') {
+      const [review, favorite] = await Promise.all([
+        fetchUserReview(est.id, viewer.id),
+        isFavoriteFor(est.id, viewer.id),
+      ]);
+      userReview = review;
+      isFavorite = favorite;
+    }
+
+    const payload = {
+      ...est,
+      plan_context: serializePlanContext(planContext),
+      profile: normalizeProfile(est, profileRow),
+      rating,
+      user_review: userReview,
+      is_favorite: isFavorite,
+    };
+
+    return res.json(payload);
   } catch (e) {
     console.error('GET /establishments/:id', e);
     res.status(500).json({ error: 'establishment_fetch_failed' });
@@ -265,6 +488,113 @@ router.put('/:id/plan', auth, isEstabelecimento, async (req, res) => {
   } catch (e) {
     console.error('PUT /establishments/:id/plan', e);
     return res.status(500).json({ error: 'server_error' });
+  }
+});
+
+router.put('/:id/review', auth, isCliente, async (req, res) => {
+  try {
+    const estabelecimentoId = Number(req.params.id);
+    if (!Number.isFinite(estabelecimentoId)) {
+      return res.status(400).json({ error: 'invalid_estabelecimento', message: 'Identificador invalido.' });
+    }
+    const est = await ensureEstabelecimento(estabelecimentoId);
+    if (!est) return res.status(404).json({ error: 'not_found' });
+
+    let nota = Number(req.body?.nota);
+    if (!Number.isFinite(nota)) {
+      return res.status(400).json({ error: 'nota_invalida', message: 'Informe uma nota entre 1 e 5.' });
+    }
+    nota = Math.round(nota);
+    if (nota < 1) nota = 1;
+    if (nota > 5) nota = 5;
+
+    let comentario = req.body?.comentario;
+    if (comentario != null) {
+      comentario = String(comentario).trim();
+      if (!comentario) comentario = null;
+      else if (comentario.length > 600) comentario = comentario.slice(0, 600);
+    } else {
+      comentario = null;
+    }
+
+    await pool.query(
+      "INSERT INTO estabelecimento_reviews (estabelecimento_id, cliente_id, nota, comentario) VALUES (?,?,?,?) ON DUPLICATE KEY UPDATE nota=VALUES(nota), comentario=VALUES(comentario), updated_at=CURRENT_TIMESTAMP",
+      [estabelecimentoId, req.user.id, nota, comentario]
+    );
+
+    const [rating, userReview] = await Promise.all([
+      getRatingSummary(estabelecimentoId),
+      fetchUserReview(estabelecimentoId, req.user.id),
+    ]);
+
+    return res.json({ ok: true, rating, user_review: userReview });
+  } catch (err) {
+    console.error('PUT /establishments/:id/review', err);
+    return res.status(500).json({ error: 'review_save_failed' });
+  }
+});
+
+router.delete('/:id/review', auth, isCliente, async (req, res) => {
+  try {
+    const estabelecimentoId = Number(req.params.id);
+    if (!Number.isFinite(estabelecimentoId)) {
+      return res.status(400).json({ error: 'invalid_estabelecimento', message: 'Identificador invalido.' });
+    }
+    const est = await ensureEstabelecimento(estabelecimentoId);
+    if (!est) return res.status(404).json({ error: 'not_found' });
+
+    await pool.query(
+      "DELETE FROM estabelecimento_reviews WHERE estabelecimento_id=? AND cliente_id=?",
+      [estabelecimentoId, req.user.id]
+    );
+
+    const rating = await getRatingSummary(estabelecimentoId);
+    return res.json({ ok: true, rating, user_review: null });
+  } catch (err) {
+    console.error('DELETE /establishments/:id/review', err);
+    return res.status(500).json({ error: 'review_delete_failed' });
+  }
+});
+
+router.post('/:id/favorite', auth, isCliente, async (req, res) => {
+  try {
+    const estabelecimentoId = Number(req.params.id);
+    if (!Number.isFinite(estabelecimentoId)) {
+      return res.status(400).json({ error: 'invalid_estabelecimento', message: 'Identificador invalido.' });
+    }
+    const est = await ensureEstabelecimento(estabelecimentoId);
+    if (!est) return res.status(404).json({ error: 'not_found' });
+
+    await pool.query(
+      "INSERT IGNORE INTO cliente_favoritos (cliente_id, estabelecimento_id) VALUES (?, ?)",
+      [req.user.id, estabelecimentoId]
+    );
+
+    return res.json({ ok: true, is_favorite: true });
+  } catch (err) {
+    console.error('POST /establishments/:id/favorite', err);
+    return res.status(500).json({ error: 'favorite_failed' });
+  }
+});
+
+router.delete('/:id/favorite', auth, isCliente, async (req, res) => {
+  try {
+    const estabelecimentoId = Number(req.params.id);
+    if (!Number.isFinite(estabelecimentoId)) {
+      return res.status(400).json({ error: 'invalid_estabelecimento', message: 'Identificador invalido.' });
+    }
+    const est = await ensureEstabelecimento(estabelecimentoId);
+    if (!est) return res.status(404).json({ error: 'not_found' });
+
+    await pool.query(
+      "DELETE FROM cliente_favoritos WHERE cliente_id=? AND estabelecimento_id=?",
+      [req.user.id, estabelecimentoId]
+    );
+
+    return res.json({ ok: true, is_favorite: false });
+  } catch (err) {
+    console.error('DELETE /establishments/:id/favorite', err);
+    return res.status(500).json({ error: 'favorite_failed' });
   }
 });
 
