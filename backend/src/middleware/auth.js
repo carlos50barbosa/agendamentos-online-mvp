@@ -15,7 +15,7 @@ export async function auth(req, res, next) {
     }
 
     const [rows] = await pool.query(
-      "SELECT id, nome, email, telefone, cep, endereco, numero, complemento, bairro, cidade, estado, avatar_url, tipo, plan, plan_status, plan_trial_ends_at, plan_active_until, plan_subscription_id FROM usuarios WHERE id=? LIMIT 1",
+      "SELECT id, nome, email, telefone, cep, endereco, numero, complemento, bairro, cidade, estado, avatar_url, tipo, notify_email_estab, notify_whatsapp_estab, plan, plan_status, plan_trial_ends_at, plan_active_until, plan_subscription_id FROM usuarios WHERE id=? LIMIT 1",
       [userId]
     );
 
@@ -36,6 +36,8 @@ export async function auth(req, res, next) {
       estado: row.estado || null,
       avatar_url: row.avatar_url || null,
       tipo: row.tipo || 'cliente',
+      notify_email_estab: Boolean(row.notify_email_estab ?? 0),
+      notify_whatsapp_estab: Boolean(row.notify_whatsapp_estab ?? 0),
       plan: row.plan || 'starter',
       plan_status: row.plan_status || 'trialing',
       plan_trial_ends_at: row.plan_trial_ends_at ? new Date(row.plan_trial_ends_at).toISOString() : null,

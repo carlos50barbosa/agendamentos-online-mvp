@@ -343,7 +343,7 @@ export default function ServicosEstabelecimento() {
 
           {pros.length > 0 && (
             <div className="grid" style={{ gap: 4, width: '100%', marginTop: 4 }}>
-              <div className="muted" style={{ fontSize: 12 }}>Vincular profissionais (opcional)</div>
+              <div className="muted" style={{ fontSize: 12 }}>Vincular profissionais</div>
               <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
                 {pros.map((p) => (
                   <label key={p.id} className={`chip ${selectedProsNew.includes(p.id) ? 'chip--active' : ''}`} style={{ cursor: 'pointer' }}>
@@ -371,7 +371,8 @@ export default function ServicosEstabelecimento() {
         {/* Dica de validacao */}
         {formInvalid && (
           <small className="muted">
-            Preencha nome, selecione duracao e informe um preço maior que zero.
+            Preencha todos os campos e escolha pelo menos um profissional para
+            cadastrar o serviço.
           </small>
         )}
       </div>

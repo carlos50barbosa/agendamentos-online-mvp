@@ -5,7 +5,6 @@ import { getUser, saveUser, saveToken } from '../utils/auth';
 import { Api, resolveAssetUrl } from '../utils/api';
 import { IconChevronRight } from '../components/Icons.jsx';
 import Modal from '../components/Modal.jsx';
-import { mergePreferences, readPreferences, writePreferences, broadcastPreferences } from '../utils/preferences';
 
 const formatPhoneLabel = (value = '') => {
   let digits = value.replace(/\D/g, '');
@@ -70,6 +69,8 @@ export default function Configuracoes() {
     cidade: '',
     estado: '',
     avatar_url: '',
+    notifyEmailEstab: Boolean(user?.notify_email_estab ?? true),
+    notifyWhatsappEstab: Boolean(user?.notify_whatsapp_estab ?? true),
   });
   const [passwordForm, setPasswordForm] = useState({ atual: '', nova: '', confirmar: '' });
   const [profileStatus, setProfileStatus] = useState({ type: '', message: '' });
@@ -83,9 +84,6 @@ export default function Configuracoes() {
 
   const cepLookupRef = useRef('');
 
-  const [prefs, setPrefs] = useState(() => mergePreferences(readPreferences()));
-  const [notifStatus, setNotifStatus] = useState('');
-  const notifTimerRef = useRef(null);
   // Billing state
   const [billing, setBilling] = useState({ subscription: null, history: [] });
   const [billingLoading, setBillingLoading] = useState(false);
@@ -221,6 +219,8 @@ export default function Configuracoes() {
       cidade: user.cidade || '',
       estado: (user.estado || '').toUpperCase(),
       avatar_url: user.avatar_url || '',
+      notifyEmailEstab: Boolean(user.notify_email_estab ?? true),
+      notifyWhatsappEstab: Boolean(user.notify_whatsapp_estab ?? true),
     });
     setAvatarPreview(resolveAssetUrl(user.avatar_url || ''));
     setAvatarData('');
@@ -707,10 +707,14 @@ export default function Configuracoes() {
         endereco: profileForm.endereco.trim() || undefined,
         numero: profileForm.numero.trim() || undefined,
         complemento: profileForm.complemento.trim() || undefined,
-        bairro: profileForm.bairro.trim() || undefined,
-        cidade: profileForm.cidade.trim() || undefined,
-        estado: profileForm.estado.trim().toUpperCase() || undefined,
-      };
+      bairro: profileForm.bairro.trim() || undefined,
+      cidade: profileForm.cidade.trim() || undefined,
+      estado: profileForm.estado.trim().toUpperCase() || undefined,
+    };
+    if (isEstab) {
+      payload.notifyEmailEstab = !!profileForm.notifyEmailEstab;
+      payload.notifyWhatsappEstab = !!profileForm.notifyWhatsappEstab;
+    }
       if (avatarData) {
         payload.avatar = avatarData;
       } else if (avatarRemove && !avatarData) {
@@ -720,7 +724,12 @@ export default function Configuracoes() {
       if (response?.user) {
         const updatedUser = response.user;
         saveUser(updatedUser);
-        setProfileForm((prev) => ({ ...prev, avatar_url: updatedUser.avatar_url || '' }));
+        setProfileForm((prev) => ({
+          ...prev,
+          avatar_url: updatedUser.avatar_url || '',
+          notifyEmailEstab: Boolean(updatedUser.notify_email_estab ?? prev.notifyEmailEstab),
+          notifyWhatsappEstab: Boolean(updatedUser.notify_whatsapp_estab ?? prev.notifyWhatsappEstab),
+        }));
         setAvatarPreview(resolveAssetUrl(updatedUser.avatar_url || ''));
         setAvatarData('');
         setAvatarRemove(false);
@@ -748,15 +757,6 @@ export default function Configuracoes() {
     } finally {
       setProfileSaving(false);
     }
-  };
-
-  const handleTogglePref = (key) => {
-    const next = mergePreferences({ ...prefs, [key]: !prefs[key] });
-    setPrefs(next);
-    writePreferences(next);
-    broadcastPreferences(next);
-    setNotifStatus('PreferÃªncias salvas.');
-    setTimeout(() => setNotifStatus(''), 2000);
   };
 
   const sections = useMemo(() => {
@@ -876,6 +876,28 @@ export default function Configuracoes() {
                 <label className="label" style={{ width: 80 }}>
                   <span>Estado</span>
                   <input className="input" value={profileForm.estado} onChange={(e) => handleProfileChange('estado', e.target.value.toUpperCase().slice(0, 2))} required />
+                </label>
+              </div>
+              <div className="box" style={{ display: 'grid', gap: 8 }}>
+                <div className="muted" style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: '.06em' }}>Notificações</div>
+                <p className="small muted" style={{ margin: 0 }}>
+                  Escolha como deseja ser avisado sempre que um novo agendamento for criado ou cancelado.
+                </p>
+                <label className="switch">
+                  <input
+                    type="checkbox"
+                    checked={!!profileForm.notifyEmailEstab}
+                    onChange={(e) => handleProfileChange('notifyEmailEstab', e.target.checked)}
+                  />
+                  <span>Receber notificações por email</span>
+                </label>
+                <label className="switch">
+                  <input
+                    type="checkbox"
+                    checked={!!profileForm.notifyWhatsappEstab}
+                    onChange={(e) => handleProfileChange('notifyWhatsappEstab', e.target.checked)}
+                  />
+                  <span>Receber notificações no WhatsApp</span>
                 </label>
               </div>
             </>
@@ -1199,39 +1221,6 @@ export default function Configuracoes() {
       });
     }
 
-
-    list.push({
-      id: 'notifications',
-      title: 'Notificações',
-      content: (
-        <div className="grid" style={{ gap: 10 }}>
-          <label className="config-toggle">
-            <input
-              type="checkbox"
-              checked={prefs.notificationsEmail}
-              onChange={() => handleTogglePref('notificationsEmail')}
-            />
-            <span>
-              <strong>Receber emails de confirmação</strong>
-              <small>Envia emails de confirmação e atualizações de agendamentos.</small>
-            </span>
-          </label>
-          <label className="config-toggle">
-            <input
-              type="checkbox"
-              checked={prefs.notificationsWhatsapp}
-              onChange={() => handleTogglePref('notificationsWhatsapp')}
-            />
-            <span>
-              <strong>Receber lembretes pelo WhatsApp</strong>
-              <small>Utiliza o número cadastrado para enviar lembretes automatizados.</small>
-            </span>
-          </label>
-          {notifStatus && <small className="muted">{notifStatus}</small>}
-        </div>
-      ),
-    });
-
     list.push({
       id: 'support',
       title: 'Ajuda',
@@ -1268,8 +1257,6 @@ export default function Configuracoes() {
     profileStatus,
     avatarPreview,
     avatarError,
-    prefs,
-    notifStatus,
     billing,
     billingLoading,
     checkoutLoading,

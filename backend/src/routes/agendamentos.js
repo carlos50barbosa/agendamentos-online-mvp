@@ -9,6 +9,16 @@ const router = Router();
 
 const TZ = 'America/Sao_Paulo';
 const toDigits = (s) => String(s || '').replace(/\D/g, ''); // normaliza telefone para apenas digitos
+const boolPref = (value, fallback = true) => {
+  if (value === undefined || value === null) return fallback;
+  if (value === true || value === false) return Boolean(value);
+  const num = Number(value);
+  if (!Number.isNaN(num)) return num !== 0;
+  const norm = String(value).trim().toLowerCase();
+  if (['0', 'false', 'off', 'no', 'nao'].includes(norm)) return false;
+  if (['1', 'true', 'on', 'yes', 'sim'].includes(norm)) return true;
+  return fallback;
+};
 
 /** Horario comercial: 07:00 (inclusive) ate 22:00 (inclusive somente 22:00 em ponto) */
 function inBusinessHours(dateISO) {
@@ -216,7 +226,7 @@ router.post('/', authRequired, isCliente, async (req, res) => {
     // 5) le dados consistentes ainda na transacao
     const [[novo]] = await conn.query('SELECT * FROM agendamentos WHERE id=?', [r.insertId]);
     const [[cli]]  = await conn.query('SELECT email, telefone, nome FROM usuarios WHERE id=?', [req.user.id]);
-    const [[est]]  = await conn.query('SELECT email, telefone, nome FROM usuarios WHERE id=?', [estabelecimento_id]);
+    const [[est]]  = await conn.query('SELECT email, telefone, nome, notify_email_estab, notify_whatsapp_estab FROM usuarios WHERE id=?', [estabelecimento_id]);
 
     await conn.commit();
     conn.release(); conn = null;
@@ -229,6 +239,8 @@ router.post('/', authRequired, isCliente, async (req, res) => {
 
     const telCli = toDigits(cli?.telefone);
     const telEst = toDigits(est?.telefone);
+    const canEmailEst = boolPref(est?.notify_email_estab, true);
+    const canWhatsappEst = boolPref(est?.notify_whatsapp_estab, true);
     const estNome = est?.nome || '';
     const estNomeFriendly = estNome || 'nosso estabelecimento';
     const profNome = profissionalRow?.nome || '';
@@ -243,7 +255,7 @@ router.post('/', authRequired, isCliente, async (req, res) => {
           `<p>Ola, <b>${cli?.nome ?? 'cliente'}</b>! Seu agendamento de <b>${svc.nome}</b>${profLabel ? ` com <b>${profNome}</b>` : ''} foi confirmado para <b>${inicioBR}</b>.</p>`
         );
       }
-      if (est?.email) {
+      if (est?.email && canEmailEst) {
         await notifyEmail(
           est.email,
           'Novo agendamento recebido',
@@ -265,7 +277,7 @@ router.post('/', authRequired, isCliente, async (req, res) => {
           await notifyWhatsapp(`[OK] Confirmacao: ${svc.nome}${profNome ? ' / ' + profNome : ''} em ${inicioBR} - ${estNomeLabel}`, telCli);
         }
       }
-      if (telEst && telEst !== telCli) {
+      if (canWhatsappEst && telEst && telEst !== telCli) {
         if (/^triple|3$/.test(paramMode)) {
           try { await sendTemplate({ to: telEst, name: tplName, lang: tplLang, bodyParams: [svc.nome, inicioBR, estNomeLabel] }); } catch (e) { console.warn('[wa/confirm est]', e?.message || e); }
         } else {
@@ -351,7 +363,7 @@ router.put('/:id/cancel', authRequired, isCliente, async (req, res) => {
     const [[a]]   = await pool.query('SELECT estabelecimento_id, servico_id, inicio FROM agendamentos WHERE id=?', [id]);
     const [[svc]] = await pool.query('SELECT nome FROM servicos WHERE id=?', [a?.servico_id || 0]);
     const [[cli]] = await pool.query('SELECT nome, telefone FROM usuarios WHERE id=?', [req.user.id]);
-    const [[est]] = await pool.query('SELECT nome, telefone FROM usuarios WHERE id=?', [a?.estabelecimento_id || 0]);
+    const [[est]] = await pool.query('SELECT nome, telefone, notify_whatsapp_estab FROM usuarios WHERE id=?', [a?.estabelecimento_id || 0]);
 
     const inicioBR = a?.inicio ? brDateTime(new Date(a.inicio).toISOString()) : '';
 
@@ -362,23 +374,25 @@ router.put('/:id/cancel', authRequired, isCliente, async (req, res) => {
       const paramMode = String(process.env.WA_TEMPLATE_PARAM_MODE || 'single').toLowerCase();
       const tplName = process.env.WA_TEMPLATE_NAME_CANCEL || process.env.WA_TEMPLATE_NAME || 'confirmacao_agendamento';
       const tplLang = process.env.WA_TEMPLATE_LANG || 'pt_BR';
-    const params3 = [svc?.nome || '', inicioBR, est?.nome || ''];
+      const params3 = [svc?.nome || '', inicioBR, est?.nome || ''];
 
-    if (/^triple|3$/.test(paramMode)) {
-    if (telCli) {
-    try { await sendTemplate({ to: telCli, name: tplName, lang: tplLang, bodyParams: params3 }); } catch (e) { console.warn('[wa/cancel cli]', e?.message || e); }
-    }
-    if (telEst && telEst !== telCli) {
-    try { await sendTemplate({ to: telEst, name: tplName, lang: tplLang, bodyParams: params3 }); } catch (e) { console.warn('[wa/cancel est]', e?.message || e); }
-    }
-    } else {
-    if (telCli) {
-      await notifyWhatsapp(`Seu agendamento ${id} (${svc?.nome ?? 'servico'}) em ${inicioBR} foi cancelado.`, telCli);
-    }
-    if (telEst && telEst !== telCli) {
-      await notifyWhatsapp(`[Aviso] Cancelamento: agendamento ${id} (${svc?.nome ?? 'servico'}) em ${inicioBR} pelo cliente ${cli?.nome ?? ''}.`, telEst);
-    }
-    }
+      const canWhatsappEstCancel = boolPref(est?.notify_whatsapp_estab, true);
+
+      if (/^triple|3$/.test(paramMode)) {
+        if (telCli) {
+          try { await sendTemplate({ to: telCli, name: tplName, lang: tplLang, bodyParams: params3 }); } catch (e) { console.warn('[wa/cancel cli]', e?.message || e); }
+        }
+        if (canWhatsappEstCancel && telEst && telEst !== telCli) {
+          try { await sendTemplate({ to: telEst, name: tplName, lang: tplLang, bodyParams: params3 }); } catch (e) { console.warn('[wa/cancel est]', e?.message || e); }
+        }
+      } else {
+        if (telCli) {
+          await notifyWhatsapp(`Seu agendamento ${id} (${svc?.nome ?? 'servico'}) em ${inicioBR} foi cancelado.`, telCli);
+        }
+        if (canWhatsappEstCancel && telEst && telEst !== telCli) {
+          await notifyWhatsapp(`[Aviso] Cancelamento: agendamento ${id} (${svc?.nome ?? 'servico'}) em ${inicioBR} pelo cliente ${cli?.nome ?? ''}.`, telEst);
+        }
+      }
     });
 
     return res.json({ ok: true });

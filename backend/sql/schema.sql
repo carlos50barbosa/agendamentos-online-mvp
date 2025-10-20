@@ -15,6 +15,8 @@ CREATE TABLE IF NOT EXISTS usuarios (
   nome         VARCHAR(120)          NOT NULL,
   email        VARCHAR(160)          NOT NULL UNIQUE,
   telefone     VARCHAR(20)           NULL,         -- usado para WhatsApp
+  notify_email_estab    TINYINT(1)   NOT NULL DEFAULT 1,
+  notify_whatsapp_estab TINYINT(1)   NOT NULL DEFAULT 1,
   cep          VARCHAR(8)            NULL,
   endereco     VARCHAR(255)          NULL,
   numero       VARCHAR(20)           NULL,

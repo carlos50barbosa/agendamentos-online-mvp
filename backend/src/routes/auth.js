@@ -12,6 +12,18 @@ import { saveAvatarFromDataUrl, removeAvatarFile } from '../lib/avatar.js';
 
 const router = Router();
 
+const toBool = (value) => {
+  if (value === true || value === false) return Boolean(value);
+  const num = Number(value);
+  if (!Number.isNaN(num)) return num !== 0;
+  if (typeof value === 'string') {
+    const norm = value.trim().toLowerCase();
+    if (['true', 'on', 'yes', 'sim', '1'].includes(norm)) return true;
+    if (['false', 'off', 'no', 'nao', '0'].includes(norm)) return false;
+  }
+  return false;
+};
+
 router.post('/register', async (req, res) => {
   try {
     const {
@@ -27,6 +39,8 @@ router.post('/register', async (req, res) => {
       bairro,
       cidade,
       estado,
+      notifyEmailEstab,
+      notifyWhatsappEstab,
     } = req.body || {};
 
     if (!nome || !email || !senha || !['cliente','estabelecimento'].includes(tipo)) {
@@ -131,6 +145,8 @@ router.post('/register', async (req, res) => {
       estado: estadoTrim || null,
       tipo,
       plan: 'starter',
+      notify_email_estab: tipo === 'estabelecimento',
+      notify_whatsapp_estab: tipo === 'estabelecimento',
       plan_status: 'trialing',
       plan_trial_ends_at: trialEndsAt ? trialEndsAt.toISOString() : null,
       plan_active_until: null,
@@ -156,7 +172,7 @@ router.post('/login', async (req, res) => {
     const email = String(emailRaw).trim().toLowerCase();
 
     const [rows] = await pool.query(
-      'SELECT id, nome, email, telefone, cep, endereco, numero, complemento, bairro, cidade, estado, avatar_url, senha_hash, tipo, plan, plan_status, plan_trial_ends_at, plan_active_until, plan_subscription_id FROM usuarios WHERE LOWER(email)=? LIMIT 1',
+      'SELECT id, nome, email, telefone, cep, endereco, numero, complemento, bairro, cidade, estado, avatar_url, senha_hash, tipo, notify_email_estab, notify_whatsapp_estab, plan, plan_status, plan_trial_ends_at, plan_active_until, plan_subscription_id FROM usuarios WHERE LOWER(email)=? LIMIT 1',
       [email]
     );
     if (!rows.length) return res.status(401).json({ error: 'invalid_credentials' });
@@ -189,6 +205,8 @@ router.post('/login', async (req, res) => {
       estado: u.estado || null,
       avatar_url: u.avatar_url || null,
       tipo: u.tipo || 'cliente',
+      notify_email_estab: toBool(u.notify_email_estab),
+      notify_whatsapp_estab: toBool(u.notify_whatsapp_estab),
       plan: u.plan || 'starter',
       plan_status: u.plan_status || 'trialing',
       plan_trial_ends_at: u.plan_trial_ends_at ? new Date(u.plan_trial_ends_at).toISOString() : null,
@@ -236,6 +254,8 @@ router.put('/me', auth, async (req, res) => {
       bairro,
       cidade,
       estado,
+      notifyEmailEstab,
+      notifyWhatsappEstab,
     } = req.body || {};
 
     nome = String(nome || '').trim();
@@ -296,6 +316,29 @@ router.put('/me', auth, async (req, res) => {
     if (phoneClean && phoneClean.length > 25) {
       return res.status(400).json({ error: 'telefone_invalido', message: 'Telefone invalido.' });
     }
+
+    const isEstabUser = req.user?.tipo === 'estabelecimento';
+    const parseToggle = (value) => {
+      if (value === undefined || value === null) return null;
+      if (typeof value === 'boolean') return value;
+      if (typeof value === 'number') return value === 1;
+      if (typeof value === 'string') {
+        const norm = value.trim().toLowerCase();
+        if (['1', 'true', 'on', 'yes', 'sim'].includes(norm)) return true;
+        if (['0', 'false', 'off', 'no', 'nao'].includes(norm)) return false;
+      }
+      return null;
+    };
+    const notifyEmailRaw = notifyEmailEstab ?? req.body?.notify_email_estab;
+    const notifyWhatsappRaw = notifyWhatsappEstab ?? req.body?.notify_whatsapp_estab;
+    const currentNotifyEmail = Boolean(req.user?.notify_email_estab);
+    const currentNotifyWhatsapp = Boolean(req.user?.notify_whatsapp_estab);
+    const nextNotifyEmail = isEstabUser
+      ? (parseToggle(notifyEmailRaw) ?? currentNotifyEmail)
+      : currentNotifyEmail;
+    const nextNotifyWhatsapp = isEstabUser
+      ? (parseToggle(notifyWhatsappRaw) ?? currentNotifyWhatsapp)
+      : currentNotifyWhatsapp;
 
     const [emailRows] = await pool.query('SELECT id FROM usuarios WHERE LOWER(email)=? AND id<>? LIMIT 1', [emailNorm, userId]);
     if (emailRows.length) {
@@ -372,8 +415,8 @@ router.put('/me', auth, async (req, res) => {
 
     if (emailChanged) {
       await pool.query(
-        'UPDATE usuarios SET nome=?, telefone=?, cep=?, endereco=?, numero=?, complemento=?, bairro=?, cidade=?, estado=?, avatar_url=? WHERE id=?',
-        [nome, phoneClean || null, cepValue, enderecoValue, numeroValue, complementoValue, bairroValue, cidadeValue, estadoValue, nextAvatar, userId]
+        'UPDATE usuarios SET nome=?, telefone=?, cep=?, endereco=?, numero=?, complemento=?, bairro=?, cidade=?, estado=?, notify_email_estab=?, notify_whatsapp_estab=?, avatar_url=? WHERE id=?',
+        [nome, phoneClean || null, cepValue, enderecoValue, numeroValue, complementoValue, bairroValue, cidadeValue, estadoValue, nextNotifyEmail ? 1 : 0, nextNotifyWhatsapp ? 1 : 0, nextAvatar, userId]
       );
       await pool.query('DELETE FROM email_change_tokens WHERE user_id=?', [userId]);
       const code = String(Math.floor(100000 + Math.random() * 900000));
@@ -384,7 +427,7 @@ router.put('/me', auth, async (req, res) => {
       const html = `<p>Ola!</p><p>Use o codigo <strong>${code}</strong> para confirmar seu novo email.</p><p>O codigo expira em 30 minutos.</p>`;
       try { await notifyEmail(emailNorm, subject, html); } catch (err) { console.error('[auth/me][email]', err); }
 
-      const [[userRow]] = await pool.query("SELECT id, nome, email, telefone, cep, endereco, numero, complemento, bairro, cidade, estado, avatar_url, tipo, plan, plan_status, plan_trial_ends_at, plan_active_until, plan_subscription_id FROM usuarios WHERE id=? LIMIT 1", [userId]);
+      const [[userRow]] = await pool.query("SELECT id, nome, email, telefone, cep, endereco, numero, complemento, bairro, cidade, estado, avatar_url, tipo, notify_email_estab, notify_whatsapp_estab, plan, plan_status, plan_trial_ends_at, plan_active_until, plan_subscription_id FROM usuarios WHERE id=? LIMIT 1", [userId]);
       if (!userRow) {
         return res.status(404).json({ error: 'not_found', message: 'Usuario nao encontrado.' });
       }
@@ -401,6 +444,8 @@ router.put('/me', auth, async (req, res) => {
         cidade: userRow.cidade || cidadeValue,
         estado: userRow.estado || estadoValue,
         avatar_url: userRow.avatar_url || nextAvatar || null,
+        notify_email_estab: toBool(userRow.notify_email_estab ?? nextNotifyEmail),
+        notify_whatsapp_estab: toBool(userRow.notify_whatsapp_estab ?? nextNotifyWhatsapp),
       };
       req.user = { ...req.user, ...mergedUser };
 
@@ -412,18 +457,24 @@ router.put('/me', auth, async (req, res) => {
     }
 
     await pool.query(
-      'UPDATE usuarios SET nome=?, email=?, telefone=?, cep=?, endereco=?, numero=?, complemento=?, bairro=?, cidade=?, estado=?, avatar_url=? WHERE id=?',
-      [nome, email, phoneClean || null, cepValue, enderecoValue, numeroValue, complementoValue, bairroValue, cidadeValue, estadoValue, nextAvatar, userId]
+      'UPDATE usuarios SET nome=?, email=?, telefone=?, cep=?, endereco=?, numero=?, complemento=?, bairro=?, cidade=?, estado=?, notify_email_estab=?, notify_whatsapp_estab=?, avatar_url=? WHERE id=?',
+      [nome, email, phoneClean || null, cepValue, enderecoValue, numeroValue, complementoValue, bairroValue, cidadeValue, estadoValue, nextNotifyEmail ? 1 : 0, nextNotifyWhatsapp ? 1 : 0, nextAvatar, userId]
     );
 
-    const [[userRow]] = await pool.query("SELECT id, nome, email, telefone, cep, endereco, numero, complemento, bairro, cidade, estado, avatar_url, tipo, plan, plan_status, plan_trial_ends_at, plan_active_until, plan_subscription_id FROM usuarios WHERE id=? LIMIT 1", [userId]);
+    const [[userRow]] = await pool.query("SELECT id, nome, email, telefone, cep, endereco, numero, complemento, bairro, cidade, estado, avatar_url, tipo, notify_email_estab, notify_whatsapp_estab, plan, plan_status, plan_trial_ends_at, plan_active_until, plan_subscription_id FROM usuarios WHERE id=? LIMIT 1", [userId]);
     if (!userRow) {
       return res.status(404).json({ error: 'not_found', message: 'Usuario nao encontrado.' });
     }
 
-    req.user = { ...req.user, ...userRow };
+    const normalizedUser = {
+      ...userRow,
+      notify_email_estab: toBool(userRow.notify_email_estab ?? nextNotifyEmail),
+      notify_whatsapp_estab: toBool(userRow.notify_whatsapp_estab ?? nextNotifyWhatsapp),
+    };
 
-    return res.json({ ok: true, user: userRow });
+    req.user = { ...req.user, ...normalizedUser };
+
+    return res.json({ ok: true, user: normalizedUser });
   } catch (e) {
     console.error('[auth/me][PUT] erro:', e);
     return res.status(500).json({ error: 'server_error' });
@@ -466,14 +517,20 @@ router.post('/me/email-confirm', auth, async (req, res) => {
     await pool.query('UPDATE usuarios SET email=? WHERE id=?', [newEmail, userId]);
     await pool.query('DELETE FROM email_change_tokens WHERE id=?', [token.id]);
 
-    const [[userRow]] = await pool.query("SELECT id, nome, email, telefone, cep, endereco, numero, complemento, bairro, cidade, estado, avatar_url, tipo, plan, plan_status, plan_trial_ends_at, plan_active_until, plan_subscription_id FROM usuarios WHERE id=? LIMIT 1", [userId]);
+    const [[userRow]] = await pool.query("SELECT id, nome, email, telefone, cep, endereco, numero, complemento, bairro, cidade, estado, avatar_url, tipo, notify_email_estab, notify_whatsapp_estab, plan, plan_status, plan_trial_ends_at, plan_active_until, plan_subscription_id FROM usuarios WHERE id=? LIMIT 1", [userId]);
     if (!userRow) {
       return res.status(404).json({ error: 'not_found', message: 'Usuario nao encontrado.' });
     }
 
-    req.user = { ...req.user, ...userRow };
+    const normalized = {
+      ...userRow,
+      notify_email_estab: toBool(userRow.notify_email_estab),
+      notify_whatsapp_estab: toBool(userRow.notify_whatsapp_estab),
+    };
 
-    return res.json({ ok: true, user: userRow });
+    req.user = { ...req.user, ...normalized };
+
+    return res.json({ ok: true, user: normalized });
   } catch (e) {
     console.error('[auth/email-confirm]', e);
     return res.status(500).json({ error: 'server_error' });

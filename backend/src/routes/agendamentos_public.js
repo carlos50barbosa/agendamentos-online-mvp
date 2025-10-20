@@ -35,6 +35,17 @@ function normalizePhoneBR(value){
   return digits;
 }
 
+const boolPref = (value, fallback = true) => {
+  if (value === undefined || value === null) return fallback;
+  if (value === true || value === false) return Boolean(value);
+  const num = Number(value);
+  if (!Number.isNaN(num)) return num !== 0;
+  const norm = String(value).trim().toLowerCase();
+  if (['0', 'false', 'off', 'no', 'nao'].includes(norm)) return false;
+  if (['1', 'true', 'on', 'yes', 'sim'].includes(norm)) return true;
+  return fallback;
+};
+
 // POST /public/agendamentos — cria agendamento sem login (guest)
 router.post('/', async (req, res) => {
   let conn;
@@ -182,11 +193,12 @@ router.post('/', async (req, res) => {
     // Notificacoes best-effort
     const inicioISO = new Date(inicioDate).toISOString();
     const inicioBR = brDateTime(inicioISO);
-    const [[est]] = await pool.query('SELECT email, telefone, nome FROM usuarios WHERE id=?', [estabelecimento_id]);
+    const [[est]] = await pool.query('SELECT email, telefone, nome, notify_email_estab, notify_whatsapp_estab FROM usuarios WHERE id=?', [estabelecimento_id]);
     const [tmplRows] = await pool.query('SELECT email_subject, email_html, wa_template FROM estab_messages WHERE estabelecimento_id=?', [estabelecimento_id]);
     const tmpl = (tmplRows && tmplRows[0]) ? tmplRows[0] : {};
     const telCli = normalizePhoneBR(telNorm);
     const telEst = normalizePhoneBR(est?.telefone);
+    const canWhatsappEst = boolPref(est?.notify_whatsapp_estab, true);
     const profNome = profissionalRow?.nome || '';
     const profLabel = profNome ? ` com ${profNome}` : '';
     (async () => {
@@ -225,7 +237,7 @@ router.post('/', async (req, res) => {
           }
         }
       } catch {}
-      try { if (telEst && telEst !== telCli) await notifyWhatsapp(`🔔 Novo agendamento: ${svc.nome} em ${inicioBR} — Cliente: ${String(nome)||''}`, telEst); } catch {}
+      try { if (canWhatsappEst && telEst && telEst !== telCli) await notifyWhatsapp(`🔔 Novo agendamento: ${svc.nome} em ${inicioBR} — Cliente: ${String(nome)||''}`, telEst); } catch {}
     })();
 
     return res.status(201).json({ id: ins.insertId, cliente_id: userId, estabelecimento_id, servico_id, profissional_id: profissional_id || null, inicio: inicioDate, fim: fimDate, status: 'confirmado' });
