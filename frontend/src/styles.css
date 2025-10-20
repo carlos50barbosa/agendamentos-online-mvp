@@ -719,10 +719,16 @@ a:hover { opacity: 1; text-decoration: underline; }
    Mensagens / Skeleton
    ======================= */
 .error{ background:var(--danger-bg); border-color:var(--danger-border); color:var(--danger-text); }
-.shimmer.pill{
-  height:22px; border-radius:999px;
+.shimmer{
   background:linear-gradient(90deg,#eee,#f6f6f6,#eee);
-  background-size:200% 100%; animation:shimmer 1.1s infinite;
+  background-size:200% 100%;
+  animation:shimmer 1.1s infinite;
+  border-radius:6px;
+  min-height:12px;
+}
+.shimmer.pill{
+  height:22px;
+  border-radius:999px;
 }
 @keyframes shimmer{ 0%{background-position:-200px 0} 100%{background-position:200px 0} }
 
@@ -1819,12 +1825,14 @@ button.danger:disabled,
 .novo-agendamento__summary-name{font-size:1rem;font-weight:600;}
 .novo-agendamento__summary-address{font-size:.8rem;color:var(--muted);line-height:1.3;}
 .novo-agendamento__summary-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:6px;}
-.summary-action{display:inline-flex;align-items:center;gap:4px;padding:4px 8px;font-size:.75rem;color:var(--primary-600);background:var(--surface-soft);border:1px solid var(--border);border-radius:999px;cursor:pointer;transition:background .15s ease,color .15s ease,border-color .15s ease;}
+.summary-action{display:inline-flex;align-items:center;gap:4px;padding:4px 8px;font-size:.75rem;color:var(--primary-600);background:var(--surface-soft);border:1px solid var(--border);border-radius:999px;cursor:pointer;transition:background .15s ease,color .15s ease,border-color .15s ease;text-decoration:none;}
 .summary-action:disabled{opacity:.6;cursor:not-allowed;}
 .summary-action--muted{color:var(--muted);}
 .summary-action--highlight{background:var(--primary-50,rgba(28,100,242,.12));color:var(--primary-700,var(--primary-600));border-color:var(--primary-100,transparent);}
 .summary-action>span[aria-hidden]{font-size:1rem;}
 .summary-action:focus-visible{outline:2px solid var(--primary-500);outline-offset:2px;}
+.summary-action--cta{background:transparent;border-style:dashed;border-color:var(--primary-100,var(--border));color:var(--primary-700,var(--primary-600));}
+.summary-action--cta:hover{background:var(--surface-soft);text-decoration:none;}
 .novo-agendamento__summary-service{margin-left:auto;text-align:right;display:flex;flex-direction:column;gap:4px;}
 .novo-agendamento__change-service{border:1px solid rgba(37,99,235,0.28);background:var(--surface);color:var(--primary-600);font-size:.75rem;font-weight:600;cursor:pointer;padding:4px 12px;margin-top:6px;align-self:flex-end;border-radius:999px;display:inline-flex;align-items:center;gap:6px;box-shadow:0 1px 2px rgba(15,23,42,0.08);transition:color .18s ease,background .18s ease,border-color .18s ease,box-shadow .18s ease,transform .18s ease;}
 .novo-agendamento__change-service-icon{display:inline-flex;align-items:center;justify-content:center;font-size:.85rem;}
@@ -1914,6 +1922,7 @@ button.danger:disabled,
 [data-theme='dark'] .plan-card__pix-select{color:#94a3b8;}
 
 .estab-info{display:flex;flex-direction:column;gap:12px;}
+.estab-info__loading{display:flex;flex-direction:column;gap:10px;}
 .estab-info__section{display:flex;flex-direction:column;gap:4px;}
 .estab-info__section h4{margin:0;font-size:.9rem;}
 .estab-info__section p{margin:0;}
@@ -1921,6 +1930,8 @@ button.danger:disabled,
 .estab-info__links{display:flex;flex-wrap:wrap;gap:8px;list-style:none;margin:0;padding:0;}
 .estab-info__links a{color:var(--primary-600);}
 .estab-info__professionals{display:flex;flex-direction:column;gap:8px;list-style:none;margin:0;padding:0;}
+.estab-info__professionals--loading .estab-info__professional-avatar{background:transparent;}
+.estab-info__professionals--loading .estab-info__professional-info{gap:6px;}
 .estab-info__professional{display:flex;align-items:center;gap:10px;}
 .estab-info__professional-avatar{width:40px;height:40px;border-radius:50%;overflow:hidden;display:flex;align-items:center;justify-content:center;background:var(--surface-soft);color:var(--primary-600);font-weight:600;text-transform:uppercase;}
 .estab-info__professional-avatar img{width:100%;height:100%;object-fit:cover;}
