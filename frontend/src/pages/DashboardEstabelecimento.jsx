@@ -67,7 +67,7 @@ export default function DashboardEstabelecimento(){
     <div className="card">
       <div className="row spread" style={{ marginBottom: 8 }}>
         <div className="row" style={{ alignItems: 'center', gap: 12 }}>
-          <h2 style={{ margin: 0 }}>Agendamentos</h2>
+          <h2 style={{ margin: 0, fontSize: 16 }}>Agendamentos</h2>
           <div className="notif-bell" title="Notificações de agendamentos">
             <IconBell className="notif-bell__icon" aria-hidden="true" />
             <span className="notif-bell__pill"> Recebidos {totals.recebidos}</span> 

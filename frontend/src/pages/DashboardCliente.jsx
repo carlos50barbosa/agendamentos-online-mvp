@@ -73,7 +73,7 @@ export default function DashboardCliente() {
     <div className="dashboard-narrow">{/* <- wrapper que limita a largura no desktop */}
       <div className="card">
         <div className="row spread" style={{ marginBottom: 8 }}>
-          <h2 style={{ margin: 0, fontSize: 18 }}>Meus Agendamentos</h2>
+          <h2 style={{ margin: 0, fontSize: 16 }}>Meus Agendamentos</h2>
           <select className="input" value={status} onChange={e=>setStatus(e.target.value)} title="Status">
             <option value="confirmado">Confirmados</option>
             <option value="concluido">Concluídos</option>
