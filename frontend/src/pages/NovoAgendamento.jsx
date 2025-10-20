@@ -1,6 +1,6 @@
 // src/pages/NovoAgendamento.jsx
 import React, { useEffect, useMemo, useState, useCallback, useRef } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Api, resolveAssetUrl } from "../utils/api";
 import { getUser } from "../utils/auth";
 import Modal from "../components/Modal.jsx";
@@ -548,6 +548,8 @@ const EstablishmentCard = ({ est, selected, onSelect, distance, userLocation, fo
 /* =================== PÃ¡gina Principal =================== */
 export default function NovoAgendamento() {
   const user = getUser();
+  const isAuthenticated = Boolean(user?.id);
+  const isClientUser = user?.tipo === 'cliente';
   const liveRef = useRef(null);
   const toastTimeoutRef = useRef(null);
   const nav = useNavigate();
@@ -1610,6 +1612,11 @@ export default function NovoAgendamento() {
   const ratingAverageLabel = ratingAverageValue != null && Number.isFinite(ratingAverageValue)
     ? ratingFormatter.format(ratingAverageValue)
     : null;
+  const ratingButtonLabel = selectedExtras?.loading
+    ? 'Carregando...'
+    : ratingCount > 0
+    ? `${ratingAverageLabel ?? ratingFormatter.format(0)} (${ratingCount})`
+    : 'Sem avaliações';
   const favoriteUpdating = Boolean(selectedExtras?.favoriteUpdating);
   const profileData = selectedExtras?.profile || null;
 
@@ -1625,6 +1632,8 @@ export default function NovoAgendamento() {
     .filter(Boolean);
   const contactEmail = profileData?.contato_email || selectedEstablishment?.email || null;
   const contactPhone = profileData?.contato_telefone || selectedEstablishment?.telefone || null;
+  const infoLoading = Boolean(selectedExtras?.loading);
+  const professionalsError = selectedProfessionals?.error || infoModalError || '';
   const serviceDuration = ServiceHelpers.duration(selectedService);
   const servicePrice = ServiceHelpers.formatPrice(ServiceHelpers.price(selectedService));
   const serviceProfessionals = Array.isArray(selectedService?.professionals) ? selectedService.professionals : [];
@@ -2062,32 +2071,44 @@ export default function NovoAgendamento() {
                 <strong className="novo-agendamento__summary-name">{selectedEstablishmentName || 'Estabelecimento'}</strong>
                 <span className="novo-agendamento__summary-address">{selectedEstablishmentAddress || 'Endereço não informado'}</span>
                 <div className="novo-agendamento__summary-actions">
-                  <button
-                    type="button"
-                    className={`summary-action${ratingCount > 0 ? '' : ' summary-action--muted'}`}
-                    onClick={handleOpenRatingModal}
-                    disabled={selectedExtras?.loading}
-                  >
-                    <span aria-hidden>{ratingCount > 0 ? '★' : '☆'}</span>
-                    {selectedExtras?.loading
-                      ? 'Carregando...'
-                      : ratingCount > 0
-                      ? `${ratingAverageLabel ?? ratingFormatter.format(0)} (${ratingCount})`
-                      : 'Sem avaliações'}
-                  </button>
+                  {!isAuthenticated ? (
+                    <Link to="/login" className="summary-action summary-action--cta">
+                      <span aria-hidden>🔒</span>
+                      Entre para avaliar
+                    </Link>
+                  ) : (
+                    <button
+                      type="button"
+                      className={`summary-action${ratingCount > 0 ? '' : ' summary-action--muted'}`}
+                      onClick={handleOpenRatingModal}
+                      disabled={!isClientUser || selectedExtras?.loading}
+                      title={!isClientUser ? 'Disponível apenas para clientes.' : undefined}
+                    >
+                      <span aria-hidden>{ratingCount > 0 ? '★' : '☆'}</span>
+                      {ratingButtonLabel}
+                    </button>
+                  )}
                   <button type="button" className="summary-action" onClick={handleOpenInfo}>
                     <span aria-hidden>🛈</span>
                     Informações
                   </button>
-                  <button
-                    type="button"
-                    className={`summary-action${selectedExtras?.is_favorite ? ' summary-action--highlight' : ''}`}
-                    onClick={handleToggleFavorite}
-                    disabled={favoriteUpdating}
-                  >
-                    <span aria-hidden>{selectedExtras?.is_favorite ? '♥' : '♡'}</span>
-                    {selectedExtras?.is_favorite ? 'Favorito' : 'Favoritar'}
-                  </button>
+                  {!isAuthenticated ? (
+                    <Link to="/login" className="summary-action summary-action--cta">
+                      <span aria-hidden>♡</span>
+                      Entre para favoritar
+                    </Link>
+                  ) : (
+                    <button
+                      type="button"
+                      className={`summary-action${selectedExtras?.is_favorite ? ' summary-action--highlight' : ''}`}
+                      onClick={handleToggleFavorite}
+                      disabled={!isClientUser || favoriteUpdating}
+                      title={!isClientUser ? 'Disponível apenas para clientes.' : undefined}
+                    >
+                      <span aria-hidden>{selectedExtras?.is_favorite ? '♥' : '♡'}</span>
+                      {selectedExtras?.is_favorite ? 'Favorito' : 'Favoritar'}
+                    </button>
+                  )}
                 </div>
               </div>
               {selectedService && (
@@ -2129,104 +2150,128 @@ export default function NovoAgendamento() {
           onClose={handleCloseInfo}
         >
           <div className="estab-info">
-            {infoModalError && (
-              <div className="notice notice--error" role="alert">
-                {infoModalError}
+            {infoLoading ? (
+              <div className="estab-info__loading">
+                {Array.from({ length: 5 }).map((_, index) => (
+                  <div
+                    key={`info-skeleton-${index}`}
+                    className="shimmer"
+                    style={{ height: 14, width: `${90 - index * 10}%` }}
+                  />
+                ))}
               </div>
-            )}
-            <section className="estab-info__section">
-              <h4>Endereço</h4>
-              <p>{selectedEstablishmentAddress || 'Endereço não informado.'}</p>
-            </section>
-            <section className="estab-info__section">
-              <h4>Contato</h4>
-              {contactPhone || contactEmail ? (
-                <ul className="estab-info__list">
-                  {contactPhone && <li>Telefone: {formatPhoneDisplay(contactPhone) || contactPhone}</li>}
-                  {contactEmail && (
-                    <li>
-                      Email: <a href={`mailto:${contactEmail}`}>{contactEmail}</a>
-                    </li>
-                  )}
-                </ul>
-              ) : (
-                <p className="muted">Contato não informado.</p>
-              )}
-            </section>
-            <section className="estab-info__section">
-              <h4>Sobre</h4>
-              {profileData?.sobre ? (
-                <p>{profileData.sobre}</p>
-              ) : (
-                <p className="muted">Informações não fornecidas.</p>
-              )}
-            </section>
-            <section className="estab-info__section">
-              <h4>Horários de atendimento</h4>
-              {horariosList.length ? (
-                <ul className="estab-info__list">
-                  {horariosList.map((item, index) => (
-                    <li key={`${item.label || 'horario'}-${index}`}>
-                      {item.label ? (
-                        <>
-                          <strong>{item.label}:</strong> {item.value || item.label}
-                        </>
-                      ) : (
-                        item.value || item.label
+            ) : (
+              <>
+                {selectedExtras?.error && (
+                  <div className="notice notice--error" role="alert">
+                    {selectedExtras.error}
+                  </div>
+                )}
+                <section className="estab-info__section">
+                  <h4>Endereço</h4>
+                  <p>{selectedEstablishmentAddress || 'Endereço não informado.'}</p>
+                </section>
+                <section className="estab-info__section">
+                  <h4>Contato</h4>
+                  {contactPhone || contactEmail ? (
+                    <ul className="estab-info__list">
+                      {contactPhone && <li>Telefone: {formatPhoneDisplay(contactPhone) || contactPhone}</li>}
+                      {contactEmail && (
+                        <li>
+                          Email: <a href={`mailto:${contactEmail}`}>{contactEmail}</a>
+                        </li>
                       )}
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="muted">Horários não informados.</p>
-              )}
-            </section>
-            <section className="estab-info__section">
-              <h4>Links</h4>
-              {socialLinks.length ? (
-                <ul className="estab-info__links">
-                  {socialLinks.map(({ key, label, url }) => (
-                    <li key={key}>
-                      <a href={url} target="_blank" rel="noopener noreferrer">{label}</a>
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="muted">Nenhum link cadastrado.</p>
-              )}
-            </section>
-            <section className="estab-info__section">
-              <h4>Profissionais</h4>
-              {selectedProfessionals?.loading ? (
-                <p>Carregando...</p>
-              ) : selectedProfessionals?.error ? (
-                <p className="muted">{selectedProfessionals.error}</p>
-              ) : selectedProfessionals?.items?.length ? (
-                <ul className="estab-info__professionals">
-                  {selectedProfessionals.items.map((prof) => {
-                    const avatar = prof?.avatar_url ? resolveAssetUrl(prof.avatar_url) : "";
-                    const initials = professionalInitials(prof?.nome || prof?.name);
-                    return (
-                      <li key={prof.id} className="estab-info__professional">
-                        <div className="estab-info__professional-avatar">
-                          {avatar ? (
-                            <img src={avatar} alt={`Foto de ${prof.nome || prof.name || 'profissional'}`} />
+                    </ul>
+                  ) : (
+                    <p className="muted">Contato não informado.</p>
+                  )}
+                </section>
+                <section className="estab-info__section">
+                  <h4>Sobre</h4>
+                  {profileData?.sobre ? (
+                    <p>{profileData.sobre}</p>
+                  ) : (
+                    <p className="muted">Nenhuma informação cadastrada.</p>
+                  )}
+                </section>
+                <section className="estab-info__section">
+                  <h4>Horários de atendimento</h4>
+                  {horariosList.length ? (
+                    <ul className="estab-info__list">
+                      {horariosList.map((item, index) => (
+                        <li key={`${item.label || 'horario'}-${index}`}>
+                          {item.label ? (
+                            <>
+                              <strong>{item.label}:</strong> {item.value || item.label}
+                            </>
                           ) : (
-                            <span>{initials}</span>
+                            item.value || item.label
                           )}
-                        </div>
-                        <div className="estab-info__professional-info">
-                          <strong>{prof.nome || prof.name}</strong>
-                          {prof.descricao ? <span className="muted">{prof.descricao}</span> : null}
-                        </div>
-                      </li>
-                    );
-                  })}
-                </ul>
-              ) : (
-                <p className="muted">Nenhum profissional informado.</p>
-              )}
-            </section>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="muted">Nenhum horário cadastrado.</p>
+                  )}
+                </section>
+                <section className="estab-info__section">
+                  <h4>Links</h4>
+                  {socialLinks.length ? (
+                    <ul className="estab-info__links">
+                      {socialLinks.map(({ key, label, url }) => (
+                        <li key={key}>
+                          <a href={url} target="_blank" rel="noopener noreferrer">{label}</a>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="muted">Nenhum link cadastrado.</p>
+                  )}
+                </section>
+                <section className="estab-info__section">
+                  <h4>Profissionais</h4>
+                  {selectedProfessionals?.loading ? (
+                    <ul className="estab-info__professionals estab-info__professionals--loading">
+                      {Array.from({ length: 3 }).map((_, index) => (
+                        <li key={`prof-skeleton-${index}`} className="estab-info__professional">
+                          <div className="estab-info__professional-avatar shimmer" />
+                          <div className="estab-info__professional-info">
+                            <div className="shimmer" style={{ height: 12, width: '70%' }} />
+                            <div className="shimmer" style={{ height: 10, width: '50%' }} />
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : professionalsError ? (
+                    <p className="notice notice--error" role="alert">{professionalsError}</p>
+                  ) : selectedProfessionals?.items?.length ? (
+                    <ul className="estab-info__professionals">
+                      {selectedProfessionals.items.map((prof) => {
+                        const avatar = prof?.avatar_url ? resolveAssetUrl(prof.avatar_url) : "";
+                        const initials = professionalInitials(prof?.nome || prof?.name);
+                        return (
+                          <li key={prof.id} className="estab-info__professional">
+                            <div className="estab-info__professional-avatar">
+                              {avatar ? (
+                                <img src={avatar} alt={`Foto de ${prof.nome || prof.name || 'profissional'}`} />
+                              ) : (
+                                <span>{initials}</span>
+                              )}
+                            </div>
+                            <div className="estab-info__professional-info">
+                              <strong>{prof.nome || prof.name}</strong>
+                              {prof.descricao ? <span className="muted">{prof.descricao}</span> : null}
+                            </div>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  ) : (
+                    <p className="muted">Nenhum profissional cadastrado.</p>
+                  )}
+                </section>
+              </>
+            )}
           </div>
         </Modal>
       )}
