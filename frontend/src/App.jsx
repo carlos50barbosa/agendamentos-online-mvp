@@ -13,12 +13,6 @@ import NovoAgendamento from './pages/NovoAgendamento.jsx';
 import EstabelecimentosList from './pages/EstabelecimentosList.jsx';
 import {
   IconUser,
-  IconHome,
-  IconPlus,
-  IconGear,
-  IconLogout,
-  IconList,
-  IconChart,
   IconChevronLeft,
   IconChevronRight,
   IconSun,
@@ -26,6 +20,7 @@ import {
 } from './components/Icons.jsx';
 import LogoAO from './components/LogoAO.jsx';
 import Modal from './components/Modal.jsx';
+import MobileNavBar from './components/MobileNavBar.jsx';
 import Loading from './pages/Loading.jsx';
 import Configuracoes from './pages/Configuracoes.jsx';
 import Ajuda from './pages/Ajuda.jsx';
@@ -39,6 +34,7 @@ import AdminBilling from './pages/AdminBilling.jsx';
 import Contato from './pages/Contato.jsx';
 import LinkPhone from './pages/LinkPhone.jsx';
 import Book from './pages/Book.jsx';
+import { buildNavigation } from './utils/navigation.js';
 import {
   PREFERENCES_EVENT,
   PREFERENCES_STORAGE_KEY,
@@ -161,7 +157,7 @@ function useAppPreferences() {
 function Sidebar({ open, user }) {
   const nav = useNavigate();
   const resolvedUser = user ?? getUser();
-  const isEstab = resolvedUser?.tipo === 'estabelecimento';
+  const navigation = useMemo(() => buildNavigation(resolvedUser), [resolvedUser]);
 
   const [scrolled, setScrolled] = useState(false);
   const [el, setEl] = useState(null);
@@ -179,29 +175,22 @@ function Sidebar({ open, user }) {
     }
   }, [open, el]);
 
-  const variantClass =
-    resolvedUser?.tipo === 'cliente'
-      ? 'sidebar--client'
-      : resolvedUser?.tipo === 'estabelecimento'
-      ? 'sidebar--estab'
-      : '';
-
   return (
-    <aside className={`sidebar ${variantClass} ${scrolled ? 'is-scrolled' : ''}`} ref={setEl}>
+    <aside className={`sidebar ${resolvedUser?.tipo === 'estabelecimento' ? 'sidebar--estab' : ''} ${scrolled ? 'is-scrolled' : ''}`} ref={setEl}>
       <div className="sidebar__inner">
         <nav id="mainnav" className="mainnav mainnav--vertical">
-          {!resolvedUser ? (
+          {!navigation.isAuthenticated ? (
             <div className="sidelist">
-              <div className="sidelist__section">
-                <NavLink to="/login" className={({ isActive }) => `sidelist__item${isActive ? ' active' : ''}`}>
-                  <IconUser className="sidelist__icon" aria-hidden="true" />
-                  <span>Login</span>
-                </NavLink>
-                <NavLink to="/cadastro" className={({ isActive }) => `sidelist__item${isActive ? ' active' : ''}`}>
-                  <IconPlus className="sidelist__icon" aria-hidden="true" />
-                  <span>Cadastro</span>
-                </NavLink>
-              </div>
+              {navigation.sections.map((section) => (
+                <div key={section.key} className="sidelist__section">
+                  {section.items.map((item) => (
+                    <NavLink key={item.key} to={item.to} className={({ isActive }) => `sidelist__item${isActive ? ' active' : ''}`}>
+                      <item.icon className="sidelist__icon" aria-hidden="true" />
+                      <span>{item.label}</span>
+                    </NavLink>
+                  ))}
+                </div>
+              ))}
             </div>
           ) : (
             <>
@@ -213,70 +202,59 @@ function Sidebar({ open, user }) {
                 </div>
               </div>
               <div className="sidelist">
-                <div className="sidelist__section">
-                  <div className="sidelist__heading">Principal</div>
-                  <NavLink to={isEstab ? '/estab' : '/cliente'} className={({ isActive }) => `sidelist__item${isActive ? ' active' : ''}`}>
-                    <IconHome className="sidelist__icon" aria-hidden="true" />
-                    <span>Meus Agendamentos</span>
-                  </NavLink>
-                  {!isEstab && (
-                    <NavLink to="/novo" className={({ isActive }) => `sidelist__item${isActive ? ' active' : ''}`}>
-                      <IconPlus className="sidelist__icon" aria-hidden="true" />
-                      <span>Novo Agendamento</span>
-                    </NavLink>
-                  )}
-                  {isEstab && (
-                    <>
-                      <NavLink to="/servicos" className={({ isActive }) => `sidelist__item${isActive ? ' active' : ''}`}>
-                        <IconList className="sidelist__icon" aria-hidden="true" />
-                        <span>Serviços</span>
-                      </NavLink>
-                      <NavLink to="/profissionais" className={({ isActive }) => `sidelist__item${isActive ? ' active' : ''}`}>
-                        <IconList className="sidelist__icon" aria-hidden="true" />
-                        <span>Profissionais</span>
-                      </NavLink>
-                      <NavLink to="/relatorios" className={({ isActive }) => `sidelist__item${isActive ? ' active' : ''}`}>
-                        <IconChart className="sidelist__icon" aria-hidden="true" />
-                        <span>Relatórios</span>
-                      </NavLink>
-                    </>
-                  )}
-                </div>
-
-                <div className="sidelist__section">
-                  <div className="sidelist__heading">Conta</div>
-                  <NavLink to="/configuracoes" className={({ isActive }) => `sidelist__item${isActive ? ' active' : ''}`}>
-                    <IconGear className="sidelist__icon" aria-hidden="true" />
-                    <span>Configurações</span>
-                  </NavLink>
-                  <button className="sidelist__item sidelist__item--danger" onClick={() => setLogoutOpen(true)}>
-                    <IconLogout className="sidelist__icon" aria-hidden="true" />
-                    <span>Sair</span>
-                  </button>
-                  {logoutOpen && (
-                    <Modal
-                      title="Sair da conta"
-                      onClose={() => setLogoutOpen(false)}
-                      actions={[
-                        <button key="cancel" className="btn btn--outline" onClick={() => setLogoutOpen(false)}>Cancelar</button>,
-                        <button
-                          key="confirm"
-                          className="btn btn--danger"
-                          onClick={() => {
-                            setLogoutOpen(false);
-                            try { logout(); } catch {}
-                            nav('/loading?type=logout&next=/', { replace: true });
-                          }}
+                {navigation.sections.map((section) => (
+                  <div key={section.key} className="sidelist__section">
+                    {section.heading && <div className="sidelist__heading">{section.heading}</div>}
+                    {section.items.map((item) => {
+                      if (item.type === 'action') {
+                        return (
+                          <button
+                            key={item.key}
+                            type="button"
+                            className="sidelist__item sidelist__item--danger"
+                            onClick={() => setLogoutOpen(true)}
+                          >
+                            <item.icon className="sidelist__icon" aria-hidden="true" />
+                            <span>{item.label}</span>
+                          </button>
+                        );
+                      }
+                      return (
+                        <NavLink
+                          key={item.key}
+                          to={item.to}
+                          className={({ isActive }) => `sidelist__item${isActive ? ' active' : ''}`}
                         >
-                          Sair
-                        </button>,
-                      ]}
-                    >
-                      <p>Tem certeza que deseja sair?</p>
-                    </Modal>
-                  )}
-                </div>
+                          <item.icon className="sidelist__icon" aria-hidden="true" />
+                          <span>{item.label}</span>
+                        </NavLink>
+                      );
+                    })}
+                  </div>
+                ))}
               </div>
+              {logoutOpen && (
+                <Modal
+                  title="Sair da conta"
+                  onClose={() => setLogoutOpen(false)}
+                  actions={[
+                    <button key="cancel" className="btn btn--outline" onClick={() => setLogoutOpen(false)}>Cancelar</button>,
+                    <button
+                      key="confirm"
+                      className="btn btn--danger"
+                      onClick={() => {
+                        setLogoutOpen(false);
+                        try { logout(); } catch {}
+                        nav('/loading?type=logout&next=/', { replace: true });
+                      }}
+                    >
+                      Sair
+                    </button>,
+                  ]}
+                >
+                  <p>Tem certeza que deseja sair?</p>
+                </Modal>
+              )}
             </>
           )}
         </nav>
@@ -343,56 +321,59 @@ export default function App() {
   }, [isPlanos, preferences?.theme]);
 
   return (
-    <div className={`app-shell ${sidebarOpen ? 'sidebar-open' : 'is-collapsed'}`}>
-      {!isBook && <Sidebar open={sidebarOpen} user={currentUser} />}
-      {!isBook && (
-        <>
-          <button
-            className="sidebar-toggle"
-            aria-label={sidebarOpen ? 'Ocultar menu' : 'Mostrar menu'}
-            onClick={() => setSidebarOpen((value) => !value)}
-          >
-            {sidebarOpen ? (
-              <IconChevronLeft aria-hidden className="sidebar-toggle__icon" />
-            ) : (
-              <IconChevronRight aria-hidden className="sidebar-toggle__icon" />
-            )}
-          </button>
-          <div className="sidebar-overlay" onClick={() => setSidebarOpen(false)} aria-hidden></div>
-        </>
-      )}
-      <main className="app-main">
-        <div className="app-topbar">
-          <div className="app-topbar__inner">
-            <NavLink to="/" className="brand">
-              <LogoAO size={28} />
-              <span className="brand__text">
-                <strong>Agendamentos Online</strong>
-                <small>Rápido e sem fricção</small>
-              </span>
-            </NavLink>
-            <div className="app-topbar__actions">
-              <button
-                type="button"
-                className={`theme-toggle${isPlanos ? ' is-disabled' : ''}`}
-                onClick={isPlanos ? undefined : toggleTheme}
-                disabled={isPlanos}
-                aria-label={isPlanos ? 'Tema fixo no modo escuro' : `Ativar tema ${isDark ? 'claro' : 'escuro'}`}
-                title={isPlanos ? 'Tema fixo no modo escuro' : isDark ? 'Alternar para tema claro' : 'Alternar para tema escuro'}
-              >
-                {(isPlanos || !isDark) ? <IconMoon aria-hidden="true" /> : <IconSun aria-hidden="true" />}
-              </button>
+    <>
+      <div className={`app-shell ${sidebarOpen ? 'sidebar-open' : 'is-collapsed'}`}>
+        {!isBook && <Sidebar open={sidebarOpen} user={currentUser} />}
+        {!isBook && (
+          <>
+            <button
+              className="sidebar-toggle"
+              aria-label={sidebarOpen ? 'Ocultar menu' : 'Mostrar menu'}
+              onClick={() => setSidebarOpen((value) => !value)}
+            >
+              {sidebarOpen ? (
+                <IconChevronLeft aria-hidden className="sidebar-toggle__icon" />
+              ) : (
+                <IconChevronRight aria-hidden className="sidebar-toggle__icon" />
+              )}
+            </button>
+            <div className="sidebar-overlay" onClick={() => setSidebarOpen(false)} aria-hidden></div>
+          </>
+        )}
+        <main className="app-main">
+          <div className="app-topbar">
+            <div className="app-topbar__inner">
+              <NavLink to="/" className="brand">
+                <LogoAO size={28} />
+                <span className="brand__text">
+                  <strong>Agendamentos Online</strong>
+                  <small>Rápido e sem fricção</small>
+                </span>
+              </NavLink>
+              <div className="app-topbar__actions">
+                <button
+                  type="button"
+                  className={`theme-toggle${isPlanos ? ' is-disabled' : ''}`}
+                  onClick={isPlanos ? undefined : toggleTheme}
+                  disabled={isPlanos}
+                  aria-label={isPlanos ? 'Tema fixo no modo escuro' : `Ativar tema ${isDark ? 'claro' : 'escuro'}`}
+                  title={isPlanos ? 'Tema fixo no modo escuro' : isDark ? 'Alternar para tema claro' : 'Alternar para tema escuro'}
+                >
+                  {(isPlanos || !isDark) ? <IconMoon aria-hidden="true" /> : <IconSun aria-hidden="true" />}
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-        <div className="container">
-          <Routes>
-            {APP_ROUTES.map(({ path, element }) => (
-              <Route key={path} path={path} element={element} />
-            ))}
-          </Routes>
-        </div>
-      </main>
-    </div>
+          <div className="container">
+            <Routes>
+              {APP_ROUTES.map(({ path, element }) => (
+                <Route key={path} path={path} element={element} />
+              ))}
+            </Routes>
+          </div>
+        </main>
+      </div>
+      {!isBook && <MobileNavBar user={currentUser} />}
+    </>
   );
 }

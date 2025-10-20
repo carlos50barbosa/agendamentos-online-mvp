@@ -32,6 +32,9 @@
   --topbar-bg: rgba(255,255,255,.92);
   --topbar-border: var(--brand-200);
   --topbar-shadow: 0 8px 24px rgba(99, 102, 241, 0.12);
+  --mobile-nav-h: 64px;
+  --mobile-nav-item-h: 48px;
+  --mobile-nav-padding: 8px;
 
   --danger-bg: #fef2f2;
   --danger-border: #fee2e2;
@@ -105,6 +108,9 @@
   --topbar-bg: rgba(15, 23, 42, 0.82);
   --topbar-border: rgba(129, 140, 248, 0.32);
   --topbar-shadow: 0 18px 36px rgba(2, 6, 23, 0.55);
+  --mobile-nav-h: 64px;
+  --mobile-nav-item-h: 48px;
+  --mobile-nav-padding: 8px;
 
   --danger-bg: rgba(248, 113, 113, 0.18);
   --danger-border: rgba(248, 113, 113, 0.36);
@@ -1039,12 +1045,12 @@ button.danger:disabled,
   transform: translateX(0); transition: transform .18s ease;
 }
 .sidebar__inner{
-  display: flex; flex-direction: column; gap: 12px; align-items: stretch;
-  padding: 12px; height: 100%;
+  display: flex; flex-direction: column; gap: 8px; align-items: stretch;
+  padding: 0 12px 12px 12px; height: 100%; /* remove padding-top extra */
   justify-content: flex-start; /* agrupado, sem espaço exagerado */
 }
 .app-shell.is-collapsed .sidebar{ transform: translateX(-100%); }
-.mainnav--vertical{ display: flex; flex-direction: column; gap: 8px; flex: 0 0 auto; align-items: stretch; }
+.mainnav--vertical{ display: flex; flex-direction: column; gap: 8px; flex: 0 0 auto; align-items: stretch; justify-content: flex-start; margin-top: 0; padding-top: 0; height: auto; }
 .app-main{ background: var(--bg); min-width: 0; padding-top: var(--topbar-h); grid-column: 2; }
 
 /* Toggle da sidebar */
@@ -1080,6 +1086,8 @@ button.danger:disabled,
   color:inherit; text-decoration:none; cursor:pointer; text-align:left;
   width: 100%;
 }
+/* Evitar que os itens do menu ocupem toda a largura quando dentro da navegação vertical */
+.mainnav--vertical .sidelist__item{ width: auto; align-self: flex-start; }
 .sidelist__section{ display:flex; flex-direction:column; gap:4px; }
 .sidelist__heading{ font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); padding:2px 6px; }
 .sidelist__item:hover{ background: var(--hover); }
@@ -1090,27 +1098,11 @@ button.danger:disabled,
 /* Em telas pequenas, a sidebar vira topo (stack) */
 @media (max-width: 780px){
   .app-shell{ grid-template-columns: 1fr; }
-  /* Garante que todos os filhos da grid ocupem a mesma coluna, evitando criação de colunas implícitas */
-  .app-shell > .sidebar,
-  .app-shell > .sidebar-toggle,
-  .app-shell > .sidebar-overlay,
   .app-shell > .app-main{ grid-column: 1 / -1; }
-  .sidebar{
-    position: fixed; left: 0; top: auto; bottom: 0; z-index: 60;
-    width: 100%; height: 64px; border-right: 0; border-top: 1px solid var(--border);
-  }
-  .app-shell.sidebar-open .sidebar-overlay{
-    display: block; position: fixed; inset: 0; z-index: 55; background: rgba(0,0,0,.25);
-  }
-  .sidebar-toggle{ left: 12px; top: 50%; transform: translateY(-50%); }
-  .app-shell.sidebar-open .sidebar-toggle{ left: 268px; } /* junto da borda da sidebar */
-  .app-main{ min-height: 100dvh; }
-  /* Sidebar: garantir navegação no topo */
-  .sidebar__inner{ display:flex; flex-direction: column; justify-content: flex-start; align-items: stretch; padding: 12px; height: 100dvh; overflow-y:auto; }
-  .brand{ display:flex; align-items:center; gap:10px; flex: 0 0 auto; }
-  .mainnav--vertical{ display:flex; flex-direction: column; gap:8px; margin-top: 8px; flex: 0 0 auto; }
-  .profilebox{ margin: 10px 0; min-height: 56px; flex: 0 0 auto; }
-  .sidelist{ display:flex; flex-direction: column; gap:10px; flex: 0 0 auto; }
+  .sidebar,
+  .sidebar-toggle,
+  .sidebar-overlay{ display: none !important; }
+  .app-main{ min-height: 100dvh; padding-bottom: calc(var(--mobile-nav-h) + env(safe-area-inset-bottom, 0px)); }
   /* Topbar compacto e em linha */
   .app-topbar__inner{ flex-direction: row; align-items: baseline; gap: 8px; }
 }
@@ -1150,6 +1142,59 @@ button.danger:disabled,
 @media (max-width: 780px){
   .app-topbar__inner{ padding: 10px 16px; flex-direction: row; align-items: center; justify-content: space-between; }
   .container{ margin-top: 8px; }
+}
+
+/* Navegação inferior (mobile) */
+.mobile-nav{
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 80;
+  display: none;
+  padding: 0 12px calc(var(--mobile-nav-padding) + env(safe-area-inset-bottom, 0px));
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  box-shadow: 0 -10px 24px rgba(15, 23, 42, 0.12);
+  gap: 8px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.mobile-nav::-webkit-scrollbar{ display: none; height: 0; }
+
+.mobile-nav__item{
+  flex: 0 0 auto;
+  min-width: 72px;
+  height: var(--mobile-nav-item-h);
+  padding: 4px 8px;
+  border-radius: 12px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.2;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background .18s ease, color .18s ease;
+}
+.mobile-nav__item svg{ width: 22px; height: 22px; }
+.mobile-nav__item:focus-visible{ outline: none; box-shadow: var(--ring-shadow); }
+.mobile-nav__item:hover{ background: var(--hover); color: var(--text); }
+.mobile-nav__item.is-active{ background: var(--brand-100); box-shadow: 0 0 0 1px var(--brand-200) inset; color: var(--primary-600); }
+.mobile-nav__item--action{ color: var(--danger-text); }
+.mobile-nav__item--action:hover{ background: var(--danger-bg); }
+
+@media (max-width: 780px){
+  .mobile-nav{ display: flex; align-items: center; }
+}
+
+@media (min-width: 781px){
+  .mobile-nav{ display: none !important; }
 }
 
 /* Dashboard: estilos compactos para tabelas, badges e botões */
@@ -1280,83 +1325,6 @@ button.danger:disabled,
   .row.spread .input,
   .row.spread select{ height: 36px; padding: 0 10px; font-size: 13px; }
 
-  /* Barra inferior (mobile) ajustada para exibir todos os itens compactos */
-  .sidebar{
-    position: fixed; left: 0; right: 0; bottom: 0; top: auto;
-    width: 100%;
-    border-right: 0; border-top: 1px solid var(--border);
-    background: var(--surface); z-index: 60;
-    transform: none;
-    padding: 6px 8px calc(8px + env(safe-area-inset-bottom, 0px));
-    box-shadow: 0 -6px 18px rgba(15, 23, 42, 0.09);
-  }
-  .sidebar .mainnav{
-    display: flex !important;
-    width: 100%;
-    background: transparent;
-    border: 0;
-  }
-  .sidebar__inner{
-    width: 100%;
-    display: flex;
-    flex-direction: column;
-    align-items: stretch;
-    gap: 6px;
-  }
-  .sidebar .brand,
-  .sidebar .profilebox,
-  .sidebar .sidelist__heading{ display: none !important; }
-  .mainnav--vertical{
-    flex-direction: column;
-    width: 100%;
-    gap: 4px;
-  }
-  .sidelist{
-    width: 100%;
-    display: flex;
-    flex-direction: row;
-    flex-wrap: nowrap;
-    justify-content: flex-start;
-    gap: 4px;
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-  }
-  .sidelist__section{
-    display: flex;
-    flex-direction: row;
-    flex-wrap: nowrap;
-    gap: 8px;
-  }
-  .sidelist__item{
-    flex: 0 0 66px;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 3px;
-    min-height: 50px;
-    padding: 5px 5px;
-    border-radius: 11px;
-    background: rgba(148, 163, 184, 0.08);
-    text-align: center;
-    color: var(--text) !important;
-  }
-  .sidelist__item.active{
-    background: rgba(99, 102, 241, 0.18);
-    color: var(--brand-strong) !important;
-  }
-  .sidelist__icon{ width: 22px; height: 22px; stroke: currentColor; stroke-width: 2.1; }
-  .sidelist__item > span{
-    font-size: 11px;
-    line-height: 1.2;
-    max-width: 80px;
-    white-space: normal;
-  }
-  .sidebar-toggle,
-  .sidebar-overlay{ display: none !important; }
-  .app-shell.is-collapsed .sidebar{ transform: none; }
-  .app-main{ padding-bottom: calc(128px + env(safe-area-inset-bottom, 0px)); }
-
   html, body{ font-size: 16px; }
   .dashboard-narrow{ font-size: 16px; }
   .dashboard-narrow .card > table thead th{ font-size: 12px; padding: 6px 8px; }
@@ -1398,6 +1366,8 @@ button.danger:disabled,
       max-width: 100%;
     }
   }
+
+/* (Removido override que forçava sidebar vertical no mobile) */
 
 
 
