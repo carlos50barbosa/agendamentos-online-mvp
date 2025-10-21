@@ -39,6 +39,44 @@ const formatCep = (value = '') => {
   return `${digits.slice(0, 5)}-${digits.slice(5)}`;
 };
 
+const formatProfileHorariosTextarea = (profile) => {
+  if (!profile) return '';
+  const list = Array.isArray(profile.horarios) ? profile.horarios : [];
+  if (list.length) {
+    return list
+      .map((item) => {
+        if (!item) return '';
+        const label = item.label ? String(item.label).trim() : '';
+        const value = item.value ? String(item.value).trim() : '';
+        if (label && value) return `${label}: ${value}`;
+        return value || label;
+      })
+      .filter(Boolean)
+      .join('\n');
+  }
+  const raw = typeof profile.horarios_raw === 'string' ? profile.horarios_raw.trim() : '';
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        return parsed
+          .map((entry) => {
+            if (!entry) return '';
+            if (typeof entry === 'string') return entry.trim();
+            const label = entry.label ? String(entry.label).trim() : '';
+            const value = entry.value ? String(entry.value).trim() : '';
+            if (label && value) return `${label}: ${value}`;
+            return value || label;
+          })
+          .filter(Boolean)
+          .join('\n');
+      }
+    } catch {}
+    return raw;
+  }
+  return '';
+};
+
 export default function Configuracoes() {
   const user = getUser();
   const isEstab = user?.tipo === 'estabelecimento';
@@ -56,6 +94,21 @@ export default function Configuracoes() {
   const [msg, setMsg] = useState({ email_subject: '', email_html: '', wa_template: '' });
   const [savingMessages, setSavingMessages] = useState(false);
   const [openSections, setOpenSections] = useState({});
+  const [publicProfileForm, setPublicProfileForm] = useState({
+    sobre: '',
+    contato_email: '',
+    contato_telefone: '',
+    site_url: '',
+    instagram_url: '',
+    facebook_url: '',
+    linkedin_url: '',
+    youtube_url: '',
+    tiktok_url: '',
+    horarios_text: '',
+  });
+  const [publicProfileStatus, setPublicProfileStatus] = useState({ type: '', message: '' });
+  const [publicProfileLoading, setPublicProfileLoading] = useState(false);
+  const [publicProfileSaving, setPublicProfileSaving] = useState(false);
 
   const [profileForm, setProfileForm] = useState({
     nome: '',
@@ -350,9 +403,12 @@ export default function Configuracoes() {
       // Carrega billing (assinatura + histórico) para habilitar botões de recorrência
       try { await fetchBilling(); } catch {}
       try {
+        setPublicProfileLoading(true);
+        setPublicProfileStatus({ type: '', message: '' });
         const est = await Api.getEstablishment(user.id);
         setSlug(est?.slug || '');
         const ctx = est?.plan_context;
+        applyPublicProfile(est?.profile || null);
         if (ctx) {
           setPlanInfo((prev) => ({
             ...prev,
@@ -372,7 +428,13 @@ export default function Configuracoes() {
             else localStorage.removeItem('trial_end');
           } catch {}
         }
-      } catch {}
+      } catch (err) {
+        setPublicProfileStatus((prev) =>
+          prev?.message ? prev : { type: 'error', message: 'Não foi possível carregar o perfil público.' }
+        );
+      } finally {
+        setPublicProfileLoading(false);
+      }
       // Carrega contagem de serviços/profissionais para pré-validar downgrades
       try {
         const stats = await Api.getEstablishmentStats(user.id);
@@ -391,7 +453,7 @@ export default function Configuracoes() {
         await fetchBilling();
       } catch {}
     })();
-  }, [isEstab, user?.id, fetchBilling]);
+  }, [isEstab, user?.id, fetchBilling, applyPublicProfile]);
 
   const handleCheckout = useCallback(async (targetPlan, targetCycle = 'mensal') => {
     if (!isEstab) return;
@@ -618,9 +680,29 @@ export default function Configuracoes() {
     setOpenSections((prev) => ({ ...prev, [id]: !prev[id] }));
   }, []);
 
+  const applyPublicProfile = useCallback((profile) => {
+    const horarios_text = formatProfileHorariosTextarea(profile);
+    setPublicProfileForm({
+      sobre: profile?.sobre || '',
+      contato_email: profile?.contato_email || '',
+      contato_telefone: profile?.contato_telefone || '',
+      site_url: profile?.site_url || '',
+      instagram_url: profile?.instagram_url || '',
+      facebook_url: profile?.facebook_url || '',
+      linkedin_url: profile?.linkedin_url || '',
+      youtube_url: profile?.youtube_url || '',
+      tiktok_url: profile?.tiktok_url || '',
+      horarios_text: horarios_text || '',
+    });
+  }, []);
+
   const handleProfileChange = (key, value) => {
     setProfileForm((prev) => ({ ...prev, [key]: value }));
   };
+
+  const handlePublicProfileChange = useCallback((key, value) => {
+    setPublicProfileForm((prev) => ({ ...prev, [key]: value }));
+  }, []);
 
   const handleAvatarFile = useCallback((event) => {
     const input = event?.target || null;
@@ -758,6 +840,40 @@ export default function Configuracoes() {
       setProfileSaving(false);
     }
   };
+
+  const handleSavePublicProfile = useCallback(async (event) => {
+    event?.preventDefault();
+    if (!isEstab) return;
+    setPublicProfileStatus({ type: '', message: '' });
+    setPublicProfileSaving(true);
+    try {
+      const phoneDigits = publicProfileForm.contato_telefone
+        ? normalizePhone(publicProfileForm.contato_telefone)
+        : '';
+      const payload = {
+        sobre: publicProfileForm.sobre?.trim() || null,
+        contato_email: publicProfileForm.contato_email?.trim() || null,
+        contato_telefone: phoneDigits || null,
+        site_url: publicProfileForm.site_url?.trim() || null,
+        instagram_url: publicProfileForm.instagram_url?.trim() || null,
+        facebook_url: publicProfileForm.facebook_url?.trim() || null,
+        linkedin_url: publicProfileForm.linkedin_url?.trim() || null,
+        youtube_url: publicProfileForm.youtube_url?.trim() || null,
+        tiktok_url: publicProfileForm.tiktok_url?.trim() || null,
+        horarios_text: publicProfileForm.horarios_text || '',
+      };
+      const response = await Api.updateEstablishmentProfile(user.id, payload);
+      if (response?.profile) {
+        applyPublicProfile(response.profile);
+      }
+      setPublicProfileStatus({ type: 'success', message: 'Perfil público atualizado com sucesso.' });
+    } catch (err) {
+      const msg = err?.data?.message || err?.message || 'Falha ao atualizar perfil público.';
+      setPublicProfileStatus({ type: 'error', message: msg });
+    } finally {
+      setPublicProfileSaving(false);
+    }
+  }, [applyPublicProfile, isEstab, publicProfileForm, user?.id]);
 
   const sections = useMemo(() => {
     const list = [];
@@ -927,6 +1043,152 @@ export default function Configuracoes() {
         </form>
       ),
     });
+
+    if (isEstab) {
+      list.push({
+        id: 'public-profile',
+        title: 'Perfil público do estabelecimento',
+        content: (
+          <form onSubmit={handleSavePublicProfile} className="grid" style={{ gap: 10 }}>
+            {publicProfileLoading && (
+              <div className="row" style={{ gap: 8, alignItems: 'center' }}>
+                <span className="spinner" aria-hidden />
+                <span className="muted" style={{ fontSize: 13 }}>Carregando informações públicas…</span>
+              </div>
+            )}
+            <label className="label">
+              <span>Sobre o estabelecimento</span>
+              <textarea
+                className="input"
+                rows={4}
+                maxLength={1200}
+                value={publicProfileForm.sobre}
+                onChange={(e) => handlePublicProfileChange('sobre', e.target.value)}
+                disabled={publicProfileLoading || publicProfileSaving}
+              />
+              <span className="muted" style={{ fontSize: 12 }}>
+                {`${publicProfileForm.sobre.length}/1200 caracteres`}
+              </span>
+            </label>
+            <div className="grid" style={{ gap: 10, gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}>
+              <label className="label">
+                <span>Email público</span>
+                <input
+                  className="input"
+                  type="email"
+                  value={publicProfileForm.contato_email}
+                  onChange={(e) => handlePublicProfileChange('contato_email', e.target.value)}
+                  disabled={publicProfileLoading || publicProfileSaving}
+                  placeholder="contato@exemplo.com"
+                />
+              </label>
+              <label className="label">
+                <span>Telefone público (WhatsApp)</span>
+                <input
+                  className="input"
+                  value={formatPhoneLabel(publicProfileForm.contato_telefone)}
+                  onChange={(e) => handlePublicProfileChange('contato_telefone', e.target.value)}
+                  disabled={publicProfileLoading || publicProfileSaving}
+                  inputMode="tel"
+                  placeholder="(11) 91234-5678"
+                />
+              </label>
+            </div>
+            <label className="label">
+              <span>Horários de atendimento</span>
+              <textarea
+                className="input"
+                rows={4}
+                value={publicProfileForm.horarios_text}
+                onChange={(e) => handlePublicProfileChange('horarios_text', e.target.value)}
+                disabled={publicProfileLoading || publicProfileSaving}
+                placeholder={'Segunda: 09h - 18h\nTerça: 09h - 18h'}
+              />
+              <span className="muted" style={{ fontSize: 12 }}>
+                Uma linha por dia. Ex.: “Segunda: 09h - 18h”.
+              </span>
+            </label>
+            <div className="grid" style={{ gap: 10, gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}>
+              <label className="label">
+                <span>Site</span>
+                <input
+                  className="input"
+                  type="url"
+                  value={publicProfileForm.site_url}
+                  onChange={(e) => handlePublicProfileChange('site_url', e.target.value)}
+                  disabled={publicProfileLoading || publicProfileSaving}
+                  placeholder="https://seusite.com"
+                />
+              </label>
+              <label className="label">
+                <span>Instagram</span>
+                <input
+                  className="input"
+                  value={publicProfileForm.instagram_url}
+                  onChange={(e) => handlePublicProfileChange('instagram_url', e.target.value)}
+                  disabled={publicProfileLoading || publicProfileSaving}
+                  placeholder="https://instagram.com/seuperfil"
+                />
+              </label>
+              <label className="label">
+                <span>Facebook</span>
+                <input
+                  className="input"
+                  value={publicProfileForm.facebook_url}
+                  onChange={(e) => handlePublicProfileChange('facebook_url', e.target.value)}
+                  disabled={publicProfileLoading || publicProfileSaving}
+                  placeholder="https://facebook.com/seupagina"
+                />
+              </label>
+              <label className="label">
+                <span>LinkedIn</span>
+                <input
+                  className="input"
+                  value={publicProfileForm.linkedin_url}
+                  onChange={(e) => handlePublicProfileChange('linkedin_url', e.target.value)}
+                  disabled={publicProfileLoading || publicProfileSaving}
+                  placeholder="https://linkedin.com/company/seuperfil"
+                />
+              </label>
+              <label className="label">
+                <span>YouTube</span>
+                <input
+                  className="input"
+                  value={publicProfileForm.youtube_url}
+                  onChange={(e) => handlePublicProfileChange('youtube_url', e.target.value)}
+                  disabled={publicProfileLoading || publicProfileSaving}
+                  placeholder="https://youtube.com/@seucanal"
+                />
+              </label>
+              <label className="label">
+                <span>TikTok</span>
+                <input
+                  className="input"
+                  value={publicProfileForm.tiktok_url}
+                  onChange={(e) => handlePublicProfileChange('tiktok_url', e.target.value)}
+                  disabled={publicProfileLoading || publicProfileSaving}
+                  placeholder="https://www.tiktok.com/@seuperfil"
+                />
+              </label>
+            </div>
+            {publicProfileStatus.message && (
+              <div className={`notice notice--${publicProfileStatus.type}`} role="alert">
+                {publicProfileStatus.message}
+              </div>
+            )}
+            <div className="row" style={{ justifyContent: 'flex-end', gap: 8 }}>
+              <button
+                type="submit"
+                className="btn btn--primary"
+                disabled={publicProfileSaving}
+              >
+                {publicProfileSaving ? <span className="spinner" /> : 'Salvar perfil público'}
+              </button>
+            </div>
+          </form>
+        ),
+      });
+    }
 
     if (isEstab) {
       const planTierLabel = PLAN_META[planInfo.plan]?.label || planInfo.plan.toUpperCase();
@@ -1275,6 +1537,12 @@ export default function Configuracoes() {
     recurringNotice,
     fetchBilling,
     pixCycle,
+    publicProfileForm,
+    publicProfileStatus,
+    publicProfileLoading,
+    publicProfileSaving,
+    handlePublicProfileChange,
+    handleSavePublicProfile,
   ]);
 
   return (

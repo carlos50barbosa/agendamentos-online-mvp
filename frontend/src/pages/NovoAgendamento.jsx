@@ -1,6 +1,6 @@
 // src/pages/NovoAgendamento.jsx
 import React, { useEffect, useMemo, useState, useCallback, useRef } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Api, resolveAssetUrl } from "../utils/api";
 import { getUser } from "../utils/auth";
 import Modal from "../components/Modal.jsx";
@@ -548,6 +548,8 @@ const EstablishmentCard = ({ est, selected, onSelect, distance, userLocation, fo
 /* =================== PÃ¡gina Principal =================== */
 export default function NovoAgendamento() {
   const user = getUser();
+  const isAuthenticated = Boolean(user?.id);
+  const isClientUser = user?.tipo === 'cliente';
   const liveRef = useRef(null);
   const toastTimeoutRef = useRef(null);
   const nav = useNavigate();
@@ -593,6 +595,7 @@ export default function NovoAgendamento() {
   const [professionalsByEstab, setProfessionalsByEstab] = useState({});
   const [infoModalOpen, setInfoModalOpen] = useState(false);
   const [infoModalError, setInfoModalError] = useState('');
+  const [infoActiveTab, setInfoActiveTab] = useState('about');
   const [ratingModal, setRatingModal] = useState({ open: false, nota: 0, comentario: '', saving: false, error: '' });
 
   // Inicializa estQuery a partir de ?q= da URL e reage a mudanÃ§as no histÃ³rico
@@ -662,6 +665,11 @@ export default function NovoAgendamento() {
   const selectedEstablishmentId = selectedEstablishment ? String(selectedEstablishment.id) : null;
   const selectedExtras = selectedEstablishmentId ? establishmentExtras[selectedEstablishmentId] : null;
   const selectedProfessionals = selectedEstablishmentId ? professionalsByEstab[selectedEstablishmentId] : null;
+  const reviewsState = selectedExtras?.reviews || { items: [], page: 0, hasNext: true, loading: false, loaded: false, error: '' };
+  const reviewsItems = Array.isArray(reviewsState.items) ? reviewsState.items : [];
+  const reviewsLoading = Boolean(reviewsState.loading);
+  const reviewsError = reviewsState.error || '';
+  const reviewsHasNext = reviewsState.hasNext !== false;
 
   const establishmentAvatar = useMemo(() => {
     const source = selectedEstablishment?.avatar_url || selectedEstablishment?.logo_url || selectedEstablishment?.foto_url;
@@ -688,6 +696,11 @@ export default function NovoAgendamento() {
 
   const ratingFormatter = useMemo(
     () => new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 }),
+    []
+  );
+
+  const reviewDateFormatter = useMemo(
+    () => new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' }),
     []
   );
 
@@ -945,6 +958,7 @@ export default function NovoAgendamento() {
     if (!selectedEstablishmentId) return;
     setInfoModalOpen(false);
     setInfoModalError('');
+    setInfoActiveTab('about');
     setRatingModal((prev) => (prev.open ? { open: false, nota: 0, comentario: '', saving: false, error: '' } : prev));
   }, [selectedEstablishmentId]);
 
@@ -1448,9 +1462,110 @@ export default function NovoAgendamento() {
     }
   };
 
+  const loadReviews = useCallback(
+    async ({ reset = false } = {}) => {
+      if (!selectedEstablishment || !selectedEstablishmentId) return null;
+      const key = selectedEstablishmentId;
+      const currentState = reset
+        ? { items: [], page: 0, hasNext: true, loaded: false, loading: false, error: '' }
+        : selectedExtras?.reviews || {
+            items: [],
+            page: 0,
+            hasNext: true,
+            loaded: false,
+            loading: false,
+            error: '',
+          };
+
+      if (!reset) {
+        if (currentState.loading) return currentState;
+        if (currentState.loaded && currentState.hasNext === false) return currentState;
+      }
+
+      const nextPage = reset ? 1 : (currentState.page || 0) + 1;
+      setEstablishmentExtras((prev) => {
+        const base = prev[key] || {};
+        const prevReviews = base.reviews || {
+          items: [],
+          page: 0,
+          hasNext: true,
+          loaded: false,
+          loading: false,
+          error: '',
+        };
+        return {
+          ...prev,
+          [key]: {
+            ...base,
+            reviews: {
+              ...prevReviews,
+              items: reset ? [] : prevReviews.items,
+              page: reset ? 0 : prevReviews.page,
+              hasNext: reset ? true : prevReviews.hasNext,
+              loading: true,
+              loaded: reset ? false : prevReviews.loaded,
+              error: '',
+            },
+          },
+        };
+      });
+
+      try {
+        const response = await Api.getEstablishmentReviews(selectedEstablishment.id, {
+          page: nextPage,
+          limit: 10,
+        });
+        const items = Array.isArray(response?.items) ? response.items : [];
+        const pagination = response?.pagination || {};
+        const mergedItems = reset ? items : [...(currentState.items || []), ...items];
+        setEstablishmentExtras((prev) => ({
+          ...prev,
+          [key]: {
+            ...(prev[key] || {}),
+            reviews: {
+              items: mergedItems,
+              page: pagination.page || nextPage,
+              perPage: pagination.per_page || 10,
+              total: pagination.total ?? null,
+              hasNext: Boolean(pagination.has_next),
+              loading: false,
+              loaded: true,
+              error: '',
+            },
+          },
+        }));
+        return response;
+      } catch (err) {
+        const msg =
+          err?.data?.message || err?.message || 'Não foi possível carregar avaliações.';
+        setEstablishmentExtras((prev) => ({
+          ...prev,
+          [key]: {
+            ...(prev[key] || {}),
+            reviews: {
+              ...(prev[key]?.reviews || {}),
+              loading: false,
+              loaded: true,
+              error: msg,
+            },
+          },
+        }));
+        return null;
+      }
+    },
+    [selectedEstablishment, selectedEstablishmentId, selectedExtras, setEstablishmentExtras]
+  );
+
+  useEffect(() => {
+    if (infoModalOpen && infoActiveTab === 'reviews') {
+      loadReviews({ reset: false });
+    }
+  }, [infoModalOpen, infoActiveTab, loadReviews]);
+
   const handleOpenInfo = async () => {
     if (!selectedEstablishment || !selectedEstablishmentId) return;
     setInfoModalError('');
+    setInfoActiveTab('about');
     setInfoModalOpen(true);
     const entry = professionalsByEstab[selectedEstablishmentId];
     if (!entry || (!entry.loaded && !entry.loading)) {
@@ -1464,6 +1579,23 @@ export default function NovoAgendamento() {
   const handleCloseInfo = () => {
     setInfoModalOpen(false);
     setInfoModalError('');
+    setInfoActiveTab('about');
+  };
+
+  const handleInfoTabChange = (tab) => {
+    if (infoActiveTab === tab) return;
+    setInfoActiveTab(tab);
+    if (tab === 'reviews') {
+      loadReviews({ reset: false });
+    }
+  };
+
+  const handleReviewsRetry = () => {
+    loadReviews({ reset: true });
+  };
+
+  const handleReviewsLoadMore = () => {
+    loadReviews({ reset: false });
   };
 
   const handleToggleFavorite = async () => {
@@ -1610,6 +1742,11 @@ export default function NovoAgendamento() {
   const ratingAverageLabel = ratingAverageValue != null && Number.isFinite(ratingAverageValue)
     ? ratingFormatter.format(ratingAverageValue)
     : null;
+  const ratingButtonLabel = selectedExtras?.loading
+    ? 'Carregando...'
+    : ratingCount > 0
+    ? `${ratingAverageLabel ?? ratingFormatter.format(0)} (${ratingCount})`
+    : 'Sem avaliações';
   const favoriteUpdating = Boolean(selectedExtras?.favoriteUpdating);
   const profileData = selectedExtras?.profile || null;
 
@@ -1625,6 +1762,8 @@ export default function NovoAgendamento() {
     .filter(Boolean);
   const contactEmail = profileData?.contato_email || selectedEstablishment?.email || null;
   const contactPhone = profileData?.contato_telefone || selectedEstablishment?.telefone || null;
+  const infoLoading = Boolean(selectedExtras?.loading);
+  const professionalsError = selectedProfessionals?.error || infoModalError || '';
   const serviceDuration = ServiceHelpers.duration(selectedService);
   const servicePrice = ServiceHelpers.formatPrice(ServiceHelpers.price(selectedService));
   const serviceProfessionals = Array.isArray(selectedService?.professionals) ? selectedService.professionals : [];
@@ -2062,32 +2201,44 @@ export default function NovoAgendamento() {
                 <strong className="novo-agendamento__summary-name">{selectedEstablishmentName || 'Estabelecimento'}</strong>
                 <span className="novo-agendamento__summary-address">{selectedEstablishmentAddress || 'Endereço não informado'}</span>
                 <div className="novo-agendamento__summary-actions">
-                  <button
-                    type="button"
-                    className={`summary-action${ratingCount > 0 ? '' : ' summary-action--muted'}`}
-                    onClick={handleOpenRatingModal}
-                    disabled={selectedExtras?.loading}
-                  >
-                    <span aria-hidden>{ratingCount > 0 ? '★' : '☆'}</span>
-                    {selectedExtras?.loading
-                      ? 'Carregando...'
-                      : ratingCount > 0
-                      ? `${ratingAverageLabel ?? ratingFormatter.format(0)} (${ratingCount})`
-                      : 'Sem avaliações'}
-                  </button>
+                  {!isAuthenticated ? (
+                    <Link to="/login" className="summary-action summary-action--cta">
+                      <span aria-hidden>🔒</span>
+                      Entre para avaliar
+                    </Link>
+                  ) : (
+                    <button
+                      type="button"
+                      className={`summary-action${ratingCount > 0 ? '' : ' summary-action--muted'}`}
+                      onClick={handleOpenRatingModal}
+                      disabled={!isClientUser || selectedExtras?.loading}
+                      title={!isClientUser ? 'Disponível apenas para clientes.' : undefined}
+                    >
+                      <span aria-hidden>{ratingCount > 0 ? '★' : '☆'}</span>
+                      {ratingButtonLabel}
+                    </button>
+                  )}
                   <button type="button" className="summary-action" onClick={handleOpenInfo}>
                     <span aria-hidden>🛈</span>
                     Informações
                   </button>
-                  <button
-                    type="button"
-                    className={`summary-action${selectedExtras?.is_favorite ? ' summary-action--highlight' : ''}`}
-                    onClick={handleToggleFavorite}
-                    disabled={favoriteUpdating}
-                  >
-                    <span aria-hidden>{selectedExtras?.is_favorite ? '♥' : '♡'}</span>
-                    {selectedExtras?.is_favorite ? 'Favorito' : 'Favoritar'}
-                  </button>
+                  {!isAuthenticated ? (
+                    <Link to="/login" className="summary-action summary-action--cta">
+                      <span aria-hidden>♡</span>
+                      Entre para favoritar
+                    </Link>
+                  ) : (
+                    <button
+                      type="button"
+                      className={`summary-action${selectedExtras?.is_favorite ? ' summary-action--highlight' : ''}`}
+                      onClick={handleToggleFavorite}
+                      disabled={!isClientUser || favoriteUpdating}
+                      title={!isClientUser ? 'Disponível apenas para clientes.' : undefined}
+                    >
+                      <span aria-hidden>{selectedExtras?.is_favorite ? '♥' : '♡'}</span>
+                      {selectedExtras?.is_favorite ? 'Favorito' : 'Favoritar'}
+                    </button>
+                  )}
                 </div>
               </div>
               {selectedService && (
@@ -2129,104 +2280,302 @@ export default function NovoAgendamento() {
           onClose={handleCloseInfo}
         >
           <div className="estab-info">
-            {infoModalError && (
-              <div className="notice notice--error" role="alert">
-                {infoModalError}
-              </div>
-            )}
-            <section className="estab-info__section">
-              <h4>Endereço</h4>
-              <p>{selectedEstablishmentAddress || 'Endereço não informado.'}</p>
-            </section>
-            <section className="estab-info__section">
-              <h4>Contato</h4>
-              {contactPhone || contactEmail ? (
-                <ul className="estab-info__list">
-                  {contactPhone && <li>Telefone: {formatPhoneDisplay(contactPhone) || contactPhone}</li>}
-                  {contactEmail && (
-                    <li>
-                      Email: <a href={`mailto:${contactEmail}`}>{contactEmail}</a>
-                    </li>
-                  )}
-                </ul>
-              ) : (
-                <p className="muted">Contato não informado.</p>
-              )}
-            </section>
-            <section className="estab-info__section">
-              <h4>Sobre</h4>
-              {profileData?.sobre ? (
-                <p>{profileData.sobre}</p>
-              ) : (
-                <p className="muted">Informações não fornecidas.</p>
-              )}
-            </section>
-            <section className="estab-info__section">
-              <h4>Horários de atendimento</h4>
-              {horariosList.length ? (
-                <ul className="estab-info__list">
-                  {horariosList.map((item, index) => (
-                    <li key={`${item.label || 'horario'}-${index}`}>
-                      {item.label ? (
-                        <>
-                          <strong>{item.label}:</strong> {item.value || item.label}
-                        </>
-                      ) : (
-                        item.value || item.label
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="muted">Horários não informados.</p>
-              )}
-            </section>
-            <section className="estab-info__section">
-              <h4>Links</h4>
-              {socialLinks.length ? (
-                <ul className="estab-info__links">
-                  {socialLinks.map(({ key, label, url }) => (
-                    <li key={key}>
-                      <a href={url} target="_blank" rel="noopener noreferrer">{label}</a>
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="muted">Nenhum link cadastrado.</p>
-              )}
-            </section>
-            <section className="estab-info__section">
-              <h4>Profissionais</h4>
-              {selectedProfessionals?.loading ? (
-                <p>Carregando...</p>
-              ) : selectedProfessionals?.error ? (
-                <p className="muted">{selectedProfessionals.error}</p>
-              ) : selectedProfessionals?.items?.length ? (
-                <ul className="estab-info__professionals">
-                  {selectedProfessionals.items.map((prof) => {
-                    const avatar = prof?.avatar_url ? resolveAssetUrl(prof.avatar_url) : "";
-                    const initials = professionalInitials(prof?.nome || prof?.name);
-                    return (
-                      <li key={prof.id} className="estab-info__professional">
-                        <div className="estab-info__professional-avatar">
-                          {avatar ? (
-                            <img src={avatar} alt={`Foto de ${prof.nome || prof.name || 'profissional'}`} />
-                          ) : (
-                            <span>{initials}</span>
+            <div
+              className="estab-info__tabs"
+              role="tablist"
+              aria-label="Detalhes do estabelecimento"
+            >
+              <button
+                type="button"
+                className={`estab-info__tab${infoActiveTab === 'about' ? ' is-active' : ''}`}
+                onClick={() => handleInfoTabChange('about')}
+                role="tab"
+                aria-selected={infoActiveTab === 'about'}
+              >
+                Informações
+              </button>
+              <button
+                type="button"
+                className={`estab-info__tab${infoActiveTab === 'reviews' ? ' is-active' : ''}`}
+                onClick={() => handleInfoTabChange('reviews')}
+                role="tab"
+                aria-selected={infoActiveTab === 'reviews'}
+              >
+                Avaliações{ratingCount > 0 ? ` (${ratingCount})` : ''}
+              </button>
+            </div>
+            <div className="estab-info__content">
+              {infoActiveTab === 'about' ? (
+                infoLoading ? (
+                  <div className="estab-info__loading">
+                    {Array.from({ length: 5 }).map((_, index) => (
+                      <div
+                        key={`info-skeleton-${index}`}
+                        className="shimmer"
+                        style={{ height: 14, width: `${90 - index * 10}%` }}
+                      />
+                    ))}
+                  </div>
+                ) : (
+                  <>
+                    {selectedExtras?.error && (
+                      <div className="notice notice--error" role="alert">
+                        {selectedExtras.error}
+                      </div>
+                    )}
+                    <section className="estab-info__section">
+                      <h4>Endereço</h4>
+                      <p>{selectedEstablishmentAddress || 'Endereço não informado.'}</p>
+                    </section>
+                    <section className="estab-info__section">
+                      <h4>Contato</h4>
+                      {contactPhone || contactEmail ? (
+                        <ul className="estab-info__list">
+                          {contactPhone && (
+                            <li>Telefone: {formatPhoneDisplay(contactPhone) || contactPhone}</li>
                           )}
-                        </div>
-                        <div className="estab-info__professional-info">
-                          <strong>{prof.nome || prof.name}</strong>
-                          {prof.descricao ? <span className="muted">{prof.descricao}</span> : null}
-                        </div>
-                      </li>
-                    );
-                  })}
-                </ul>
+                          {contactEmail && (
+                            <li>
+                              Email: <a href={`mailto:${contactEmail}`}>{contactEmail}</a>
+                            </li>
+                          )}
+                        </ul>
+                      ) : (
+                        <p className="muted">Contato não informado.</p>
+                      )}
+                    </section>
+                    <section className="estab-info__section">
+                      <h4>Sobre</h4>
+                      {profileData?.sobre ? (
+                        <p>{profileData.sobre}</p>
+                      ) : (
+                        <p className="muted">Nenhuma informação cadastrada.</p>
+                      )}
+                    </section>
+                    <section className="estab-info__section">
+                      <h4>Horários de atendimento</h4>
+                      {horariosList.length ? (
+                        <ul className="estab-info__list">
+                          {horariosList.map((item, index) => (
+                            <li key={`${item.label || 'horario'}-${index}`}>
+                              {item.label ? (
+                                <>
+                                  <strong>{item.label}:</strong> {item.value || item.label}
+                                </>
+                              ) : (
+                                item.value || item.label
+                              )}
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <p className="muted">Nenhum horário cadastrado.</p>
+                      )}
+                    </section>
+                    <section className="estab-info__section">
+                      <h4>Links</h4>
+                      {socialLinks.length ? (
+                        <ul className="estab-info__links">
+                          {socialLinks.map(({ key, label, url }) => (
+                            <li key={key}>
+                              <a href={url} target="_blank" rel="noopener noreferrer">
+                                {label}
+                              </a>
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <p className="muted">Nenhum link cadastrado.</p>
+                      )}
+                    </section>
+                    <section className="estab-info__section">
+                      <h4>Profissionais</h4>
+                      {selectedProfessionals?.loading ? (
+                        <ul className="estab-info__professionals estab-info__professionals--loading">
+                          {Array.from({ length: 3 }).map((_, index) => (
+                            <li key={`prof-skeleton-${index}`} className="estab-info__professional">
+                              <div className="estab-info__professional-avatar shimmer" />
+                              <div className="estab-info__professional-info">
+                                <div className="shimmer" style={{ height: 12, width: '70%' }} />
+                                <div className="shimmer" style={{ height: 10, width: '50%' }} />
+                              </div>
+                            </li>
+                          ))}
+                        </ul>
+                      ) : professionalsError ? (
+                        <p className="notice notice--error" role="alert">
+                          {professionalsError}
+                        </p>
+                      ) : selectedProfessionals?.items?.length ? (
+                        <ul className="estab-info__professionals">
+                          {selectedProfessionals.items.map((prof) => {
+                            const avatar = prof?.avatar_url ? resolveAssetUrl(prof.avatar_url) : '';
+                            const initials = professionalInitials(prof?.nome || prof?.name);
+                            return (
+                              <li key={prof.id} className="estab-info__professional">
+                                <div className="estab-info__professional-avatar">
+                                  {avatar ? (
+                                    <img
+                                      src={avatar}
+                                      alt={`Foto de ${prof.nome || prof.name || 'profissional'}`}
+                                    />
+                                  ) : (
+                                    <span>{initials}</span>
+                                  )}
+                                </div>
+                                <div className="estab-info__professional-info">
+                                  <strong>{prof.nome || prof.name}</strong>
+                                  {prof.descricao ? (
+                                    <span className="muted">{prof.descricao}</span>
+                                  ) : null}
+                                </div>
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      ) : (
+                        <p className="muted">Nenhum profissional cadastrado.</p>
+                      )}
+                    </section>
+                  </>
+                )
               ) : (
-                <p className="muted">Nenhum profissional informado.</p>
+                <div className="estab-reviews">
+                  <div className="estab-reviews__summary">
+                    <div className="estab-reviews__average" aria-label={`Nota média ${ratingAverageLabel ?? '–'}`}>
+                      <span className="estab-reviews__value">{ratingAverageLabel ?? '–'}</span>
+                      <div className="estab-reviews__stars" aria-hidden="true">
+                        {[1, 2, 3, 4, 5].map((value) => (
+                          <span
+                            key={`summary-star-${value}`}
+                            className={`estab-reviews__star${
+                              ratingSummary?.average != null && ratingSummary.average >= value - 0.5 ? ' is-active' : ''
+                            }`}
+                          >
+                            {ratingSummary?.average != null && ratingSummary.average >= value - 0.5 ? '★' : '☆'}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="estab-reviews__count">
+                      {ratingCount > 0
+                        ? `${ratingCount} ${ratingCount === 1 ? 'avaliação' : 'avaliações'}`
+                        : 'Ainda sem avaliações'}
+                    </div>
+                    {isClientUser ? (
+                      <button
+                        type="button"
+                        className="btn btn--outline btn--sm"
+                        onClick={handleOpenRatingModal}
+                      >
+                        Avaliar estabelecimento
+                      </button>
+                    ) : !isAuthenticated ? (
+                      <Link to="/login" className="btn btn--outline btn--sm">
+                        Entre para avaliar
+                      </Link>
+                    ) : null}
+                  </div>
+                  {reviewsError && !reviewsLoading ? (
+                    <div className="notice notice--error" role="alert">
+                      {reviewsError}
+                      <div className="row" style={{ marginTop: 8 }}>
+                        <button className="btn btn--sm" onClick={handleReviewsRetry}>
+                          Tentar novamente
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
+                  {reviewsLoading && reviewsItems.length === 0 ? (
+                    <ul className="estab-reviews__list estab-reviews__list--loading">
+                      {Array.from({ length: 3 }).map((_, index) => (
+                        <li key={`review-skeleton-${index}`} className="estab-reviews__item">
+                          <div className="estab-reviews__header">
+                            <div className="estab-reviews__avatar shimmer" />
+                            <div className="estab-reviews__meta">
+                              <div className="shimmer" style={{ height: 12, width: '60%' }} />
+                              <div className="shimmer" style={{ height: 10, width: '40%', marginTop: 4 }} />
+                            </div>
+                            <div className="estab-reviews__stars">
+                              {Array.from({ length: 5 }).map((__, star) => (
+                                <span key={`skeleton-star-${star}`} className="estab-reviews__star shimmer" />
+                              ))}
+                            </div>
+                          </div>
+                          <div className="shimmer" style={{ height: 12, width: '90%', marginTop: 8 }} />
+                          <div className="shimmer" style={{ height: 12, width: '70%', marginTop: 6 }} />
+                        </li>
+                      ))}
+                    </ul>
+                  ) : reviewsItems.length === 0 ? (
+                    <p className="muted" style={{ marginTop: 12 }}>
+                      {ratingCount > 0
+                        ? 'Ainda sem comentários. Quando clientes deixarem relatos, eles aparecerão aqui.'
+                        : 'Seja o primeiro a avaliar este estabelecimento.'}
+                    </p>
+                  ) : (
+                    <ul className="estab-reviews__list">
+                      {reviewsItems.map((review) => {
+                        const nota = Number(review.nota) || 0;
+                        const reviewDateIso = review.updated_at || review.created_at;
+                        const dateObj = reviewDateIso ? new Date(reviewDateIso) : null;
+                        const reviewDate = dateObj && !Number.isNaN(dateObj.getTime())
+                          ? reviewDateFormatter.format(dateObj)
+                          : '';
+                        const avatar = review?.author?.avatar_url ? resolveAssetUrl(review.author.avatar_url) : '';
+                        const initials = review?.author?.initials || 'CL';
+                        return (
+                          <li key={review.id} className="estab-reviews__item">
+                            <div className="estab-reviews__header">
+                              <div className="estab-reviews__avatar">
+                                {avatar ? (
+                                  <img src={avatar} alt={`Foto de ${review.author?.name || 'cliente'}`} />
+                                ) : (
+                                  <span>{initials}</span>
+                                )}
+                              </div>
+                              <div className="estab-reviews__meta">
+                                <strong>{review.author?.name || 'Cliente'}</strong>
+                                {reviewDate ? <span className="muted">{reviewDate}</span> : null}
+                              </div>
+                              <div className="estab-reviews__stars" aria-label={`Nota ${nota} de 5`}>
+                                {[1, 2, 3, 4, 5].map((value) => (
+                                  <span
+                                    key={`review-${review.id}-star-${value}`}
+                                    className={`estab-reviews__star${nota >= value ? ' is-active' : ''}`}
+                                  >
+                                    {nota >= value ? '★' : '☆'}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                            {review.comentario ? (
+                              <p className="estab-reviews__comment">{review.comentario}</p>
+                            ) : (
+                              <p className="estab-reviews__comment estab-reviews__comment--muted">
+                                Avaliação sem comentário.
+                              </p>
+                            )}
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                  {reviewsLoading && reviewsItems.length > 0 && (
+                    <div className="row" style={{ justifyContent: 'center', marginTop: 8 }}>
+                      <span className="spinner" aria-label="Carregando avaliações" />
+                    </div>
+                  )}
+                  {!reviewsLoading && reviewsHasNext && reviewsItems.length > 0 && (
+                    <div className="row" style={{ justifyContent: 'center', marginTop: 12 }}>
+                      <button className="btn btn--outline btn--sm" onClick={handleReviewsLoadMore}>
+                        Carregar mais
+                      </button>
+                    </div>
+                  )}
+                </div>
               )}
-            </section>
+            </div>
           </div>
         </Modal>
       )}

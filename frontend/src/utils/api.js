@@ -146,6 +146,8 @@ export const Api = {
   // Estabelecimentos + ServiÃ§os (NOVOS)
   listEstablishments: () => req('/establishments'),
   getEstablishment: (idOrSlug) => req(`/establishments/${idOrSlug}`),
+  getEstablishmentReviews: (id, params = {}) =>
+    req(`/establishments/${id}/reviews${toQuery(params)}`),
   saveEstablishmentReview: (id, payload) =>
     req(`/establishments/${id}/review`, { method: 'PUT', body: JSON.stringify(payload) }),
   deleteEstablishmentReview: (id) => req(`/establishments/${id}/review`, { method: 'DELETE' }),
@@ -155,6 +157,8 @@ export const Api = {
   updateEstablishmentMessages: (id, payload) => req(`/establishments/${id}/messages`, { method: 'PUT', body: JSON.stringify(payload) }),
   updateEstablishmentSlug: (id, slug) => req(`/establishments/${id}/slug`, { method: 'PUT', body: JSON.stringify({ slug }) }),
   updateEstablishmentPlan: (id, payload) => req(`/establishments/${id}/plan`, { method: 'PUT', body: JSON.stringify(payload) }),
+  updateEstablishmentProfile: (id, payload) =>
+    req(`/establishments/${id}/profile`, { method: 'PUT', body: JSON.stringify(payload) }),
   getEstablishmentStats: (id) => req(`/establishments/${id}/stats`),
   listServices: (establishmentId) => req(`/servicos${toQuery({ establishmentId })}`),
 
