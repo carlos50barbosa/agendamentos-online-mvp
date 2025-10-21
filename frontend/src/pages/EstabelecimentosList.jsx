@@ -56,6 +56,10 @@ const fallbackAvatar = (label) => {
   return `https://ui-avatars.com/api/?name=${name}&size=128&background=1C64F2&color=ffffff&rounded=true`;
 };
 
+const ratingNumberFormatter = new Intl.NumberFormat('pt-BR', {
+  minimumFractionDigits: 1,
+  maximumFractionDigits: 1,
+});
 const geocodeEstablishment = async (est) => {
   const lat = Number(est?.latitude ?? est?.lat ?? null);
   const lng = Number(est?.longitude ?? est?.lng ?? null);
@@ -456,6 +460,10 @@ export default function EstabelecimentosList() {
                   ? `${kmFormatter.format(distance)} km`
                   : 'Distancia indisponivel'
                 : 'Ative a localizacao para ver a distancia';
+              const ratingAverageRaw = Number(est?.rating_average ?? est?.ratingAverage ?? NaN);
+              const ratingCount = Number(est?.rating_count ?? est?.ratingCount ?? 0);
+              const hasRatings = Number.isFinite(ratingAverageRaw) && ratingCount > 0;
+              const ratingLabel = hasRatings ? ratingNumberFormatter.format(ratingAverageRaw) : null;
 
               return (
                 <Link
@@ -482,7 +490,20 @@ export default function EstabelecimentosList() {
                     <p className="establishment-card__address">
                       {address || 'Endereco nao informado'}
                     </p>
-                    <span className="establishment-card__distance">{distanceLabel}</span>
+                    <div className="establishment-card__meta-row">
+                      <span className="establishment-card__distance">{distanceLabel}</span>
+                      <span
+                        className={`establishment-card__rating${hasRatings ? '' : ' establishment-card__rating--muted'}`}
+                        aria-label={
+                          hasRatings
+                            ? `Avaliação ${ratingLabel} de 5, com ${ratingCount} ${ratingCount === 1 ? 'avaliação' : 'avaliações'}`
+                            : 'Estabelecimento ainda sem avaliações'
+                        }
+                      >
+                        <span aria-hidden>★</span>
+                        {hasRatings ? `${ratingLabel} (${ratingCount})` : 'Sem avaliações'}
+                      </span>
+                    </div>
                   </div>
                 </Link>
               );

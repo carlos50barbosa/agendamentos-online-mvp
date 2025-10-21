@@ -118,6 +118,11 @@ const DateHelpers = {
     }),
 };
 
+const ratingNumberFormatter = new Intl.NumberFormat('pt-BR', {
+  minimumFractionDigits: 1,
+  maximumFractionDigits: 1,
+});
+
 // Semana [Monday 00:00, next Monday 00:00)
 const weekRangeMs = (isoMonday) => {
   const start = DateHelpers.parseLocal(isoMonday); start.setHours(0,0,0,0);
@@ -501,6 +506,10 @@ const EstablishmentCard = ({ est, selected, onSelect, distance, userLocation, fo
   const name = est?.nome || est?.name || est?.fantasia || est?.razao_social || `Estabelecimento #${est?.id || ''}`;
   const address = formatAddress(est);
   const avatarSource = est?.foto_url || est?.avatar_url || '';
+  const ratingAverageRaw = Number(est?.rating_average ?? est?.ratingAverage ?? NaN);
+  const ratingCount = Number(est?.rating_count ?? est?.ratingCount ?? 0);
+  const hasRatings = Number.isFinite(ratingAverageRaw) && ratingCount > 0;
+  const ratingLabel = hasRatings ? ratingNumberFormatter.format(ratingAverageRaw) : null;
   const distanceLabel = userLocation
     ? Number.isFinite(distance)
       ? `${formatter.format(distance)} km`
@@ -539,7 +548,20 @@ const EstablishmentCard = ({ est, selected, onSelect, distance, userLocation, fo
       <div className="establishment-card__info">
         <h3 className="establishment-card__name">{name}</h3>
         <p className="establishment-card__address">{address || 'Endereco nao informado'}</p>
-        <span className="establishment-card__distance">{distanceLabel}</span>
+        <div className="establishment-card__meta-row">
+          <span className="establishment-card__distance">{distanceLabel}</span>
+          <span
+            className={`establishment-card__rating${hasRatings ? '' : ' establishment-card__rating--muted'}`}
+            aria-label={
+              hasRatings
+                ? `Avaliação ${ratingLabel} de 5, com ${ratingCount} ${ratingCount === 1 ? 'avaliação' : 'avaliações'}`
+                : 'Estabelecimento ainda sem avaliações'
+            }
+          >
+            <span aria-hidden>★</span>
+            {hasRatings ? `${ratingLabel} (${ratingCount})` : 'Sem avaliações'}
+          </span>
+        </div>
       </div>
     </div>
   );
@@ -907,9 +929,11 @@ export default function NovoAgendamento() {
     })();
   }, [establishmentId, showToast, searchParams, setSearchParams]);
 
+  const extrasLoaded = Boolean(selectedExtras?.loaded);
+
   useEffect(() => {
     if (!selectedEstablishmentId || !selectedEstablishment?.id) return;
-    if (selectedExtras && (selectedExtras.loading || selectedExtras.loaded)) return;
+    if (extrasLoaded) return;
 
     let cancelled = false;
     const estId = selectedEstablishment.id;
@@ -952,7 +976,7 @@ export default function NovoAgendamento() {
     return () => {
       cancelled = true;
     };
-  }, [selectedEstablishmentId, selectedEstablishment, selectedExtras]);
+  }, [selectedEstablishmentId, selectedEstablishment?.id, extrasLoaded]);
 
   useEffect(() => {
     if (!selectedEstablishmentId) return;

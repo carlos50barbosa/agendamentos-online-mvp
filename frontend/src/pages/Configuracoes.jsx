@@ -110,6 +110,26 @@ export default function Configuracoes() {
   const [publicProfileLoading, setPublicProfileLoading] = useState(false);
   const [publicProfileSaving, setPublicProfileSaving] = useState(false);
 
+  const toggleSection = useCallback((id) => {
+    setOpenSections((prev) => ({ ...prev, [id]: !prev[id] }));
+  }, []);
+
+  const applyPublicProfile = useCallback((profile) => {
+    const horarios_text = formatProfileHorariosTextarea(profile);
+    setPublicProfileForm({
+      sobre: profile?.sobre || '',
+      contato_email: profile?.contato_email || '',
+      contato_telefone: profile?.contato_telefone || '',
+      site_url: profile?.site_url || '',
+      instagram_url: profile?.instagram_url || '',
+      facebook_url: profile?.facebook_url || '',
+      linkedin_url: profile?.linkedin_url || '',
+      youtube_url: profile?.youtube_url || '',
+      tiktok_url: profile?.tiktok_url || '',
+      horarios_text: horarios_text || '',
+    });
+  }, []);
+
   const [profileForm, setProfileForm] = useState({
     nome: '',
     email: '',
@@ -675,26 +695,6 @@ export default function Configuracoes() {
       alert('Nao foi possivel iniciar o teste gratuito agora.');
     }
   }, [isEstab, user?.id, fetchBilling]);
-
-  const toggleSection = useCallback((id) => {
-    setOpenSections((prev) => ({ ...prev, [id]: !prev[id] }));
-  }, []);
-
-  const applyPublicProfile = useCallback((profile) => {
-    const horarios_text = formatProfileHorariosTextarea(profile);
-    setPublicProfileForm({
-      sobre: profile?.sobre || '',
-      contato_email: profile?.contato_email || '',
-      contato_telefone: profile?.contato_telefone || '',
-      site_url: profile?.site_url || '',
-      instagram_url: profile?.instagram_url || '',
-      facebook_url: profile?.facebook_url || '',
-      linkedin_url: profile?.linkedin_url || '',
-      youtube_url: profile?.youtube_url || '',
-      tiktok_url: profile?.tiktok_url || '',
-      horarios_text: horarios_text || '',
-    });
-  }, []);
 
   const handleProfileChange = (key, value) => {
     setProfileForm((prev) => ({ ...prev, [key]: value }));

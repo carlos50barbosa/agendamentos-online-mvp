@@ -18,7 +18,31 @@ import {
 
 const router = Router();
 
-const LIST_QUERY = "SELECT id, nome, email, telefone, cep, endereco, numero, complemento, bairro, cidade, estado, avatar_url FROM usuarios WHERE tipo = 'estabelecimento' ORDER BY nome";
+const LIST_QUERY = `
+SELECT
+  u.id,
+  u.nome,
+  u.email,
+  u.telefone,
+  u.cep,
+  u.endereco,
+  u.numero,
+  u.complemento,
+  u.bairro,
+  u.cidade,
+  u.estado,
+  u.avatar_url,
+  r.avg_rating AS rating_average,
+  r.total_reviews AS rating_count
+FROM usuarios u
+LEFT JOIN (
+  SELECT estabelecimento_id, AVG(nota) AS avg_rating, COUNT(*) AS total_reviews
+  FROM estabelecimento_reviews
+  GROUP BY estabelecimento_id
+) r ON r.estabelecimento_id = u.id
+WHERE u.tipo = 'estabelecimento'
+ORDER BY u.nome
+`;
 
 const toFiniteOrNull = (value) => {
   const num = Number(value);
