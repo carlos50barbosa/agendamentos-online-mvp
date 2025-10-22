@@ -177,13 +177,240 @@ const formatPhoneDisplay = (value = "") => {
 
 
 /* =================== Janela 07•22 =================== */
-const BUSINESS_HOURS = { start: 7, end: 22 };
-const inBusinessHours = (isoDatetime) => {
+const DEFAULT_BUSINESS_HOURS = { start: 7, end: 22 };
+
+const normalizeText = (value) =>
+  String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+
+const normalizeDayToken = (value) => normalizeText(value).replace(/[^a-z0-9]/g, '');
+
+const DAY_TOKEN_MAP = Object.freeze({
+  sunday: ['domingo', 'dom', 'domingo-feira', 'sun', 'sunday'],
+  monday: ['segunda', 'segunda-feira', 'seg', '2a', 'mon', 'monday'],
+  tuesday: ['terça', 'terca', 'terça-feira', 'terca-feira', 'ter', 'tue', 'tuesday'],
+  wednesday: ['quarta', 'quarta-feira', 'qua', 'wed', 'wednesday'],
+  thursday: ['quinta', 'quinta-feira', 'qui', 'thu', 'thursday'],
+  friday: ['sexta', 'sexta-feira', 'sex', 'fri', 'friday'],
+  saturday: ['sábado', 'sabado', 'sábado-feira', 'sab', 'sat', 'saturday'],
+});
+
+const DAY_SLUG_TO_INDEX = Object.freeze({
+  sunday: 0,
+  monday: 1,
+  tuesday: 2,
+  wednesday: 3,
+  thursday: 4,
+  friday: 5,
+  saturday: 6,
+});
+
+const DAY_TOKEN_LOOKUP = (() => {
+  const map = new Map();
+  Object.entries(DAY_TOKEN_MAP).forEach(([slug, tokens]) => {
+    tokens.forEach((token) => {
+      const normalized = normalizeDayToken(token);
+      if (normalized) map.set(normalized, slug);
+    });
+  });
+  return map;
+})();
+
+const TIME_VALUE_REGEX = /^([01]?\d|2[0-3]):([0-5]\d)$/;
+
+const ensureTimeValue = (value) => {
+  if (value == null) return '';
+  const text = String(value).trim();
+  if (!text) return '';
+  const direct = text.match(/^(\d{1,2})(?:[:h](\d{2}))?$/i);
+  if (direct) {
+    const hours = Number(direct[1]);
+    const minutes = Number(direct[2] ?? '00');
+    if (
+      Number.isInteger(hours) &&
+      hours >= 0 &&
+      hours <= 23 &&
+      Number.isInteger(minutes) &&
+      minutes >= 0 &&
+      minutes <= 59
+    ) {
+      return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+    }
+  }
+  const digits = text.replace(/\D/g, '');
+  if (!digits) return '';
+  if (digits.length <= 2) {
+    const hours = Number(digits);
+    if (!Number.isInteger(hours) || hours < 0 || hours > 23) return '';
+    return `${String(hours).padStart(2, '0')}:00`;
+  }
+  const hoursNum = Number(digits.slice(0, -2));
+  const minutesNum = Number(digits.slice(-2));
+  if (
+    !Number.isInteger(hoursNum) ||
+    hoursNum < 0 ||
+    hoursNum > 23 ||
+    !Number.isInteger(minutesNum) ||
+    minutesNum < 0 ||
+    minutesNum > 59
+  ) {
+    return '';
+  }
+  return `${String(hoursNum).padStart(2, '0')}:${String(minutesNum).padStart(2, '0')}`;
+};
+
+const toMinutes = (value) => {
+  if (!TIME_VALUE_REGEX.test(String(value || ''))) return null;
+  const [hours, minutes] = String(value).split(':').map(Number);
+  if (!Number.isInteger(hours) || !Number.isInteger(minutes)) return null;
+  return hours * 60 + minutes;
+};
+
+const parseTimeRangeHint = (label) => {
+  if (!label) return { start: '', end: '' };
+  const matches = Array.from(String(label).matchAll(/(\d{1,2})(?:[:h](\d{2}))?/gi));
+  if (!matches.length) return { start: '', end: '' };
+  const times = matches
+    .map(([_, hh, mm]) => ensureTimeValue(`${hh}${mm ?? ''}`))
+    .filter(Boolean);
+  if (!times.length) return { start: '', end: '' };
+  const [start, end] = times;
+  return { start: start || '', end: end || '' };
+};
+
+const resolveDayIndex = (entry) => {
+  if (!entry) return null;
+  const explicitSlug =
+    entry.day ||
+    entry.weekday ||
+    entry.week_day ||
+    entry.key ||
+    entry.dia ||
+    null;
+  if (explicitSlug && DAY_SLUG_TO_INDEX.hasOwnProperty(explicitSlug)) {
+    return DAY_SLUG_TO_INDEX[explicitSlug];
+  }
+  const labelToken = normalizeDayToken(entry.label || '');
+  if (labelToken && DAY_TOKEN_LOOKUP.has(labelToken)) {
+    return DAY_SLUG_TO_INDEX[DAY_TOKEN_LOOKUP.get(labelToken)];
+  }
+  if (entry.value) {
+    const firstPart = String(entry.value).split(/[:\-]/)[0];
+    const normalized = normalizeDayToken(firstPart || '');
+    if (normalized && DAY_TOKEN_LOOKUP.has(normalized)) {
+      return DAY_SLUG_TO_INDEX[DAY_TOKEN_LOOKUP.get(normalized)];
+    }
+  }
+  return null;
+};
+
+const buildWorkingSchedule = (entries) => {
+  if (!Array.isArray(entries) || !entries.length) return null;
+  const rules = Array.from({ length: 7 }, () => ({
+    enabled: false,
+    isClosed: false,
+    start: '',
+    end: '',
+    startMinutes: null,
+    endMinutes: null,
+  }));
+  const recognized = new Set();
+
+  entries.forEach((item) => {
+    const dayIndex = resolveDayIndex(item);
+    if (dayIndex == null) return;
+    recognized.add(dayIndex);
+
+    const valueText = normalizeText(item.value || '');
+    if (/fechado|sem atendimento|nao atende/.test(valueText)) {
+      rules[dayIndex] = {
+        enabled: false,
+        isClosed: true,
+        start: '',
+        end: '',
+        startMinutes: null,
+        endMinutes: null,
+      };
+      return;
+    }
+
+    let start = ensureTimeValue(item.start ?? item.begin ?? item.from ?? '');
+    let end = ensureTimeValue(item.end ?? item.finish ?? item.to ?? '');
+    if ((!start || !end) && item.value) {
+      const parsed = parseTimeRangeHint(item.value);
+      if (!start && parsed.start) start = parsed.start;
+      if (!end && parsed.end) end = parsed.end;
+    }
+    if (!start || !end) {
+      rules[dayIndex] = {
+        enabled: false,
+        isClosed: true,
+        start: '',
+        end: '',
+        startMinutes: null,
+        endMinutes: null,
+      };
+      return;
+    }
+    const startMinutes = toMinutes(start);
+    const endMinutes = toMinutes(end);
+    if (
+      startMinutes == null ||
+      endMinutes == null ||
+      startMinutes >= endMinutes
+    ) {
+      rules[dayIndex] = {
+        enabled: false,
+        isClosed: true,
+        start: '',
+        end: '',
+        startMinutes: null,
+        endMinutes: null,
+      };
+      return;
+    }
+
+    rules[dayIndex] = {
+      enabled: true,
+      isClosed: false,
+      start,
+      end,
+      startMinutes,
+      endMinutes,
+    };
+  });
+
+  if (!recognized.size) return null;
+  return rules;
+};
+
+const getScheduleRuleForDate = (dateish, schedule) => {
+  if (!schedule) return null;
+  try {
+    const date = DateHelpers.parseLocal(dateish);
+    if (!date || Number.isNaN(date.getTime())) return null;
+    const dayIdx = date.getDay();
+    return schedule[dayIdx] || null;
+  } catch {
+    return null;
+  }
+};
+
+const inBusinessHours = (isoDatetime, schedule = null) => {
   const d = new Date(isoDatetime);
+  if (Number.isNaN(d.getTime())) return false;
+  if (schedule) {
+    const rule = schedule[d.getDay()];
+    if (!rule || !rule.enabled) return false;
+    const minutes = d.getHours() * 60 + d.getMinutes();
+    return minutes >= rule.startMinutes && minutes <= rule.endMinutes;
+  }
   const h = d.getHours();
   const m = d.getMinutes();
-  const afterStart = h > BUSINESS_HOURS.start || (h === BUSINESS_HOURS.start && m >= 0);
-  const beforeEnd = h < BUSINESS_HOURS.end || (h === BUSINESS_HOURS.end && m === 0);
+  const afterStart = h > DEFAULT_BUSINESS_HOURS.start || (h === DEFAULT_BUSINESS_HOURS.start && m >= 0);
+  const beforeEnd = h < DEFAULT_BUSINESS_HOURS.end || (h === DEFAULT_BUSINESS_HOURS.end && m === 0);
   return afterStart && beforeEnd;
 };
 
@@ -210,7 +437,7 @@ const minuteISO = (dt) => {
   return d.toISOString();
 };
 
-function fillBusinessGrid({ currentWeek, slots, stepMinutes = 30 }) {
+function fillBusinessGrid({ currentWeek, slots, stepMinutes = 30, workingSchedule = null }) {
   const { days } = (function getDays(iso) {
     const ds = DateHelpers.weekDays(iso);
     return { days: ds };
@@ -221,10 +448,21 @@ function fillBusinessGrid({ currentWeek, slots, stepMinutes = 30 }) {
 
   const filled = [];
   for (const { date } of days) {
+    const dayRule = workingSchedule ? workingSchedule[date.getDay()] : null;
+    if (workingSchedule && (!dayRule || !dayRule.enabled)) continue;
+
     const start = new Date(date);
-    start.setHours(BUSINESS_HOURS.start, 0, 0, 0);
     const end = new Date(date);
-    end.setHours(BUSINESS_HOURS.end, 0, 0, 0);
+
+    if (dayRule && dayRule.enabled) {
+      const [startHour, startMinute] = dayRule.start.split(':').map(Number);
+      const [endHour, endMinute] = dayRule.end.split(':').map(Number);
+      start.setHours(startHour, startMinute, 0, 0);
+      end.setHours(endHour, endMinute, 0, 0);
+    } else {
+      start.setHours(DEFAULT_BUSINESS_HOURS.start, 0, 0, 0);
+      end.setHours(DEFAULT_BUSINESS_HOURS.end, 0, 0, 0);
+    }
 
     for (let t = start.getTime(); t <= end.getTime(); t += stepMinutes * 60_000) {
       const k = localKey(t);
@@ -259,12 +497,6 @@ const slotStatusClass = (label) => {
 };
 
 const STORAGE_KEY = 'ao:lastLocation';
-
-const normalizeText = (value) =>
-  String(value || '')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase();
 
 const buildEstablishmentSearchText = (est) =>
   normalizeText(
@@ -687,6 +919,12 @@ export default function NovoAgendamento() {
   const selectedEstablishmentId = selectedEstablishment ? String(selectedEstablishment.id) : null;
   const selectedExtras = selectedEstablishmentId ? establishmentExtras[selectedEstablishmentId] : null;
   const selectedProfessionals = selectedEstablishmentId ? professionalsByEstab[selectedEstablishmentId] : null;
+  const profileData = selectedExtras?.profile || null;
+  const horariosList = useMemo(
+    () => (Array.isArray(profileData?.horarios) ? profileData.horarios : []),
+    [profileData?.horarios]
+  );
+  const workingSchedule = useMemo(() => buildWorkingSchedule(horariosList), [horariosList]);
   const reviewsState = selectedExtras?.reviews || { items: [], page: 0, hasNext: true, loading: false, loaded: false, error: '' };
   const reviewsItems = Array.isArray(reviewsState.items) ? reviewsState.items : [];
   const reviewsLoading = Boolean(reviewsState.loading);
@@ -1057,7 +1295,7 @@ export default function NovoAgendamento() {
       const normalized = normalizeSlots(slotsData);
 
       // B) grade completa
-      const grid = fillBusinessGrid({ currentWeek, slots: normalized, stepMinutes });
+      const grid = fillBusinessGrid({ currentWeek, slots: normalized, stepMinutes, workingSchedule });
 
       // C) conjuntos/contagens de ocupados por fonte
       const busyFromApiCount = new Map();
@@ -1109,7 +1347,10 @@ export default function NovoAgendamento() {
         } catch {}
 
         const firstAvailable = overlayed.find(
-          (s) => isAvailableLabel(s.label) && !DateHelpers.isPastSlot(s.datetime) && inBusinessHours(s.datetime)
+          (s) =>
+            isAvailableLabel(s.label) &&
+            !DateHelpers.isPastSlot(s.datetime) &&
+            inBusinessHours(s.datetime, workingSchedule)
         );
 
         return {
@@ -1130,11 +1371,18 @@ export default function NovoAgendamento() {
         error: "Não foi possível carregar os horários.",
       }));
     }
-  }, [establishmentId, serviceId, currentWeek, normalizeSlots, stepMinutes, getBusyFromAppointments, selectedService, state.professionalId]);
+  }, [establishmentId, serviceId, currentWeek, normalizeSlots, stepMinutes, getBusyFromAppointments, selectedService, state.professionalId, workingSchedule]);
 
   useEffect(() => {
     loadSlots();
   }, [loadSlots]);
+
+  useEffect(() => {
+    if (!selectedSlot) return;
+    if (!inBusinessHours(selectedSlot.datetime, workingSchedule)) {
+      setState((p) => ({ ...p, selectedSlot: null }));
+    }
+  }, [selectedSlot, workingSchedule]);
 
   useEffect(() => {
     setProfessionalMenuOpen(false);
@@ -1164,13 +1412,13 @@ export default function NovoAgendamento() {
   );
   const isSlotVisible = useCallback(
     (slot) => {
-      if (!inBusinessHours(slot.datetime)) return false;
+      if (!inBusinessHours(slot.datetime, workingSchedule)) return false;
       if (filters.onlyAvailable && !isAvailableLabel(slot.label)) return false;
       if (filters.hidePast && DateHelpers.isPastSlot(slot.datetime)) return false;
       if (!timeRangeCheck(slot.datetime)) return false;
       return true;
     },
-    [filters, timeRangeCheck]
+    [filters, timeRangeCheck, workingSchedule]
   );
 
   // Agrupar por dia
@@ -1185,6 +1433,11 @@ export default function NovoAgendamento() {
     Object.values(grouped).forEach((daySlots) => daySlots.sort((a, b) => new Date(a.datetime) - new Date(b.datetime)));
     return { days, grouped };
   }, [currentWeek, slots]);
+
+  const selectedDayRule = useMemo(() => {
+    if (!selectedDate) return null;
+    return getScheduleRuleForDate(selectedDate, workingSchedule);
+  }, [selectedDate, workingSchedule]);
 
   // announce seleÃ§Ã£o (a11y)
   useEffect(() => {
@@ -1276,8 +1529,11 @@ export default function NovoAgendamento() {
       showToast("error", "Não foi possível agendar no passado.");
       return;
     }
-    if (!inBusinessHours(selectedSlot.datetime)) {
-      showToast("error", "Este horário está fora do perí­odo de 07:00•22:00.");
+    if (!inBusinessHours(selectedSlot.datetime, workingSchedule)) {
+      const outOfHoursMessage = workingSchedule
+        ? "Este horário está fora do horário de atendimento do estabelecimento."
+        : "Este horário está fora do período de 07:00-22:00.";
+      showToast("error", outOfHoursMessage);
       return;
     }
     if (serviceProfessionals.length && !state.professionalId) {
@@ -1373,6 +1629,7 @@ export default function NovoAgendamento() {
     loadSlots,
     showToast,
     verifyBookingCreated,
+    workingSchedule,
   ]);
 
   /* ====== Handlers ====== */
@@ -1772,9 +2029,6 @@ export default function NovoAgendamento() {
     ? `${ratingAverageLabel ?? ratingFormatter.format(0)} (${ratingCount})`
     : 'Sem avaliações';
   const favoriteUpdating = Boolean(selectedExtras?.favoriteUpdating);
-  const profileData = selectedExtras?.profile || null;
-
-  const horariosList = Array.isArray(profileData?.horarios) ? profileData.horarios : [];
   const socialLinks = SOCIAL_LINK_FIELDS
     .map(({ key, label }) => {
       const value = profileData ? profileData[key] : null;
@@ -2156,7 +2410,11 @@ export default function NovoAgendamento() {
                   {loading ? (
                     Array.from({ length: 8 }).map((_, i) => <div key={i} className="shimmer pill" />)
                   ) : ((groupedSlots.grouped[selectedDate] || []).filter(isSlotVisible)).length === 0 ? (
-                    <div className="empty">Sem horários para este dia.</div>
+                    <div className="empty">
+                      {workingSchedule && selectedDayRule && !selectedDayRule.enabled
+                        ? 'Estabelecimento não atende neste dia.'
+                        : 'Sem horários para este dia.'}
+                    </div>
                   ) : (
                     groupedSlots.grouped[selectedDate].filter(isSlotVisible).map((slot) => (
                       <SlotButton
@@ -2187,7 +2445,7 @@ export default function NovoAgendamento() {
                 (serviceProfessionals.length && !state.professionalId) ||
                 (selectedSlotNow && !isAvailableLabel(selectedSlotNow.label)) ||
                 DateHelpers.isPastSlot(selectedSlot.datetime) ||
-                !inBusinessHours(selectedSlot.datetime)
+                !inBusinessHours(selectedSlot.datetime, workingSchedule)
               }
             >
               {modal.isSaving ? <span className="spinner" /> : 'Confirmar agendamento'}

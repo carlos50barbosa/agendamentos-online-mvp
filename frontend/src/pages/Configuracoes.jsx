@@ -39,43 +39,267 @@ const formatCep = (value = '') => {
   return `${digits.slice(0, 5)}-${digits.slice(5)}`;
 };
 
-const formatProfileHorariosTextarea = (profile) => {
-  if (!profile) return '';
-  const list = Array.isArray(profile.horarios) ? profile.horarios : [];
-  if (list.length) {
-    return list
-      .map((item) => {
-        if (!item) return '';
-        const label = item.label ? String(item.label).trim() : '';
-        const value = item.value ? String(item.value).trim() : '';
-        if (label && value) return `${label}: ${value}`;
-        return value || label;
-      })
-      .filter(Boolean)
-      .join('\n');
+const DEFAULT_WORKING_START = '09:00';
+const DEFAULT_WORKING_END = '18:00';
+const TIME_VALUE_REGEX = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+function normalizeDayText(value) {
+  if (!value) return '';
+  return String(value)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '');
+}
+
+const WORKING_DAY_TOKENS = Object.freeze({
+  monday: ['segunda', 'segunda-feira', 'seg', 'mon', 'monday'],
+  tuesday: ['terca', 'terca-feira', 'ter', 'tue', 'tuesday'],
+  wednesday: ['quarta', 'quarta-feira', 'qua', 'wed', 'wednesday'],
+  thursday: ['quinta', 'quinta-feira', 'qui', 'thu', 'thursday'],
+  friday: ['sexta', 'sexta-feira', 'sex', 'fri', 'friday'],
+  saturday: ['sabado', 'sabado-feira', 'sab', 'sat', 'saturday'],
+  sunday: ['domingo', 'domingo-feira', 'dom', 'sun', 'sunday'],
+});
+
+const WORKING_DAYS = [
+  { key: 'monday', label: 'Segunda-feira', shortLabel: 'Segunda' },
+  { key: 'tuesday', label: 'Terca-feira', shortLabel: 'Terca' },
+  { key: 'wednesday', label: 'Quarta-feira', shortLabel: 'Quarta' },
+  { key: 'thursday', label: 'Quinta-feira', shortLabel: 'Quinta' },
+  { key: 'friday', label: 'Sexta-feira', shortLabel: 'Sexta' },
+  { key: 'saturday', label: 'Sabado', shortLabel: 'Sabado' },
+  { key: 'sunday', label: 'Domingo', shortLabel: 'Domingo' },
+];
+
+const DAY_ALIAS_MAP = (() => {
+  const map = {};
+  Object.entries(WORKING_DAY_TOKENS).forEach(([slug, tokens]) => {
+    tokens.forEach((token) => {
+      const normalized = normalizeDayText(token);
+      if (normalized) map[normalized] = slug;
+    });
+  });
+  return map;
+})();
+
+const WORKING_DAY_INDEX = WORKING_DAYS.reduce((acc, day, index) => {
+  acc[day.key] = index;
+  return acc;
+}, {});
+
+function createEmptyWorkingHours() {
+  return WORKING_DAYS.map((day) => ({
+    key: day.key,
+    label: day.label,
+    shortLabel: day.shortLabel,
+    enabled: false,
+    start: DEFAULT_WORKING_START,
+    end: DEFAULT_WORKING_END,
+  }));
+}
+
+function formatScheduleLine(entry) {
+  if (!entry) return '';
+  const label = entry.label ? String(entry.label).trim() : '';
+  const value = entry.value ? String(entry.value).trim() : '';
+  if (label && value) return `${label}: ${value}`;
+  return value || label;
+}
+
+function sanitizeTimeInput(value) {
+  if (!value && value !== 0) return '';
+  const text = String(value).trim();
+  if (!text) return '';
+  if (TIME_VALUE_REGEX.test(text)) return text;
+  const digits = text.replace(/\D/g, '');
+  if (!digits) return '';
+  if (digits.length <= 2) {
+    const hours = Number(digits);
+    if (!Number.isInteger(hours) || hours < 0 || hours > 23) return '';
+    return `${String(hours).padStart(2, '0')}:00`;
   }
-  const raw = typeof profile.horarios_raw === 'string' ? profile.horarios_raw.trim() : '';
-  if (raw) {
-    try {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) {
-        return parsed
-          .map((entry) => {
-            if (!entry) return '';
-            if (typeof entry === 'string') return entry.trim();
-            const label = entry.label ? String(entry.label).trim() : '';
-            const value = entry.value ? String(entry.value).trim() : '';
-            if (label && value) return `${label}: ${value}`;
-            return value || label;
-          })
-          .filter(Boolean)
-          .join('\n');
-      }
-    } catch {}
-    return raw;
+  const hoursDigits = digits.slice(0, -2);
+  const minutesDigits = digits.slice(-2);
+  const hoursNum = Number(hoursDigits);
+  const minutesNum = Number(minutesDigits);
+  if (
+    !Number.isInteger(hoursNum) ||
+    hoursNum < 0 ||
+    hoursNum > 23 ||
+    !Number.isInteger(minutesNum) ||
+    minutesNum < 0 ||
+    minutesNum > 59
+  ) {
+    return '';
+  }
+  return `${String(hoursNum).padStart(2, '0')}:${String(minutesNum).padStart(2, '0')}`;
+}
+
+function parseTimeRangeFromText(value) {
+  if (!value) return { start: '', end: '', closed: false };
+  const text = String(value).toLowerCase();
+  if (/fechado|sem atendimento|nao atende/.test(text)) {
+    return { start: '', end: '', closed: true };
+  }
+  const matches = Array.from(String(value).matchAll(/(\d{1,2})(?:[:h](\d{2}))?/gi));
+  if (!matches.length) return { start: '', end: '', closed: false };
+  const times = matches
+    .map((match) => {
+      const hour = match[1] ?? '';
+      const minute = match[2] ?? '';
+      return sanitizeTimeInput(hour + (minute ? ':' + minute : ''));
+    })
+    .filter(Boolean);
+  if (!times.length) return { start: '', end: '', closed: false };
+  const [start, end] = times;
+  return { start: start || '', end: end || '', closed: false };
+}
+
+function resolveDayKey(entry) {
+  if (!entry) return '';
+  const dayRaw = entry.day ?? entry.weekday ?? entry.key ?? '';
+  if (dayRaw && Object.prototype.hasOwnProperty.call(WORKING_DAY_INDEX, dayRaw)) {
+    return dayRaw;
+  }
+  const label = entry.label ? normalizeDayText(entry.label) : '';
+  if (label && DAY_ALIAS_MAP[label]) return DAY_ALIAS_MAP[label];
+  const value = entry.value ? String(entry.value) : '';
+  if (value) {
+    const beforeColon = value.split(/[:\-]/)[0];
+    const normalized = normalizeDayText(beforeColon);
+    if (normalized && DAY_ALIAS_MAP[normalized]) return DAY_ALIAS_MAP[normalized];
+    const firstWord = value.split(/\s+/)[0];
+    const normalizedWord = normalizeDayText(firstWord);
+    if (normalizedWord && DAY_ALIAS_MAP[normalizedWord]) return DAY_ALIAS_MAP[normalizedWord];
   }
   return '';
-};
+}
+
+function extractWorkingHoursFromProfile(profile) {
+  const schedule = createEmptyWorkingHours();
+  const notes = [];
+  const list = Array.isArray(profile?.horarios) ? profile.horarios : [];
+  const used = new Set();
+
+  for (const item of list) {
+    if (!item) continue;
+    const dayKey = resolveDayKey(item);
+    const line = formatScheduleLine(item);
+    if (!dayKey) {
+      if (line) notes.push(line);
+      continue;
+    }
+    if (used.has(dayKey)) {
+      if (line) notes.push(line);
+      continue;
+    }
+    const index = WORKING_DAY_INDEX[dayKey];
+    if (index == null) {
+      if (line) notes.push(line);
+      continue;
+    }
+    const valueText = item.value ? String(item.value).trim() : '';
+    const loweredValue = valueText.toLowerCase();
+    if (/fechado|sem atendimento|nao atende/.test(loweredValue)) {
+      schedule[index] = { ...schedule[index], enabled: false };
+      used.add(dayKey);
+      continue;
+    }
+    let start = sanitizeTimeInput(item.start ?? item.begin ?? item.from ?? '');
+    let end = sanitizeTimeInput(item.end ?? item.finish ?? item.to ?? '');
+    if ((!start || !end) && valueText) {
+      const parsed = parseTimeRangeFromText(valueText);
+      if (parsed.closed) {
+        schedule[index] = { ...schedule[index], enabled: false };
+        used.add(dayKey);
+        continue;
+      }
+      if (!start && parsed.start) start = parsed.start;
+      if (!end && parsed.end) end = parsed.end;
+    }
+    if (!start || !end) {
+      if (line) notes.push(line);
+      continue;
+    }
+    if (start > end) {
+      const tmp = start;
+      start = end;
+      end = tmp;
+    }
+    schedule[index] = {
+      ...schedule[index],
+      enabled: true,
+      start,
+      end,
+    };
+    used.add(dayKey);
+  }
+
+  if (!notes.length) {
+    const raw = typeof profile?.horarios_raw === 'string' ? profile.horarios_raw.trim() : '';
+    if (raw) notes.push(raw);
+  }
+
+  return { schedule, notes: notes.join('\n') };
+}
+
+function validateWorkingHours(schedule) {
+  for (const day of schedule) {
+    if (!day.enabled) continue;
+    if (!TIME_VALUE_REGEX.test(day.start || '')) {
+      return `Informe um horario inicial valido para ${day.shortLabel}.`;
+    }
+    if (!TIME_VALUE_REGEX.test(day.end || '')) {
+      return `Informe um horario final valido para ${day.shortLabel}.`;
+    }
+    if (day.start >= day.end) {
+      return `O horario inicial deve ser anterior ao final em ${day.shortLabel}.`;
+    }
+  }
+  return '';
+}
+
+function formatTimeDisplay(value) {
+  const time = sanitizeTimeInput(value);
+  if (!time) return '';
+  const [hour, minute = '00'] = time.split(':');
+  const prefix = hour.padStart(2, '0');
+  return minute === '00' ? `${prefix}h` : `${prefix}h${minute}`;
+}
+
+function buildWorkingHoursPayload(schedule, notesText) {
+  const payload = [];
+  for (const day of schedule) {
+    if (!day.enabled) {
+      payload.push({
+        label: day.shortLabel,
+        value: 'Fechado',
+        day: day.key,
+      });
+      continue;
+    }
+    const start = sanitizeTimeInput(day.start) || DEFAULT_WORKING_START;
+    const end = sanitizeTimeInput(day.end) || DEFAULT_WORKING_END;
+    const label = `${formatTimeDisplay(start)} - ${formatTimeDisplay(end)}`;
+    payload.push({
+      label: day.shortLabel,
+      value: label,
+      day: day.key,
+      start,
+      end,
+    });
+  }
+  const notes = String(notesText || '')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .slice(0, 6);
+  for (const line of notes) {
+    payload.push({ label: '', value: line });
+  }
+  return payload;
+}
 
 export default function Configuracoes() {
   const user = getUser();
@@ -109,13 +333,15 @@ export default function Configuracoes() {
   const [publicProfileStatus, setPublicProfileStatus] = useState({ type: '', message: '' });
   const [publicProfileLoading, setPublicProfileLoading] = useState(false);
   const [publicProfileSaving, setPublicProfileSaving] = useState(false);
+  const [workingHours, setWorkingHours] = useState(() => createEmptyWorkingHours());
 
   const toggleSection = useCallback((id) => {
     setOpenSections((prev) => ({ ...prev, [id]: !prev[id] }));
   }, []);
 
   const applyPublicProfile = useCallback((profile) => {
-    const horarios_text = formatProfileHorariosTextarea(profile);
+    const { schedule, notes } = extractWorkingHoursFromProfile(profile);
+    setWorkingHours(schedule);
     setPublicProfileForm({
       sobre: profile?.sobre || '',
       contato_email: profile?.contato_email || '',
@@ -126,9 +352,9 @@ export default function Configuracoes() {
       linkedin_url: profile?.linkedin_url || '',
       youtube_url: profile?.youtube_url || '',
       tiktok_url: profile?.tiktok_url || '',
-      horarios_text: horarios_text || '',
+      horarios_text: notes || '',
     });
-  }, []);
+  }, [setWorkingHours]);
 
   const [profileForm, setProfileForm] = useState({
     nome: '',
@@ -704,6 +930,25 @@ export default function Configuracoes() {
     setPublicProfileForm((prev) => ({ ...prev, [key]: value }));
   }, []);
 
+  const handleWorkingHoursToggle = useCallback((dayKey, enabled) => {
+    setWorkingHours((prev) =>
+      prev.map((day) =>
+        day.key === dayKey ? { ...day, enabled } : day
+      )
+    );
+  }, []);
+
+  const handleWorkingHoursTimeChange = useCallback((dayKey, field, value) => {
+    const sanitized = sanitizeTimeInput(value);
+    setWorkingHours((prev) =>
+      prev.map((day) =>
+        day.key === dayKey
+          ? { ...day, [field]: sanitized }
+          : day
+      )
+    );
+  }, []);
+
   const handleAvatarFile = useCallback((event) => {
     const input = event?.target || null;
     const file = input?.files?.[0];
@@ -845,6 +1090,11 @@ export default function Configuracoes() {
     event?.preventDefault();
     if (!isEstab) return;
     setPublicProfileStatus({ type: '', message: '' });
+    const scheduleError = validateWorkingHours(workingHours);
+    if (scheduleError) {
+      setPublicProfileStatus({ type: 'error', message: scheduleError });
+      return;
+    }
     setPublicProfileSaving(true);
     try {
       const phoneDigits = publicProfileForm.contato_telefone
@@ -860,7 +1110,7 @@ export default function Configuracoes() {
         linkedin_url: publicProfileForm.linkedin_url?.trim() || null,
         youtube_url: publicProfileForm.youtube_url?.trim() || null,
         tiktok_url: publicProfileForm.tiktok_url?.trim() || null,
-        horarios_text: publicProfileForm.horarios_text || '',
+        horarios: buildWorkingHoursPayload(workingHours, publicProfileForm.horarios_text),
       };
       const response = await Api.updateEstablishmentProfile(user.id, payload);
       if (response?.profile) {
@@ -873,7 +1123,7 @@ export default function Configuracoes() {
     } finally {
       setPublicProfileSaving(false);
     }
-  }, [applyPublicProfile, isEstab, publicProfileForm, user?.id]);
+  }, [applyPublicProfile, isEstab, publicProfileForm, user?.id, workingHours]);
 
   const sections = useMemo(() => {
     const list = [];
@@ -1094,18 +1344,56 @@ export default function Configuracoes() {
                 />
               </label>
             </div>
+            <div className="label">
+              <span>Horarios de funcionamento</span>
+              <div className="working-hours">
+                {workingHours.map((day) => (
+                  <div key={day.key} className="working-hours__row">
+                    <label className="working-hours__day">
+                      <input
+                        type="checkbox"
+                        checked={day.enabled}
+                        onChange={(e) => handleWorkingHoursToggle(day.key, e.target.checked)}
+                        disabled={publicProfileLoading || publicProfileSaving}
+                      />
+                      <span>{day.label}</span>
+                    </label>
+                    <div className="working-hours__time">
+                      <input
+                        type="time"
+                        className="input"
+                        value={day.start}
+                        onChange={(e) => handleWorkingHoursTimeChange(day.key, 'start', e.target.value)}
+                        disabled={publicProfileLoading || publicProfileSaving || !day.enabled}
+                      />
+                      <span className="working-hours__separator">as</span>
+                      <input
+                        type="time"
+                        className="input"
+                        value={day.end}
+                        onChange={(e) => handleWorkingHoursTimeChange(day.key, 'end', e.target.value)}
+                        disabled={publicProfileLoading || publicProfileSaving || !day.enabled}
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <span className="muted" style={{ fontSize: 12 }}>
+                Ative os dias em que atende e informe os horarios.
+              </span>
+            </div>
             <label className="label">
-              <span>Horários de atendimento</span>
+              <span>Observacoes (opcional)</span>
               <textarea
                 className="input"
-                rows={4}
+                rows={3}
                 value={publicProfileForm.horarios_text}
                 onChange={(e) => handlePublicProfileChange('horarios_text', e.target.value)}
                 disabled={publicProfileLoading || publicProfileSaving}
-                placeholder={'Segunda: 09h - 18h\nTerça: 09h - 18h'}
+                placeholder={'Plantoes, feriados ou orientacoes especiais'}
               />
               <span className="muted" style={{ fontSize: 12 }}>
-                Uma linha por dia. Ex.: “Segunda: 09h - 18h”.
+                Essas observacoes aparecem junto aos horarios no agendamento.
               </span>
             </label>
             <div className="grid" style={{ gap: 10, gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}>
@@ -1541,7 +1829,10 @@ export default function Configuracoes() {
     publicProfileStatus,
     publicProfileLoading,
     publicProfileSaving,
+    workingHours,
     handlePublicProfileChange,
+    handleWorkingHoursToggle,
+    handleWorkingHoursTimeChange,
     handleSavePublicProfile,
   ]);
 

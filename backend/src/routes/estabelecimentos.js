@@ -138,6 +138,83 @@ function sanitizeUrl(value) {
   }
 }
 
+const WEEKDAY_TOKEN_MAP = Object.freeze({
+  monday: ['segunda', 'segunda-feira', 'seg', 'mon', 'monday'],
+  tuesday: ['terca', 'terca-feira', 'ter', 'tue', 'tuesday'],
+  wednesday: ['quarta', 'quarta-feira', 'qua', 'wed', 'wednesday'],
+  thursday: ['quinta', 'quinta-feira', 'qui', 'thu', 'thursday'],
+  friday: ['sexta', 'sexta-feira', 'sex', 'fri', 'friday'],
+  saturday: ['sabado', 'sabado-feira', 'sab', 'sat', 'saturday'],
+  sunday: ['domingo', 'domingo-feira', 'dom', 'sun', 'sunday'],
+});
+
+const WEEKDAY_LABEL_MAP = Object.freeze({
+  monday: 'Segunda',
+  tuesday: 'Terca',
+  wednesday: 'Quarta',
+  thursday: 'Quinta',
+  friday: 'Sexta',
+  saturday: 'Sabado',
+  sunday: 'Domingo',
+});
+
+const WEEKDAY_SLUGS = Object.keys(WEEKDAY_TOKEN_MAP);
+
+function normalizeString(value) {
+  if (!value) return '';
+  return String(value)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '');
+}
+
+function normalizeDaySlug(value) {
+  const token = normalizeString(value);
+  if (!token) return '';
+  for (const slug of WEEKDAY_SLUGS) {
+    const tokens = WEEKDAY_TOKEN_MAP[slug];
+    if (tokens && tokens.some((item) => normalizeString(item) === token)) {
+      return slug;
+    }
+  }
+  return '';
+}
+
+function sanitizeTimeValue(value) {
+  if (!value && value !== 0) return null;
+  const text = String(value).trim();
+  if (!text) return null;
+  const directMatch = text.match(/^([01]?\d|2[0-3]):?([0-5]\d)?$/);
+  if (directMatch) {
+    const hours = directMatch[1];
+    const minutes = directMatch[2] ?? '00';
+    return `${hours.padStart(2, '0')}:${minutes.padStart(2, '0')}`;
+  }
+  const digits = text.replace(/\D/g, '');
+  if (!digits) return null;
+  if (digits.length <= 2) {
+    const hoursNum = Number(digits);
+    if (!Number.isInteger(hoursNum) || hoursNum < 0 || hoursNum > 23) return null;
+    return `${String(hoursNum).padStart(2, '0')}:00`;
+  }
+  const hoursDigits = digits.slice(0, -2);
+  const minutesDigits = digits.slice(-2);
+  const hoursNum = Number(hoursDigits);
+  const minutesNum = Number(minutesDigits);
+  if (
+    !Number.isInteger(hoursNum) ||
+    hoursNum < 0 ||
+    hoursNum > 23 ||
+    !Number.isInteger(minutesNum) ||
+    minutesNum < 0 ||
+    minutesNum > 59
+  ) {
+    return null;
+  }
+  return `${String(hoursNum).padStart(2, '0')}:${String(minutesNum).padStart(2, '0')}`;
+}
+
 function sanitizeHorariosInput(input) {
   if (input == null) return null;
   let entries = [];
@@ -174,12 +251,30 @@ function sanitizeHorariosInput(input) {
   const sanitized = [];
   const seen = new Set();
   for (const entry of normalized) {
-    const label = entry.label ? entry.label.slice(0, 60) : '';
-    const value = entry.value.slice(0, 160);
-    const key = `${label}::${value}`;
+    let label = entry.label ? String(entry.label).trim() : '';
+    let value = entry.value ? String(entry.value).trim() : '';
+    const daySlug =
+      normalizeDaySlug(entry.day ?? entry.key ?? entry.weekday ?? entry.week_day ?? label) || '';
+    const defaultLabel = daySlug ? (WEEKDAY_LABEL_MAP[daySlug] || '') : '';
+    label = label ? label.slice(0, 60) : defaultLabel.slice(0, 60);
+    if (!label && !value) continue;
+    value = value ? value.slice(0, 160) : label;
+    if (!value) continue;
+    let start = sanitizeTimeValue(entry.start ?? entry.begin ?? entry.from ?? null);
+    let end = sanitizeTimeValue(entry.end ?? entry.finish ?? entry.to ?? null);
+    if (start && end && start > end) {
+      const temp = start;
+      start = end;
+      end = temp;
+    }
+    const sanitizedEntry = { label, value };
+    if (daySlug) sanitizedEntry.day = daySlug;
+    if (start) sanitizedEntry.start = start;
+    if (end) sanitizedEntry.end = end;
+    const key = `${daySlug || label}::${value}::${start || ''}-${end || ''}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    sanitized.push({ label, value });
+    sanitized.push(sanitizedEntry);
     if (sanitized.length >= 20) break;
   }
 
@@ -282,11 +377,11 @@ async function resolveViewerFromRequest(req) {
   }
 }
 
-function parseHorarios(value) {
-  if (!value) return [];
-  const raw = String(value).trim();
-  if (!raw) return [];
-  try {
+function parseHorarios(value) {
+  if (!value) return [];
+  const raw = String(value).trim();
+  if (!raw) return [];
+  try {
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed)) {
       return parsed
@@ -297,28 +392,48 @@ function parseHorarios(value) {
             if (!text) return null;
             return { label: '', value: text };
           }
-          if (typeof item === 'object') {
-            const label = String(item.label ?? item.day ?? item.dia ?? '').trim();
-            const valueText = String(item.value ?? item.horario ?? item.horarios ?? item.hours ?? '').trim();
-            if (!label && !valueText) return null;
-            return { label, value: valueText || label };
-          }
-          return null;
-        })
-        .filter(Boolean);
-    }
+          if (typeof item === 'object') {
+            const label = String(item.label ?? item.day ?? item.dia ?? '').trim();
+            const valueText = String(item.value ?? item.horario ?? item.horarios ?? item.hours ?? '').trim();
+            if (!label && !valueText) return null;
+            const daySlug = normalizeDaySlug(
+              item.day ?? item.key ?? item.weekday ?? item.week_day ?? label
+            );
+            let resolvedLabel = label;
+            if (!resolvedLabel && daySlug && WEEKDAY_LABEL_MAP[daySlug]) {
+              resolvedLabel = WEEKDAY_LABEL_MAP[daySlug];
+            }
+            let start = sanitizeTimeValue(item.start ?? item.begin ?? item.from ?? null);
+            let end = sanitizeTimeValue(item.end ?? item.finish ?? item.to ?? null);
+            if (start && end && start > end) {
+              const temp = start;
+              start = end;
+              end = temp;
+            }
+            return {
+              label: resolvedLabel,
+              value: valueText || resolvedLabel,
+              day: daySlug || null,
+              start: start || null,
+              end: end || null,
+            };
+          }
+          return null;
+        })
+        .filter(Boolean);
+    }
     if (parsed && typeof parsed === 'object') {
       return Object.entries(parsed)
         .map(([key, val]) => {
-          const label = String(key || '').trim();
-          const valueText = String(val ?? '').trim();
-          if (!label && !valueText) return null;
-          return { label, value: valueText || label };
-        })
-        .filter(Boolean);
-    }
-  } catch (err) {
-    // fallback
+          const label = String(key || '').trim();
+          const valueText = String(val ?? '').trim();
+          if (!label && !valueText) return null;
+          return { label, value: valueText || label, day: normalizeDaySlug(label) || null, start: null, end: null };
+        })
+        .filter(Boolean);
+    }
+  } catch (err) {
+    // fallback
   }
   const lines = raw
     .split(/\r?\n/)
