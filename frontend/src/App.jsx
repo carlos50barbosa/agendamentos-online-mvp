@@ -272,7 +272,7 @@ export default function App() {
   const { preferences, isDark, toggleTheme } = useAppPreferences();
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const isPlanos = (loc?.pathname || '') === '/planos';
-  const hideShell = isNovo && !currentUser;
+  const hideShell = false;
 
   useEffect(() => {
     const handleUserEvent = (event) => {
