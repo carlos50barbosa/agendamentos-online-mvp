@@ -1,6 +1,6 @@
 // src/pages/NovoAgendamento.jsx
 import React, { useEffect, useMemo, useState, useCallback, useRef } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams, useLocation } from "react-router-dom";
 import { Api, resolveAssetUrl } from "../utils/api";
 import { getUser } from "../utils/auth";
 import Modal from "../components/Modal.jsx";
@@ -807,6 +807,11 @@ export default function NovoAgendamento() {
   const liveRef = useRef(null);
   const toastTimeoutRef = useRef(null);
   const nav = useNavigate();
+  const location = useLocation();
+  const loginHref = useMemo(() => {
+    const path = `${location.pathname}${location.search}` || '/';
+    return `/login?next=${encodeURIComponent(path)}`;
+  }, [location.pathname, location.search]);
 
   // Redireciona estabelecimentos para seu dashboard
   useEffect(() => {
@@ -2484,7 +2489,7 @@ export default function NovoAgendamento() {
                 <span className="novo-agendamento__summary-address">{selectedEstablishmentAddress || 'Endereço não informado'}</span>
                 <div className="novo-agendamento__summary-actions">
                   {!isAuthenticated ? (
-                    <Link to="/login" className="summary-action summary-action--cta">
+                    <Link to={loginHref} className="summary-action summary-action--cta">
                       <span aria-hidden>🔒</span>
                       Entre para avaliar
                     </Link>
@@ -2505,7 +2510,7 @@ export default function NovoAgendamento() {
                     Informações
                   </button>
                   {!isAuthenticated ? (
-                    <Link to="/login" className="summary-action summary-action--cta">
+                    <Link to={loginHref} className="summary-action summary-action--cta">
                       <span aria-hidden>♡</span>
                       Entre para favoritar
                     </Link>
@@ -2753,7 +2758,7 @@ export default function NovoAgendamento() {
                         Avaliar estabelecimento
                       </button>
                     ) : !isAuthenticated ? (
-                      <Link to="/login" className="btn btn--outline btn--sm">
+                      <Link to={loginHref} className="btn btn--outline btn--sm">
                         Entre para avaliar
                       </Link>
                     ) : null}
@@ -2964,3 +2969,4 @@ export default function NovoAgendamento() {
     </div>
   );
 }
+

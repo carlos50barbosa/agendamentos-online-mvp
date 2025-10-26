@@ -1,12 +1,13 @@
 import React, { useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate, useLocation } from 'react-router-dom'
 import LogoAO from '../components/LogoAO.jsx'
 import { Api } from '../utils/api'
 import { saveToken, saveUser } from '../utils/auth'
-import { useNavigate } from 'react-router-dom'
 
 export default function LoginCliente(){
   const nav = useNavigate()
+  const loc = useLocation()
+  const nextParam = React.useMemo(() => new URLSearchParams(loc.search).get('next') || '', [loc.search])
   const [email,setEmail]=useState('')
   const [senha,setSenha]=useState('')
   const [showPass,setShowPass]=useState(false)
@@ -18,7 +19,9 @@ export default function LoginCliente(){
     try{
       const { token, user } = await Api.login(email.trim(), senha)
       if(user?.tipo!=='cliente') throw new Error('tipo_incorreto')
-      saveToken(token); saveUser(user); nav('/loading?type=login&next=/cliente')
+      saveToken(token); saveUser(user);
+      const next = nextParam || '/cliente'
+      nav(`/loading?type=login&next=${encodeURIComponent(next)}`)
     }catch(e){
       setErr(
         e?.message==='tipo_incorreto'
