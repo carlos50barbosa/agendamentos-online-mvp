@@ -39,6 +39,16 @@ const formatCep = (value = '') => {
   return `${digits.slice(0, 5)}-${digits.slice(5)}`;
 };
 
+const toSlug = (value = '') => {
+  const normalized = String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return normalized || 'estabelecimento';
+};
+
 const DEFAULT_WORKING_START = '09:00';
 const DEFAULT_WORKING_END = '18:00';
 const TIME_VALUE_REGEX = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -917,9 +927,25 @@ export default function Configuracoes() {
     iso ? new Date(iso).toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' }) : '';
 
   const publicLink = useMemo(() => {
-    if (!user || typeof window === 'undefined') return '';
-    return slug ? `${window.location.origin}/book/${slug}` : `${window.location.origin}/book/${user.id}`;
-  }, [slug, user?.id]);
+    if (!user) return '';
+    const id = user.id ? String(user.id) : '';
+    if (!id) return '';
+    let origin = 'https://agendamentosonline.com';
+    if (typeof window !== 'undefined') {
+      const currentOrigin = window.location?.origin || '';
+      if (currentOrigin.includes('agendamentosonline.com')) origin = currentOrigin;
+    }
+    const slugSource = slug || user?.nome || '';
+    const targetSlug = toSlug(slugSource || `estabelecimento-${id}`);
+    try {
+      const url = new URL(`/novo/${targetSlug}`, origin);
+      url.searchParams.set('estabelecimento', id);
+      return url.toString();
+    } catch (err) {
+      console.error('publicLink generation failed', err);
+      return '';
+    }
+  }, [slug, user?.id, user?.nome]);
 
   const qrCodeUrl = useMemo(() => {
     if (!publicLink) return '';

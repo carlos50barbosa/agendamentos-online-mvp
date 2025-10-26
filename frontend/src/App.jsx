@@ -33,7 +33,6 @@ import AdminDB from './pages/AdminDB.jsx';
 import AdminBilling from './pages/AdminBilling.jsx';
 import Contato from './pages/Contato.jsx';
 import LinkPhone from './pages/LinkPhone.jsx';
-import Book from './pages/Book.jsx';
 import Termos from './pages/Termos.jsx';
 import PoliticaPrivacidade from './pages/PoliticaPrivacidade.jsx';
 import { buildNavigation } from './utils/navigation.js';
@@ -49,8 +48,6 @@ import {
 
 const APP_ROUTES = [
   { path: '/', element: <EstabelecimentosList /> },
-  { path: '/book', element: <Book /> },
-  { path: '/book/:id', element: <Book /> },
   { path: '/login', element: <Login /> },
   { path: '/recuperar-senha', element: <RecuperarSenha /> },
   { path: '/definir-senha', element: <DefinirSenha /> },
@@ -270,11 +267,12 @@ function Sidebar({ open, user }) {
 
 export default function App() {
   const loc = useLocation();
-  const isBook = (loc?.pathname || '').startsWith('/book');
+  const isNovo = (loc?.pathname || '').startsWith('/novo');
   const [currentUser, setCurrentUser] = useState(() => getUser());
   const { preferences, isDark, toggleTheme } = useAppPreferences();
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const isPlanos = (loc?.pathname || '') === '/planos';
+  const hideShell = isNovo && !currentUser;
 
   useEffect(() => {
     const handleUserEvent = (event) => {
@@ -328,8 +326,8 @@ export default function App() {
   return (
     <>
       <div className={`app-shell ${sidebarOpen ? 'sidebar-open' : 'is-collapsed'}`}>
-        {!isBook && <Sidebar open={sidebarOpen} user={currentUser} />}
-        {!isBook && (
+        {!hideShell && <Sidebar open={sidebarOpen} user={currentUser} />}
+        {!hideShell && (
           <>
             <button
               className="sidebar-toggle"
@@ -378,7 +376,7 @@ export default function App() {
           </div>
         </main>
       </div>
-      {!isBook && <MobileNavBar user={currentUser} />}
+      {!hideShell && <MobileNavBar user={currentUser} />}
     </>
   );
 }
