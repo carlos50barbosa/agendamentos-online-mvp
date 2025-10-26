@@ -1,7 +1,7 @@
 // src/pages/Login.jsx
 import React, { useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { IconUser, IconHome } from '../components/Icons.jsx';
+import { IconLogout } from '../components/Icons.jsx';
 import LogoAO from '../components/LogoAO.jsx';
 
 export default function Login() {
@@ -42,27 +42,27 @@ export default function Login() {
               {sessionMsg}
             </div>
           )}
-          <div className="row-wrap" style={{ marginTop: 10 }}>
-            <div className="mini-card" style={{ minWidth: 260 }}>
-              <div className="mini-card__title">Cliente</div>
-              <div className="mini-card__meta"><span>Acesse sua conta de cliente</span></div>
-              <div className="row" style={{ marginTop: 8, width: '100%' }}>
-                <Link className="btn btn--primary btn--lg btn--block" to={`/login-cliente${next ? `?next=${encodeURIComponent(next)}` : ''}`}>
-                  <IconUser className="btn__icon" aria-hidden />
-                  Entrar como Cliente
-                </Link>
-              </div>
-            </div>
-            <div className="mini-card" style={{ minWidth: 260 }}>
-              <div className="mini-card__title">Estabelecimento</div>
-              <div className="mini-card__meta"><span>Acesse como estabelecimento</span></div>
-              <div className="row" style={{ marginTop: 8, width: '100%' }}>
-                <Link className="btn btn--primary btn--lg btn--block" to={`/login-estabelecimento${next ? `?next=${encodeURIComponent(next)}` : ''}`}>
-                  <IconHome className="btn__icon" aria-hidden />
-                  Entrar como Estabelecimento
-                </Link>
-              </div>
-            </div>
+          <div className="login-options">
+            <Link
+              className="login-option"
+              to={`/login-cliente${next ? `?next=${encodeURIComponent(next)}` : ''}`}
+            >
+              <span className="login-option__label">Para Clientes</span>
+              <span className="login-option__action">
+                <IconLogout className="login-option__icon" aria-hidden />
+                <span>Login</span>
+              </span>
+            </Link>
+            <Link
+              className="login-option"
+              to={`/login-estabelecimento${next ? `?next=${encodeURIComponent(next)}` : ''}`}
+            >
+              <span className="login-option__label">Para Empresas</span>
+              <span className="login-option__action">
+                <IconLogout className="login-option__icon" aria-hidden />
+                <span>Login</span>
+              </span>
+            </Link>
           </div>
           <div className="divider"><span>ou</span></div>
           <div className="auth-alt" style={{ marginTop: 6 }}>

@@ -1,6 +1,6 @@
 ﻿// src/pages/Configuracoes.jsx
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { getUser, saveUser, saveToken } from '../utils/auth';
 import { Api, resolveAssetUrl } from '../utils/api';
 import { IconChevronRight } from '../components/Icons.jsx';
@@ -304,6 +304,9 @@ function buildWorkingHoursPayload(schedule, notesText) {
 export default function Configuracoes() {
   const user = getUser();
   const isEstab = user?.tipo === 'estabelecimento';
+  const location = useLocation();
+  const sectionRefs = useRef({});
+  const focusTimeoutRef = useRef(null);
 
   const [planInfo, setPlanInfo] = useState({
     plan: 'starter',
@@ -318,6 +321,8 @@ export default function Configuracoes() {
   const [msg, setMsg] = useState({ email_subject: '', email_html: '', wa_template: '' });
   const [savingMessages, setSavingMessages] = useState(false);
   const [openSections, setOpenSections] = useState({});
+  const [focusedSection, setFocusedSection] = useState('');
+  const [showQrCode, setShowQrCode] = useState(false);
   const [publicProfileForm, setPublicProfileForm] = useState({
     sobre: '',
     contato_email: '',
@@ -334,6 +339,31 @@ export default function Configuracoes() {
   const [publicProfileLoading, setPublicProfileLoading] = useState(false);
   const [publicProfileSaving, setPublicProfileSaving] = useState(false);
   const [workingHours, setWorkingHours] = useState(() => createEmptyWorkingHours());
+
+  useEffect(() => () => {
+    if (focusTimeoutRef.current) {
+      clearTimeout(focusTimeoutRef.current);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const target = location?.state?.focusSection;
+    if (!target) return;
+    setOpenSections((prev) => ({ ...prev, [target]: true }));
+    setFocusedSection(target);
+    const node = sectionRefs.current[target];
+    if (node) {
+      try {
+        node.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      } catch {}
+    }
+    if (focusTimeoutRef.current) clearTimeout(focusTimeoutRef.current);
+    focusTimeoutRef.current = window.setTimeout(() => {
+      setFocusedSection('');
+      focusTimeoutRef.current = null;
+    }, 2400);
+  }, [location?.state?.focusSection]);
 
   const toggleSection = useCallback((id) => {
     setOpenSections((prev) => ({ ...prev, [id]: !prev[id] }));
@@ -891,6 +921,27 @@ export default function Configuracoes() {
     return slug ? `${window.location.origin}/book/${slug}` : `${window.location.origin}/book/${user.id}`;
   }, [slug, user?.id]);
 
+  const qrCodeUrl = useMemo(() => {
+    if (!publicLink) return '';
+    const params = new URLSearchParams({ size: '320x320', data: publicLink });
+    return `https://api.qrserver.com/v1/create-qr-code/?${params.toString()}`;
+  }, [publicLink]);
+
+  const handleCopyPublicLink = useCallback(async () => {
+    if (!publicLink) return;
+    try {
+      await navigator.clipboard.writeText(publicLink);
+      showToast('success', 'Link copiado para a área de transferência.');
+    } catch (err) {
+      console.error('copy public link failed', err);
+      showToast('error', 'Não foi possível copiar o link agora.');
+    }
+  }, [publicLink]);
+
+  useEffect(() => {
+    setShowQrCode(false);
+  }, [publicLink]);
+
   const startTrial = useCallback(async () => {
     if (!isEstab || !user?.id) return;
     try {
@@ -1304,6 +1355,50 @@ export default function Configuracoes() {
               <div className="row" style={{ gap: 8, alignItems: 'center' }}>
                 <span className="spinner" aria-hidden />
                 <span className="muted" style={{ fontSize: 13 }}>Carregando informações públicas…</span>
+              </div>
+            )}
+            {!publicProfileLoading && publicLink && (
+              <div className="public-link-box">
+                <div className="public-link-box__row">
+                  <div>
+                    <span className="public-link-box__label">Link da página pública</span>
+                    <a className="public-link-box__url" href={publicLink} target="_blank" rel="noreferrer">
+                      {publicLink}
+                    </a>
+                  </div>
+                  <div className="public-link-box__actions">
+                    <button type="button" className="btn btn--outline btn--sm" onClick={handleCopyPublicLink}>
+                      Copiar link
+                    </button>
+                    <button type="button" className="btn btn--primary btn--sm" onClick={() => setShowQrCode((value) => !value)}>
+                      {showQrCode ? 'Ocultar QR Code' : 'Gerar QR Code'}
+                    </button>
+                  </div>
+                </div>
+                {showQrCode && qrCodeUrl && (
+                  <div className="public-link-box__qr">
+                    <img src={qrCodeUrl} alt="QR Code do link público do estabelecimento" />
+                    <div className="row" style={{ gap: 8, justifyContent: 'center' }}>
+                      <a
+                        className="btn btn--outline btn--sm"
+                        href={qrCodeUrl}
+                        download={`qr-${slug || user?.id || 'estabelecimento'}.png`}
+                      >
+                        Baixar PNG
+                      </a>
+                      <button
+                        type="button"
+                        className="btn btn--ghost btn--sm"
+                        onClick={() => window.open(qrCodeUrl, '_blank', 'noopener')}
+                      >
+                        Abrir em nova guia
+                      </button>
+                    </div>
+                    <span className="muted" style={{ fontSize: 12 }}>
+                      Compartilhe ou imprima o QR Code para clientes acessarem a página de agendamento.
+                    </span>
+                  </div>
+                )}
               </div>
             )}
             <label className="label">
@@ -1825,6 +1920,7 @@ export default function Configuracoes() {
     recurringNotice,
     fetchBilling,
     pixCycle,
+    focusedSection,
     publicProfileForm,
     publicProfileStatus,
     publicProfileLoading,
@@ -1834,6 +1930,9 @@ export default function Configuracoes() {
     handleWorkingHoursToggle,
     handleWorkingHoursTimeChange,
     handleSavePublicProfile,
+    handleCopyPublicLink,
+    qrCodeUrl,
+    showQrCode,
   ]);
 
   return (
@@ -1845,8 +1944,16 @@ export default function Configuracoes() {
 
       {sections.map(({ id, title, content }) => {
         const isOpen = !!openSections[id];
+        const isHighlighted = focusedSection === id;
         return (
-          <div key={id} className="card config-section">
+          <div
+            key={id}
+            className={`card config-section${isHighlighted ? ' config-section--highlight' : ''}`}
+            ref={(node) => {
+              if (node) sectionRefs.current[id] = node;
+              else delete sectionRefs.current[id];
+            }}
+          >
             <button
               type="button"
               className={`config-section__toggle${isOpen ? ' is-open' : ''}`}

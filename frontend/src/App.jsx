@@ -34,6 +34,8 @@ import AdminBilling from './pages/AdminBilling.jsx';
 import Contato from './pages/Contato.jsx';
 import LinkPhone from './pages/LinkPhone.jsx';
 import Book from './pages/Book.jsx';
+import Termos from './pages/Termos.jsx';
+import PoliticaPrivacidade from './pages/PoliticaPrivacidade.jsx';
 import { buildNavigation } from './utils/navigation.js';
 import {
   PREFERENCES_EVENT,
@@ -60,6 +62,7 @@ const APP_ROUTES = [
   { path: '/estab', element: <DashboardEstabelecimento /> },
   { path: '/servicos', element: <ServicosEstabelecimento /> },
   { path: '/profissionais', element: <ProfissionaisEstabelecimento /> },
+  { path: '/novo/:estabelecimentoSlug', element: <NovoAgendamento /> },
   { path: '/novo', element: <NovoAgendamento /> },
   { path: '/configuracoes', element: <Configuracoes /> },
   { path: '/loading', element: <Loading /> },
@@ -67,6 +70,8 @@ const APP_ROUTES = [
   { path: '/relatorios', element: <Relatorios /> },
   { path: '/planos', element: <Planos /> },
   { path: '/contato', element: <Contato /> },
+  { path: '/termos', element: <Termos /> },
+  { path: '/politica-privacidade', element: <PoliticaPrivacidade /> },
   { path: '/admin-tools', element: <AdminTools /> },
   { path: '/admin/db', element: <AdminDB /> },
   { path: '/admin/billing', element: <AdminBilling /> },

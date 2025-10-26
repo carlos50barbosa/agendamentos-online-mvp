@@ -26,7 +26,7 @@ const CONTACT_CHANNELS = [
     title: 'E-mail',
     description: 'Envie detalhes do seu negócio para receber uma proposta personalizada.',
     actionLabel: 'Enviar e-mail',
-    href: 'mailto:contato@agendamentosonline.com',
+    href: 'mailto:servicos.negocios.digital@gmail.com',
   },
   {
     icon: '📅',
@@ -96,7 +96,7 @@ export default function Contato() {
       mensagem || '',
     ];
     const body = encodeURIComponent(lines.join('\n'));
-    window.location.href = `mailto:contato@agendamentosonline.com?subject=${subject}&body=${body}`;
+    window.location.href = `mailto:servicos.negocios.digital@gmail.com?subject=${subject}&body=${body}`;
     setFormSent(true);
   };
 
@@ -139,7 +139,7 @@ export default function Contato() {
             </header>
             {formSent ? (
               <div className="contact-form__feedback" role="status">
-                Obrigado! Abrimos seu e-mail no aplicativo padrão. Caso não visualize, escreva para contato@agendamentosonline.com.
+                Obrigado! Abrimos seu e-mail no aplicativo padrão. Caso não visualize, escreva para servicos.negocios.digital@gmail.com.
               </div>
             ) : (
               <form className="contact-form" onSubmit={handleSubmit}>

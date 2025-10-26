@@ -12,6 +12,13 @@ const normalize = (value) =>
     .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase();
 
+const toSlug = (value = '') => {
+  const normalized = normalize(value)
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return normalized || 'estabelecimento';
+};
+
 const buildSearchText = (est) =>
   normalize([
     est?.nome,
@@ -26,7 +33,7 @@ const buildSearchText = (est) =>
     .filter(Boolean)
     .join(' '));
 
-const HEADLINE_TEXT = 'O jeito mais simples de agendar servicos de beleza e bem-estar';
+const HEADLINE_TEXT = 'O jeito mais simples de agendar serviços de beleza e bem-estar';
 const NBSP = String.fromCharCode(160);
 
 const formatAddress = (est) => {
@@ -383,7 +390,7 @@ export default function EstabelecimentosList() {
             {!prefersReducedMotion && isTyping && <span className="home-hero__caret" aria-hidden="true" />}
           </h1>
           <p className="home-hero__subtitle">
-            Descubra estabelecimentos perto de voce, escolha o horario ideal e confirme em segundos.
+            Descubra estabelecimentos perto de você, escolha o horario ideal e confirme em segundos.
           </p>
           <form className="home-search-box" onSubmit={handleSubmit}>
             <div className="home-search-box__field">
@@ -392,7 +399,7 @@ export default function EstabelecimentosList() {
                 ref={searchInputRef}
                 className="home-search-box__input"
                 type="search"
-                placeholder="Em qual endereco voce esta?"
+                placeholder="Em qual endereço você está?"
                 value={query}
                 onChange={(e) => handleQueryChange(e.target.value)}
                 aria-label="Buscar estabelecimentos por endereco, servico ou nome"
@@ -408,7 +415,7 @@ export default function EstabelecimentosList() {
             onClick={handleUseLocation}
             disabled={locating}
           >
-            {locating ? 'Localizando...' : 'Usar minha localizacao atual'}
+            {locating ? 'Localizando...' : 'Usar minha localização atual'}
           </button>
           {geoError && (
             <div className="home-search-box__status home-search-box__status--error" role="alert">
@@ -452,7 +459,10 @@ export default function EstabelecimentosList() {
                 const sp = new URLSearchParams();
                 sp.set('estabelecimento', String(est.id));
                 const currentQuery = (query || '').trim();
-              if (currentQuery) sp.set('q', currentQuery);
+                if (currentQuery) sp.set('q', currentQuery);
+                const slugSource = est?.slug || name;
+                const slug = slugSource ? toSlug(slugSource) : 'estabelecimento';
+                const path = slug ? `/novo/${slug}` : '/novo';
               const avatarSource = est?.foto_url || est?.avatar_url || '';
               const image = avatarSource ? resolveAssetUrl(avatarSource) : fallbackAvatar(name);
               const distanceLabel = userLocation
@@ -469,7 +479,7 @@ export default function EstabelecimentosList() {
                 <Link
                   key={est.id}
                   className="establishment-card"
-                  to={`/novo?${sp.toString()}`}
+                  to={`${path}?${sp.toString()}`}
                   aria-label={`Agendar em ${name}`}
                 >
                   <div className="establishment-card__avatar">
@@ -515,7 +525,6 @@ export default function EstabelecimentosList() {
     </div>
   );
 }
-
 
 
 

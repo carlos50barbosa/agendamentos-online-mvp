@@ -1,9 +1,10 @@
 
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import LogoAO from '../components/LogoAO.jsx';
 import { Api } from '../utils/api';
 import { saveToken, saveUser } from '../utils/auth';
+import { LEGAL_METADATA } from '../utils/legal.js';
 
 const formatBRPhone = (value = '') => {
   const digits = value.replace(/\D/g, '').slice(0, 11);
@@ -49,6 +50,8 @@ export default function Cadastro() {
   const [err, setErr] = useState('');
   const [loading, setLoading] = useState(false);
   const [cepStatus, setCepStatus] = useState({ loading: false, error: '' });
+  const [acceptPolicies, setAcceptPolicies] = useState(false);
+  const legalMeta = useMemo(() => LEGAL_METADATA, []);
 
   const phoneDigits = (form.telefone || '').replace(/\D/g, '');
   const cepDigits = form.cep.replace(/\D/g, '');
@@ -98,7 +101,8 @@ export default function Cadastro() {
     !matchOk ||
     !phoneOk ||
     !form.tipo ||
-    !addressOk;
+    !addressOk ||
+    !acceptPolicies;
 
   useEffect(() => {
     const digits = cepDigits;
@@ -149,6 +153,7 @@ export default function Cadastro() {
     setLoading(true);
     try {
       const telefoneNorm = normalizeToE164BR(form.telefone.trim());
+      const acceptanceTimestamp = new Date().toISOString();
       const payload = {
         nome: form.nome.trim(),
         email: form.email.trim(),
@@ -162,6 +167,11 @@ export default function Cadastro() {
         bairro: form.bairro.trim() || undefined,
         cidade: form.cidade.trim() || undefined,
         estado: form.estado.trim().toUpperCase() || undefined,
+        termsVersion: legalMeta.terms?.version,
+        privacyVersion: legalMeta.privacy?.version,
+        termsAcceptedAt: acceptanceTimestamp,
+        privacyAcceptedAt: acceptanceTimestamp,
+        dataProcessingConsent: true,
       };
       const { token, user } = await Api.register(payload);
       saveToken(token);
@@ -358,6 +368,22 @@ export default function Cadastro() {
                 </div>
               </div>
             )}
+
+            <label className="terms-check">
+              <input
+                type="checkbox"
+                checked={acceptPolicies}
+                onChange={(e) => setAcceptPolicies(e.target.checked)}
+                required
+              />
+              <span>
+                Li e concordo com os <Link to="/termos" target="_blank" rel="noreferrer">Termos de Uso</Link> e com a{' '}
+                <Link to="/politica-privacidade" target="_blank" rel="noreferrer">Politica de Privacidade</Link>.
+              </span>
+            </label>
+            <small className="auth-legal__version">
+              Versoes vigentes: Termos {legalMeta.terms?.version} • Política {legalMeta.privacy?.version}
+            </small>
 
             <div className="auth-actions" style={{ marginTop: 4 }}>
               <button type="submit" className="btn btn--primary" disabled={disabled}>
