@@ -192,7 +192,7 @@ export default function Relatorios() {
       },
       {
         key: 'concluidos',
-        label: 'Concluidos',
+        label: 'Concluídos',
         value: concluidos,
         hint: confirmados ? `${formatPercent(realizationRate)} dos confirmados` : null,
       },
@@ -204,7 +204,7 @@ export default function Relatorios() {
       },
       {
         key: 'receitaRealizada',
-        label: 'Receita concluida',
+        label: 'Receita concluída',
         value: centsToCurrency(totals.receitaConcluidaCentavos),
         hint: totals.receitaPerdidaCentavos
           ? `Perdida: ${centsToCurrency(totals.receitaPerdidaCentavos)}`
@@ -220,10 +220,10 @@ export default function Relatorios() {
       },
       {
         key: 'ticketMedio',
-        label: 'Ticket medio',
+        label: 'Ticket médio',
         value: centsToCurrency(totals.ticketMedioCentavos),
         hint: totals.ticketRealizadoCentavos
-          ? `Concluido: ${centsToCurrency(totals.ticketRealizadoCentavos)}`
+          ? `Concluído: ${centsToCurrency(totals.ticketRealizadoCentavos)}`
           : null,
       },
     ];
@@ -287,7 +287,7 @@ export default function Relatorios() {
     if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) return null;
     const formatter = new Intl.DateTimeFormat('pt-BR');
     const parts = [
-      `Periodo analisado: ${formatter.format(startDate)} - ${formatter.format(endDate)} (${days} dias)`,
+      `Período analisado: ${formatter.format(startDate)} - ${formatter.format(endDate)} (${days} dias)`,
     ];
     if (statusFilter !== 'all') {
       const statusLabel = STATUS_OPTIONS.find((opt) => opt.value === statusFilter)?.label || statusFilter;
@@ -432,7 +432,7 @@ export default function Relatorios() {
 
             <section className="report-section">
               <div className="report-section__header">
-                <h3>Volume diario</h3>
+                <h3>Volume diário</h3>
                 <div className="report-actions">
                   <button
                     type="button"

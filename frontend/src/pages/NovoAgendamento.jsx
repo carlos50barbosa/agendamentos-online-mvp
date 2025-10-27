@@ -2144,11 +2144,6 @@ export default function NovoAgendamento() {
         </button>
       </div>
       {geoError && <div className="notice notice--error" role="alert">{geoError}</div>}
-      {userLocation && !geoError && (
-        <div className="novo-agendamento__status muted" aria-live="polite">
-          Resultados ordenados pela sua localização atual.
-        </div>
-      )}
       {geocoding && (
         <div className="novo-agendamento__status muted" aria-live="polite">
           Calculando distâncias dos estabelecimentos...
@@ -2574,6 +2569,8 @@ export default function NovoAgendamento() {
         <Modal
           title={`Informações de ${selectedEstablishmentName || 'Estabelecimento'}`}
           onClose={handleCloseInfo}
+          closeButton
+          bodyClassName="modal__body--scroll"
         >
           <div className="estab-info">
             <div
@@ -2879,6 +2876,7 @@ export default function NovoAgendamento() {
         <Modal
           title="Avaliar estabelecimento"
           onClose={ratingModal.saving ? undefined : handleCloseRatingModal}
+          closeButton
           actions={[
             <button
               key="cancel"
@@ -2947,7 +2945,7 @@ export default function NovoAgendamento() {
         </Modal>
       )}
       {modal.isOpen && selectedSlot && selectedService && (
-        <Modal onClose={() => setModal((m) => ({ ...m, isOpen: false }))}>
+        <Modal onClose={() => setModal((m) => ({ ...m, isOpen: false }))} closeButton>
           <h3>Confirmar agendamento?</h3>
           <div className="confirmation-details">
             <div className="confirmation-details__item"><span className="confirmation-details__label">Estabelecimento: </span><span className="confirmation-details__value">{selectedEstablishmentName}</span></div>
@@ -2978,4 +2976,5 @@ export default function NovoAgendamento() {
     </div>
   );
 }
+
 

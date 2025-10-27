@@ -1,7 +1,16 @@
 // src/components/Modal.jsx
 import React from 'react';
 
-export default function Modal({ title, children, onClose, actions }){
+export default function Modal({
+  title,
+  children,
+  onClose,
+  actions,
+  closeButton = false,
+  bodyClassName = '',
+}) {
+  const bodyClass = bodyClassName ? `modal__body ${bodyClassName}` : 'modal__body';
+
   return (
     <div className="modal-backdrop" role="presentation" onClick={onClose}>
       <div
@@ -11,13 +20,18 @@ export default function Modal({ title, children, onClose, actions }){
         aria-label={title || 'Diálogo'}
         onClick={(e) => e.stopPropagation()}
       >
-        {title && <h3 style={{ marginTop: 0 }}>{title}</h3>}
-        <div>{children}</div>
-        {actions && (
-          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 16 }}>
-            {actions}
+        {(title || closeButton) && (
+          <div className="modal__header">
+            {title ? <h3 className="modal__title">{title}</h3> : <span aria-hidden="true" />}
+            {closeButton && (
+              <button type="button" className="modal__close" onClick={onClose} aria-label="Fechar">
+                <span aria-hidden="true">X</span>
+              </button>
+            )}
           </div>
         )}
+        <div className={bodyClass}>{children}</div>
+        {actions && <div className="modal__actions">{actions}</div>}
       </div>
     </div>
   );

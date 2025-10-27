@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom';
 import { Api, resolveAssetUrl } from '../utils/api';
 import LogoAO from '../components/LogoAO.jsx';
-import { IconMapPin } from '../components/Icons.jsx';
+import { IconMapPin, IconSearch } from '../components/Icons.jsx';
 
 const STORAGE_KEY = 'ao:lastLocation';
 
@@ -34,7 +34,6 @@ const buildSearchText = (est) =>
     .join(' '));
 
 const HEADLINE_TEXT = 'O jeito mais simples de agendar serviços de beleza e bem-estar';
-const NBSP = String.fromCharCode(160);
 
 const formatAddress = (est) => {
   const street = [est?.endereco, est?.numero].filter(Boolean).join(', ');
@@ -113,9 +112,6 @@ export default function EstabelecimentosList() {
     return initial.length > 0;
   });
   const [pendingScroll, setPendingScroll] = useState(false);
-  const [prefersReducedMotion, setPrefersReducedMotion] = useState(false);
-  const [headingText, setHeadingText] = useState('');
-  const [isTyping, setIsTyping] = useState(false);
   const [userLocation, setUserLocation] = useState(null);
   const [locating, setLocating] = useState(false);
   const [geoError, setGeoError] = useState('');
@@ -124,41 +120,6 @@ export default function EstabelecimentosList() {
   const [distanceMap, setDistanceMap] = useState({});
   const searchInputRef = useRef(null);
   const resultsSectionRef = useRef(null);
-
-  useEffect(() => {
-    if (typeof window === 'undefined' || !window.matchMedia) return;
-    const media = window.matchMedia('(prefers-reduced-motion: reduce)');
-    const update = () => setPrefersReducedMotion(media.matches);
-    update();
-    if (media.addEventListener) media.addEventListener('change', update);
-    else media.addListener(update);
-    return () => {
-      if (media.removeEventListener) media.removeEventListener('change', update);
-      else media.removeListener(update);
-    };
-  }, []);
-
-  useEffect(() => {
-    if (prefersReducedMotion || typeof window === 'undefined') {
-      setHeadingText(HEADLINE_TEXT);
-      setIsTyping(false);
-      return;
-    }
-    let index = 0;
-    setHeadingText('');
-    setIsTyping(true);
-    const interval = window.setInterval(() => {
-      index += 1;
-      setHeadingText(HEADLINE_TEXT.slice(0, index));
-      if (index >= HEADLINE_TEXT.length) {
-        window.clearInterval(interval);
-        setIsTyping(false);
-      }
-    }, 35);
-    return () => {
-      window.clearInterval(interval);
-    };
-  }, [prefersReducedMotion]);
 
   useEffect(() => {
     const q = (searchParams.get('q') || '').trim();
@@ -374,11 +335,7 @@ export default function EstabelecimentosList() {
     setPendingScroll(true);
   }, []);
 
-  const displayHeading = headingText.length
-    ? headingText
-    : prefersReducedMotion
-    ? HEADLINE_TEXT
-    : NBSP;
+  const displayHeading = HEADLINE_TEXT;
 
   return (
     <div className="home">
@@ -387,49 +344,42 @@ export default function EstabelecimentosList() {
           <LogoAO size={72} className="home-hero__logo" />
           <h1 id="home-hero-title" className="home-hero__heading">
             <span className="home-hero__heading-text">{displayHeading}</span>
-            {!prefersReducedMotion && isTyping && <span className="home-hero__caret" aria-hidden="true" />}
           </h1>
           <p className="home-hero__subtitle">
             Descubra estabelecimentos perto de você, escolha o horario ideal e confirme em segundos.
           </p>
-          <form className="home-search-box" onSubmit={handleSubmit}>
-            <div className="home-search-box__field">
-              <IconMapPin className="home-search-box__icon" />
+          <form className="novo-agendamento__search" onSubmit={handleSubmit}>
+            <div className="novo-agendamento__searchbox">
+              <IconSearch className="novo-agendamento__search-icon" aria-hidden />
               <input
                 ref={searchInputRef}
-                className="home-search-box__input"
+                className="input novo-agendamento__search-input"
                 type="search"
-                placeholder="Em qual endereço você está?"
+                placeholder="Buscar por nome, bairro ou cidade"
                 value={query}
                 onChange={(e) => handleQueryChange(e.target.value)}
-                aria-label="Buscar estabelecimentos por endereco, servico ou nome"
+                aria-label="Buscar estabelecimentos por nome, bairro ou cidade"
               />
-              <button type="submit" className="home-search-box__button">
-                Buscar
-              </button>
+              <span className="novo-agendamento__search-caret" aria-hidden>▾</span>
             </div>
+            <button
+              type="button"
+              className="novo-agendamento__location"
+              onClick={handleUseLocation}
+              disabled={locating}
+            >
+              <IconMapPin className="novo-agendamento__location-icon" aria-hidden />
+              <span>{locating ? 'Localizando...' : 'Usar minha localização atual'}</span>
+            </button>
           </form>
-          <button
-            type="button"
-            className="home-search-box__geo"
-            onClick={handleUseLocation}
-            disabled={locating}
-          >
-            {locating ? 'Localizando...' : 'Usar minha localização atual'}
-          </button>
           {geoError && (
-            <div className="home-search-box__status home-search-box__status--error" role="alert">
+            <div className="notice notice--error" role="alert">
               {geoError}
             </div>
           )}
-          {!geoError && userLocation && (
-            <div className="home-search-box__status" aria-live="polite">
-
-            </div>
-          )}
-          {!geoError && geocoding && (
-            <div className="home-search-box__status" aria-live="polite">
-              Calculando distancias dos estabelecimentos...
+          {geocoding && !geoError && (
+            <div className="novo-agendamento__status muted" aria-live="polite">
+              Calculando distâncias dos estabelecimentos...
             </div>
           )}
         </div>

@@ -78,7 +78,7 @@ const WORKING_DAYS = [
   { key: 'wednesday', label: 'Quarta-feira', shortLabel: 'Quarta' },
   { key: 'thursday', label: 'Quinta-feira', shortLabel: 'Quinta' },
   { key: 'friday', label: 'Sexta-feira', shortLabel: 'Sexta' },
-  { key: 'saturday', label: 'Sabado', shortLabel: 'Sabado' },
+  { key: 'saturday', label: 'Sábado', shortLabel: 'Sabado' },
   { key: 'sunday', label: 'Domingo', shortLabel: 'Domingo' },
 ];
 
@@ -1466,7 +1466,7 @@ export default function Configuracoes() {
               </label>
             </div>
             <div className="label">
-              <span>Horarios de funcionamento</span>
+              <span>Horários de funcionamento</span>
               <div className="working-hours">
                 {workingHours.map((day) => (
                   <div key={day.key} className="working-hours__row">
@@ -1504,7 +1504,7 @@ export default function Configuracoes() {
               </span>
             </div>
             <label className="label">
-              <span>Observacoes (opcional)</span>
+              <span>Observações (opcional)</span>
               <textarea
                 className="input"
                 rows={3}
@@ -1514,7 +1514,7 @@ export default function Configuracoes() {
                 placeholder={'Plantoes, feriados ou orientacoes especiais'}
               />
               <span className="muted" style={{ fontSize: 12 }}>
-                Essas observacoes aparecem junto aos horarios no agendamento.
+                Essas observações aparecem junto aos horários no agendamento.
               </span>
             </label>
             <div className="grid" style={{ gap: 10, gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}>
@@ -1964,7 +1964,7 @@ export default function Configuracoes() {
   return (
     <div className="grid" style={{ gap: 12 }}>
       <div className="card">
-        <h2 style={{ marginTop: 0 }}>Configuracoes</h2>
+        <h2 style={{ marginTop: 0 }}>Configurações</h2>
         <p className="muted" style={{ marginTop: 0 }}>Gerencie sua conta e preferências.</p>
       </div>
 

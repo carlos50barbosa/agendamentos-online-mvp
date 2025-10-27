@@ -503,10 +503,10 @@ export default function ServicosEstabelecimento() {
             {planLimitMessage || 'Seu plano atual (Starter) permite cadastrar ate 10 servicos. Para adicionar novos servicos, migre para o plano Pro ou Premium.'}
           </p>
           <p className="muted">
-            Acesse <strong>Configuracoes &gt; Planos</strong> ou utilize os botoes abaixo para mudar de plano.
+            Acesse <strong>Configurações &gt; Planos</strong> ou utilize os botões abaixo para mudar de plano.
           </p>
           <div className="row" style={{ gap: 8, justifyContent: 'flex-end', marginTop: 16 }}>
-            <Link className="btn btn--outline" to="/configuracoes" onClick={() => setPlanLimitOpen(false)}>Ir para Configuracoes</Link>
+            <Link className="btn btn--outline" to="/configuracoes" onClick={() => setPlanLimitOpen(false)}>Ir para Configurações</Link>
             <Link className="btn btn--primary" to="/planos" onClick={() => setPlanLimitOpen(false)}>Ver planos</Link>
           </div>
           <div className="row" style={{ justifyContent: 'flex-end', marginTop: 8 }}>
@@ -517,11 +517,11 @@ export default function ServicosEstabelecimento() {
 
       {editOpen && (
         <Modal onClose={() => setEditOpen(false)}>
-          <h3>Editar servico</h3>
+          <h3>Editar serviço</h3>
           <div className="grid" style={{ gap: 8, marginTop: 8 }}>
             <input
               className="input"
-              placeholder="Nome do servico"
+              placeholder="Nome do serviço"
               value={editForm.nome}
               onChange={(e) => setEditForm((f) => ({ ...f, nome: e.target.value }))}
               maxLength={80}
