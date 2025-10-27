@@ -7,25 +7,25 @@ const SUPPORT_CHANNELS = [
   {
     key: 'whatsapp',
     title: 'WhatsApp',
-    description: 'Atendimento em dias uteis das 9h as 18h. Informe CNPJ ou email de login para agilizar a conversa.',
-    href: 'https://wa.me/5511959929380?text=Ola%20Time%20Agendamentos%20Online%20Preciso%20de%20ajuda%20com%20o%20painel',
+    description: 'Atendimento em dias úteis das 9h às 18h. Informe CNPJ ou e-mail de login para agilizar a conversa.',
+    href: 'https://wa.me/5511959929380?text=Olá%20Time%20Agendamentos%20Online%20Preciso%20de%20ajuda%20com%20o%20painel',
     action: 'Abrir conversa',
     external: true,
   },
   {
     key: 'email',
-    title: 'Email',
-    description: 'Respostas em ate um dia util. Ideal para duvidas sobre acesso e cobrancas.',
+    title: 'E-mail',
+    description: 'Respostas em até um dia útil. Ideal para dúvidas sobre acesso e cobranças.',
     href: 'mailto:servicos.negocios.digital@gmail.com?subject=Suporte%20Agendamentos%20Online',
-    action: 'Enviar email',
+    action: 'Enviar e-mail',
     external: false,
   },
   {
     key: 'demo',
     title: 'Agendar conversa guiada',
-    description: 'Reserve um horario com especialista para revisar configuracoes e melhores praticas.',
+    description: 'Reserve um horário com especialista para revisar configurações e melhores práticas.',
     href: 'https://cal.com/agendamentos-online/demo',
-    action: 'Reservar horario',
+    action: 'Reservar horário',
     external: true,
   },
 ];
@@ -82,8 +82,8 @@ export default function Ajuda() {
         key: 'profile',
         title: isEstab ? 'Atualizar cadastro da empresa' : 'Atualizar dados pessoais',
         description: isEstab
-          ? 'Edite razao social, telefone principal e senha em Perfil e Seguranca.'
-          : 'Revise nome, email e senha para continuar recebendo notificacoes.',
+          ? 'Edite razão social, telefone principal e senha em Perfil e Segurança.'
+          : 'Revise nome, e-mail e senha para continuar recebendo notificações.',
         section: 'profile',
         cta: 'Abrir perfil',
       },
@@ -92,15 +92,15 @@ export default function Ajuda() {
       items.push(
         {
           key: 'public-profile',
-          title: 'Configurar vitrine e horarios',
-          description: 'Defina texto de apresentacao, contatos e disponibilidade para clientes.',
+          title: 'Configurar vitrine e horários',
+          description: 'Defina texto de apresentação, contatos e disponibilidade para clientes.',
           section: 'public-profile',
           cta: 'Editar vitrine',
         },
         {
           key: 'plan',
-          title: 'Gerenciar plano e cobrancas',
-          description: 'Acompanhe faturas, gere PIX e ajuste recorrencia quando necessario.',
+          title: 'Gerenciar plano e cobranças',
+          description: 'Acompanhe faturas, gere PIX e ajuste recorrência quando necessário.',
           section: 'plan',
           cta: 'Abrir painel financeiro',
         },
@@ -109,7 +109,7 @@ export default function Ajuda() {
     items.push({
       key: 'support',
       title: 'Preciso de ajuda humana',
-      description: 'Abra um chamado direto com o time via email ou WhatsApp.',
+      description: 'Abra um chamado direto com o time via e-mail ou WhatsApp.',
       to: '/contato',
       cta: 'Abrir contato',
     });
@@ -119,16 +119,16 @@ export default function Ajuda() {
   const getStartedSteps = useMemo(() => {
     if (isEstab) {
       return [
-        'Revise dados fiscais, telefone e senha em Configuracoes > Perfil e Seguranca.',
-        'Preencha a vitrine publica com descricao, contatos e link para redes sociais.',
-        'Habilite dias e horarios na grade de funcionamento para liberar a agenda.',
-        'Compartilhe o link publico com clientes e acompanhe agendamentos no painel.',
+        'Revise dados fiscais, telefone e senha em Configurações > Perfil e Segurança.',
+        'Preencha a vitrine pública com descrição, contatos e link para redes sociais.',
+        'Habilite dias e horários na grade de funcionamento para liberar a agenda.',
+        'Compartilhe o link público com clientes e acompanhe agendamentos no painel.',
       ];
     }
     return [
-      'Confirme nome, email e telefone em Configuracoes > Perfil e Seguranca.',
-      'Use o painel do cliente para acompanhar proximos atendimentos e notificacoes.',
-      'Acesse Novo agendamento para buscar estabelecimentos e reservar um horario.',
+      'Confirme nome, e-mail e telefone em Configurações > Perfil e Segurança.',
+      'Use o painel do cliente para acompanhar próximos atendimentos e notificações.',
+      'Acesse Novo agendamento para buscar estabelecimentos e reservar um horário.',
     ];
   }, [isEstab]);
 
@@ -137,24 +137,24 @@ export default function Ajuda() {
       return [
         {
           key: 'services',
-          label: 'Cadastrar servicos e duracao',
+          label: 'Cadastrar serviços e duração',
           description: 'Defina valores, tempo e categoria de cada atendimento.',
           to: '/servicos',
-          cta: 'Abrir servicos',
+          cta: 'Abrir serviços',
         },
         {
           key: 'professionals',
           label: 'Adicionar profissionais ao time',
-          description: 'Vincule quem atende cada servico para controlar agendas.',
+          description: 'Vincule quem atende cada serviço para controlar agendas.',
           to: '/profissionais',
           cta: 'Gerenciar equipe',
         },
         {
           key: 'reports',
-          label: 'Acompanhar resultados no relatorio',
-          description: 'Veja confirmacoes, cancelamentos e faturamento por periodo.',
+          label: 'Acompanhar resultados no relatório',
+          description: 'Veja confirmações, cancelamentos e faturamento por período.',
           to: '/relatorios',
-          cta: 'Ver relatorio',
+          cta: 'Ver relatório',
         },
       ];
     }
@@ -162,7 +162,7 @@ export default function Ajuda() {
       {
         key: 'dashboard',
         label: 'Painel do cliente',
-        description: 'Confira status dos seus agendamentos e confirme presenca.',
+        description: 'Confira status dos seus agendamentos e confirme presença.',
         to: '/cliente',
         cta: 'Abrir painel',
       },
@@ -176,7 +176,7 @@ export default function Ajuda() {
       {
         key: 'plans',
         label: 'Indicar a plataforma',
-        description: 'Mostre os planos disponiveis para um parceiro ou gestor interessado.',
+        description: 'Mostre os planos disponíveis para um parceiro ou gestor interessado.',
         to: '/planos',
         cta: 'Ver planos',
       },
@@ -187,29 +187,29 @@ export default function Ajuda() {
     if (isEstab) {
       return [
         {
-          question: 'Como gerar o link publico do meu estabelecimento?',
+          question: 'Como gerar o link público do meu estabelecimento?',
           answer:
-            'Em Configuracoes > Perfil publico, salve as informacoes e copie o link exibido no topo da pagina. Compartilhe com clientes por WhatsApp, site ou redes sociais.',
+            'Em Configurações > Perfil público, salve as informações e copie o link exibido no topo da página. Compartilhe com clientes por WhatsApp, site ou redes sociais.',
         },
         {
-          question: 'Posso bloquear dias especificos ou feriados?',
+          question: 'Posso bloquear dias específicos ou feriados?',
           answer:
-            'Sim. Desative o dia desejado na grade de funcionamento ou ajuste o horario para deixar sem vagas. Para bloqueios pontuais, use a agenda do estabelecimento para criar eventos internos.',
+            'Sim. Desative o dia desejado na grade de funcionamento ou ajuste o horário para deixar sem vagas. Para bloqueios pontuais, use a agenda do estabelecimento para criar eventos internos.',
         },
         {
           question: 'Quais formas de pagamento posso usar para o plano?',
           answer:
-            'No card Plano do Estabelecimento ha opcoes de checkout via cartao e PIX. Tambem e possivel ativar recorrencia automatica pelo cartao diretamente no mesmo local.',
+            'No card Plano do Estabelecimento há opções de checkout via cartão e PIX. Também é possível ativar recorrência automática pelo cartão diretamente no mesmo local.',
         },
         {
-          question: 'Como defino quem recebe notificacoes de agendamento?',
+          question: 'Como defino quem recebe notificações de agendamento?',
           answer:
-            'Ainda em Perfil e Seguranca, habilite ou desabilite os campos de alerta por email e WhatsApp. Use um telefone valido com DDD para garantir o envio.',
+            'Ainda em Perfil e Segurança, habilite ou desabilite os campos de alerta por e-mail e WhatsApp. Use um telefone válido com DDD para garantir o envio.',
         },
         {
           question: 'O que acontece se eu mudar de plano antes do fim do ciclo?',
           answer:
-            'Upgrades liberam recursos imediatamente e o novo valor e cobrado no proximo ciclo. Downgrades entram em vigor ao final do periodo atual, desde que voce respeite os limites do plano escolhido.',
+            'Upgrades liberam recursos imediatamente e o novo valor é cobrado no próximo ciclo. Downgrades entram em vigor ao final do período atual, desde que você respeite os limites do plano escolhido.',
         },
       ];
     }
@@ -217,22 +217,22 @@ export default function Ajuda() {
       {
         question: 'Como reagendar ou cancelar um atendimento?',
         answer:
-          'Acesse o painel do cliente e abra o agendamento desejado. Use as opcoes de reagendar ou cancelar seguindo as politicas do estabelecimento escolhido.',
+          'Acesse o painel do cliente e abra o agendamento desejado. Use as opções de reagendar ou cancelar seguindo as políticas do estabelecimento escolhido.',
       },
       {
-        question: 'Nao recebi email de confirmacao. E normal?',
+        question: 'Não recebi e-mail de confirmação. É normal?',
         answer:
-          'Verifique a caixa de spam e confirme se o email cadastrado em Configuracoes > Perfil e Seguranca esta correto. Voce tambem pode checar o status direto no painel.',
+          'Verifique a caixa de spam e confirme se o e-mail cadastrado em Configurações > Perfil e Segurança está correto. Você também pode checar o status direto no painel.',
       },
       {
         question: 'Posso compartilhar o link do meu agendamento?',
         answer:
-          'Sim. No painel do cliente, abra o agendamento confirmado e use o botao de compartilhar para enviar pelo WhatsApp ou copiar o link.',
+          'Sim. No painel do cliente, abra o agendamento confirmado e use o botão de compartilhar para enviar pelo WhatsApp ou copiar o link.',
       },
       {
         question: 'Esqueci minha senha. Como recuperar?',
         answer:
-          'Clique em Esqueci minha senha na tela de login e informe o email cadastrado. Voce recebera um link temporario para criar uma nova senha.',
+          'Clique em Esqueci minha senha na tela de login e informe o e-mail cadastrado. Você receberá um link temporário para criar uma nova senha.',
       },
     ];
   }, [isEstab]);
@@ -259,10 +259,10 @@ export default function Ajuda() {
       <section className="card help-hero">
         <header>
           <span className="tag tag--accent">Central de apoio</span>
-          <h2>Ajuda e recursos para tirar proveito das configuracoes</h2>
+          <h2>Ajuda e recursos para tirar proveito das configurações</h2>
         </header>
         <p className="muted">
-          Explore atalhos, artigos e canais de suporte para resolver duvidas sobre o painel de agendamentos online.
+          Explore atalhos, artigos e canais de suporte para resolver dúvidas sobre o painel de agendamentos online.
         </p>
         <div className="help-hero__actions">
           <button type="button" className="btn btn--primary btn--sm" onClick={() => navigate('/contato')}>
@@ -273,7 +273,7 @@ export default function Ajuda() {
           </Link>
           <a
             className="btn btn--ghost btn--sm"
-            href="https://wa.me/5511959929380?text=Ola%20Time%20Agendamentos%20Online%20Preciso%20de%20ajuda%20com%20o%20painel"
+            href="https://wa.me/5511959929380?text=Olá%20Time%20Agendamentos%20Online%20Preciso%20de%20ajuda%20com%20o%20painel"
             target="_blank"
             rel="noreferrer"
           >
@@ -284,8 +284,8 @@ export default function Ajuda() {
 
       <section className="card help-quick">
         <header className="help-section__header">
-          <h3>Acoes rapidas</h3>
-          <p className="muted">Abra direto as configuracoes mais usadas.</p>
+          <h3>Ações rápidas</h3>
+          <p className="muted">Abra direto as configurações mais usadas.</p>
         </header>
         <div className="help-quick__grid">
           {quickActions.map((action) => (
@@ -296,8 +296,8 @@ export default function Ajuda() {
 
       <section className="card help-guides">
         <header className="help-section__header">
-          <h3>Checklist de ativacao</h3>
-          <p className="muted">Siga os passos para colocar sua conta em producao rapidamente.</p>
+          <h3>Checklist de ativação</h3>
+          <p className="muted">Siga os passos para colocar sua conta em produção rapidamente.</p>
         </header>
         <ol className="help-steps__list">
           {getStartedSteps.map((step) => (
@@ -314,7 +314,7 @@ export default function Ajuda() {
       <section id="faq" className="card help-faq">
         <header className="help-section__header">
           <h3>Perguntas frequentes</h3>
-          <p className="muted">Respostas curtas para temas recorrentes da pagina de configuracoes.</p>
+          <p className="muted">Respostas curtas para temas recorrentes da página de configurações.</p>
         </header>
         <div className="faq-grid">
           {faqItems.map((item) => (
@@ -340,4 +340,3 @@ export default function Ajuda() {
     </div>
   );
 }
-
