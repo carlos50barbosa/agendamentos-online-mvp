@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useMemo, useState } from 'react'
 import { Link, useNavigate, useLocation } from 'react-router-dom'
 import LogoAO from '../components/LogoAO.jsx'
 import { Api } from '../utils/api'
@@ -7,7 +7,16 @@ import { saveToken, saveUser } from '../utils/auth'
 export default function LoginCliente(){
   const nav = useNavigate()
   const loc = useLocation()
-  const nextParam = React.useMemo(() => new URLSearchParams(loc.search).get('next') || '', [loc.search])
+  const nextParam = useMemo(() => new URLSearchParams(loc.search).get('next') || '', [loc.search])
+  const storedNext = useMemo(() => {
+    if (typeof window === 'undefined') return ''
+    try {
+      return sessionStorage.getItem('next_after_login') || ''
+    } catch {
+      return ''
+    }
+  }, [loc.key])
+  const nextTarget = nextParam || storedNext || '/cliente'
   const [email,setEmail]=useState('')
   const [senha,setSenha]=useState('')
   const [showPass,setShowPass]=useState(false)
@@ -20,8 +29,8 @@ export default function LoginCliente(){
       const { token, user } = await Api.login(email.trim(), senha)
       if(user?.tipo!=='cliente') throw new Error('tipo_incorreto')
       saveToken(token); saveUser(user);
-      const next = nextParam || '/cliente'
-      nav(`/loading?type=login&next=${encodeURIComponent(next)}`)
+      try { sessionStorage.removeItem('next_after_login') } catch {}
+      nav(`/loading?type=login&next=${encodeURIComponent(nextTarget)}`)
     }catch(e){
       setErr(
         e?.message==='tipo_incorreto'

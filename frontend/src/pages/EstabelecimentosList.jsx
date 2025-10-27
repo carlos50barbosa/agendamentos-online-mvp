@@ -424,7 +424,7 @@ export default function EstabelecimentosList() {
           )}
           {!geoError && userLocation && (
             <div className="home-search-box__status" aria-live="polite">
-              Resultados ordenados pela sua localizacao atual.
+
             </div>
           )}
           {!geoError && geocoding && (
@@ -525,6 +525,7 @@ export default function EstabelecimentosList() {
     </div>
   );
 }
+
 
 
 

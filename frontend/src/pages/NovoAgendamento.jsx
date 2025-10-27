@@ -813,6 +813,15 @@ export default function NovoAgendamento() {
     return `/login?next=${encodeURIComponent(path)}`;
   }, [location.pathname, location.search]);
 
+  useEffect(() => {
+    if (isAuthenticated) return;
+    if (typeof window === 'undefined') return;
+    try {
+      const path = `${location.pathname}${location.search}` || '/';
+      sessionStorage.setItem('next_after_login', path);
+    } catch {}
+  }, [isAuthenticated, location.pathname, location.search]);
+
   // Redireciona estabelecimentos para seu dashboard
   useEffect(() => {
     if (user?.tipo === 'estabelecimento') {
