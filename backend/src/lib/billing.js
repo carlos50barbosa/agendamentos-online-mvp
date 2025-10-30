@@ -324,17 +324,28 @@ export async function createMercadoPagoCheckout({
   const uiSuccess = pickValidUrl(config.billing?.mercadopago?.successUrl) || `${FRONT_BASE}/configuracoes?checkout=sucesso`
   const callbackUrl = `${API_BASE}/billing/callback?next=${encodeURIComponent(uiSuccess)}`
 
+  const externalReference = buildExternalReference(estabelecimento.id, normalizedPlan, normalizedCycle)
+  const notificationUrl = `${API_BASE}/billing/webhook`
+
   const planBody = {
     reason: `Agendamentos Online - Plano ${getPlanLabel(normalizedPlan)}`,
     back_url: callbackUrl,
+    notification_url: notificationUrl,
+    external_reference: externalReference,
+    payer_email: payerEmail,
     auto_recurring: {
       frequency: cycleCfg.frequency,
       frequency_type: cycleCfg.frequencyType,
       transaction_amount: amountNum,
       currency_id: BILLING_CURRENCY,
     },
+    payment_methods_allowed: {
+      payment_types: [
+        { id: 'credit_card' },
+      ],
+    },
   }
-  // Opção A: sem pró‑rata; se upgrade, empurra a primeira cobrança para o próximo ciclo
+  // Opção A: sem pró-rata; se upgrade, empurra a primeira cobrança para o próximo ciclo
   if (deferStartDate) {
     try {
       const d = new Date(deferStartDate)
@@ -366,12 +377,12 @@ export async function createMercadoPagoCheckout({
     planId: planResp.id,
     application_id: planResp.application_id,
     collector_id: planResp.collector_id,
+    external_reference: planResp.external_reference || null,
     hasSandbox: Boolean(planResp.sandbox_init_point),
     hasInit: Boolean(planResp.init_point),
     chosen: chosenInitPoint ? 'ok' : 'null',
   })
 
-  const externalReference = buildExternalReference(estabelecimento.id, normalizedPlan, normalizedCycle)
   const subscription = await createSubscription({
     estabelecimentoId: estabelecimento.id,
     plan: normalizedPlan,

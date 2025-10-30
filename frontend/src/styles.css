@@ -255,6 +255,24 @@ body{
   font-size:13px;
   color:var(--muted);
 }
+.working-hours__break{
+  display:flex;
+  align-items:center;
+  gap:12px;
+  flex-wrap:wrap;
+}
+.working-hours__break-toggle span{
+  font-size:13px;
+  color:var(--text);
+}
+.working-hours__break-range{
+  display:flex;
+  align-items:center;
+  gap:8px;
+}
+.working-hours__break-range .input{
+  width:110px;
+}
 @media (max-width:640px){
   .working-hours__row{
     flex-direction:column;
@@ -264,6 +282,17 @@ body{
     width:100%;
   }
   .working-hours__time .input{
+    width:100%;
+  }
+  .working-hours__break{
+    width:100%;
+    flex-direction:column;
+    align-items:flex-start;
+  }
+  .working-hours__break-range{
+    width:100%;
+  }
+  .working-hours__break-range .input{
     width:100%;
   }
 }

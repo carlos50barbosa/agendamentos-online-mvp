@@ -315,6 +315,9 @@ const buildWorkingSchedule = (entries) => {
     end: '',
     startMinutes: null,
     endMinutes: null,
+    blocks: [],
+    breaks: [],
+    blockMinutes: [],
   }));
   const recognized = new Set();
 
@@ -332,6 +335,9 @@ const buildWorkingSchedule = (entries) => {
         end: '',
         startMinutes: null,
         endMinutes: null,
+        blocks: [],
+        breaks: [],
+        blockMinutes: [],
       };
       return;
     }
@@ -351,6 +357,9 @@ const buildWorkingSchedule = (entries) => {
         end: '',
         startMinutes: null,
         endMinutes: null,
+        blocks: [],
+        breaks: [],
+        blockMinutes: [],
       };
       return;
     }
@@ -368,9 +377,49 @@ const buildWorkingSchedule = (entries) => {
         end: '',
         startMinutes: null,
         endMinutes: null,
+        blocks: [],
+        breaks: [],
+        blockMinutes: [],
       };
       return;
     }
+
+    const rawBlocks = Array.isArray(item.blocks)
+      ? item.blocks
+      : Array.isArray(item.breaks)
+      ? item.breaks
+      : item.block_start || item.blockStart || item.block_end || item.blockEnd
+      ? [{
+          start: item.block_start ?? item.blockStart ?? null,
+          end: item.block_end ?? item.blockEnd ?? null,
+        }]
+      : [];
+
+    const sanitizedBlocks = [];
+    rawBlocks.forEach((block) => {
+      if (!block) return;
+      const blockStart = ensureTimeValue(block.start ?? block.begin ?? block.from ?? '');
+      const blockEnd = ensureTimeValue(block.end ?? block.finish ?? block.to ?? '');
+      if (!blockStart || !blockEnd) return;
+      const blockStartMinutes = toMinutes(blockStart);
+      const blockEndMinutes = toMinutes(blockEnd);
+      if (
+        blockStartMinutes == null ||
+        blockEndMinutes == null ||
+        blockStartMinutes >= blockEndMinutes
+      ) {
+        return;
+      }
+      if (blockStartMinutes < startMinutes || blockEndMinutes > endMinutes) {
+        return;
+      }
+      sanitizedBlocks.push({
+        start: blockStart,
+        end: blockEnd,
+        startMinutes: blockStartMinutes,
+        endMinutes: blockEndMinutes,
+      });
+    });
 
     rules[dayIndex] = {
       enabled: true,
@@ -379,6 +428,9 @@ const buildWorkingSchedule = (entries) => {
       end,
       startMinutes,
       endMinutes,
+      blocks: sanitizedBlocks.map(({ start: bStart, end: bEnd }) => ({ start: bStart, end: bEnd })),
+      breaks: sanitizedBlocks.map(({ start: bStart, end: bEnd }) => ({ start: bStart, end: bEnd })),
+      blockMinutes: sanitizedBlocks.map(({ startMinutes: bStart, endMinutes: bEnd }) => [bStart, bEnd]),
     };
   });
 
@@ -405,6 +457,9 @@ const inBusinessHours = (isoDatetime, schedule = null) => {
     const rule = schedule[d.getDay()];
     if (!rule || !rule.enabled) return false;
     const minutes = d.getHours() * 60 + d.getMinutes();
+    if (Array.isArray(rule.blockMinutes) && rule.blockMinutes.some(([start, end]) => minutes >= start && minutes < end)) {
+      return false;
+    }
     return minutes >= rule.startMinutes && minutes <= rule.endMinutes;
   }
   const h = d.getHours();
@@ -467,9 +522,25 @@ function fillBusinessGrid({ currentWeek, slots, stepMinutes = 30, workingSchedul
     for (let t = start.getTime(); t <= end.getTime(); t += stepMinutes * 60_000) {
       const k = localKey(t);
       const existing = byKey.get(k);
-      filled.push(
-        existing || { datetime: new Date(t).toISOString(), label: "disponível", status: "available" }
-      );
+      const slotDate = new Date(t);
+      const minutesOfDay = slotDate.getHours() * 60 + slotDate.getMinutes();
+      const blockedByRule =
+        dayRule &&
+        Array.isArray(dayRule.blockMinutes) &&
+        dayRule.blockMinutes.some(([startMin, endMin]) => minutesOfDay >= startMin && minutesOfDay < endMin);
+      const normalizedLabel = existing ? normalizeSlotLabel(existing.label) : '';
+      const baseSlot = existing
+        ? { ...existing }
+        : { datetime: slotDate.toISOString(), label: "disponivel", status: "available" };
+
+      if (blockedByRule && normalizedLabel !== 'agendado') {
+        baseSlot.label = "bloqueado";
+        baseSlot.status = "blocked";
+      } else if (!baseSlot.status) {
+        baseSlot.status = normalizedLabel === 'agendado' ? 'booked' : 'available';
+      }
+
+      filled.push(baseSlot);
     }
   }
   return filled;
@@ -1347,6 +1418,9 @@ export default function NovoAgendamento() {
 
         const overlayed = grid.map((s) => {
           const k = minuteISO(s.datetime);
+          if (normalizeSlotLabel(s.label) === 'bloqueado') {
+            return { ...s, label: 'bloqueado' };
+          }
           if (blockedSet.has(k)) return { ...s, label: 'bloqueado' };
           const countApi = state.professionalId ? 0 : busyFromApiCount.get(k) || 0;
           const countAppt = apptCounts && typeof apptCounts.get === 'function' ? apptCounts.get(k) || 0 : 0;

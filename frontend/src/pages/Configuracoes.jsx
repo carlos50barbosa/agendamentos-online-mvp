@@ -106,6 +106,9 @@ function createEmptyWorkingHours() {
     enabled: false,
     start: DEFAULT_WORKING_START,
     end: DEFAULT_WORKING_END,
+    blockEnabled: false,
+    blockStart: '',
+    blockEnd: '',
   }));
 }
 
@@ -237,11 +240,37 @@ function extractWorkingHoursFromProfile(profile) {
       start = end;
       end = tmp;
     }
+    const rawBlocks = Array.isArray(item.blocks)
+      ? item.blocks
+      : Array.isArray(item.breaks)
+      ? item.breaks
+      : [];
+
+    let blockEnabled = false;
+    let blockStart = '';
+    let blockEnd = '';
+
+    for (const block of rawBlocks) {
+      if (!block) continue;
+      const bStart = sanitizeTimeInput(block.start ?? block.begin ?? block.from ?? '');
+      const bEnd = sanitizeTimeInput(block.end ?? block.finish ?? block.to ?? '');
+      if (!bStart || !bEnd) continue;
+      if (bStart >= bEnd) continue;
+      if (bStart < start || bEnd > end) continue;
+      blockEnabled = true;
+      blockStart = bStart;
+      blockEnd = bEnd;
+      break;
+    }
+
     schedule[index] = {
       ...schedule[index],
       enabled: true,
       start,
       end,
+      blockEnabled,
+      blockStart,
+      blockEnd,
     };
     used.add(dayKey);
   }
@@ -265,6 +294,20 @@ function validateWorkingHours(schedule) {
     }
     if (day.start >= day.end) {
       return `O horario inicial deve ser anterior ao final em ${day.shortLabel}.`;
+    }
+    if (day.blockEnabled) {
+      if (!TIME_VALUE_REGEX.test(day.blockStart || '')) {
+        return `Informe um inicio valido para a trava em ${day.shortLabel}.`;
+      }
+      if (!TIME_VALUE_REGEX.test(day.blockEnd || '')) {
+        return `Informe um fim valido para a trava em ${day.shortLabel}.`;
+      }
+      if (day.blockStart >= day.blockEnd) {
+        return `A trava precisa ter inicio anterior ao fim em ${day.shortLabel}.`;
+      }
+      if (day.blockStart < day.start || day.blockEnd > day.end) {
+        return `A trava em ${day.shortLabel} deve estar dentro do horario de atendimento.`;
+      }
     }
   }
   return '';
@@ -292,12 +335,29 @@ function buildWorkingHoursPayload(schedule, notesText) {
     const start = sanitizeTimeInput(day.start) || DEFAULT_WORKING_START;
     const end = sanitizeTimeInput(day.end) || DEFAULT_WORKING_END;
     const label = `${formatTimeDisplay(start)} - ${formatTimeDisplay(end)}`;
+
+    const blocks = [];
+    if (day.blockEnabled) {
+      const blockStart = sanitizeTimeInput(day.blockStart);
+      const blockEnd = sanitizeTimeInput(day.blockEnd);
+      if (
+        blockStart &&
+        blockEnd &&
+        blockStart < blockEnd &&
+        blockStart >= start &&
+        blockEnd <= end
+      ) {
+        blocks.push({ start: blockStart, end: blockEnd });
+      }
+    }
+
     payload.push({
       label: day.shortLabel,
       value: label,
       day: day.key,
       start,
       end,
+      ...(blocks.length ? { blocks, breaks: blocks } : {}),
     });
   }
   const notes = String(notesText || '')
@@ -1010,12 +1070,35 @@ export default function Configuracoes() {
   const handleWorkingHoursToggle = useCallback((dayKey, enabled) => {
     setWorkingHours((prev) =>
       prev.map((day) =>
-        day.key === dayKey ? { ...day, enabled } : day
+        day.key === dayKey
+          ? { ...day, enabled, blockEnabled: enabled ? day.blockEnabled : false }
+          : day
       )
     );
   }, []);
 
   const handleWorkingHoursTimeChange = useCallback((dayKey, field, value) => {
+    const sanitized = sanitizeTimeInput(value);
+    setWorkingHours((prev) =>
+      prev.map((day) =>
+        day.key === dayKey
+          ? { ...day, [field]: sanitized }
+          : day
+      )
+    );
+  }, []);
+
+  const handleWorkingHoursBlockToggle = useCallback((dayKey, enabled) => {
+    setWorkingHours((prev) =>
+      prev.map((day) =>
+        day.key === dayKey
+          ? { ...day, blockEnabled: enabled }
+          : day
+      )
+    );
+  }, []);
+
+  const handleWorkingHoursBlockChange = useCallback((dayKey, field, value) => {
     const sanitized = sanitizeTimeInput(value);
     setWorkingHours((prev) =>
       prev.map((day) =>
@@ -1496,6 +1579,36 @@ export default function Configuracoes() {
                         disabled={publicProfileLoading || publicProfileSaving || !day.enabled}
                       />
                     </div>
+                    <div className="working-hours__break">
+                      <label className="switch working-hours__break-toggle">
+                        <input
+                          type="checkbox"
+                          checked={day.blockEnabled}
+                          onChange={(e) => handleWorkingHoursBlockToggle(day.key, e.target.checked)}
+                          disabled={publicProfileLoading || publicProfileSaving || !day.enabled}
+                        />
+                        <span>Trava de horario</span>
+                      </label>
+                      {day.blockEnabled && (
+                        <div className="working-hours__break-range">
+                          <input
+                            type="time"
+                            className="input"
+                            value={day.blockStart}
+                            onChange={(e) => handleWorkingHoursBlockChange(day.key, 'blockStart', e.target.value)}
+                            disabled={publicProfileLoading || publicProfileSaving || !day.enabled}
+                          />
+                          <span className="working-hours__separator">as</span>
+                          <input
+                            type="time"
+                            className="input"
+                            value={day.blockEnd}
+                            onChange={(e) => handleWorkingHoursBlockChange(day.key, 'blockEnd', e.target.value)}
+                            disabled={publicProfileLoading || publicProfileSaving || !day.enabled}
+                          />
+                        </div>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>
@@ -1955,6 +2068,8 @@ export default function Configuracoes() {
     handlePublicProfileChange,
     handleWorkingHoursToggle,
     handleWorkingHoursTimeChange,
+    handleWorkingHoursBlockToggle,
+    handleWorkingHoursBlockChange,
     handleSavePublicProfile,
     handleCopyPublicLink,
     qrCodeUrl,

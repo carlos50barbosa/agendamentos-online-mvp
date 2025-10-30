@@ -271,6 +271,35 @@ function sanitizeHorariosInput(input) {
     if (daySlug) sanitizedEntry.day = daySlug;
     if (start) sanitizedEntry.start = start;
     if (end) sanitizedEntry.end = end;
+
+    const rawBlocks = Array.isArray(entry.blocks)
+      ? entry.blocks
+      : Array.isArray(entry.breaks)
+      ? entry.breaks
+      : entry.block_start || entry.blockStart || entry.block_end || entry.blockEnd
+      ? [{
+          start: entry.block_start ?? entry.blockStart ?? null,
+          end: entry.block_end ?? entry.blockEnd ?? null,
+        }]
+      : [];
+
+    const sanitizedBlocks = [];
+    for (const block of rawBlocks) {
+      if (!block) continue;
+      const blockStart = sanitizeTimeValue(block.start ?? block.begin ?? block.from ?? null);
+      const blockEnd = sanitizeTimeValue(block.end ?? block.finish ?? block.to ?? null);
+      if (!blockStart || !blockEnd) continue;
+      if (blockStart >= blockEnd) continue;
+      if (start && blockStart < start) continue;
+      if (end && blockEnd > end) continue;
+      sanitizedBlocks.push({ start: blockStart, end: blockEnd });
+      if (sanitizedBlocks.length >= 3) break;
+    }
+    if (sanitizedBlocks.length) {
+      sanitizedEntry.blocks = sanitizedBlocks;
+      sanitizedEntry.breaks = sanitizedBlocks;
+    }
+
     const key = `${daySlug || label}::${value}::${start || ''}-${end || ''}`;
     if (seen.has(key)) continue;
     seen.add(key);
@@ -410,13 +439,40 @@ function parseHorarios(value) {
               start = end;
               end = temp;
             }
-            return {
+            const rawBlocks = Array.isArray(item.blocks)
+              ? item.blocks
+              : Array.isArray(item.breaks)
+              ? item.breaks
+              : item.block_start || item.blockStart || item.block_end || item.blockEnd
+              ? [{
+                  start: item.block_start ?? item.blockStart ?? null,
+                  end: item.block_end ?? item.blockEnd ?? null,
+                }]
+              : [];
+            const sanitizedBlocks = [];
+            for (const block of rawBlocks) {
+              if (!block) continue;
+              const blockStart = sanitizeTimeValue(block.start ?? block.begin ?? block.from ?? null);
+              const blockEnd = sanitizeTimeValue(block.end ?? block.finish ?? block.to ?? null);
+              if (!blockStart || !blockEnd) continue;
+              if (blockStart >= blockEnd) continue;
+              if (start && blockStart < start) continue;
+              if (end && blockEnd > end) continue;
+              sanitizedBlocks.push({ start: blockStart, end: blockEnd });
+              if (sanitizedBlocks.length >= 3) break;
+            }
+            const result = {
               label: resolvedLabel,
               value: valueText || resolvedLabel,
               day: daySlug || null,
               start: start || null,
               end: end || null,
             };
+            if (sanitizedBlocks.length) {
+              result.blocks = sanitizedBlocks;
+              result.breaks = sanitizedBlocks;
+            }
+            return result;
           }
           return null;
         })

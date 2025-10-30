@@ -1,7 +1,7 @@
 # VSCODE --> GITHUB
 cd /opt/apps/agendamentos-online-mvp
 git add .
-git commit -m "Atualização 26-10-2025 (Políticas, termos QRCode)"
+git commit -m "Pagamentos MP)"
 git push origin main
 
 ---------------------------------------------
