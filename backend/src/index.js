@@ -24,6 +24,7 @@ import profissionaisRouter from './routes/profissionais.js';
 import { pool } from './lib/db.js';
 import { startMaintenance } from './lib/maintenance.js';
 import { mountWebhooks } from './routes/webhooks.js';
+import { startBillingMonitor } from './lib/billing_monitor.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -123,9 +124,6 @@ app.listen(PORT, HOST, () => {
   console.log(`✅ Backend ouvindo em http://${HOST}:${PORT}`);
 });
 
-// Tarefas de manutenção periódicas (limpeza de tokens expirados, etc.)
+// Tarefas de manutencao: limpeza de tokens expirados e lembretes de cobranca
 startMaintenance(pool);
-
-
-
-
+startBillingMonitor();

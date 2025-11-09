@@ -26,6 +26,15 @@ function requireAny(...names) {
   return value
 }
 
+function parseBool(value, fallback = false) {
+  if (value === undefined || value === null) return fallback
+  const normalized = String(value).trim().toLowerCase()
+  if (!normalized) return fallback
+  if (['1', 'true', 'yes', 'on'].includes(normalized)) return true
+  if (['0', 'false', 'no', 'off'].includes(normalized)) return false
+  return fallback
+}
+
 export const config = {
   db: {
     host: requireAny('DB_HOST', 'MYSQL_HOST'),
@@ -60,6 +69,13 @@ export const config = {
       failureUrl: getAny('MERCADOPAGO_FAILURE_URL') || null,
       pendingUrl: getAny('MERCADOPAGO_PENDING_URL') || null,
       testPayerEmail: getAny('MERCADOPAGO_TEST_PAYER_EMAIL'),
+    },
+    reminders: {
+      warnDays: Number(getAny('BILLING_WARN_DAYS', 'BILLING_REMINDER_WARN_DAYS') || 3) || 3,
+      graceDays: Number(getAny('BILLING_GRACE_DAYS', 'BILLING_REMINDER_GRACE_DAYS') || 3) || 3,
+      intervalMs: Number(getAny('BILLING_MONITOR_INTERVAL_MS', 'BILLING_REMINDER_INTERVAL_MS') || 30 * 60 * 1000) || 30 * 60 * 1000,
+      disabled: parseBool(getAny('BILLING_REMINDERS_DISABLED', 'BILLING_MONITOR_DISABLED'), false),
+      paymentUrl: getAny('BILLING_PAYMENT_URL', 'BILLING_REMINDER_PAYMENT_URL') || null,
     },
   },
 }

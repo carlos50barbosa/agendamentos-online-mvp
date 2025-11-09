@@ -242,7 +242,42 @@ function sanitizeHorariosInput(input) {
       ).trim();
       if (!valueText && label) valueText = label;
       if (!valueText) continue;
-      normalized.push({ label, value: valueText });
+
+      const normalizedEntry = { label, value: valueText };
+
+      // Preserve optional keys so downstream sanitization can infer the weekday.
+      const possibleKeys = ['day', 'key', 'weekday', 'week_day', 'dia'];
+      for (const key of possibleKeys) {
+        if (item[key] != null && normalizedEntry[key] == null) {
+          normalizedEntry[key] = item[key];
+        }
+      }
+
+      // Keep raw start/end hints when provided.
+      const startLike = item.start ?? item.begin ?? item.from ?? null;
+      const endLike = item.end ?? item.finish ?? item.to ?? null;
+      if (startLike != null) normalizedEntry.start = startLike;
+      if (endLike != null) normalizedEntry.end = endLike;
+
+      // Preserve block/break metadata.
+      const blocks =
+        Array.isArray(item.blocks) && item.blocks.length
+          ? item.blocks
+          : Array.isArray(item.breaks) && item.breaks.length
+          ? item.breaks
+          : null;
+      if (blocks) {
+        normalizedEntry.blocks = blocks;
+      }
+      if (Array.isArray(item.breaks) && item.breaks.length) {
+        normalizedEntry.breaks = item.breaks;
+      }
+      const blockStart = item.block_start ?? item.blockStart ?? null;
+      const blockEnd = item.block_end ?? item.blockEnd ?? null;
+      if (blockStart != null) normalizedEntry.block_start = blockStart;
+      if (blockEnd != null) normalizedEntry.block_end = blockEnd;
+
+      normalized.push(normalizedEntry);
     }
   }
 

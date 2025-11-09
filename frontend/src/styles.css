@@ -1263,6 +1263,54 @@ button.danger:disabled,
 .theme-toggle.is-disabled:hover,
 .theme-toggle.is-disabled:focus-visible{ background:transparent; color:var(--muted); box-shadow:none; }
 
+.billing-banner{
+  border-bottom: 1px solid var(--warning-border);
+  background: var(--warning-bg);
+  color: var(--warning-text);
+}
+.billing-banner--warning{
+  border-color: var(--warning-border);
+  background: var(--warning-bg);
+  color: var(--warning-text);
+}
+.billing-banner--danger{
+  border-color: var(--danger-border);
+  background: var(--danger-bg);
+  color: var(--danger-text);
+}
+.billing-banner__inner{
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 10px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.billing-banner__copy strong{
+  display: block;
+  font-size: 14px;
+  margin-bottom: 2px;
+}
+.billing-banner__copy p{
+  margin: 0;
+  font-size: 13px;
+  color: inherit;
+}
+.billing-banner__inner .btn{
+  white-space: nowrap;
+}
+@media (max-width: 640px){
+  .billing-banner__inner{
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .billing-banner__inner .btn{
+    width: 100%;
+    justify-content: center;
+  }
+}
+
 @media (max-width: 780px){
   .app-topbar__inner{ padding: 10px 16px; flex-direction: row; align-items: center; justify-content: space-between; }
   .container{ margin-top: 8px; }

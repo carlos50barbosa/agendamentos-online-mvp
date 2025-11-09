@@ -185,6 +185,7 @@ export const Api = {
     if (body.billing_cycle == null) body.billing_cycle = 'mensal';
     return req('/billing/pix', { method: 'POST', body: JSON.stringify(body) });
   },
+  billingStatus: () => req('/billing/status'),
 
   // ServiÃ§os (rotas existentes)
   servicosList: () => req('/servicos'),

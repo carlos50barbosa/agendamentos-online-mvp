@@ -23,13 +23,83 @@ const toISO = (d) => new Date(d).toISOString();
 
 const DAY_SLUG_TO_INDEX = Object.freeze({
   sunday: 0,
+  sundayfeira: 0,
+  sun: 0,
+  domingo: 0,
+  domingofeira: 0,
+  dom: 0,
   monday: 1,
+  mondayfeira: 1,
+  mon: 1,
+  segunda: 1,
+  segundafeira: 1,
+  seg: 1,
   tuesday: 2,
+  tuesdayfeira: 2,
+  tue: 2,
+  terca: 2,
+  tercafeira: 2,
+  ter: 2,
   wednesday: 3,
+  wednesdayfeira: 3,
+  wed: 3,
+  quarta: 3,
+  quartafeira: 3,
+  qua: 3,
   thursday: 4,
+  thursdayfeira: 4,
+  thu: 4,
+  quinta: 4,
+  quintafeira: 4,
+  qui: 4,
   friday: 5,
+  fridayfeira: 5,
+  fri: 5,
+  sexta: 5,
+  sextafeira: 5,
+  sex: 5,
   saturday: 6,
+  saturdayfeira: 6,
+  sat: 6,
+  sabado: 6,
+  sabadofeira: 6,
+  sab: 6,
 });
+
+const normalizeDayKey = (value) => {
+  if (!value && value !== 0) return '';
+  return String(value)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z]/g, '');
+};
+
+const resolveDayIndex = (item) => {
+  if (!item || typeof item !== 'object') return null;
+  const candidates = [
+    item.day,
+    item.key,
+    item.weekday,
+    item.week_day,
+    item.dia,
+    item.label,
+  ];
+  if (item.value) {
+    candidates.push(item.value);
+    const firstChunk = String(item.value).split(/[\s,;-]+/)[0];
+    candidates.push(firstChunk);
+  }
+
+  for (const candidate of candidates) {
+    const normalized = normalizeDayKey(candidate);
+    if (!normalized) continue;
+    if (Object.prototype.hasOwnProperty.call(DAY_SLUG_TO_INDEX, normalized)) {
+      return DAY_SLUG_TO_INDEX[normalized];
+    }
+  }
+  return null;
+};
 
 const ensureTimeValue = (value) => {
   if (!value && value !== 0) return null;
@@ -90,9 +160,7 @@ const buildWorkingRules = (horariosJson) => {
 
   entries.forEach((item) => {
     if (!item || typeof item !== 'object') return;
-    const slugRaw = item.day ?? item.key ?? item.weekday ?? item.week_day ?? '';
-    const slug = typeof slugRaw === 'string' ? slugRaw.toLowerCase().trim() : '';
-    const idx = DAY_SLUG_TO_INDEX[slug];
+    const idx = resolveDayIndex(item);
     if (idx == null) return;
     if (rules[idx].processed) return;
 

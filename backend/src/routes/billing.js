@@ -21,8 +21,28 @@ import {
 } from '../lib/subscriptions.js'
 import { pool } from '../lib/db.js'
 import { config } from '../lib/config.js'
+import { resolveBillingState } from '../lib/billing_monitor.js'
 
 const router = Router()
+const DAY_MS = 86400000
+
+async function summarizeReminders(estabelecimentoId) {
+  const [rows] = await pool.query(
+    `SELECT reminder_kind, channel, MAX(sent_at) AS sent_at
+     FROM billing_payment_reminders
+     WHERE estabelecimento_id=?
+     GROUP BY reminder_kind, channel`,
+    [estabelecimentoId]
+  )
+  const reminders = {}
+  for (const row of rows) {
+    const kind = row?.reminder_kind
+    if (!kind) continue
+    if (!reminders[kind]) reminders[kind] = {}
+    reminders[kind][row.channel] = row.sent_at ? new Date(row.sent_at).toISOString() : null
+  }
+  return reminders
+}
 
 function verifyWebhookSignature(req, resourceId) {
   const secretA = (config.billing?.mercadopago?.webhookSecret || '').trim()
@@ -109,6 +129,43 @@ async function resolveRecurringSubscription(estabelecimentoId, fallbackGatewayId
   }
   return history.find((item) => item.gatewaySubscriptionId) || null
 }
+
+router.get('/status', auth, isEstabelecimento, async (req, res) => {
+  try {
+    const ctx = await getPlanContext(req.user.id)
+    if (!ctx) return res.status(404).json({ error: 'plan_context_not_found' })
+    const state = resolveBillingState({
+      planStatus: ctx.status,
+      planActiveUntil: ctx.activeUntil,
+      planTrialEndsAt: ctx.trialEndsAt,
+    })
+    const dueAtIso = state.dueAt ? state.dueAt.toISOString() : null
+    const graceDeadlineIso =
+      state.dueAt && state.graceDays
+        ? new Date(state.dueAt.getTime() + state.graceDays * DAY_MS).toISOString()
+        : null
+    const reminders = await summarizeReminders(req.user.id)
+
+    return res.json({
+      ok: true,
+      plan: ctx.plan,
+      plan_status: ctx.status,
+      billing_cycle: ctx.cycle,
+      due_at: dueAtIso,
+      state: state.state,
+      warn_days: state.warnDays,
+      grace_days: state.graceDays,
+      grace_deadline: graceDeadlineIso,
+      days_to_due: state.daysToDue,
+      days_overdue: state.daysOverdue,
+      grace_days_remaining: state.graceDaysRemaining,
+      reminders,
+    })
+  } catch (err) {
+    console.error('[billing/status]', err)
+    return res.status(500).json({ error: 'server_error' })
+  }
+})
 
 router.post('/checkout-session', auth, isEstabelecimento, async (req, res) => {
   try {

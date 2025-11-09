@@ -36,6 +36,7 @@ import LinkPhone from './pages/LinkPhone.jsx';
 import Termos from './pages/Termos.jsx';
 import PoliticaPrivacidade from './pages/PoliticaPrivacidade.jsx';
 import { buildNavigation } from './utils/navigation.js';
+import { Api } from './utils/api.js';
 import {
   PREFERENCES_EVENT,
   PREFERENCES_STORAGE_KEY,
@@ -73,6 +74,71 @@ const APP_ROUTES = [
   { path: '/admin/db', element: <AdminDB /> },
   { path: '/admin/billing', element: <AdminBilling /> },
 ];
+
+const BILLING_ALERT_STATES = new Set(['due_soon', 'overdue', 'blocked']);
+
+function formatBillingDate(value) {
+  if (!value) return '';
+  try {
+    return new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: 'short' }).format(new Date(value));
+  } catch {
+    return '';
+  }
+}
+
+function BillingStatusBanner({ status, user }) {
+  if (!user || user?.tipo !== 'estabelecimento') return null;
+  if (!status || !BILLING_ALERT_STATES.has(status.state)) return null;
+
+  const state = status.state;
+  const dueLabel = formatBillingDate(status?.due_at);
+  const graceDeadline = formatBillingDate(status?.grace_deadline);
+
+  let tone = 'warning';
+  let title = '';
+  let body = '';
+  let ctaLabel = 'Pagar agora';
+
+  if (state === 'due_soon') {
+    const daysRaw = Number(status?.days_to_due ?? 0);
+    const days = Number.isNaN(daysRaw) ? 0 : Math.max(0, daysRaw);
+    const plural = days === 1 ? 'dia' : 'dias';
+    const timeLabel = days === 0 ? 'vence hoje' : `vence em ${days} ${plural}`;
+    title = `Pagamento ${timeLabel}`;
+    body = dueLabel
+      ? `Regularize ate ${dueLabel} para manter o acesso.`
+      : 'Regularize para manter o acesso.';
+  } else if (state === 'overdue') {
+    tone = 'warning';
+    title = 'Plano em atraso';
+    const overdueLabel = dueLabel ? `Venceu em ${dueLabel}.` : 'Seu pagamento venceu.';
+    const remainingRaw = Number(status?.grace_days_remaining ?? 0);
+    const remaining = Number.isNaN(remainingRaw) ? 0 : Math.max(0, remainingRaw);
+    const remainingText = remaining
+      ? `Bloqueio em ${remaining} ${remaining === 1 ? 'dia' : 'dias'}${graceDeadline ? ` (ate ${graceDeadline})` : ''}.`
+      : 'Atualize para evitar o bloqueio.';
+    body = `${overdueLabel} ${remainingText}`.trim();
+  } else {
+    tone = 'danger';
+    title = 'Plano suspenso';
+    body = 'O acesso foi bloqueado por falta de pagamento. Pague o PIX para liberar imediatamente.';
+    ctaLabel = 'Regularizar agora';
+  }
+
+  return (
+    <div className={`billing-banner billing-banner--${tone}`}>
+      <div className="billing-banner__inner">
+        <div className="billing-banner__copy">
+          <strong>{title}</strong>
+          <p>{body}</p>
+        </div>
+        <NavLink to="/configuracoes" className="btn btn--sm btn--primary">
+          {ctaLabel}
+        </NavLink>
+      </div>
+    </div>
+  );
+}
 
 function useAppPreferences() {
   const initial = useMemo(() => {
@@ -269,6 +335,7 @@ export default function App() {
   const loc = useLocation();
   const isNovo = (loc?.pathname || '').startsWith('/novo');
   const [currentUser, setCurrentUser] = useState(() => getUser());
+  const [billingStatus, setBillingStatus] = useState(null);
   const { preferences, isDark, toggleTheme } = useAppPreferences();
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const isPlanos = (loc?.pathname || '') === '/planos';
@@ -296,6 +363,37 @@ export default function App() {
       window.removeEventListener('storage', handleStorage);
     };
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    let timerId = null;
+
+    const fetchStatus = async () => {
+      if (!currentUser || currentUser.tipo !== 'estabelecimento') return;
+      try {
+        const data = await Api.billingStatus();
+        if (!cancelled) setBillingStatus(data);
+      } catch (err) {
+        if (!cancelled) {
+          // Falha silenciosa: mantem ultimo status conhecido ou zera
+          setBillingStatus((prev) => (prev && prev.state ? prev : null));
+        }
+      }
+    };
+
+    if (!currentUser || currentUser.tipo !== 'estabelecimento') {
+      setBillingStatus(null);
+      return () => {};
+    }
+
+    fetchStatus();
+    timerId = setInterval(fetchStatus, 5 * 60 * 1000);
+
+    return () => {
+      cancelled = true;
+      if (timerId) clearInterval(timerId);
+    };
+  }, [currentUser?.id, currentUser?.tipo]);
 
   useEffect(() => {
     try {
@@ -367,6 +465,7 @@ export default function App() {
               </div>
             </div>
           </div>
+          <BillingStatusBanner status={billingStatus} user={currentUser} />
           <div className="container">
             <Routes>
               {APP_ROUTES.map(({ path, element }) => (
