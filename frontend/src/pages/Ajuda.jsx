@@ -100,7 +100,7 @@ export default function Ajuda() {
         {
           key: 'plan',
           title: 'Gerenciar plano e cobranças',
-          description: 'Acompanhe faturas, gere PIX e ajuste recorrência quando necessário.',
+          description: 'Acompanhe faturas e gere novos PIX sempre que precisar.',
           section: 'plan',
           cta: 'Abrir painel financeiro',
         },
@@ -199,7 +199,7 @@ export default function Ajuda() {
         {
           question: 'Quais formas de pagamento posso usar para o plano?',
           answer:
-            'No card Plano do Estabelecimento há opções de checkout via cartão e PIX. Também é possível ativar recorrência automática pelo cartão diretamente no mesmo local.',
+            'No card Plano do Estabelecimento você gera a cobrança via PIX dinâmico. Basta escolher o plano/ciclo, copiar o link ou QR Code e concluir o pagamento no seu banco.',
         },
         {
           question: 'Como defino quem recebe notificações de agendamento?',

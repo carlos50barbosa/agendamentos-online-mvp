@@ -148,7 +148,7 @@ const PRICING_PLANS = [
     prices: { mensal: '14,90', anual: '149,00' },
     features: [
       'Agenda online e confirmações automáticas',
-      'Até 10 serviços e 2 profissionais',
+      'Até 100 agendamentos/mês com até 10 serviços e 2 profissionais',
       'Lembretes por e-mail',
       'Lembretes por WhatsApp',
       'Relatórios básicos',
@@ -164,8 +164,8 @@ const PRICING_PLANS = [
     subtitle: 'O melhor custo-benefício',
     prices: { mensal: '49,90', anual: '499,00' },
     features: [
-      'Tudo do Starter, sem limites',
-      'Equipe completa e múltiplas agendas',
+      'Tudo do Starter, com até 500 agendamentos/mês',
+      'Até 100 serviços e 10 profissionais',
       'Lembretes e campanhas por WhatsApp',
       'Relatórios avançados e indicadores em tempo real',
       'Suporte prioritário via WhatsApp Business',
@@ -182,6 +182,7 @@ const PRICING_PLANS = [
     subtitle: 'Para alto volume e franquias',
     prices: { mensal: '199,00', anual: '1.990,00' },
     features: [
+      'Agendamentos, serviços e profissionais ilimitados',
       'Tudo do Pro com integrações personalizadas',
       'Onboarding assistido e treinamento da equipe',
       'API e dashboards executivos',

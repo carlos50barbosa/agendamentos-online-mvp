@@ -1311,6 +1311,34 @@ button.danger:disabled,
   }
 }
 
+.pix-checkout{
+  display:flex;
+  flex-direction:column;
+  gap:12px;
+  text-align:center;
+}
+.pix-checkout__qr{
+  width:220px;
+  height:220px;
+  object-fit:contain;
+  margin:0 auto;
+  border:1px solid var(--border);
+  border-radius:var(--radius-sm);
+  padding:8px;
+  background:var(--surface);
+}
+.pix-checkout__code{
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+  text-align:left;
+}
+.pix-checkout__code textarea{
+  font-family:monospace;
+  font-size:13px;
+  resize:none;
+}
+
 @media (max-width: 780px){
   .app-topbar__inner{ padding: 10px 16px; flex-direction: row; align-items: center; justify-content: space-between; }
   .container{ margin-top: 8px; }

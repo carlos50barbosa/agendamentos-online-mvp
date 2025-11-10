@@ -1,6 +1,5 @@
 // backend/src/routes/webhooks.js
 import express from 'express';
-import { syncMercadoPagoPreapproval } from '../lib/billing.js';
 export const router = express.Router();
 
 // se você for validar assinatura do MP, salve o raw body:
@@ -34,16 +33,7 @@ export function mountWebhooks(app, withApiPrefix = false) {
         return res.status(200).send('OK');
       }
 
-      // Sincroniza imediatamente a assinatura/preapproval.
-      // Observação: a verificação de assinatura completa existe em /billing/webhook.
-      try {
-        await syncMercadoPagoPreapproval(String(resourceId), b && Object.keys(b).length ? b : { action: 'mp_webhook' });
-        console.log('[MP] webhook synced', resourceId);
-      } catch (e) {
-        console.error('[MP] webhook sync failed', resourceId, e?.message || e);
-      }
-
-      // Responda rápido para evitar retries agressivos do MP
+      // Apenas registra e responde rápido para evitar retries agressivos do MP
       res.status(200).send('OK');
     } catch (e) {
       console.error('[MP] webhook error', e);

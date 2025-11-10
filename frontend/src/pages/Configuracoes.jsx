@@ -488,9 +488,6 @@ export default function Configuracoes() {
   const [billingLoading, setBillingLoading] = useState(false);
   const [checkoutLoading, setCheckoutLoading] = useState(false);
   const [checkoutError, setCheckoutError] = useState('');
-  const [recurringLoading, setRecurringLoading] = useState(false);
-  const [recurringError, setRecurringError] = useState('');
-  const [recurringNotice, setRecurringNotice] = useState('');
   const checkoutIntentRef = useRef(false);
   // Mensagens pós-checkout (retorno do Mercado Pago)
   const [checkoutNotice, setCheckoutNotice] = useState({ kind: '', message: '', syncing: false });
@@ -503,27 +500,15 @@ export default function Configuracoes() {
   const [changePlanSubmitting, setChangePlanSubmitting] = useState(false);
   // PIX fallback cycle selector
   const [pixCycle, setPixCycle] = useState('mensal');
+  const [pixCheckoutModal, setPixCheckoutModal] = useState({ open: false, data: null });
 
   // Util: mapeia códigos do MP para mensagens amigáveis
   const mapStatusDetailMessage = useCallback((code) => {
     const c = String(code || '').toLowerCase();
-    const generic = 'O pagamento não foi concluído. Tente novamente em seu dispositivo habitual, faça login no Mercado Pago, use outro cartão ou ative por PIX.';
-    if (!c) return generic;
-    if (c.includes('high_risk')) return 'Pagamento recusado por segurança. Use o dispositivo/rede que você costuma comprar, faça login no Mercado Pago ou tente outro cartão. Alternativa: ative por PIX.';
-    if (c.includes('issuer') || c.includes('call_for_authorize') || c.includes('other_reason')) return 'O banco emissor recusou a transação. Tente outro cartão ou contate seu banco. Alternativa: ative por PIX.';
-    if (c.includes('insufficient')) return 'Sem limite/saldo disponível no cartão. Tente outro cartão. Alternativa: ative por PIX.';
-    if (c.includes('bad_filled')) return 'Dados do cartão inválidos. Revise número, validade e código (CVV).';
-    if (c.includes('blacklist')) return 'Pagamento bloqueado pelo Mercado Pago. Utilize outro cartão/conta ou ative por PIX.';
-    return generic;
-  }, []);
-
-  const inferMpStatusDetailFromError = useCallback((err) => {
-    // tenta extrair um status_detail da mensagem/cause do backend
-    try {
-      const raw = (err?.data?.message || err?.message || '') + ' ' + JSON.stringify(err?.data || {});
-      const m = raw.match(/cc_rejected_[a-z_]+|bad_filled_[a-z_]+|issuer|insufficient_amount|call_for_authorize|blacklist/gi);
-      return m && m[0] ? String(m[0]).toLowerCase() : '';
-    } catch { return ''; }
+    if (!c) return 'O pagamento não foi concluído. Gere o PIX novamente.';
+    if (c.includes('high_risk')) return 'Pagamento recusado por segurança. Gere um novo PIX e pague pelo app bancário em um dispositivo confiável.';
+    if (c.includes('insufficient') || c.includes('rejected')) return 'Pagamento não aprovado. Verifique saldo/limite e gere um novo PIX.';
+    return 'Pagamento não confirmado. Gere um novo PIX e finalize pelo seu banco.';
   }, []);
 
   // Elegibilidade a teste grátis: somente Starter, sem trial em andamento e sem histórico de plano pago
@@ -548,22 +533,7 @@ export default function Configuracoes() {
     const statusSub = String(billing?.subscription?.status || '').toLowerCase();
     return statusPlan === 'active' || statusSub === 'active';
   }, [planInfo.status, billing?.subscription?.status]);
-  const hasPreapprovalInHistory = useMemo(() => {
-    try {
-      const items = Array.isArray(billing?.history) ? billing.history : [];
-      return items.some((h) => {
-        const st = String(h?.status || '').toLowerCase();
-        return h?.gateway_subscription_id && (st === 'active' || st === 'authorized' || st === 'paused' || st === 'past_due');
-      });
-    } catch { return false; }
-  }, [billing?.history]);
-  const hasGatewaySub = !!(billing?.subscription?.gateway_subscription_id);
-  const hasGatewayRecurring = useMemo(() => hasGatewaySub || hasPreapprovalInHistory, [hasGatewaySub, hasPreapprovalInHistory]);
-  const needsRecurringSetup = useMemo(() => {
-    return hasActiveSubscription && !hasGatewayRecurring; // ativo (por plano ou MP) e sem preapproval
-  }, [hasActiveSubscription, hasGatewayRecurring]);
   const subStatus = useMemo(() => String(billing?.subscription?.status || '').toLowerCase(), [billing?.subscription?.status]);
-
   // Assinatura ativa (evita acionar checkout padrão e resultar em 409 "already_active")
 
   // Metadados dos planos (espelha backend)
@@ -702,51 +672,31 @@ export default function Configuracoes() {
   useEffect(() => {
     (async () => {
       if (!isEstab || !user?.id) return;
-      // Se voltamos do checkout com preapproval_id, sincroniza estado antes de carregar
+      // Banner pós-retorno do checkout PIX
       try {
         const url = new URL(window.location.href);
-        const preId = url.searchParams.get('preapproval_id');
-        if (preId) {
-          await Api.billingSync(preId);
-        }
-        // Banner pós-retorno: checkout=sucesso|erro|pendente
         const chk = (url.searchParams.get('checkout') || '').toLowerCase();
         if (chk === 'sucesso') {
-          setCheckoutNotice({ kind: 'info', message: 'Pagamento aprovado. Sincronizando sua assinatura...', syncing: true });
-          // Poll curto para refletir ativação
-          const tryPoll = async () => {
-            let activated = false;
-            for (let i = 0; i < 6; i++) {
-              try {
-                const data = await Api.billingSubscription();
-                const planStatus = String(data?.plan?.status || '').toLowerCase();
-                const subStatus = String(data?.subscription?.status || '').toLowerCase();
-                if (planStatus === 'active' || subStatus === 'active' || subStatus === 'authorized') {
-                  activated = true;
-                  break;
-                }
-              } catch {}
-              await new Promise((r) => setTimeout(r, 1500));
-            }
-            if (activated) setCheckoutNotice({ kind: 'success', message: 'Assinatura atualizada com sucesso!', syncing: false });
-            else setCheckoutNotice({ kind: 'warn', message: 'Estamos processando sua assinatura. Ela deve atualizar em instantes.', syncing: false });
-          };
-          try { await tryPoll(); } catch {}
-          // Limpa o parâmetro da URL após tratar
-          try { url.searchParams.delete('checkout'); window.history.replaceState({}, '', url.toString()); } catch {}
+          setCheckoutNotice({
+            kind: 'success',
+            message: 'PIX gerado com sucesso. Assim que o pagamento for confirmado liberamos tudo automaticamente.',
+            syncing: false,
+          });
         } else if (chk === 'erro') {
           setCheckoutNotice({
             kind: 'error',
-            message: 'O pagamento não foi concluído. Tente novamente no seu dispositivo habitual, faça login no Mercado Pago, use outro cartão ou ative por PIX.',
+            message: 'O PIX foi cancelado antes da confirmação. Gere um novo link e conclua o pagamento.',
             syncing: false,
           });
-          try { url.searchParams.delete('checkout'); window.history.replaceState({}, '', url.toString()); } catch {}
         } else if (chk === 'pendente') {
           setCheckoutNotice({ kind: 'warn', message: 'Pagamento pendente de confirmação.', syncing: false });
-          try { url.searchParams.delete('checkout'); window.history.replaceState({}, '', url.toString()); } catch {}
+        }
+        if (chk) {
+          url.searchParams.delete('checkout');
+          window.history.replaceState({}, '', url.toString());
         }
       } catch {}
-      // Carrega billing (assinatura + histórico) para habilitar botões de recorrência
+      // Carrega billing (assinatura + histórico) para preencher o cartão do plano
       try { await fetchBilling(); } catch {}
       try {
         setPublicProfileLoading(true);
@@ -802,92 +752,16 @@ export default function Configuracoes() {
   }, [isEstab, user?.id, fetchBilling, applyPublicProfile]);
 
   const handleCheckout = useCallback(async (targetPlan, targetCycle = 'mensal') => {
-    if (!isEstab) return;
-    setCheckoutError('');
-    setCheckoutLoading(true);
-    checkoutIntentRef.current = true;
-    try {
-      const payload = { plan: targetPlan, billing_cycle: targetCycle };
-      const data = await Api.billingCreateCheckout(payload);
-      if (data?.subscription) {
-        setBilling((prev) => ({ ...prev, subscription: data.subscription }));
-      }
-      try {
-        await fetchBilling();
-      } catch {}
-      if (typeof window !== 'undefined' && data?.init_point) {
-        window.location.href = data.init_point;
-      }
-    } catch (err) {
-      console.error('billing checkout failed', err);
-      // Mensagem amigável quando já existe assinatura ativa
-      if (err?.status === 409 && err?.data?.error === 'already_active') {
-        try {
-          const iso = err?.data?.plan?.active_until || err?.data?.plan?.trial?.ends_at || null;
-          const msg = iso
-            ? `Sua assinatura já está ativa até ${new Date(iso).toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' })}.`
-            : 'Sua assinatura já está ativa no momento.';
-          setCheckoutError(msg);
-          await fetchBilling();
-        } catch {
-          setCheckoutError(err?.data?.message || 'Sua assinatura já está ativa.');
-        }
-      } else {
-        const code = inferMpStatusDetailFromError(err);
-        const friendly = mapStatusDetailMessage(code);
-        setCheckoutError(friendly);
-      }
-    } finally {
-      setCheckoutLoading(false);
-      checkoutIntentRef.current = false;
-      try {
-        localStorage.removeItem('intent_plano');
-        localStorage.removeItem('intent_plano_ciclo');
-      } catch {}
-    }
-  }, [fetchBilling, isEstab]);
-
-  const executePlanChange = useCallback(async (targetPlan) => {
-    setCheckoutError('');
-    setCheckoutLoading(true);
-    let success = false;
-    try {
-      const data = await Api.billingChangeCheckout(targetPlan);
-      if (data?.init_point) {
-        window.location.href = data.init_point;
-        success = true;
-        return success;
-      }
-      await fetchBilling();
-      success = true;
-    } catch (err) {
-      if (err?.status === 409 && (err?.data?.error === 'plan_downgrade_blocked' || err?.data?.error === 'same_plan')) {
-        setCheckoutError(err?.data?.message || 'Não foi possível alterar o plano.');
-      } else {
-        const code = inferMpStatusDetailFromError(err);
-        const friendly = mapStatusDetailMessage(code);
-        setCheckoutError(friendly);
-      }
-    } finally {
-      setCheckoutLoading(false);
-    }
-    return success;
-  }, [fetchBilling]);
-
-  const handleChangePlan = useCallback((targetPlan) => {
-    setChangePlanTarget(targetPlan);
-    setChangePlanPassword('');
-    setChangePlanError('');
-  }, []);
-
-  const handleCheckoutPix = useCallback(async (plan = 'pro', cycle = 'mensal') => {
     if (!isEstab || !user?.id) return false;
     setCheckoutError('');
     setCheckoutLoading(true);
+    checkoutIntentRef.current = true;
     let success = false;
     try {
-      const data = await Api.billingPixCheckout({ plan, billing_cycle: cycle });
-      if (data?.init_point) {
+      const data = await Api.billingPixCheckout({ plan: targetPlan, billing_cycle: targetCycle });
+      if (data?.pix && (data.pix.qr_code || data.pix.ticket_url)) {
+        setPixCheckoutModal({ open: true, data: { ...data.pix, init_point: data.init_point } });
+      } else if (data?.init_point) {
         window.location.href = data.init_point;
         success = true;
         return success;
@@ -898,9 +772,50 @@ export default function Configuracoes() {
       setCheckoutError(err?.data?.message || err?.message || 'Falha ao gerar cobrança PIX.');
     } finally {
       setCheckoutLoading(false);
+      checkoutIntentRef.current = false;
+      try {
+        localStorage.removeItem('intent_plano');
+        localStorage.removeItem('intent_plano_ciclo');
+      } catch {}
     }
     return success;
   }, [fetchBilling, isEstab, user?.id]);
+
+  const closePixModal = useCallback(() => setPixCheckoutModal({ open: false, data: null }), []);
+
+  const copyToClipboard = useCallback(async (text) => {
+    if (!text) return false;
+    try {
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        const textarea = document.createElement('textarea');
+        textarea.value = text;
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        document.body.appendChild(textarea);
+        textarea.focus();
+        textarea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+      }
+      setCheckoutNotice({ kind: 'info', message: 'Chave PIX copiada!', syncing: false });
+      return true;
+    } catch {
+      setCheckoutError('Não foi possível copiar automaticamente. Copie manualmente.');
+      return false;
+    }
+  }, []);
+
+  const executePlanChange = useCallback(async (targetPlan) => {
+    return handleCheckout(targetPlan, pixCycle);
+  }, [handleCheckout, pixCycle]);
+
+  const handleChangePlan = useCallback((targetPlan) => {
+    setChangePlanTarget(targetPlan);
+    setChangePlanPassword('');
+    setChangePlanError('');
+  }, []);
 
   const closeChangePlanModal = useCallback(() => {
     if (changePlanSubmitting) return;
@@ -959,13 +874,7 @@ export default function Configuracoes() {
       checkoutIntentRef.current = true;
       (async () => {
         try {
-          // Se há assinatura ativa e o plano desejado difere do atual, usar rota de change
-          if (planInfo.status === 'active' && storedPlan !== planInfo.plan) {
-            const data = await Api.billingChangeCheckout(storedPlan, storedCycle);
-            if (data?.init_point) window.location.href = data.init_point;
-          } else {
-            await handleCheckout(storedPlan, storedCycle);
-          }
+          await handleCheckout(storedPlan, storedCycle);
         } finally {
           try {
             localStorage.removeItem('intent_plano');
@@ -975,7 +884,7 @@ export default function Configuracoes() {
         }
       })();
     }
-  }, [handleCheckout, isEstab, planInfo.status, planInfo.plan]);
+  }, [handleCheckout, isEstab]);
   const daysLeft = useMemo(() => {
     if (planInfo.trialDaysLeft != null) return planInfo.trialDaysLeft;
     if (!planInfo.trialEnd) return 0;
@@ -1723,11 +1632,9 @@ export default function Configuracoes() {
         (servicesLimit == null ? 'serviços ilimitados' : 'até ' + servicesLimit + ' serviços') + ' · ' +
         (professionalsLimit == null ? 'profissionais ilimitados' : 'até ' + professionalsLimit + ' profissionais');
       const planFeatures = [whatsappFeature, reportsFeature];
-      const recurringDisplay = hasGatewayRecurring ? (subStatus === 'paused' ? 'Cartão (pausado)' : 'Cartão ativo') : 'Não configurada';
-      const pricedAmount = amountLabel ? amountLabel + '/mês' : null;
-      const summarySubscription = subscriptionStatusLabel
-        ? subscriptionStatusLabel + (pricedAmount ? ' · ' + pricedAmount : '')
-        : 'Sem cobrança recorrente';
+      const pricedAmount = amountLabel ? `${amountLabel}/mês` : null;
+      const summarySubscription = subscriptionStatusLabel || statusLabel || 'Em análise';
+      const summaryWithPrice = pricedAmount ? `${summarySubscription} · ${pricedAmount}` : summarySubscription;
       const nextChargeDisplay = nextChargeLabel || (planInfo.activeUntil ? fmtDate(planInfo.activeUntil) : '—');
 
       const planAlerts = [];
@@ -1738,9 +1645,6 @@ export default function Configuracoes() {
       if (effectivePlanStatus === 'pending') planAlerts.push({ key: 'pending', variant: 'warn', message: 'Pagamento pendente. Finalize o checkout para concluir a contratação.' });
       if (planInfo.plan === 'starter' && hasPaidHistory) planAlerts.push({ key: 'trial-blocked', variant: 'muted', message: 'Teste grátis indisponível: já houve uma assinatura contratada nesta conta.' });
       else if (planInfo.plan === 'starter' && trialEligible) planAlerts.push({ key: 'trial-available', variant: 'info', message: 'Experimente o plano Pro gratuitamente por 7 dias quando desejar.' });
-      if (needsRecurringSetup && hasActiveSubscription) planAlerts.push({ key: 'rec-setup', variant: 'info', message: 'Configure a recorrência no cartão para automatizar as próximas cobranças.' });
-      if (recurringError) planAlerts.push({ key: 'rec-error', variant: 'error', message: recurringError });
-      else if (recurringNotice) planAlerts.push({ key: 'rec-notice', variant: 'info', message: recurringNotice });
 
       const planChangeButtons = [];
       if (planInfo.plan === 'starter') {
@@ -1798,107 +1702,7 @@ export default function Configuracoes() {
         });
       }
 
-      const recurringButtons = [];
-      if (needsRecurringSetup) {
-        recurringButtons.push(
-          <button
-            key="recurring-setup"
-            className="btn btn--brand-outline btn--sm"
-            type="button"
-            onClick={async () => {
-              try {
-                setCheckoutLoading(true);
-                const data = await Api.billingRecurringSetup();
-                if (data?.init_point) window.location.href = data.init_point;
-              } catch (err) {
-                setCheckoutError(err?.data?.message || err?.message || 'Falha ao configurar recorrência.');
-              } finally {
-                setCheckoutLoading(false);
-              }
-            }}
-            disabled={checkoutLoading}
-          >
-            {checkoutLoading ? <span className="spinner" /> : 'Configurar recorrência no cartão'}
-          </button>
-        );
-      }
-      if (hasGatewayRecurring) {
-        if (subStatus !== 'paused') {
-          recurringButtons.push(
-            <button
-              key="recurring-pause"
-              className="btn btn--outline btn--sm"
-              type="button"
-              onClick={async () => {
-                if (!confirm('Pausar a recorrência? Você pode retomar quando quiser.')) return;
-                setRecurringError(''); setRecurringNotice(''); setRecurringLoading(true);
-                try {
-                  await Api.billingRecurringPause();
-                  setRecurringNotice('Recorrência pausada.');
-                  await fetchBilling();
-                } catch (e) {
-                  setRecurringError(e?.data?.message || e?.message || 'Falha ao pausar recorrência.');
-                } finally {
-                  setRecurringLoading(false);
-                }
-              }}
-              disabled={recurringLoading}
-            >
-              {recurringLoading ? <span className="spinner" /> : 'Pausar recorrência'}
-            </button>
-          );
-        }
-        if (subStatus === 'paused') {
-          recurringButtons.push(
-            <button
-              key="recurring-resume"
-              className="btn btn--outline btn--sm"
-              type="button"
-              onClick={async () => {
-                setRecurringError(''); setRecurringNotice(''); setRecurringLoading(true);
-                try {
-                  await Api.billingRecurringResume();
-                  setRecurringNotice('Recorrência retomada.');
-                  await fetchBilling();
-                } catch (e) {
-                  setRecurringError(e?.data?.message || e?.message || 'Falha ao retomar recorrência.');
-                } finally {
-                  setRecurringLoading(false);
-                }
-              }}
-              disabled={recurringLoading}
-            >
-              {recurringLoading ? <span className="spinner" /> : 'Retomar recorrência'}
-            </button>
-          );
-        }
-        recurringButtons.push(
-          <button
-            key="recurring-cancel"
-            className="btn btn--ghost btn--sm"
-            type="button"
-            onClick={async () => {
-              if (!confirm('Cancelar a recorrência? Você continuará ativo até o fim do ciclo atual.')) return;
-              setRecurringError(''); setRecurringNotice(''); setRecurringLoading(true);
-              try {
-                await Api.billingRecurringCancel();
-                setRecurringNotice('Recorrência cancelada.');
-                await fetchBilling();
-              } catch (e) {
-                setRecurringError(e?.data?.message || e?.message || 'Falha ao cancelar recorrência.');
-              } finally {
-                setRecurringLoading(false);
-              }
-            }}
-            disabled={recurringLoading}
-          >
-            {recurringLoading ? <span className="spinner" /> : 'Cancelar recorrência'}
-          </button>
-        );
-      }
-
       const secondaryActions = [
-        ...recurringButtons,
         <Link key="plans-link" className="btn btn--ghost btn--sm" to="/planos">Conhecer planos</Link>,
       ];
       if (!hasActiveSubscription) {
@@ -1907,7 +1711,7 @@ export default function Configuracoes() {
             key="pix-checkout"
             className="btn btn--chip btn--sm"
             type="button"
-            onClick={() => handleCheckoutPix(planInfo.plan, pixCycle)}
+            onClick={() => handleCheckout(planInfo.plan, pixCycle)}
             disabled={checkoutLoading}
             title="Gerar cobrança via PIX"
           >
@@ -1948,18 +1752,18 @@ export default function Configuracoes() {
 
             <div className="plan-card__summary">
               <div className="plan-card__summary-item">
-                <span className="plan-card__summary-label">Assinatura Mercado Pago</span>
-                <strong>{summarySubscription}</strong>
+                <span className="plan-card__summary-label">Status da assinatura</span>
+                <strong>{summaryWithPrice}</strong>
               </div>
               <div className="plan-card__summary-item">
-                <span className="plan-card__summary-label">Próxima cobrança</span>
+                <span className="plan-card__summary-label">Próxima confirmação</span>
                 <strong>{nextChargeDisplay}</strong>
                 {planInfo.activeUntil && !nextChargeLabel && <span className="plan-card__summary-extra">Plano ativo até {fmtDate(planInfo.activeUntil)}</span>}
               </div>
               <div className="plan-card__summary-item">
-                <span className="plan-card__summary-label">Recorrência</span>
-                <strong>{recurringDisplay}</strong>
-                {!hasGatewayRecurring && hasActiveSubscription && <span className="plan-card__summary-extra">Ative para automatizar as renovações</span>}
+                <span className="plan-card__summary-label">Forma de pagamento</span>
+                <strong>PIX manual</strong>
+                <span className="plan-card__summary-extra">Geramos o link dinâmico a cada renovação</span>
               </div>
             </div>
 
@@ -2047,16 +1851,10 @@ export default function Configuracoes() {
     checkoutError,
     startTrial,
     handleCheckout,
-    handleCheckoutPix,
     handleChangePlan,
     hasPaidHistory,
     trialEligible,
     hasActiveSubscription,
-    needsRecurringSetup,
-    hasGatewayRecurring,
-    recurringLoading,
-    recurringError,
-    recurringNotice,
     fetchBilling,
     pixCycle,
     focusedSection,
@@ -2108,6 +1906,67 @@ export default function Configuracoes() {
           </div>
         );
       })}
+      {pixCheckoutModal.open && (
+        <Modal
+          title="Pagamento via PIX"
+          onClose={closePixModal}
+          actions={[
+            pixCheckoutModal.data?.ticket_url ? (
+              <a
+                key="open"
+                className="btn btn--primary"
+                href={pixCheckoutModal.data.ticket_url}
+                target="_blank"
+                rel="noreferrer"
+              >
+                Abrir no app do banco
+              </a>
+            ) : null,
+            <button key="close" type="button" className="btn btn--outline" onClick={closePixModal}>
+              Fechar
+            </button>,
+          ].filter(Boolean)}
+        >
+          <div className="pix-checkout">
+            {pixCheckoutModal.data?.qr_code_base64 ? (
+              <img
+                src={`data:image/png;base64,${pixCheckoutModal.data.qr_code_base64}`}
+                alt="QR Code PIX"
+                className="pix-checkout__qr"
+              />
+            ) : (
+              <p className="muted">Abra o link acima para visualizar o QR Code.</p>
+            )}
+            {pixCheckoutModal.data?.qr_code && (
+              <div className="pix-checkout__code">
+                <label htmlFor="pix-code">Chave copia e cola</label>
+                <textarea id="pix-code" readOnly value={pixCheckoutModal.data.qr_code} rows={3} className="input" />
+                <button
+                  type="button"
+                  className="btn btn--sm btn--primary"
+                  onClick={() => copyToClipboard(pixCheckoutModal.data?.qr_code)}
+                >
+                  Copiar chave
+                </button>
+              </div>
+            )}
+            {pixCheckoutModal.data?.expires_at && (
+              <p className="muted">
+                Expira em{' '}
+                {new Date(pixCheckoutModal.data.expires_at).toLocaleString('pt-BR', {
+                  day: '2-digit',
+                  month: 'short',
+                  hour: '2-digit',
+                  minute: '2-digit',
+                })}
+              </p>
+            )}
+            <p className="muted">
+              Após confirmar o pagamento no seu banco, voltaremos a liberar o acesso automaticamente.
+            </p>
+          </div>
+        </Modal>
+      )}
       {changePlanTarget && (
         <Modal
           title={`Confirmar alteração para ${planLabel(changePlanTarget)}`}

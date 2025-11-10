@@ -2,17 +2,16 @@
 import { Router } from 'express'
 import { createHmac } from 'node:crypto'
 import { auth, isEstabelecimento } from '../middleware/auth.js'
-import { createMercadoPagoCheckout, createMercadoPagoPixCheckout, syncMercadoPagoPreapproval, syncMercadoPagoPayment, getPlanInitPoint, updateMercadoPagoPreapprovalStatus } from '../lib/billing.js'
+import { createMercadoPagoPixCheckout, syncMercadoPagoPayment } from '../lib/billing.js'
 import {
   getPlanContext,
   serializePlanContext,
+  normalizeBillingCycle,
   PLAN_TIERS,
   isDowngrade,
-  isUpgrade,
   resolvePlanConfig,
   countProfessionals,
   formatPlanLimitExceeded,
-  normalizeBillingCycle,
 } from '../lib/plans.js'
 import {
   getLatestSubscriptionForEstabelecimento,
@@ -117,19 +116,6 @@ function normalizeId(value) {
   return String(value || '').trim()
 }
 
-async function resolveRecurringSubscription(estabelecimentoId, fallbackGatewayId) {
-  const history = await listSubscriptionsForEstabelecimento(estabelecimentoId)
-  const preferredStatuses = new Set(['active', 'authorized', 'paused', 'past_due'])
-  const preferred = history.find((item) => item.gatewaySubscriptionId && preferredStatuses.has(String(item.status || '').toLowerCase()))
-  if (preferred) return preferred
-  const normalizedFallback = normalizeId(fallbackGatewayId)
-  if (normalizedFallback) {
-    const match = history.find((item) => normalizeId(item.gatewaySubscriptionId) === normalizedFallback)
-    if (match) return match
-  }
-  return history.find((item) => item.gatewaySubscriptionId) || null
-}
-
 router.get('/status', auth, isEstabelecimento, async (req, res) => {
   try {
     const ctx = await getPlanContext(req.user.id)
@@ -164,75 +150,6 @@ router.get('/status', auth, isEstabelecimento, async (req, res) => {
   } catch (err) {
     console.error('[billing/status]', err)
     return res.status(500).json({ error: 'server_error' })
-  }
-})
-
-router.post('/checkout-session', auth, isEstabelecimento, async (req, res) => {
-  try {
-    const { plan, billing_cycle: rawCycle, successUrl, failureUrl, pendingUrl } = req.body || {}
-    const billingCycle = normalizeBillingCycle(rawCycle)
-    const forceNew = /^(1|true|yes)$/i.test(String(req.query?.force || req.body?.force || ''))
-
-    // 1) Trava: se já está ativo e ainda dentro do período, não criar novo checkout
-    const ctx = await getPlanContext(req.user.id)
-    if (ctx?.status === 'active' && ctx?.activeUntil && new Date(ctx.activeUntil) > new Date()) {
-      return res.status(409).json({
-        error: 'already_active',
-        message: `Assinatura ativa até ${new Date(ctx.activeUntil).toISOString()}`,
-        plan: serializePlanContext(ctx),
-      })
-    }
-
-    // 2) Reuso: se há assinatura pendente com plano criado, reusar o init_point (a menos que forceNew ou reuse desativado)
-    const allowReuse = config.billing?.reusePending !== false && !forceNew
-    if (allowReuse) {
-      const last = await getLatestSubscriptionForEstabelecimento(req.user.id)
-      if (last && last.status === 'pending' && last.gatewayPreferenceId) {
-        const init = await getPlanInitPoint(last.gatewayPreferenceId)
-        if (init) {
-          return res.json({
-            ok: true,
-            init_point: init,
-            plan_status: 'pending',
-            subscription: serializeSubscription(last),
-            reused: true,
-          })
-        }
-      }
-    }
-
-    const result = await createMercadoPagoCheckout({
-      estabelecimento: { id: req.user.id, email: req.user.email },
-      plan,
-      billingCycle,
-      successUrl,
-      failureUrl,
-      pendingUrl,
-    })
-
-    req.user.plan_status = result.planStatus
-    req.user.plan_subscription_id = result.subscription.gatewaySubscriptionId
-    if (result.planStatus === 'active') {
-      req.user.plan = result.subscription.plan
-    }
-
-    return res.json({
-      ok: true,
-      init_point: result.initPoint,
-      plan_status: result.planStatus,
-      subscription: serializeSubscription(result.subscription),
-      billing_cycle: billingCycle,
-    })
-  } catch (error) {
-    const responseData = error?.response?.data
-    const cause = error?.cause || responseData || null
-    const detail =
-      (responseData && (responseData.message || responseData.error || responseData.error_message)) ||
-      (Array.isArray(error?.cause) && (error.cause[0]?.description || error.cause[0]?.error)) ||
-      error?.message ||
-      'Falha ao criar checkout'
-    console.error('POST /billing/checkout-session', detail, cause || error)
-    return res.status(400).json({ error: 'checkout_failed', message: detail, cause })
   }
 })
 
@@ -300,11 +217,7 @@ router.post('/webhook', async (req, res) => {
       return res.status(200).json({ ok: true })
     }
 
-    const result = await syncMercadoPagoPreapproval(resourceId, event)
-    const preStatus = result?.preapproval?.status || null
-    const preDetail = result?.preapproval?.status_detail || null
-    const action = event?.action || null
-    console.log('[billing:webhook] preapproval', resourceId, result.planStatus, { preapproval_status: preStatus, preapproval_status_detail: preDetail, action })
+    console.log('[billing:webhook] ignoring topic', topic || 'unknown', 'for resource', resourceId)
   } catch (error) {
     console.error('[billing:webhook] falha ao sincronizar', resourceId, error)
     return res.status(200).json({ ok: false })
@@ -359,170 +272,40 @@ router.get('/webhook/health', (req, res) => {
   return res.status(200).json(base)
 })
 
-// Callback de sucesso do Mercado Pago (back_url): tenta sincronizar e redireciona ao front
-router.get('/callback', async (req, res) => {
+// Checkout exclusivo via PIX (link dinâmico do Mercado Pago)
+router.post('/pix', auth, isEstabelecimento, async (req, res) => {
   try {
-    const preapprovalId = String(req.query.preapproval_id || req.query.id || req.query['data.id'] || '').trim()
-    if (preapprovalId) {
-      try {
-        await syncMercadoPagoPreapproval(preapprovalId, { action: 'callback' })
-      } catch (e) {
-        console.warn('[billing:callback] sync failed', preapprovalId, e?.message || e)
-      }
+    const { plan, billing_cycle: rawCycle } = req.body || {}
+    const targetPlan = String(plan || req.user.plan || 'starter').toLowerCase()
+    if (!PLAN_TIERS.includes(targetPlan)) {
+      return res.status(400).json({ error: 'invalid_plan', message: 'Plano inválido.' })
     }
-  } catch (e) {
-    console.warn('[billing:callback] error', e)
-  }
+    const billingCycle = normalizeBillingCycle(rawCycle)
+    const currentPlan = String(req.user.plan || 'starter').toLowerCase()
 
-  // Redireciona para a tela de configurações (ou "next" fornecido)
-  const FRONT_BASE = String(process.env.FRONTEND_BASE_URL || process.env.APP_URL || 'http://localhost:3001').replace(/\/$/, '')
-  const next = String(req.query.next || '').trim()
-  // Sempre sinaliza sucesso e, quando disponível, inclui preapproval_id para o front sincronizar também
-  const fallbackUrl = new URL(`${FRONT_BASE}/configuracoes`)
-  fallbackUrl.searchParams.set('checkout', 'sucesso')
-  const pre = String(req.query.preapproval_id || req.query.id || req.query['data.id'] || '').trim()
-  if (pre) fallbackUrl.searchParams.set('preapproval_id', pre)
-
-  let targetUrl
-  if (next && /^https:\/\//i.test(next)) {
-    try {
-      const u = new URL(next)
-      if (pre) u.searchParams.set('preapproval_id', pre)
-      // Garante o banner de sucesso no front (se ele preservar o parâmetro)
-      if (!u.searchParams.has('checkout')) u.searchParams.set('checkout', 'sucesso')
-      targetUrl = u.toString()
-    } catch {
-      targetUrl = fallbackUrl.toString()
-    }
-  } else {
-    targetUrl = fallbackUrl.toString()
-  }
-  try {
-    return res.redirect(302, targetUrl)
-  } catch {
-    return res.status(302).set('Location', targetUrl).end()
-  }
-})
-
-// Utilitário: sincroniza manualmente uma assinatura a partir do preapproval_id (ex.: retornado no back_url)
-router.get('/sync', auth, isEstabelecimento, async (req, res) => {
-  try {
-    const preapprovalId = String(req.query.preapproval_id || req.query.id || '').trim()
-    if (!preapprovalId) return res.status(400).json({ error: 'missing_preapproval_id' })
-    const result = await syncMercadoPagoPreapproval(preapprovalId, { action: 'manual_sync' })
-    const det = {
-      status: result?.preapproval?.status || null,
-      status_detail: result?.preapproval?.status_detail || null,
-      reason: result?.preapproval?.reason || null,
-      preapproval_id: result?.preapproval?.id || preapprovalId,
-    }
-    return res.json({ ok: true, plan_status: result.planStatus, preapproval: det })
-  } catch (e) {
-    console.error('GET /billing/sync', e)
-    return res.status(400).json({ error: 'sync_failed', message: e?.message || String(e) })
-  }
-})
-
-// Alteração de plano (upgrade/downgrade) – permite gerar checkout mesmo com assinatura ativa
-router.post('/change', auth, isEstabelecimento, async (req, res) => {
-  try {
-    const target = String(req.body?.target_plan || req.body?.plan || '').toLowerCase()
-    const billingCycle = normalizeBillingCycle(req.body?.billing_cycle)
-    const forceNew = /^(1|true|yes)$/i.test(String(req.query?.force || req.body?.force || ''))
-    if (!PLAN_TIERS.includes(target)) {
-      return res.status(400).json({ error: 'invalid_plan' })
-    }
-    const ctx = await getPlanContext(req.user.id)
-    if (!ctx) return res.status(404).json({ error: 'not_found' })
-
-    const currentPlan = ctx.plan
-    if (currentPlan === target) {
-      return res.status(409).json({ error: 'same_plan', message: 'Este já é o plano atual.' })
-    }
-
-    // Se for downgrade, validar limites antes de permitir
-    if (isDowngrade(currentPlan, target)) {
-      const targetCfg = resolvePlanConfig(target)
-      // Serviços
-      const [[svcRow]] = await pool.query('SELECT COUNT(*) AS total FROM servicos WHERE estabelecimento_id=?', [req.user.id])
-      const totalServices = Number(svcRow?.total || 0)
-      if (targetCfg.maxServices !== null && totalServices > targetCfg.maxServices) {
-        return res.status(409).json({
-          error: 'plan_downgrade_blocked',
-          message: formatPlanLimitExceeded(targetCfg, 'services'),
-          details: { services: totalServices, limit: targetCfg.maxServices },
-        })
-      }
-      // Profissionais (se existir a tabela)
+    if (isDowngrade(currentPlan, targetPlan)) {
+      const limits = resolvePlanConfig(targetPlan)
       const totalProfessionals = await countProfessionals(req.user.id)
-      if (targetCfg.maxProfessionals !== null && totalProfessionals > targetCfg.maxProfessionals) {
+      if (typeof limits.maxProfessionals === 'number' && totalProfessionals > limits.maxProfessionals) {
         return res.status(409).json({
-          error: 'plan_downgrade_blocked',
-          message: formatPlanLimitExceeded(targetCfg, 'professionals'),
-          details: { professionals: totalProfessionals, limit: targetCfg.maxProfessionals },
+          error: 'plan_limit_professionals',
+          message: formatPlanLimitExceeded(limits, 'professionals') || 'Reduza a equipe antes de fazer downgrade.',
         })
       }
     }
 
-    // Reusar link pendente para o mesmo destino (a menos que forceNew ou reuse desativado)
-    const allowReuse = config.billing?.reusePending !== false && !forceNew
-    if (allowReuse) {
-      const last = await getLatestSubscriptionForEstabelecimento(req.user.id)
-      if (last && last.status === 'pending' && last.plan === target && last.gatewayPreferenceId) {
-        const init = await getPlanInitPoint(last.gatewayPreferenceId)
-        if (init) {
-          return res.json({ ok: true, init_point: init, plan_status: 'pending', subscription: serializeSubscription(last), reused: true })
-        }
-      }
-    }
-
-    const result = await createMercadoPagoCheckout({
+    const result = await createMercadoPagoPixCheckout({
       estabelecimento: { id: req.user.id, email: req.user.email },
-      plan: target,
+      plan: targetPlan,
       billingCycle,
-      deferStartDate: (() => {
-        // Opção A: se upgrade com assinatura ativa, agenda primeira cobrança do novo valor para a virada do ciclo atual
-        if (isUpgrade(currentPlan, target) && ctx?.status === 'active' && ctx?.activeUntil) {
-          const nextAt = new Date(ctx.activeUntil)
-          if (!Number.isNaN(nextAt.getTime()) && nextAt > new Date()) return nextAt.toISOString()
-        }
-        return null
-      })(),
     })
     return res.json({
       ok: true,
       init_point: result.initPoint,
       plan_status: result.planStatus,
       subscription: serializeSubscription(result.subscription),
-      billing_cycle: billingCycle,
+      pix: result.pix,
     })
-  } catch (error) {
-    const responseData = error?.response?.data
-    const cause = error?.cause || responseData || null
-    const detail =
-      (responseData && (responseData.message || responseData.error || responseData.error_message)) ||
-      (Array.isArray(error?.cause) && (error.cause[0]?.description || error.cause[0]?.error)) ||
-      error?.message ||
-      'Falha ao alterar plano'
-    console.error('POST /billing/change', detail, cause || error)
-    return res.status(400).json({ error: 'change_failed', message: detail, cause })
-  }
-})
-
-// Fallback: cria preferência de PIX para primeiro ciclo
-router.post('/pix', auth, isEstabelecimento, async (req, res) => {
-  try {
-    const { plan, billing_cycle: rawCycle, successUrl, failureUrl, pendingUrl } = req.body || {}
-    const billingCycle = normalizeBillingCycle(rawCycle)
-    const result = await createMercadoPagoPixCheckout({
-      estabelecimento: { id: req.user.id, email: req.user.email },
-      plan,
-      billingCycle,
-      successUrl,
-      failureUrl,
-      pendingUrl,
-    })
-    return res.json({ ok: true, init_point: result.initPoint, plan_status: result.planStatus, subscription: serializeSubscription(result.subscription) })
   } catch (error) {
     const responseData = error?.response?.data
     const cause = error?.cause || responseData || null
@@ -535,84 +318,4 @@ router.post('/pix', auth, isEstabelecimento, async (req, res) => {
   }
 })
 
-// Configurar recorrência no cartão após ativação por PIX (gera preapproval com início na virada do ciclo atual)
-router.post('/recurring/setup', auth, isEstabelecimento, async (req, res) => {
-  try {
-    const ctx = await getPlanContext(req.user.id)
-    if (!ctx) return res.status(404).json({ error: 'not_found' })
-
-    const plan = ctx.plan
-    const billingCycle = ctx.cycle
-    const deferStartDate = ctx?.activeUntil || null
-
-    // Gera o preapproval mesmo estando ativo (não usar rota /checkout-session que bloqueia already_active)
-    const result = await createMercadoPagoCheckout({
-      estabelecimento: { id: req.user.id, email: req.user.email },
-      plan,
-      billingCycle,
-      successUrl: undefined,
-      failureUrl: undefined,
-      pendingUrl: undefined,
-      deferStartDate,
-    })
-
-    return res.json({ ok: true, init_point: result.initPoint, plan_status: result.planStatus, subscription: serializeSubscription(result.subscription), billing_cycle: billingCycle })
-  } catch (error) {
-    const responseData = error?.response?.data
-    const cause = error?.cause || responseData || null
-    const detail =
-      (responseData && (responseData.message || responseData.error || responseData.error_message)) ||
-      (Array.isArray(error?.cause) && (error.cause[0]?.description || error.cause[0]?.error)) ||
-      error?.message || 'Falha ao configurar recorrencia'
-    console.error('POST /billing/recurring/setup', detail, cause || error)
-    return res.status(400).json({ error: 'recurring_failed', message: detail, cause })
-  }
-})
-
-// Pausar recorrência no cartão (preapproval)
-router.post('/recurring/pause', auth, isEstabelecimento, async (req, res) => {
-  try {
-    const sub = await resolveRecurringSubscription(req.user.id, req.user?.plan_subscription_id)
-    const preId = normalizeId(sub?.gatewaySubscriptionId || req.user?.plan_subscription_id || null)
-    if (!preId) return res.status(409).json({ error: 'no_recurring', message: 'Nenhuma recorrência configurada.' })
-    const result = await updateMercadoPagoPreapprovalStatus(preId, 'paused', 'recurring_pause')
-    return res.json({ ok: true, status: result?.subscription?.status || null, preapproval: { id: result?.preapproval?.id || preId, status: result?.preapproval?.status || 'paused' } })
-  } catch (error) {
-    const detail = error?.message || 'Falha ao pausar recorrência'
-    console.error('POST /billing/recurring/pause', detail)
-    return res.status(400).json({ error: 'recurring_pause_failed', message: detail })
-  }
-})
-
-// Retomar recorrência
-router.post('/recurring/resume', auth, isEstabelecimento, async (req, res) => {
-  try {
-    const sub = await resolveRecurringSubscription(req.user.id, req.user?.plan_subscription_id)
-    const preId = normalizeId(sub?.gatewaySubscriptionId || req.user?.plan_subscription_id || null)
-    if (!preId) return res.status(409).json({ error: 'no_recurring', message: 'Nenhuma recorrência configurada.' })
-    const result = await updateMercadoPagoPreapprovalStatus(preId, 'authorized', 'recurring_resume')
-    return res.json({ ok: true, status: result?.subscription?.status || null, preapproval: { id: result?.preapproval?.id || preId, status: result?.preapproval?.status || 'authorized' } })
-  } catch (error) {
-    const detail = error?.message || 'Falha ao retomar recorrência'
-    console.error('POST /billing/recurring/resume', detail)
-    return res.status(400).json({ error: 'recurring_resume_failed', message: detail })
-  }
-})
-
-// Cancelar recorrência
-router.post('/recurring/cancel', auth, isEstabelecimento, async (req, res) => {
-  try {
-    const sub = await resolveRecurringSubscription(req.user.id, req.user?.plan_subscription_id)
-    const preId = normalizeId(sub?.gatewaySubscriptionId || req.user?.plan_subscription_id || null)
-    if (!preId) return res.status(409).json({ error: 'no_recurring', message: 'Nenhuma recorrência configurada.' })
-    const result = await updateMercadoPagoPreapprovalStatus(preId, 'cancelled', 'recurring_cancel')
-    return res.json({ ok: true, status: result?.subscription?.status || null, preapproval: { id: result?.preapproval?.id || preId, status: result?.preapproval?.status || 'cancelled' } })
-  } catch (error) {
-    const detail = error?.message || 'Falha ao cancelar recorrência'
-    console.error('POST /billing/recurring/cancel', detail)
-    return res.status(400).json({ error: 'recurring_cancel_failed', message: detail })
-  }
-})
-
 export default router
-

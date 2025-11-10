@@ -163,22 +163,7 @@ export const Api = {
   listServices: (establishmentId) => req(`/servicos${toQuery({ establishmentId })}`),
 
   // Billing (assinaturas Mercado Pago)
-  billingCreateCheckout: (payload) => {
-    const body = { ...payload };
-    if (body.billing_cycle == null) body.billing_cycle = 'mensal';
-    return req('/billing/checkout-session', { method: 'POST', body: JSON.stringify(body) });
-  },
   billingSubscription: () => req('/billing/subscription'),
-  billingSync: (preapproval_id) => req(`/billing/sync${toQuery({ preapproval_id })}`),
-  billingChangeCheckout: (target_plan, billing_cycle) => {
-    const payload = { target_plan };
-    if (billing_cycle) payload.billing_cycle = billing_cycle;
-    return req('/billing/change', { method: 'POST', body: JSON.stringify(payload) });
-  },
-  billingRecurringSetup: () => req('/billing/recurring/setup', { method: 'POST' }),
-  billingRecurringPause: () => req('/billing/recurring/pause', { method: 'POST' }),
-  billingRecurringResume: () => req('/billing/recurring/resume', { method: 'POST' }),
-  billingRecurringCancel: () => req('/billing/recurring/cancel', { method: 'POST' }),
   // PIX fallback (primeiro ciclo)
   billingPixCheckout: (payload) => {
     const body = { ...payload };

@@ -101,6 +101,9 @@ export default function Relatorios() {
   const [refreshKey, setRefreshKey] = useState(0);
 
   const isCustom = range === 'custom';
+  const allowAdvanced = !!data?.plan?.allow_advanced;
+  const rangeOptions = allowAdvanced ? RANGE_OPTIONS : RANGE_OPTIONS.filter((opt) => opt.value === DEFAULT_RANGE);
+  const showCustomRangeInputs = allowAdvanced && isCustom;
 
   useEffect(() => {
     if (!isEstab) return undefined;
@@ -116,31 +119,42 @@ export default function Relatorios() {
   }, [isEstab]);
 
   useEffect(() => {
-    if (!isCustom) return;
+    if (!showCustomRangeInputs) return;
     if (customStart && customEnd) return;
     const end = new Date();
     const start = new Date(end.getTime() - 29 * DAY_MS);
     setCustomStart((prev) => prev || ensureDateString(start));
     setCustomEnd((prev) => prev || ensureDateString(end));
-  }, [isCustom, customStart, customEnd]);
+  }, [showCustomRangeInputs, customStart, customEnd]);
+
+  useEffect(() => {
+    if (allowAdvanced) return;
+    if (range !== DEFAULT_RANGE) setRange(DEFAULT_RANGE);
+    if (statusFilter !== 'all') setStatusFilter('all');
+    if (serviceFilter !== 'all') setServiceFilter('all');
+    if (customStart) setCustomStart('');
+    if (customEnd) setCustomEnd('');
+  }, [allowAdvanced, range, statusFilter, serviceFilter, customStart, customEnd]);
 
   const filterError = useMemo(() => {
-    if (!isCustom) return '';
+    if (!showCustomRangeInputs) return '';
     if (!customStart || !customEnd) return 'Informe data inicial e final para gerar o relatorio.';
     if (customStart > customEnd) return 'A data inicial nao pode ser maior que a data final.';
     return '';
-  }, [isCustom, customStart, customEnd]);
+  }, [showCustomRangeInputs, customStart, customEnd]);
 
   const currentParams = useMemo(() => {
-    const base = isCustom ? { start: customStart, end: customEnd } : { range };
-    if (statusFilter !== 'all') base.status = statusFilter;
-    if (serviceFilter !== 'all') base.serviceId = serviceFilter;
+    const base = allowAdvanced && isCustom
+      ? { start: customStart, end: customEnd }
+      : { range: allowAdvanced ? range : DEFAULT_RANGE };
+    if (allowAdvanced && statusFilter !== 'all') base.status = statusFilter;
+    if (allowAdvanced && serviceFilter !== 'all') base.serviceId = serviceFilter;
     return base;
-  }, [isCustom, customStart, customEnd, range, statusFilter, serviceFilter]);
+  }, [allowAdvanced, isCustom, customStart, customEnd, range, statusFilter, serviceFilter]);
 
   useEffect(() => {
     if (!isEstab) return undefined;
-    if (isCustom && filterError) {
+    if (showCustomRangeInputs && filterError) {
       setError(filterError);
       setData(null);
       setLoading(false);
@@ -168,7 +182,7 @@ export default function Relatorios() {
       });
 
     return () => { active = false; };
-  }, [isEstab, isCustom, filterError, currentParams, refreshKey]);
+  }, [isEstab, showCustomRangeInputs, filterError, currentParams, refreshKey]);
 
   const totals = data?.totals;
 
@@ -254,8 +268,11 @@ export default function Relatorios() {
   const currentParamsForDownload = useMemo(() => ({ ...currentParams }), [currentParams]);
 
   const handleDownload = async (type) => {
-    if (!data) return;
-    if (isCustom && filterError) {
+    if (!data || !allowAdvanced) {
+      setError('Exportação disponível a partir do plano Pro.');
+      return;
+    }
+    if (showCustomRangeInputs && filterError) {
       setError(filterError);
       return;
     }
@@ -333,15 +350,15 @@ export default function Relatorios() {
               className="input"
               value={range}
               onChange={(event) => setRange(event.target.value)}
-              disabled={loading}
+              disabled={loading || !allowAdvanced}
             >
-              {RANGE_OPTIONS.map((option) => (
+              {rangeOptions.map((option) => (
                 <option key={option.value} value={option.value}>
                   {option.label}
                 </option>
               ))}
             </select>
-            {isCustom && (
+            {showCustomRangeInputs && (
               <>
                 <input
                   type="date"
@@ -362,31 +379,35 @@ export default function Relatorios() {
                 />
               </>
             )}
-            <select
-              className="input"
-              value={statusFilter}
-              onChange={(event) => setStatusFilter(event.target.value)}
-              disabled={loading}
-            >
-              {STATUS_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-            <select
-              className="input"
-              value={serviceFilter}
-              onChange={(event) => setServiceFilter(event.target.value)}
-              disabled={loading || !serviceOptions.length}
-            >
-              <option value="all">Todos os serviços</option>
-              {serviceOptions.map((svc) => (
-                <option key={svc.id} value={svc.id}>
-                  {svc.nome || svc.title || svc.name}
-                </option>
-              ))}
-            </select>
+            {allowAdvanced && (
+              <>
+                <select
+                  className="input"
+                  value={statusFilter}
+                  onChange={(event) => setStatusFilter(event.target.value)}
+                  disabled={loading}
+                >
+                  {STATUS_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  className="input"
+                  value={serviceFilter}
+                  onChange={(event) => setServiceFilter(event.target.value)}
+                  disabled={loading || !serviceOptions.length}
+                >
+                  <option value="all">Todos os serviços</option>
+                  {serviceOptions.map((svc) => (
+                    <option key={svc.id} value={svc.id}>
+                      {svc.nome || svc.title || svc.name}
+                    </option>
+                  ))}
+                </select>
+              </>
+            )}
             <button
               type="button"
               className="btn btn--outline btn--sm report-refresh"
@@ -403,6 +424,11 @@ export default function Relatorios() {
         {error && !loading && (
           <div className="box error report-alert">
             {error}
+          </div>
+        )}
+        {!allowAdvanced && (
+          <div className="box info report-alert">
+            Filtros personalizados e exportação estão disponíveis a partir do plano Pro.
           </div>
         )}
 
@@ -434,15 +460,17 @@ export default function Relatorios() {
               <div className="report-section__header">
                 <h3>Volume diário</h3>
                 <div className="report-actions">
-                  <button
-                    type="button"
-                    className="btn btn--outline btn--sm"
-                    onClick={() => handleDownload('daily')}
-                    disabled={!dailyData.length || exporting}
-                  >
-                    <IconDownload className="btn__icon" aria-hidden />
-                    Exportar CSV
-                  </button>
+                  {allowAdvanced && (
+                    <button
+                      type="button"
+                      className="btn btn--outline btn--sm"
+                      onClick={() => handleDownload('daily')}
+                      disabled={!dailyData.length || exporting}
+                    >
+                      <IconDownload className="btn__icon" aria-hidden />
+                      Exportar CSV
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -510,15 +538,17 @@ export default function Relatorios() {
               <div className="report-section__header">
                 <h3>Serviços com mais agendamentos</h3>
                 <div className="report-actions">
-                  <button
-                    type="button"
-                    className="btn btn--outline btn--sm"
-                    onClick={() => handleDownload('services')}
-                    disabled={!services.length || exporting}
-                  >
-                    <IconDownload className="btn__icon" aria-hidden />
-                    Exportar CSV
-                  </button>
+                  {allowAdvanced && (
+                    <button
+                      type="button"
+                      className="btn btn--outline btn--sm"
+                      onClick={() => handleDownload('services')}
+                      disabled={!services.length || exporting}
+                    >
+                      <IconDownload className="btn__icon" aria-hidden />
+                      Exportar CSV
+                    </button>
+                  )}
                 </div>
               </div>
 
