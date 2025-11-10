@@ -1291,7 +1291,7 @@ export default function Configuracoes() {
               </div>
               <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
                 <label className="label" style={{ flex: '0 1 120px' }}>
-                  <span>NÃºmero</span>
+                  <span>Número</span>
                   <input className="input" value={profileForm.numero} onChange={(e) => handleProfileChange('numero', e.target.value)} required />
                 </label>
                 <label className="label" style={{ flex: '1 1 200px' }}>
@@ -1522,7 +1522,7 @@ export default function Configuracoes() {
                 ))}
               </div>
               <span className="muted" style={{ fontSize: 12 }}>
-                Ative os dias em que atende e informe os horarios.
+                Ative os dias em que atende e informe os horários.
               </span>
             </div>
             <label className="label">
@@ -1533,7 +1533,7 @@ export default function Configuracoes() {
                 value={publicProfileForm.horarios_text}
                 onChange={(e) => handlePublicProfileChange('horarios_text', e.target.value)}
                 disabled={publicProfileLoading || publicProfileSaving}
-                placeholder={'Plantoes, feriados ou orientacoes especiais'}
+                placeholder={'Plantões, feriados ou orientacões especiais'}
               />
               <span className="muted" style={{ fontSize: 12 }}>
                 Essas observações aparecem junto aos horários no agendamento.

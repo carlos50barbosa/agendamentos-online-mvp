@@ -1,6 +1,7 @@
 // backend/src/routes/admin.js
 import { Router } from 'express';
 import { pool } from '../lib/db.js';
+import { syncMercadoPagoPayment } from '../lib/billing.js';
 import { cleanupPasswordResets } from '../lib/maintenance.js';
 
 const IDENT_RE = /^[a-zA-Z0-9_]+$/;
@@ -79,6 +80,22 @@ router.get('/billing/subscriptions', checkAdmin, async (req, res) => {
     res.json({ subscriptions: rows, limit });
   } catch (e) {
     res.status(500).json({ error: 'db_error', message: e?.message || String(e) });
+  }
+});
+
+// Forçar sincronização de um pagamento (PIX) por payment_id
+router.post('/billing/sync-payment', checkAdmin, async (req, res) => {
+  const id = String(
+    (req.body && (req.body.payment_id || req.body.id)) ||
+    (req.query && (req.query.payment_id || req.query.id)) ||
+    ''
+  ).trim();
+  if (!id) return res.status(400).json({ error: 'missing_payment_id' });
+  try {
+    const r = await syncMercadoPagoPayment(id, { forced_by: 'admin' });
+    res.json({ ok: !!(r && r.ok), result: r });
+  } catch (e) {
+    res.status(400).json({ error: 'sync_failed', message: e?.message || String(e) });
   }
 });
 

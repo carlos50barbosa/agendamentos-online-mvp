@@ -52,8 +52,9 @@ function verifyWebhookSignature(req, resourceId) {
   if (config.billing?.mercadopago?.allowUnsigned) {
     return { valid: true, method: 'unsigned-allowed', using_secret_index: null }
   }
-  // Mercado Pago envia X-Signature: ts=<unix>, v1=<hex> (às vezes usa 't' em vez de 'ts')
-  const header = req.headers['x-signature']
+  // Mercado Pago envia X-Signature: ts=<unix>, v1=<hex>
+  // Alguns ambientes usam "x-mercadopago-signature" como alias
+  const header = req.headers['x-signature'] || req.headers['x-mercadopago-signature']
   if (!header) return { valid: false, reason: 'missing_signature' }
 
   const parts = String(header)
@@ -70,7 +71,8 @@ function verifyWebhookSignature(req, resourceId) {
 
   // Alguns ambientes do MP usam request-id na mensagem, outros usam topic (query "topic" ou "type")
   const requestId = req.headers['x-request-id'] || ''
-  // Colete várias fontes possíveis de tópico (MP varia entre 'topic', 'type', 'entity' e header 'x-topic')
+  // Colete várias fontes possíveis de tópico (MP varia bastante):
+  // 'topic', 'type', 'entity', header 'x-topic' e 'action' (ex.: 'payment.updated' => 'payment')
   const topicCandidatesRaw = [
     req.query?.topic,
     req.query?.type,
@@ -78,8 +80,19 @@ function verifyWebhookSignature(req, resourceId) {
     req.body?.topic,
     req.body?.type,
     req.body?.entity,
+    req.query?.action,
+    req.body?.action,
   ]
-  const topicCandidates = Array.from(new Set(topicCandidatesRaw.filter((v) => typeof v === 'string' && v.trim() !== '').map((v) => String(v).toLowerCase())))
+  const normalized = []
+  for (const v of topicCandidatesRaw) {
+    if (typeof v !== 'string') continue
+    const s = v.trim()
+    if (!s) continue
+    normalized.push(s.toLowerCase())
+    // Se for um action no formato "payment.updated", inclua também a raiz 'payment'
+    if (s.includes('.')) normalized.push(s.split('.')[0].toLowerCase())
+  }
+  const topicCandidates = Array.from(new Set(normalized))
 
   let matched = false
   let method = 'none'
