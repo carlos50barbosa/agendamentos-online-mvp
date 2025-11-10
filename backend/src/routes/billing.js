@@ -65,9 +65,22 @@ function verifyWebhookSignature(req, resourceId) {
   const raw = Object.fromEntries(parts)
   const normalizeVal = (v) => String(v || '').trim().replace(/^"|"$/g, '').replace(/^'|'$/g, '')
   const data = Object.fromEntries(Object.entries(raw).map(([k, v]) => [k.trim().toLowerCase(), normalizeVal(v)]))
-  const ts = data.ts || data.t || data.time || data.timestamp || ''
+  const tsRaw = data.ts || data.t || data.time || data.timestamp || ''
+  const tsCandidates = []
+  if (tsRaw) {
+    const tsClean = String(tsRaw).trim()
+    tsCandidates.push(tsClean)
+    // Se vier em milissegundos (13 dígitos), tente também em segundos
+    if (/^\d{13,}$/.test(tsClean)) {
+      try { tsCandidates.push(String(Math.floor(Number(tsClean) / 1000))) } catch {}
+    }
+    // Se vier em segundos (10 dígitos), tente também milissegundos
+    if (/^\d{10}$/.test(tsClean)) {
+      try { tsCandidates.push(String(Math.floor(Number(tsClean) * 1000))) } catch {}
+    }
+  }
   const signature = data.v1 || data.sign || data.signature || ''
-  if (!ts || !signature) return { valid: false, reason: 'invalid_signature_header' }
+  if (!tsCandidates.length || !signature) return { valid: false, reason: 'invalid_signature_header' }
 
   // Alguns ambientes do MP usam request-id na mensagem, outros usam topic (query "topic" ou "type")
   const requestId = req.headers['x-request-id'] || ''
@@ -97,32 +110,37 @@ function verifyWebhookSignature(req, resourceId) {
   let matched = false
   let method = 'none'
   let usingSecretIndex = null
+  let tsUsed = null
   const variants = []
 
   for (let i = 0; i < secrets.length; i++) {
     const sec = secrets[i]
-    const payloadReqId = `id:${resourceId};request-id:${requestId};ts:${ts}`
-    const expectedReqId = createHmac('sha256', sec).update(payloadReqId).digest('hex')
-    const validReq = expectedReqId === signature
-    variants.push({ index: i, expected_request_id: expectedReqId, payload_request_id: payloadReqId })
-    if (validReq) { matched = true; method = 'request-id'; usingSecretIndex = i; break }
+    for (const ts of tsCandidates) {
+      const payloadReqId = `id:${resourceId};request-id:${requestId};ts:${ts}`
+      const expectedReqId = createHmac('sha256', sec).update(payloadReqId).digest('hex')
+      const validReq = expectedReqId === signature
+      variants.push({ index: i, ts, expected_request_id: expectedReqId, payload_request_id: payloadReqId })
+      if (validReq) { matched = true; method = 'request-id'; usingSecretIndex = i; tsUsed = ts; break }
 
-    // Tente múltiplos candidatos de tópico
-    for (const t of (topicCandidates.length ? topicCandidates : [''])) {
-      const payloadTopic = `id:${resourceId};topic:${t};ts:${ts}`
-      const expectedTopic = createHmac('sha256', sec).update(payloadTopic).digest('hex')
-      variants.push({ index: i, expected_topic: expectedTopic, payload_topic: payloadTopic, topic: t })
-      if (expectedTopic === signature) {
-        matched = true
-        method = 'topic'
-        usingSecretIndex = i
-        break
+      // Tente múltiplos candidatos de tópico
+      for (const t of (topicCandidates.length ? topicCandidates : [''])) {
+        const payloadTopic = `id:${resourceId};topic:${t};ts:${ts}`
+        const expectedTopic = createHmac('sha256', sec).update(payloadTopic).digest('hex')
+        variants.push({ index: i, ts, expected_topic: expectedTopic, payload_topic: payloadTopic, topic: t })
+        if (expectedTopic === signature) {
+          matched = true
+          method = 'topic'
+          usingSecretIndex = i
+          tsUsed = ts
+          break
+        }
       }
+      if (matched) break
     }
     if (matched) break
   }
 
-  return { valid: matched, signature, ts, method, using_secret_index: usingSecretIndex, topics_tried: topicCandidates, request_id: requestId, variants }
+  return { valid: matched, signature, ts: tsRaw, ts_used: tsUsed, ts_candidates_tried: tsCandidates, method, using_secret_index: usingSecretIndex, topics_tried: topicCandidates, request_id: requestId, variants }
 }
 
 function normalizeId(value) {
@@ -269,14 +287,31 @@ router.get('/webhook/health', (req, res) => {
 
   if (id && ts) {
     try {
+      const tsCandidates = [ts]
+      if (/^\d{13,}$/.test(ts)) tsCandidates.push(String(Math.floor(Number(ts) / 1000)))
+      if (/^\d{10}$/.test(ts)) tsCandidates.push(String(Math.floor(Number(ts) * 1000)))
+
       const results = secrets.map((sec, idx) => {
-        const payloadReqId = `id:${id};request-id:${requestId || ''};ts:${ts}`
-        const expectedReqId = createHmac('sha256', sec).update(payloadReqId).digest('hex')
-        const payloadTopic = `id:${id};topic:${topic || ''};ts:${ts}`
-        const expectedTopic = createHmac('sha256', sec).update(payloadTopic).digest('hex')
-        return { index: idx, request_id_variant: { payload: payloadReqId, expected: expectedReqId }, topic_variant: { payload: payloadTopic, expected: expectedTopic } }
+        const primary = (() => {
+          const payloadReqId = `id:${id};request-id:${requestId || ''};ts:${ts}`
+          const expectedReqId = createHmac('sha256', sec).update(payloadReqId).digest('hex')
+          const payloadTopic = `id:${id};topic:${topic || ''};ts:${ts}`
+          const expectedTopic = createHmac('sha256', sec).update(payloadTopic).digest('hex')
+          return { request_id_variant: { payload: payloadReqId, expected: expectedReqId }, topic_variant: { payload: payloadTopic, expected: expectedTopic } }
+        })()
+
+        const alternatives = []
+        for (const alt of tsCandidates) {
+          if (alt === ts) continue
+          const payloadReqId = `id:${id};request-id:${requestId || ''};ts:${alt}`
+          const expectedReqId = createHmac('sha256', sec).update(payloadReqId).digest('hex')
+          const payloadTopic = `id:${id};topic:${topic || ''};ts:${alt}`
+          const expectedTopic = createHmac('sha256', sec).update(payloadTopic).digest('hex')
+          alternatives.push({ ts: alt, request_id_variant: { payload: payloadReqId, expected: expectedReqId }, topic_variant: { payload: payloadTopic, expected: expectedTopic } })
+        }
+        return { index: idx, ...primary, alt_ts: alternatives }
       })
-      return res.status(200).json({ ...base, provided: { id, request_id: requestId, topic, ts }, secrets: results })
+      return res.status(200).json({ ...base, provided: { id, request_id: requestId, topic, ts }, secrets: results, ts_candidates: tsCandidates })
     } catch (e) {
       return res.status(200).json({ ...base, error: 'failed_to_compute_signature', detail: e?.message || String(e) })
     }
