@@ -1,7 +1,7 @@
 # VSCODE --> GITHUB
 cd /opt/apps/agendamentos-online-mvp
 git add .
-git commit -m "Atualizações 09-11-2025"
+git commit -m "Atualizações 09-11-2025_"
 git push origin main
 
 ---------------------------------------------
