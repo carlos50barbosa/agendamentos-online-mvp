@@ -39,22 +39,6 @@ function onBodyReady(callback) {
   }
 }
 
-function initGoogleTag(tagId) {
-  if (state.googleLoaded) return
-  state.googleLoaded = true
-
-  window.dataLayer = window.dataLayer || []
-  window.gtag =
-    window.gtag ||
-    function gtag() {
-      window.dataLayer.push(arguments)
-    }
-
-  loadScript(`https://www.googletagmanager.com/gtag/js?id=${encodeURIComponent(tagId)}`).catch(() => {})
-  window.gtag('js', new Date())
-  window.gtag('config', tagId)
-}
-
 function initGoogleTagManager(containerId) {
   if (state.gtmLoaded) return
   state.gtmLoaded = true
@@ -122,9 +106,6 @@ export function initAnalytics() {
   const gtmId = normalizeEnv(import.meta.env.VITE_GTM_ID)
   if (gtmId) {
     initGoogleTagManager(gtmId)
-  } else {
-    const googleTagId = normalizeEnv(import.meta.env.VITE_GOOGLE_TAG_ID)
-    if (googleTagId) initGoogleTag(googleTagId)
   }
 
   const metaPixelId = normalizeEnv(import.meta.env.VITE_META_PIXEL_ID)
@@ -149,11 +130,6 @@ export function trackAnalyticsEvent(eventName, params = {}) {
   const payload = cleanParams({ event: eventName, ...params })
   window.dataLayer = window.dataLayer || []
   window.dataLayer.push(payload)
-
-  if (typeof window.gtag === 'function') {
-    const { event_callback: eventCallback, event_timeout: eventTimeout, ...rest } = payload
-    window.gtag('event', eventName, cleanParams(rest))
-  }
 }
 
 export function trackMetaEvent(eventName, params = {}, options = {}) {
