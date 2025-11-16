@@ -1,6 +1,6 @@
 ﻿// backend/src/routes/billing.js
 import { Router } from 'express'
-import { createHmac } from 'node:crypto'
+import { createHmac, createHash } from 'node:crypto'
 import { auth, isEstabelecimento } from '../middleware/auth.js'
 import { createMercadoPagoPixCheckout, syncMercadoPagoPayment } from '../lib/billing.js'
 import {
@@ -48,12 +48,10 @@ function verifyWebhookSignature(req, resourceId) {
   const secretB = (config.billing?.mercadopago?.webhookSecret2 || '').trim()
   const secrets = [secretA, secretB].filter(Boolean)
   if (!secrets.length) return { valid: true, method: 'none', using_secret_index: null }
-  // Modo diagnóstico: permitir sem assinatura quando habilitado por env
   if (config.billing?.mercadopago?.allowUnsigned) {
     return { valid: true, method: 'unsigned-allowed', using_secret_index: null }
   }
-  // Mercado Pago envia X-Signature: ts=<unix>, v1=<hex>
-  // Alguns ambientes usam "x-mercadopago-signature" como alias
+
   const header = req.headers['x-signature'] || req.headers['x-mercadopago-signature']
   if (!header) return { valid: false, reason: 'missing_signature' }
 
@@ -62,89 +60,316 @@ function verifyWebhookSignature(req, resourceId) {
     .map((segment) => segment.trim().split('='))
     .filter((pair) => pair.length === 2)
 
-  const raw = Object.fromEntries(parts)
-  const normalizeVal = (v) => String(v || '').trim().replace(/^"|"$/g, '').replace(/^'|'$/g, '')
-  const data = Object.fromEntries(Object.entries(raw).map(([k, v]) => [k.trim().toLowerCase(), normalizeVal(v)]))
-  const tsRaw = data.ts || data.t || data.time || data.timestamp || ''
+  const normalizeHeaderVal = (v) => String(v || '').trim().replace(/^"|"$/g, '').replace(/^'|'$/g, '')
+  const headerData = Object.fromEntries(parts.map(([k, v]) => [k.trim().toLowerCase(), normalizeHeaderVal(v)]))
+
+  const tsRaw = headerData.ts || headerData.t || headerData.time || headerData.timestamp || ''
   const tsCandidates = []
+  const pushTsCandidate = (value) => {
+    const normalized = String(value || '').trim()
+    if (!normalized) return
+    if (!tsCandidates.includes(normalized)) tsCandidates.push(normalized)
+  }
   if (tsRaw) {
-    const tsClean = String(tsRaw).trim()
-    tsCandidates.push(tsClean)
-    // Se vier em milissegundos (13 dígitos), tente também em segundos
-    if (/^\d{13,}$/.test(tsClean)) {
-      try { tsCandidates.push(String(Math.floor(Number(tsClean) / 1000))) } catch {}
+    pushTsCandidate(tsRaw)
+    if (/^\d{13,}$/.test(tsRaw)) {
+      try { pushTsCandidate(String(Math.floor(Number(tsRaw) / 1000))) } catch {}
     }
-    // Se vier em segundos (10 dígitos), tente também milissegundos
-    if (/^\d{10}$/.test(tsClean)) {
-      try { tsCandidates.push(String(Math.floor(Number(tsClean) * 1000))) } catch {}
+    if (/^\d{10}$/.test(tsRaw)) {
+      try { pushTsCandidate(String(Math.floor(Number(tsRaw) * 1000))) } catch {}
     }
   }
-  const signature = data.v1 || data.sign || data.signature || ''
+
+  const signatureRaw = headerData.v1 || headerData.sign || headerData.signature || ''
+  const signature = String(signatureRaw || '').trim().toLowerCase()
   if (!tsCandidates.length || !signature) return { valid: false, reason: 'invalid_signature_header' }
 
-  // Alguns ambientes do MP usam request-id na mensagem, outros usam topic (query "topic" ou "type")
-  const requestId = req.headers['x-request-id'] || ''
-  // Colete várias fontes possíveis de tópico (MP varia bastante):
-  // 'topic', 'type', 'entity', header 'x-topic' e 'action' (ex.: 'payment.updated' => 'payment')
-  const topicCandidatesRaw = [
-    req.query?.topic,
-    req.query?.type,
-    req.headers['x-topic'],
-    req.body?.topic,
-    req.body?.type,
-    req.body?.entity,
-    req.query?.action,
-    req.body?.action,
-  ]
-  const normalized = []
-  for (const v of topicCandidatesRaw) {
-    if (typeof v !== 'string') continue
-    const s = v.trim()
-    if (!s) continue
-    normalized.push(s.toLowerCase())
-    // Se for um action no formato "payment.updated", inclua também a raiz 'payment'
-    if (s.includes('.')) normalized.push(s.split('.')[0].toLowerCase())
-  }
-  const topicCandidates = Array.from(new Set(normalized))
+  const body = req.body && typeof req.body === 'object' && !Buffer.isBuffer(req.body) ? req.body : {}
+  const rawBody = Buffer.isBuffer(req.rawBody) ? req.rawBody : null
+  const rawBodyHash = rawBody?.length ? createHash('sha256').update(rawBody).digest('hex') : null
 
-  let matched = false
-  let method = 'none'
-  let usingSecretIndex = null
-  let tsUsed = null
-  const variants = []
-
-  for (let i = 0; i < secrets.length; i++) {
-    const sec = secrets[i]
-    for (const ts of tsCandidates) {
-      const payloadReqId = `id:${resourceId};request-id:${requestId};ts:${ts}`
-      const expectedReqId = createHmac('sha256', sec).update(payloadReqId).digest('hex')
-      const validReq = expectedReqId === signature
-      variants.push({ index: i, ts, expected_request_id: expectedReqId, payload_request_id: payloadReqId })
-      if (validReq) { matched = true; method = 'request-id'; usingSecretIndex = i; tsUsed = ts; break }
-
-      // Tente múltiplos candidatos de tópico
-      for (const t of (topicCandidates.length ? topicCandidates : [''])) {
-        const payloadTopic = `id:${resourceId};topic:${t};ts:${ts}`
-        const expectedTopic = createHmac('sha256', sec).update(payloadTopic).digest('hex')
-        variants.push({ index: i, ts, expected_topic: expectedTopic, payload_topic: payloadTopic, topic: t })
-        if (expectedTopic === signature) {
-          matched = true
-          method = 'topic'
-          usingSecretIndex = i
-          tsUsed = ts
-          break
+  const collectTopics = () => {
+    const rawValues = [
+      req.query?.topic,
+      req.query?.type,
+      req.query?.entity,
+      req.query?.action,
+      req.headers['x-topic'],
+      body?.topic,
+      body?.type,
+      body?.entity,
+      body?.action,
+    ]
+    const seen = new Set()
+    for (const value of rawValues) {
+      if (typeof value !== 'string') continue
+      const trimmed = value.trim()
+      if (!trimmed) continue
+      seen.add(trimmed)
+      seen.add(trimmed.toLowerCase())
+      if (trimmed.includes('.')) {
+        const base = trimmed.split('.')[0]
+        if (base) {
+          seen.add(base)
+          seen.add(base.toLowerCase())
         }
       }
-      if (matched) break
+    }
+    return Array.from(seen)
+  }
+
+  const topicCandidates = collectTopics()
+
+  const requestIdCandidates = [
+    req.headers['x-request-id'],
+    req.headers['x-mercadopago-request-id'],
+    req.headers['x-idempotency-key'],
+    req.query?.['request-id'],
+    req.query?.request_id,
+    body?.['request-id'],
+    body?.request_id,
+  ]
+  const requestId = requestIdCandidates.map(normalizeId).find(Boolean) || ''
+
+  const candidateIds = new Set()
+  const addIdCandidate = (...values) => {
+    for (const value of values) {
+      const raw = normalizeId(value)
+      if (!raw) continue
+      candidateIds.add(raw)
+      const compact = normalizeResourceCandidate(raw)
+      if (compact && compact !== raw) candidateIds.add(compact)
+    }
+  }
+  addIdCandidate(resourceId)
+  addIdCandidate(req.query?.['data.id'], req.query?.id)
+  addIdCandidate(body?.data?.id, body?.id, body?.resource, body?.resource_id, body?.payment_id)
+  addIdCandidate(req.headers['x-resource-id'])
+  const idCandidates = Array.from(candidateIds).filter(Boolean)
+
+  const payloadCandidates = []
+  const payloadSeen = new Set()
+  const registerPayload = (payload, meta) => {
+    if (!payload) return
+    const key = `str:${payload}`
+    if (payloadSeen.has(key)) return
+    payloadSeen.add(key)
+    payloadCandidates.push({ payload, meta })
+  }
+  const registerWithSemicolon = (payload, meta) => {
+    if (!payload) return
+    registerPayload(payload, meta)
+    if (!payload.endsWith(';')) registerPayload(`${payload};`, { ...meta, appended_semicolon: true })
+  }
+  const composeSegments = (segments) => {
+    const partsOut = []
+    for (const [label, value] of segments) {
+      const normalized = normalizeId(value)
+      if (!normalized) continue
+      partsOut.push(`${label}:${normalized}`)
+    }
+    return partsOut.join(';')
+  }
+  const addCandidate = (segments, meta) => {
+    const payload = composeSegments(segments)
+    if (payload) registerWithSemicolon(payload, meta)
+  }
+
+  for (const ts of tsCandidates) {
+    for (const id of idCandidates) {
+      addCandidate(
+        [
+          ['id', id],
+          ['ts', ts],
+        ],
+        { strategy: 'id_ts', id, ts }
+      )
+      addCandidate(
+        [
+          ['ts', ts],
+          ['id', id],
+        ],
+        { strategy: 'ts_id', id, ts }
+      )
+      if (requestId) {
+        addCandidate(
+          [
+            ['id', id],
+            ['request-id', requestId],
+            ['ts', ts],
+          ],
+          { strategy: 'id_request-id_ts', id, ts, requestId }
+        )
+        addCandidate(
+          [
+            ['id', id],
+            ['request_id', requestId],
+            ['ts', ts],
+          ],
+          { strategy: 'id_request_id_ts', id, ts, requestId }
+        )
+        addCandidate(
+          [
+            ['request-id', requestId],
+            ['id', id],
+            ['ts', ts],
+          ],
+          { strategy: 'request-id_id_ts', id, ts, requestId }
+        )
+        addCandidate(
+          [
+            ['ts', ts],
+            ['id', id],
+            ['request-id', requestId],
+          ],
+          { strategy: 'ts_id_request-id', id, ts, requestId }
+        )
+      }
+      for (const topic of topicCandidates) {
+        addCandidate(
+          [
+            ['id', id],
+            ['topic', topic],
+            ['ts', ts],
+          ],
+          { strategy: 'id_topic_ts', id, ts, topic }
+        )
+        addCandidate(
+          [
+            ['topic', topic],
+            ['id', id],
+            ['ts', ts],
+          ],
+          { strategy: 'topic_id_ts', id, ts, topic }
+        )
+        addCandidate(
+          [
+            ['id', id],
+            ['type', topic],
+            ['ts', ts],
+          ],
+          { strategy: 'id_type_ts', id, ts, topic }
+        )
+      }
+      if (rawBodyHash) {
+        addCandidate(
+          [
+            ['id', id],
+            ['ts', ts],
+            ['body', rawBodyHash],
+          ],
+          { strategy: 'id_ts_bodyhash', id, ts }
+        )
+        if (requestId) {
+          addCandidate(
+            [
+              ['id', id],
+              ['request-id', requestId],
+              ['ts', ts],
+              ['body', rawBodyHash],
+            ],
+            { strategy: 'id_request_bodyhash', id, ts, requestId }
+          )
+        }
+      }
+    }
+
+    if (requestId) {
+      addCandidate(
+        [
+          ['id', requestId],
+          ['ts', ts],
+        ],
+        { strategy: 'request-id_ts', requestId, ts }
+      )
+      addCandidate(
+        [
+          ['ts', ts],
+          ['id', requestId],
+        ],
+        { strategy: 'ts_request-id', requestId, ts }
+      )
+      addCandidate(
+        [
+          ['request-id', requestId],
+          ['ts', ts],
+        ],
+        { strategy: 'request-id_only', requestId, ts }
+      )
+    }
+  }
+
+  if (!payloadCandidates.length) {
+    return { valid: false, reason: 'no_payload_candidates', signature, ts: tsRaw, request_id: requestId, topics_tried: topicCandidates }
+  }
+
+  const variants = []
+  let matched = null
+
+  for (let index = 0; index < secrets.length; index++) {
+    const secret = secrets[index]
+    for (const candidate of payloadCandidates) {
+      const digest = createHmac('sha256', secret).update(candidate.payload).digest('hex')
+      if (variants.length < 60) {
+        variants.push({
+          index,
+          payload: candidate.payload,
+          digest,
+          meta: candidate.meta,
+        })
+      }
+      if (digest === signature) {
+        matched = { index, candidate, digest }
+        break
+      }
     }
     if (matched) break
   }
 
-  return { valid: matched, signature, ts: tsRaw, ts_used: tsUsed, ts_candidates_tried: tsCandidates, method, using_secret_index: usingSecretIndex, topics_tried: topicCandidates, request_id: requestId, variants }
+  if (matched) {
+    return {
+      valid: true,
+      method: matched.candidate?.meta?.strategy || 'matched',
+      using_secret_index: matched.index,
+      ts: tsRaw,
+      ts_used: matched.candidate?.meta?.ts || tsRaw,
+      signature,
+      request_id: requestId,
+      topics_tried: topicCandidates,
+      raw_body_len: rawBody?.length || 0,
+      matched_payload: matched.candidate.payload,
+      variants,
+    }
+  }
+
+  return {
+    valid: false,
+    reason: 'signature_mismatch',
+    signature,
+    ts: tsRaw,
+    ts_candidates_tried: tsCandidates,
+    request_id: requestId,
+    topics_tried: topicCandidates,
+    raw_body_len: rawBody?.length || 0,
+    variants,
+  }
 }
 
 function normalizeId(value) {
   return String(value || '').trim()
+}
+
+function normalizeResourceCandidate(value) {
+  const raw = normalizeId(value)
+  if (!raw) return ''
+  const withoutQuery = raw.split('?')[0].split('#')[0]
+  const withoutHost = withoutQuery.replace(/^https?:\/\/[^/]+/i, '')
+  const trimmed = withoutHost.replace(/^\/+/, '').replace(/\/+$/, '')
+  if (!trimmed) return raw
+  if (!trimmed.includes('/')) return trimmed
+  const segments = trimmed.split('/').filter(Boolean)
+  if (!segments.length) return trimmed
+  return segments[segments.length - 1]
 }
 
 router.get('/status', auth, isEstabelecimento, async (req, res) => {
@@ -367,3 +592,4 @@ router.post('/pix', auth, isEstabelecimento, async (req, res) => {
 })
 
 export default router
+
