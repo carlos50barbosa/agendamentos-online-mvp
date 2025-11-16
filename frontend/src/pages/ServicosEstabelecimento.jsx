@@ -67,10 +67,6 @@ export default function ServicosEstabelecimento() {
     try {
       const plan = localStorage.getItem("plan_current") || "starter";
       let end = localStorage.getItem("trial_end");
-      if (!end) {
-        const d = new Date(); d.setDate(d.getDate() + 14); end = d.toISOString();
-        localStorage.setItem("trial_end", end);
-      }
       setTrialInfo({ plan, end });
     } catch {}
   }, []);
