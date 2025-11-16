@@ -1,7 +1,7 @@
 # VSCODE --> GITHUB
 cd /opt/apps/agendamentos-online-mvp
 git add .
-git commit -m "Atualizações 10/11/2025"
+git commit -m "Atualizações 16/11/2025"
 git push origin main
 
 ---------------------------------------------
@@ -32,8 +32,14 @@ cd /opt/apps/agendamentos-online-mvp/frontend
 # deps do frontend
 npm ci
 
-# apontar a API (porque seu Nginx usa /api/)
-export VITE_API_URL="https://agendamentosonline.com/api"
+# variáveis padrão já estão em frontend/.env.production:
+# VITE_API_URL="https://agendamentosonline.com/api"
+# VITE_GTM_ID="GTM-M66FSB3K"
+# VITE_META_PIXEL_ID="864468765947159"
+# (remova os comentários abaixo se precisar sobrescrever durante o build)
+# export VITE_API_URL="https://agendamentosonline.com/api"
+# export VITE_GTM_ID="GTM-M66FSB3K"
+# export VITE_META_PIXEL_ID="864468765947159"
 
 # build
 npm run build

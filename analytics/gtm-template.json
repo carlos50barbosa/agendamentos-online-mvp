@@ -1,0 +1,65 @@
+{
+  "description": "Template lógico dos objetos a criar no GTM",
+  "variables": [
+    { "name": "DLV - plan", "type": "dataLayer", "key": "plan" },
+    { "name": "DLV - plan label", "type": "dataLayer", "key": "plan_label" },
+    { "name": "DLV - billing cycle", "type": "dataLayer", "key": "billing_cycle" },
+    { "name": "DLV - payment id", "type": "dataLayer", "key": "payment_id" },
+    { "name": "DLV - subscription id", "type": "dataLayer", "key": "subscription_id" },
+    { "name": "DLV - transaction id", "type": "dataLayer", "key": "transaction_id" },
+    { "name": "DLV - value", "type": "dataLayer", "key": "value", "default": 0 },
+    { "name": "DLV - currency", "type": "dataLayer", "key": "currency", "default": "BRL" },
+    { "name": "DLV - items", "type": "dataLayer", "key": "items" }
+  ],
+  "triggers": [
+    { "name": "EV - initiate_checkout", "type": "customEvent", "eventName": "initiate_checkout" },
+    { "name": "EV - purchase", "type": "customEvent", "eventName": "purchase" }
+  ],
+  "tags": [
+    {
+      "name": "GA4 - Config",
+      "type": "ga4-config",
+      "parameters": {
+        "measurement_id": "G-XXXXXXXXXX",
+        "send_page_view": true
+      },
+      "trigger": "All Pages"
+    },
+    {
+      "name": "GA4 - initiate_checkout",
+      "type": "ga4-event",
+      "trigger": "EV - initiate_checkout",
+      "eventName": "initiate_checkout",
+      "parameters": {
+        "items": "{{DLV - items}}",
+        "value": "{{DLV - value}}",
+        "currency": "{{DLV - currency}}",
+        "plan": "{{DLV - plan}}",
+        "plan_label": "{{DLV - plan label}}",
+        "billing_cycle": "{{DLV - billing cycle}}",
+        "payment_id": "{{DLV - payment id}}"
+      }
+    },
+    {
+      "name": "GA4 - purchase",
+      "type": "ga4-event",
+      "trigger": "EV - purchase",
+      "eventName": "purchase",
+      "parameters": {
+        "items": "{{DLV - items}}",
+        "value": "{{DLV - value}}",
+        "currency": "{{DLV - currency}}",
+        "plan": "{{DLV - plan}}",
+        "plan_label": "{{DLV - plan label}}",
+        "billing_cycle": "{{DLV - billing cycle}}",
+        "transaction_id": "{{DLV - transaction id}}",
+        "subscription_id": "{{DLV - subscription id}}"
+      }
+    }
+  ],
+  "notes": [
+    "Substitua G-XXXXXXXXXX pelo Measurement ID real do GA4.",
+    "Se preferir Google Ads Conversion Tag, duplique o trigger EV - purchase e troque o tipo do tag.",
+    "As conversões no Meta devem ser definidas no Events Manager usando os eventos InitiateCheckout/Purchase já enviados via Pixel."
+  ]
+}

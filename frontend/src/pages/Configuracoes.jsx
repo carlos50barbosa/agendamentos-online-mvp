@@ -5,6 +5,7 @@ import { getUser, saveUser, saveToken } from '../utils/auth';
 import { Api, resolveAssetUrl } from '../utils/api';
 import { IconChevronRight } from '../components/Icons.jsx';
 import Modal from '../components/Modal.jsx';
+import { trackAnalyticsEvent, trackMetaEvent } from '../utils/analytics.js';
 
 const formatPhoneLabel = (value = '') => {
   let digits = value.replace(/\D/g, '');
@@ -81,6 +82,40 @@ const WORKING_DAYS = [
   { key: 'saturday', label: 'Sábado', shortLabel: 'Sabado' },
   { key: 'sunday', label: 'Domingo', shortLabel: 'Domingo' },
 ];
+
+const PLAN_META = {
+  starter: { label: 'Starter', maxServices: 10, maxProfessionals: 2 },
+  pro: { label: 'Pro', maxServices: 100, maxProfessionals: 10 },
+  premium: { label: 'Premium', maxServices: null, maxProfessionals: null },
+};
+const PLAN_TIERS = Object.keys(PLAN_META);
+const planLabel = (plan) => PLAN_META[plan]?.label || plan?.toUpperCase() || '';
+const ANALYTICS_CURRENCY = 'BRL';
+
+const normalizePlanKey = (plan) => {
+  const normalized = String(plan || '').trim().toLowerCase();
+  return normalized || 'starter';
+};
+const normalizeCycle = (cycle) => {
+  const normalized = String(cycle || 'mensal').trim().toLowerCase();
+  return normalized || 'mensal';
+};
+const centsToValue = (amountCents) => {
+  if (typeof amountCents !== 'number' || !Number.isFinite(amountCents)) return null;
+  return Math.round(amountCents) / 100;
+};
+const buildAnalyticsItem = (planKey, cycle, value) => {
+  const item = {
+    item_id: planKey,
+    item_name: planLabel(planKey),
+    item_category: 'subscription',
+    billing_cycle: cycle,
+    quantity: 1,
+  };
+  if (value != null) item.price = value;
+  return item;
+};
+const PURCHASE_SIGNATURE_KEY = 'ao_last_plan_purchase_signature';
 
 const DAY_ALIAS_MAP = (() => {
   const map = {};
@@ -489,6 +524,7 @@ export default function Configuracoes() {
   const [checkoutLoading, setCheckoutLoading] = useState(false);
   const [checkoutError, setCheckoutError] = useState('');
   const checkoutIntentRef = useRef(false);
+  const purchaseEventRef = useRef(null);
   // Mensagens pós-checkout (retorno do Mercado Pago)
   const [checkoutNotice, setCheckoutNotice] = useState({ kind: '', message: '', syncing: false });
   // Contagem simples para pré-validação de downgrade (serviços)
@@ -536,14 +572,6 @@ export default function Configuracoes() {
   const subStatus = useMemo(() => String(billing?.subscription?.status || '').toLowerCase(), [billing?.subscription?.status]);
   // Assinatura ativa (evita acionar checkout padrão e resultar em 409 "already_active")
 
-  // Metadados dos planos (espelha backend)
-  const PLAN_META = {
-    starter: { label: 'Starter', maxServices: 10, maxProfessionals: 2 },
-    pro: { label: 'Pro', maxServices: 100, maxProfessionals: 10 },
-    premium: { label: 'Premium', maxServices: null, maxProfessionals: null },
-  };
-  const PLAN_TIERS = Object.keys(PLAN_META);
-  const planLabel = (p) => PLAN_META[p]?.label || p?.toUpperCase() || '';
   const exceedsServices = (target) => {
     const limit = PLAN_META[target]?.maxServices;
     if (limit == null) return false;
@@ -751,6 +779,48 @@ export default function Configuracoes() {
     })();
   }, [isEstab, user?.id, fetchBilling, applyPublicProfile]);
 
+  useEffect(() => {
+    const subscription = billing?.subscription;
+    if (!subscription) return;
+    const status = String(subscription.status || '').toLowerCase();
+    if (status !== 'active') return;
+    const signatureBase = `${subscription.id || 'sub'}:${subscription.current_period_end || subscription.updated_at || ''}`;
+    if (!signatureBase) return;
+    if (purchaseEventRef.current === signatureBase) return;
+    let storedSignature = null;
+    try { storedSignature = localStorage.getItem(PURCHASE_SIGNATURE_KEY); } catch {}
+    if (storedSignature === signatureBase) {
+      purchaseEventRef.current = signatureBase;
+      return;
+    }
+    purchaseEventRef.current = signatureBase;
+    try { localStorage.setItem(PURCHASE_SIGNATURE_KEY, signatureBase); } catch {}
+
+    const planKey = normalizePlanKey(subscription.plan || planInfo.plan);
+    const cycleKey = normalizeCycle(subscription.billing_cycle || subscription.cycle);
+    const value = centsToValue(subscription.amount_cents);
+    const analyticsPayload = {
+      plan: planKey,
+      plan_label: planLabel(planKey),
+      billing_cycle: cycleKey,
+      subscription_id: subscription.id || null,
+      transaction_id: subscription.gateway_preference_id || subscription.id || null,
+      currency: ANALYTICS_CURRENCY,
+      items: [buildAnalyticsItem(planKey, cycleKey, value)],
+    };
+    if (value != null) analyticsPayload.value = value;
+    trackAnalyticsEvent('purchase', analyticsPayload);
+
+    const metaPayload = {
+      plan: planKey,
+      billing_cycle: cycleKey,
+      currency: ANALYTICS_CURRENCY,
+    };
+    if (value != null) metaPayload.value = value;
+    if (subscription.gateway_preference_id) metaPayload.order_id = subscription.gateway_preference_id;
+    trackMetaEvent('Purchase', metaPayload);
+  }, [billing?.subscription, planInfo.plan]);
+
   const handleCheckout = useCallback(async (targetPlan, targetCycle = 'mensal') => {
     if (!isEstab || !user?.id) return false;
     setCheckoutError('');
@@ -759,6 +829,32 @@ export default function Configuracoes() {
     let success = false;
     try {
       const data = await Api.billingPixCheckout({ plan: targetPlan, billing_cycle: targetCycle });
+      if (data) {
+        const amountCents = data?.pix?.amount_cents ?? data?.subscription?.amount_cents ?? null;
+        const paymentId = data?.pix?.payment_id || data?.subscription?.gateway_preference_id || null;
+        const planKey = normalizePlanKey(targetPlan);
+        const cycleKey = normalizeCycle(targetCycle);
+        const value = centsToValue(amountCents);
+        const analyticsPayload = {
+          plan: planKey,
+          plan_label: planLabel(planKey),
+          billing_cycle: cycleKey,
+          payment_id: paymentId || null,
+          currency: ANALYTICS_CURRENCY,
+          items: [buildAnalyticsItem(planKey, cycleKey, value)],
+        };
+        if (value != null) analyticsPayload.value = value;
+        trackAnalyticsEvent('initiate_checkout', analyticsPayload);
+
+        const metaPayload = {
+          plan: planKey,
+          billing_cycle: cycleKey,
+          currency: ANALYTICS_CURRENCY,
+        };
+        if (value != null) metaPayload.value = value;
+        if (paymentId) metaPayload.order_id = paymentId;
+        trackMetaEvent('InitiateCheckout', metaPayload);
+      }
       if (data?.pix && (data.pix.qr_code || data.pix.ticket_url)) {
         setPixCheckoutModal({ open: true, data: { ...data.pix, init_point: data.init_point } });
       } else if (data?.init_point) {
@@ -1707,25 +1803,28 @@ export default function Configuracoes() {
       ];
       if (!hasActiveSubscription) {
         secondaryActions.unshift(
-          <button
-            key="pix-checkout"
-            className="btn btn--chip btn--sm"
-            type="button"
-            onClick={() => handleCheckout(planInfo.plan, pixCycle)}
-            disabled={checkoutLoading}
-            title="Gerar cobrança via PIX"
-          >
-            {checkoutLoading ? <span className="spinner" /> : 'Gerar PIX'}
-          </button>
-        );
-        secondaryActions.unshift(
-          <label key="pix-cycle" className="plan-card__pix-select">
-            <span>Ciclo</span>
-            <select value={pixCycle} onChange={(e) => setPixCycle(e.target.value)} disabled={checkoutLoading} className="input input--sm">
-              <option value="mensal">Mensal</option>
-              <option value="anual">Anual</option>
-            </select>
-          </label>
+          <div key="pix-actions" className="plan-card__pix-actions">
+            <label className="plan-card__pix-select">
+              <span className="plan-card__pix-label">Ciclo</span>
+              <select
+                value={pixCycle}
+                onChange={(e) => setPixCycle(e.target.value)}
+                disabled={checkoutLoading}
+              >
+                <option value="mensal">Mensal</option>
+                <option value="anual">Anual</option>
+              </select>
+            </label>
+            <button
+              className="btn btn--primary plan-card__pix-button"
+              type="button"
+              onClick={() => handleCheckout(planInfo.plan, pixCycle)}
+              disabled={checkoutLoading}
+              title="Gerar cobrança via PIX"
+            >
+              {checkoutLoading ? <span className="spinner" /> : 'Gerar PIX'}
+            </button>
+          </div>
         );
       }
       const planNotice = hasActiveSubscription

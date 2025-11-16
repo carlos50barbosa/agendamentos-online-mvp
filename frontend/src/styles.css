@@ -2093,8 +2093,15 @@ button.danger:disabled,
 .plan-card__actions-group{display:flex;flex-wrap:wrap;gap:10px;}
 .plan-card__actions-group--secondary{justify-content:flex-end;}
 .plan-card__foot{display:flex;flex-wrap:wrap;gap:12px;font-size:.8rem;color:#64748b;}
-.plan-card__pix-select{display:flex;flex-direction:column;gap:4px;font-size:.75rem;color:#64748b;}
-.plan-card__pix-select select{min-width:120px;}
+.plan-card__pix-actions{display:flex;flex-wrap:wrap;align-items:flex-end;gap:12px;}
+.plan-card__pix-select{display:flex;flex-direction:column;gap:6px;font-size:.75rem;color:#475569;font-weight:600;}
+.plan-card__pix-label{font-size:.7rem;text-transform:uppercase;letter-spacing:.08em;color:#475569;}
+.plan-card__pix-select select{appearance:none;-webkit-appearance:none;-moz-appearance:none;min-width:150px;border-radius:999px;border:1px solid rgba(99,102,241,0.3);background:linear-gradient(135deg,rgba(99,102,241,0.08),rgba(99,102,241,0.18));padding:10px 36px 10px 14px;font-weight:600;font-size:.9rem;color:#312e81;box-shadow:0 6px 16px rgba(99,102,241,0.15);transition:var(--transition);background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16'%3E%3Cpath d='M4 6l4 4 4-4' stroke='%236366f1' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round' fill='none'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:calc(100% - 14px) center;background-size:14px;}
+.plan-card__pix-select select:focus{outline:none;box-shadow:0 0 0 1px rgba(99,102,241,0.55),0 0 0 4px rgba(99,102,241,0.25);}
+.plan-card__pix-select select:disabled{opacity:.6;cursor:not-allowed;box-shadow:none;}
+.plan-card__pix-button{border:none;border-radius:999px;height:44px;padding:0 26px;font-size:.95rem;font-weight:600;background:linear-gradient(120deg,var(--brand),var(--primary-600));color:var(--text-on-brand);box-shadow:0 12px 28px rgba(99,102,241,0.32);transition:transform .18s ease,box-shadow .18s ease;}
+.plan-card__pix-button:hover:not(:disabled){transform:translateY(-1px);box-shadow:0 16px 34px rgba(99,102,241,0.35);}
+.plan-card__pix-button:disabled{opacity:.65;cursor:not-allowed;box-shadow:none;}
 @media (max-width:640px){
   .plan-card{padding:20px;}
   .plan-card__summary{grid-template-columns:1fr;}
@@ -2125,7 +2132,9 @@ button.danger:disabled,
 [data-theme='dark'] .plan-card__summary-item strong{color:#f8fafc;}
 [data-theme='dark'] .plan-card__summary-extra{color:#94a3b8;}
 [data-theme='dark'] .plan-card__foot{color:#94a3b8;}
-[data-theme='dark'] .plan-card__pix-select{color:#94a3b8;}
+[data-theme='dark'] .plan-card__pix-label{color:#cbd5f5;}
+[data-theme='dark'] .plan-card__pix-select select{border-color:rgba(129,140,248,0.45);background:linear-gradient(135deg,rgba(129,140,248,0.25),rgba(99,102,241,0.35));color:#e0e7ff;box-shadow:0 10px 22px rgba(15,23,42,0.65);}
+[data-theme='dark'] .plan-card__pix-button{box-shadow:0 16px 36px rgba(15,23,42,0.65);}
 
 .estab-info{display:flex;flex-direction:column;gap:12px;}
 .estab-info__tabs{display:flex;gap:8px;border-bottom:1px solid var(--border);padding-bottom:6px;margin-bottom:4px;flex-wrap:wrap;}

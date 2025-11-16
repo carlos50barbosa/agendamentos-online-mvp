@@ -1,0 +1,267 @@
+{
+  "exportFormatVersion": 2,
+  "exportTime": "2025-11-16 12:45:00",
+  "containerVersion": {
+    "accountId": "0000000000",
+    "containerId": "0000000000",
+    "containerVersionId": "0",
+    "container": {
+      "name": "Agendamentos Online",
+      "publicId": "GTM-XXXXXXX",
+      "usageContext": [
+        "web"
+      ]
+    },
+    "tag": [
+      {
+        "accountId": "0000000000",
+        "containerId": "0000000000",
+        "tagId": "1",
+        "name": "GA4 - Config",
+        "type": "gaawe",
+        "parameter": [
+          {
+            "type": "template",
+            "key": "measurementId",
+            "value": "G-37DNY1XZQJ"
+          },
+          {
+            "type": "boolean",
+            "key": "sendPageView",
+            "value": "true"
+          }
+        ],
+        "firingTriggerId": [
+          "2147479558"
+        ],
+        "monitoringMetadata": {
+          "type": "map"
+        }
+      },
+      {
+        "accountId": "0000000000",
+        "containerId": "0000000000",
+        "tagId": "2",
+        "name": "GA4 - initiate_checkout",
+        "type": "gaawe",
+        "parameter": [
+          {
+            "type": "template",
+            "key": "measurementId",
+            "value": "G-37DNY1XZQJ"
+          },
+          {
+            "type": "template",
+            "key": "eventName",
+            "value": "initiate_checkout"
+          },
+          {
+            "type": "list",
+            "key": "eventParameters",
+            "list": [
+              {
+                "type": "map",
+                "map": [
+                  { "type": "template", "key": "name", "value": "plan" },
+                  { "type": "template", "key": "value", "value": "{{DLV - plan}}" }
+                ]
+              },
+              {
+                "type": "map",
+                "map": [
+                  { "type": "template", "key": "name", "value": "plan_label" },
+                  { "type": "template", "key": "value", "value": "{{DLV - plan label}}" }
+                ]
+              },
+              {
+                "type": "map",
+                "map": [
+                  { "type": "template", "key": "name", "value": "billing_cycle" },
+                  { "type": "template", "key": "value", "value": "{{DLV - billing cycle}}" }
+                ]
+              },
+              {
+                "type": "map",
+                "map": [
+                  { "type": "template", "key": "name", "value": "payment_id" },
+                  { "type": "template", "key": "value", "value": "{{DLV - payment id}}" }
+                ]
+              },
+              {
+                "type": "map",
+                "map": [
+                  { "type": "template", "key": "name", "value": "value" },
+                  { "type": "template", "key": "value", "value": "{{DLV - value}}" }
+                ]
+              },
+              {
+                "type": "map",
+                "map": [
+                  { "type": "template", "key": "name", "value": "currency" },
+                  { "type": "template", "key": "value", "value": "{{DLV - currency}}" }
+                ]
+              },
+              {
+                "type": "map",
+                "map": [
+                  { "type": "template", "key": "name", "value": "items" },
+                  { "type": "template", "key": "value", "value": "{{DLV - items}}" }
+                ]
+              }
+            ]
+          }
+        ],
+        "firingTriggerId": [
+          "5"
+        ],
+        "monitoringMetadata": {
+          "type": "map"
+        }
+      },
+      {
+        "accountId": "0000000000",
+        "containerId": "0000000000",
+        "tagId": "3",
+        "name": "GA4 - purchase",
+        "type": "gaawe",
+        "parameter": [
+          {
+            "type": "template",
+            "key": "measurementId",
+            "value": "G-37DNY1XZQJ"
+          },
+          {
+            "type": "template",
+            "key": "eventName",
+            "value": "purchase"
+          },
+          {
+            "type": "list",
+            "key": "eventParameters",
+            "list": [
+              {
+                "type": "map",
+                "map": [
+                  { "type": "template", "key": "name", "value": "plan" },
+                  { "type": "template", "key": "value", "value": "{{DLV - plan}}" }
+                ]
+              },
+              {
+                "type": "map",
+                "map": [
+                  { "type": "template", "key": "name", "value": "plan_label" },
+                  { "type": "template", "key": "value", "value": "{{DLV - plan label}}" }
+                ]
+              },
+              {
+                "type": "map",
+                "map": [
+                  { "type": "template", "key": "name", "value": "billing_cycle" },
+                  { "type": "template", "key": "value", "value": "{{DLV - billing cycle}}" }
+                ]
+              },
+              {
+                "type": "map",
+                "map": [
+                  { "type": "template", "key": "name", "value": "transaction_id" },
+                  { "type": "template", "key": "value", "value": "{{DLV - transaction id}}" }
+                ]
+              },
+              {
+                "type": "map",
+                "map": [
+                  { "type": "template", "key": "name", "value": "subscription_id" },
+                  { "type": "template", "key": "value", "value": "{{DLV - subscription id}}" }
+                ]
+              },
+              {
+                "type": "map",
+                "map": [
+                  { "type": "template", "key": "name", "value": "value" },
+                  { "type": "template", "key": "value", "value": "{{DLV - value}}" }
+                ]
+              },
+              {
+                "type": "map",
+                "map": [
+                  { "type": "template", "key": "name", "value": "currency" },
+                  { "type": "template", "key": "value", "value": "{{DLV - currency}}" }
+                ]
+              },
+              {
+                "type": "map",
+                "map": [
+                  { "type": "template", "key": "name", "value": "items" },
+                  { "type": "template", "key": "value", "value": "{{DLV - items}}" }
+                ]
+              }
+            ]
+          }
+        ],
+        "firingTriggerId": [
+          "6"
+        ],
+        "monitoringMetadata": {
+          "type": "map"
+        }
+      }
+    ],
+    "trigger": [
+      {
+        "accountId": "0000000000",
+        "containerId": "0000000000",
+        "triggerId": "5",
+        "name": "EV - initiate_checkout",
+        "type": "CUSTOM_EVENT",
+        "customEventFilter": [
+          {
+            "type": "MATCH_REGEX",
+            "parameter": [
+              { "type": "template", "key": "arg0", "value": "{{_event}}" },
+              { "type": "template", "key": "arg1", "value": "^initiate_checkout$" }
+            ]
+          }
+        ],
+        "parameter": [
+          { "type": "template", "key": "eventName", "value": "initiate_checkout" }
+        ]
+      },
+      {
+        "accountId": "0000000000",
+        "containerId": "0000000000",
+        "triggerId": "6",
+        "name": "EV - purchase",
+        "type": "CUSTOM_EVENT",
+        "customEventFilter": [
+          {
+            "type": "MATCH_REGEX",
+            "parameter": [
+              { "type": "template", "key": "arg0", "value": "{{_event}}" },
+              { "type": "template", "key": "arg1", "value": "^purchase$" }
+            ]
+          }
+        ],
+        "parameter": [
+          { "type": "template", "key": "eventName", "value": "purchase" }
+        ]
+      }
+    ],
+    "variable": [
+      { "accountId": "0000000000", "containerId": "0000000000", "variableId": "1", "name": "DLV - plan", "type": "v", "parameter": [ { "type": "template", "key": "name", "value": "plan" }, { "type": "boolean", "key": "setDefaultValue", "value": "false" } ] },
+      { "accountId": "0000000000", "containerId": "0000000000", "variableId": "2", "name": "DLV - plan label", "type": "v", "parameter": [ { "type": "template", "key": "name", "value": "plan_label" }, { "type": "boolean", "key": "setDefaultValue", "value": "false" } ] },
+      { "accountId": "0000000000", "containerId": "0000000000", "variableId": "3", "name": "DLV - billing cycle", "type": "v", "parameter": [ { "type": "template", "key": "name", "value": "billing_cycle" }, { "type": "boolean", "key": "setDefaultValue", "value": "false" } ] },
+      { "accountId": "0000000000", "containerId": "0000000000", "variableId": "4", "name": "DLV - payment id", "type": "v", "parameter": [ { "type": "template", "key": "name", "value": "payment_id" }, { "type": "boolean", "key": "setDefaultValue", "value": "false" } ] },
+      { "accountId": "0000000000", "containerId": "0000000000", "variableId": "5", "name": "DLV - subscription id", "type": "v", "parameter": [ { "type": "template", "key": "name", "value": "subscription_id" }, { "type": "boolean", "key": "setDefaultValue", "value": "false" } ] },
+      { "accountId": "0000000000", "containerId": "0000000000", "variableId": "6", "name": "DLV - transaction id", "type": "v", "parameter": [ { "type": "template", "key": "name", "value": "transaction_id" }, { "type": "boolean", "key": "setDefaultValue", "value": "false" } ] },
+      { "accountId": "0000000000", "containerId": "0000000000", "variableId": "7", "name": "DLV - value", "type": "v", "parameter": [ { "type": "template", "key": "name", "value": "value" }, { "type": "boolean", "key": "setDefaultValue", "value": "true" }, { "type": "template", "key": "defaultValue", "value": "0" } ] },
+      { "accountId": "0000000000", "containerId": "0000000000", "variableId": "8", "name": "DLV - currency", "type": "v", "parameter": [ { "type": "template", "key": "name", "value": "currency" }, { "type": "boolean", "key": "setDefaultValue", "value": "true" }, { "type": "template", "key": "defaultValue", "value": "BRL" } ] },
+      { "accountId": "0000000000", "containerId": "0000000000", "variableId": "9", "name": "DLV - items", "type": "v", "parameter": [ { "type": "template", "key": "name", "value": "items" }, { "type": "boolean", "key": "setDefaultValue", "value": "false" } ] }
+    ],
+    "builtInVariable": [
+      { "accountId": "0000000000", "containerId": "0000000000", "type": "PAGE_URL" },
+      { "accountId": "0000000000", "containerId": "0000000000", "type": "PAGE_HOSTNAME" },
+      { "accountId": "0000000000", "containerId": "0000000000", "type": "EVENT" }
+    ],
+    "fingerprint": "0000000000"
+  }
+}
