@@ -64,16 +64,46 @@ export default function ServicosEstabelecimento() {
   // Banner de teste/plano: placeholder apenas no front usando localStorage
   const [trialInfo, setTrialInfo] = useState(null);
   useEffect(() => {
-    try {
-      const plan = localStorage.getItem("plan_current") || "starter";
-      let end = localStorage.getItem("trial_end");
-      setTrialInfo({ plan, end });
-    } catch {}
+    const MAX_TRIAL_DAYS = 7;
+    let active = true;
+    (async () => {
+      try {
+        const response = await Api.billingSubscription();
+        if (!active) return;
+        const planData = response?.plan;
+        const plan = planData?.plan || localStorage.getItem('plan_current') || 'starter';
+        const end = planData?.trial?.ends_at || localStorage.getItem('trial_end') || null;
+        const rawDaysLeft =
+          typeof planData?.trial?.days_left === 'number'
+            ? planData.trial.days_left
+            : end
+            ? Math.max(0, Math.ceil((new Date(end).getTime() - Date.now()) / 86400000))
+            : null;
+        const daysLeft = rawDaysLeft == null ? null : Math.min(rawDaysLeft, MAX_TRIAL_DAYS);
+        if (planData?.trial?.ends_at) {
+          try {
+            localStorage.setItem('trial_end', planData.trial.ends_at);
+          } catch {}
+        }
+        setTrialInfo({ plan, end, daysLeft });
+      } catch {
+        try {
+          const plan = localStorage.getItem('plan_current') || 'starter';
+          const end = localStorage.getItem('trial_end');
+          const fallbackDays = end ? Math.max(0, Math.ceil((new Date(end).getTime() - Date.now()) / 86400000)) : null;
+          if (active) setTrialInfo({ plan, end, daysLeft: fallbackDays == null ? null : Math.min(fallbackDays, MAX_TRIAL_DAYS) });
+        } catch {}
+      }
+    })();
+    return () => {
+      active = false;
+    };
   }, []);
   const trialDaysLeft = useMemo(() => {
+    if (typeof trialInfo?.daysLeft === 'number') return trialInfo.daysLeft;
     if (!trialInfo?.end) return 0;
     const diff = new Date(trialInfo.end).getTime() - Date.now();
-    return Math.max(0, Math.ceil(diff / 86400000));
+    return Math.max(0, Math.min(7, Math.ceil(diff / 86400000)));
   }, [trialInfo]);
 
   // Helpers de preco (BRL)
@@ -262,11 +292,8 @@ export default function ServicosEstabelecimento() {
         trialDaysLeft > 0 ? (
           <div className="card box--highlight" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
             <div className="row" style={{ gap: 8, alignItems: 'center' }}>
-              <div className="brand__logo" aria-hidden>AO</div>
-              <div>
-                <strong>Teste gratis ativo</strong>
-                <div className="small muted">{trialDaysLeft} {trialDaysLeft === 1 ? 'dia restante' : 'dias restantes'}</div>
-              </div>
+              <strong>Teste grátis ativo</strong>
+              <div className="small muted">{trialDaysLeft} {trialDaysLeft === 1 ? 'dia restante' : 'dias restantes'}</div>
             </div>
             <Link className="btn btn--primary btn--sm" to="/planos">Experimentar Pro</Link>
           </div>
