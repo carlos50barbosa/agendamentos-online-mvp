@@ -110,7 +110,7 @@ const TESTIMONIALS = [
 const FAQS = [
   {
     question: 'Preciso trocar todas as minhas ferramentas para usar o Agendamentos Online?',
-    answer: 'Não. Conectamos com o que já funciona no dia a dia do seu time (WhatsApp, Google Agenda, Instagram e gateways de pagamento). Você pode migrar aos poucos e importar sua base atual com suporte dedicado.',
+    answer: 'Não. Dá para começar usando apenas o que já oferecemos hoje (agenda online, notificações e relatórios) e manter as demais ferramentas que você utiliza no dia a dia. Assim que novas integrações ficarem disponíveis ajudamos você a conectar tudo com segurança.',
   },
   {
     question: 'Existe taxa de implantação ou contrato de fidelidade?',
@@ -299,7 +299,7 @@ export default function Planos() {
             <h2>Seu time no controle, seus clientes encantados</h2>
             <p>Implantação guiada, suporte humano e insights diários para acelerar decisões.</p>
           </div>
-          <button className="btn btn--primary btn--lg" onClick={goCheckout('premium')}>Quero falar com o time</button>
+          <button className="btn btn--primary btn--lg" onClick={() => nav('/contato?plano=premium')}>Quero falar com o time</button>
         </div>
       </section>
 
