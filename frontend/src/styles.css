@@ -669,8 +669,10 @@ a:hover { opacity: 1; text-decoration: underline; }
 .report-dot{width:10px;height:10px;border-radius:50%;display:inline-block;margin-right:6px;}
 .report-dot--confirmados{background:var(--report-confirm);}
 .report-dot--cancelados{background:var(--report-cancel);}
-.report-table-wrapper{border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;background:var(--surface);box-shadow:var(--shadow-soft);}
-.report-table{width:100%;border-collapse:separate;border-spacing:0;}
+.report-table-wrapper{border:1px solid var(--border);border-radius:var(--radius);overflow:auto;background:var(--surface);box-shadow:var(--shadow-soft);-webkit-overflow-scrolling:touch;}
+.report-table-wrapper::-webkit-scrollbar{height:6px;}
+.report-table-wrapper::-webkit-scrollbar-thumb{background:var(--border);border-radius:6px;}
+.report-table{width:100%;min-width:560px;border-collapse:separate;border-spacing:0;}
 .report-table thead th{background:var(--surface-soft);color:var(--muted);font-size:12px;text-align:left;padding:10px 12px;}
 .report-table tbody td{padding:10px 12px;border-top:1px solid var(--border);font-size:14px;}
 .report-table tbody tr:nth-child(odd){background:var(--surface-soft);}
