@@ -522,9 +522,19 @@ assert.equal(res6.body.plan.status, 'active')
 assert.equal(res6.body.plan.limits.maxServices, null)
 
 // 7) criacao de servico permitida em plano pro ativo
-seedScenario({ user: { plan: 'pro', plan_status: 'active' }, services: [] })
+seedScenario({
+  user: { plan: 'pro', plan_status: 'active' },
+  services: [],
+  professionals: [{ id: 10, estabelecimento_id: 1, nome: 'Profissional Teste' }],
+})
+const payload = {
+  nome: 'Massagem',
+  duracao_min: 60,
+  preco_centavos: 2000,
+  professionalIds: [10],
+}
 const res7 = await callHandler(createServiceHandler, {
-  body: { nome: 'Massagem', duracao_min: 60, preco_centavos: 2000 },
+  body: payload,
   user: { id: 1, tipo: 'estabelecimento' }
 })
 results.push({ name: 'criar servico permitido', response: res7 })

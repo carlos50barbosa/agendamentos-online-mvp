@@ -1305,7 +1305,17 @@ export default function Configuracoes() {
     const subStatusRaw = String(billing.subscription?.status || '').toLowerCase();
     const subscriptionIsActive = subStatusRaw === 'active' || subStatusRaw === 'authorized';
     const effectivePlanStatus = subscriptionIsActive ? 'active' : (planInfo.status || '');
-    const statusLabel = statusLabelMap[effectivePlanStatus] || (effectivePlanStatus ? effectivePlanStatus.toUpperCase() : '');
+    const baseStatusLabel =
+      statusLabelMap[effectivePlanStatus] || (effectivePlanStatus ? effectivePlanStatus.toUpperCase() : '');
+    const trialDaysLabel =
+      effectivePlanStatus === 'trialing' && daysLeft != null
+        ? daysLeft === 0
+          ? 'encerra hoje'
+          : daysLeft === 1
+          ? '1 dia restante'
+          : `${daysLeft} dias restantes`
+        : '';
+    const statusLabel = trialDaysLabel ? `${baseStatusLabel} · ${trialDaysLabel}` : baseStatusLabel;
     const subscriptionStatusLabel = billing.subscription?.status
       ? statusLabelMap[billing.subscription.status] || billing.subscription.status.toUpperCase()
       : null;

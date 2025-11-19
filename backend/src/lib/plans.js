@@ -6,6 +6,7 @@ export const PLAN_STATUS = ['trialing', 'active', 'delinquent', 'pending', 'canc
 
 const LIMIT_UNLIMITED = null;
 
+const MAX_TRIAL_DAYS = 7;
 const PLAN_CONFIG = {
   starter: {
     code: 'starter',
@@ -92,10 +93,14 @@ export function computeTrialInfo(trialEndsAt) {
   if (Number.isNaN(end.getTime())) return { daysLeft: null, isTrial: false, warn: false };
   const now = new Date();
   const diffMs = end.getTime() - now.getTime();
-  const daysLeft = Math.ceil(diffMs / 86400000);
+  const rawDaysLeft = Math.ceil(diffMs / 86400000);
+  const daysLeft =
+    rawDaysLeft != null && Number.isFinite(rawDaysLeft)
+      ? Math.max(0, Math.min(rawDaysLeft, MAX_TRIAL_DAYS))
+      : null;
   const isTrial = diffMs > 0;
-  const warn = isTrial && daysLeft <= 3;
-  return { daysLeft: Math.max(daysLeft, 0), isTrial, warn };
+  const warn = isTrial && typeof daysLeft === 'number' && daysLeft <= 3;
+  return { daysLeft, isTrial, warn };
 }
 
 let hasProfessionalsTableCache = null;
