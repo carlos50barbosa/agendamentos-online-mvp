@@ -1804,6 +1804,14 @@ export default function NovoAgendamento() {
   const handleSlotSelect = (slot) =>
     setState((p) => ({ ...p, selectedSlot: slot }));
 
+  const handleConfirmClick = useCallback(() => {
+    if (!isAuthenticated) {
+      showToast('info', 'Faça login para confirmar seu agendamento.')
+      return
+    }
+    setModal((m) => ({ ...m, isOpen: true }))
+  }, [isAuthenticated, showToast])
+
   const handleFilterToggle = (filter) =>
     setState((p) => ({ ...p, filters: { ...p.filters, [filter]: !p.filters[filter] } }));
 
@@ -2522,7 +2530,7 @@ export default function NovoAgendamento() {
             </button>
             <button
               className="btn btn--primary"
-              onClick={() => setModal((m) => ({ ...m, isOpen: true }))}
+              onClick={handleConfirmClick}
               disabled={
                 !selectedSlot || !serviceId || modal.isSaving ||
                 (serviceProfessionals.length && !state.professionalId) ||
