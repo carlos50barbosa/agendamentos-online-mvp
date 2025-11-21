@@ -220,8 +220,9 @@ export default function ProfissionaisEstabelecimento() {
 
       <div className="card">
         <h2 style={{ marginBottom: 12 }}>Novo Profissional</h2>
-        <form onSubmit={add} className="grid" style={{ gap: 8 }}>
-          <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+        <form onSubmit={add} className="pro-form">
+          <label className="label">
+            <span>Nome</span>
             <input
               className="input"
               placeholder="Nome"
@@ -230,43 +231,40 @@ export default function ProfissionaisEstabelecimento() {
               maxLength={120}
               required
             />
-            <input
+          </label>
+          <label className="label">
+            <span>Descrição (opcional)</span>
+            <textarea
               className="input"
               placeholder="Descrição (opcional)"
               value={form.descricao}
               onChange={(e) => setForm((f) => ({ ...f, descricao: e.target.value }))}
+              rows={3}
+              maxLength={200}
             />
-            <label className="switch">
-              <input type="checkbox" checked={form.ativo} onChange={(e) => setForm((f) => ({ ...f, ativo: e.target.checked }))} />
+          </label>
+
+          <div className="pro-form__meta">
+            <label className="pro-form__toggle">
               <span>Ativo</span>
+              <label className="switch" style={{ margin: 0 }}>
+                <input type="checkbox" checked={form.ativo} onChange={(e) => setForm((f) => ({ ...f, ativo: e.target.checked }))} />
+                <span />
+              </label>
             </label>
           </div>
 
-          <div className="grid" style={{ gap: 6 }}>
-            <span className="muted" style={{ fontSize: 13 }}>Foto (opcional)</span>
-            <div className="row" style={{ gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+          <div className="pro-form__avatar">
+            <span className="pro-form__hint">Foto (opcional)</span>
+            <div className="pro-form__avatar-row">
               {newAvatar.preview ? (
                 <img
                   src={newAvatar.preview}
                   alt="Pré-visualização"
-                  style={{ width: 72, height: 72, objectFit: 'cover', borderRadius: '50%', border: '1px solid var(--border)' }}
+                  className="pro-form__avatar-preview"
                 />
               ) : (
-                <div
-                  style={{
-                    width: 72,
-                    height: 72,
-                    borderRadius: '50%',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    border: '1px dashed var(--border)',
-                    color: 'var(--muted)',
-                    fontSize: 12,
-                  }}
-                >
-                  Sem foto
-                </div>
+                <div className="pro-form__avatar-fallback">Sem foto</div>
               )}
               <label className="btn btn--outline btn--sm" style={{ cursor: 'pointer' }}>
                 Selecionar imagem
@@ -287,7 +285,7 @@ export default function ProfissionaisEstabelecimento() {
             <small className="muted" style={{ fontSize: 11 }}>Formatos aceitos: PNG, JPG ou WEBP (até 2MB).</small>
           </div>
 
-          <div className="row" style={{ justifyContent: 'flex-end' }}>
+          <div className="pro-form__actions">
             <button className="btn btn--primary" disabled={saving || formInvalid}>
               {saving ? <span className="spinner" /> : 'Salvar'}
             </button>
@@ -296,16 +294,18 @@ export default function ProfissionaisEstabelecimento() {
       </div>
 
       <div className="card">
-        <div className="header-row" style={{ display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-          <h2>Meus Profissionais</h2>
-          <input className="input" placeholder="Buscar por nome..." value={query} onChange={(e) => setQuery(e.target.value)} />
+        <div className="header-row" style={{ display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'flex-start', marginBottom: 12 }}>
+          <h2 style={{ margin: 0, fontSize: 20 }}>Meus Profissionais</h2>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', width: '100%' }}>
+            <input className="input" style={{ flex: '1 1 220px' }} placeholder="Buscar por nome..." value={query} onChange={(e) => setQuery(e.target.value)} />
+          </div>
         </div>
         {loading ? (
           <div className="empty">Carregando...</div>
         ) : filtered.length === 0 ? (
           <div className="empty">Nenhum profissional encontrado.</div>
         ) : (
-          <table>
+          <table className="services-table-plain">
             <thead>
               <tr>
                 <th>Foto</th>
@@ -336,15 +336,13 @@ export default function ProfissionaisEstabelecimento() {
                       {p.ativo ? 'Ativo' : 'Inativo'}
                     </button>
                   </td>
-                  <td className="service-actions">
-                    <div className="row" style={{ gap: 6, justifyContent: 'flex-end' }}>
-                      <button className="btn btn--outline" onClick={() => openEdit(p)}>
-                        Editar
-                      </button>
-                      <button className="btn btn--danger" onClick={() => del(p)}>
-                        Excluir
-                      </button>
-                    </div>
+                  <td className="service-actions service-actions--compact">
+                    <button className="btn btn--outline btn--sm" onClick={() => openEdit(p)}>
+                      Editar
+                    </button>
+                    <button className="btn btn--danger btn--sm" onClick={() => del(p)}>
+                      Excluir
+                    </button>
                   </td>
                 </tr>
               ))}
