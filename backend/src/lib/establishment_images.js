@@ -1,16 +1,13 @@
 import fs from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { fileURLToPath } from 'node:url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const ROOT_DIR = path.join(__dirname, '..', '..');
 const UPLOADS_DIR = path.join(ROOT_DIR, 'uploads');
 const GALLERY_DIR = path.join(UPLOADS_DIR, 'establishments');
-
-const DEFAULT_PUBLIC_PREFIX = '/uploads/establishments';
-const FALLBACK_PREFIXES = ['/api/uploads/establishments', DEFAULT_PUBLIC_PREFIX];
 
 function normalizePrefix(value) {
   if (!value) return null;
@@ -21,13 +18,19 @@ function normalizePrefix(value) {
   return trimmed.replace(/\/+$/, '');
 }
 
+const FALLBACK_PUBLIC_PREFIX = normalizePrefix('/api/uploads/establishments');
+const DEFAULT_PUBLIC_PREFIX = normalizePrefix('/uploads/establishments');
 const PREFERRED_PUBLIC_PREFIX =
   normalizePrefix(process.env.ESTABLISHMENT_GALLERY_PUBLIC_PREFIX) ||
-  normalizePrefix(DEFAULT_PUBLIC_PREFIX);
-
+  FALLBACK_PUBLIC_PREFIX ||
+  DEFAULT_PUBLIC_PREFIX;
 const PUBLIC_PREFIXES = Array.from(
   new Set(
-    [PREFERRED_PUBLIC_PREFIX, ...FALLBACK_PREFIXES.map(normalizePrefix)].filter(Boolean)
+    [
+      PREFERRED_PUBLIC_PREFIX,
+      FALLBACK_PUBLIC_PREFIX,
+      DEFAULT_PUBLIC_PREFIX,
+    ].filter(Boolean)
   )
 );
 
