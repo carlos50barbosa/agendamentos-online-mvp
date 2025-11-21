@@ -2182,27 +2182,58 @@ function GalleryManager({ establishmentId }) {
     setError('');
     (async () => {
       try {
-        const [imagesResponse, establishmentData] = await Promise.all([
+        const [imagesResult, establishmentResult] = await Promise.allSettled([
           Api.listEstablishmentImages(establishmentId),
           Api.getEstablishment(establishmentId),
         ]);
         if (cancelled) return;
-        const fetched = Array.isArray(imagesResponse?.images) ? imagesResponse.images : [];
-        setImages(sortGalleryImages(fetched));
-        const limitFromPlan =
-          establishmentData?.gallery_limit ??
-          establishmentData?.plan_context?.limits?.maxGalleryImages ??
-          null;
-        if (limitFromPlan === null || limitFromPlan === undefined || limitFromPlan === '') {
-          setLimit(null);
+
+        let fetched = [];
+        if (imagesResult.status === 'fulfilled') {
+          fetched = Array.isArray(imagesResult.value?.images) ? imagesResult.value.images : [];
         } else {
-          const numeric = Number(limitFromPlan);
-          setLimit(Number.isFinite(numeric) ? numeric : null);
+          console.warn('Falha ao listar imagens, usando fallback do perfil.', imagesResult.reason);
+          setError(
+            imagesResult.reason?.data?.message ||
+              imagesResult.reason?.message ||
+              'Falha ao carregar imagens.'
+          );
+        }
+
+        if (!fetched.length && establishmentResult.status === 'fulfilled') {
+          fetched = Array.isArray(establishmentResult.value?.gallery)
+            ? establishmentResult.value.gallery
+            : [];
+        }
+        setImages(sortGalleryImages(fetched));
+
+        if (establishmentResult.status === 'fulfilled') {
+          const est = establishmentResult.value;
+          const limitFromPlan =
+            est?.gallery_limit ?? est?.plan_context?.limits?.maxGalleryImages ?? null;
+          if (limitFromPlan === null || limitFromPlan === undefined || limitFromPlan === '') {
+            setLimit(null);
+          } else {
+            const numeric = Number(limitFromPlan);
+            setLimit(Number.isFinite(numeric) ? numeric : null);
+          }
+        } else {
+          console.warn('Falha ao carregar dados do estabelecimento.', establishmentResult.reason);
+          if (!error) {
+            setError(
+              establishmentResult.reason?.data?.message ||
+                establishmentResult.reason?.message ||
+                'Falha ao carregar perfil.'
+            );
+          }
+          setLimit(null);
         }
       } catch (err) {
         if (cancelled) return;
-        setError(err?.data?.message || 'Falha ao carregar imagens.');
+        console.error('Erro geral ao carregar imagens', err);
+        setError(err?.data?.message || err?.message || 'Falha ao carregar imagens.');
         setImages([]);
+        setLimit(null);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -2368,7 +2399,7 @@ function GalleryManager({ establishmentId }) {
         />
         <button
           type="button"
-          className="btn btn--sm"
+          className="btn btn--primary btn--sm"
           onClick={handleUpload}
           disabled={uploading || limitReached || !pendingImage?.dataUrl}
         >
