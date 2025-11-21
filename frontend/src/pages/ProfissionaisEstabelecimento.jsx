@@ -311,8 +311,8 @@ export default function ProfissionaisEstabelecimento() {
                 <th>Foto</th>
                 <th>Nome</th>
                 <th>Descrição</th>
-                <th>Status</th>
-                <th></th>
+                <th className="service-status__header">Status</th>
+                <th className="service-actions__header">Ações</th>
               </tr>
             </thead>
             <tbody>
@@ -336,7 +336,7 @@ export default function ProfissionaisEstabelecimento() {
                       {p.ativo ? 'Ativo' : 'Inativo'}
                     </button>
                   </td>
-                  <td className="service-actions service-actions--compact">
+                  <td className="service-actions">
                     <button className="btn btn--outline btn--sm" onClick={() => openEdit(p)}>
                       Editar
                     </button>

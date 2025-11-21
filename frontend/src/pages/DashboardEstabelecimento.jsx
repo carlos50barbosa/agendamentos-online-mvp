@@ -1,7 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import moment from 'moment'
+import { Calendar as BigCalendar, momentLocalizer, Views } from 'react-big-calendar'
 import { Api } from '../utils/api'
 import { IconBell } from '../components/Icons.jsx'
 import { getUser, USER_EVENT } from '../utils/auth'
+
+const localizer = momentLocalizer(moment)
 
 const DateHelpers = {
   parseLocal: (dateish) => {
@@ -524,6 +528,7 @@ export default function DashboardEstabelecimento() {
   const [status, setStatus] = useState('confirmado')
   const [currentUser, setCurrentUser] = useState(() => getUser())
   const [showCalendar, setShowCalendar] = useState(false)
+  const [showProAgenda, setShowProAgenda] = useState(false)
   const establishmentId =
     currentUser && currentUser.tipo === 'estabelecimento' ? currentUser.id : null
 
@@ -638,9 +643,9 @@ export default function DashboardEstabelecimento() {
     <div className="dashboard-narrow">
       <div className="card">
         <div className="row spread" style={{ marginBottom: 8 }}>
-          <div className="row" style={{ alignItems: 'center', gap: 12 }}>
+          <div className="row" style={{ alignItems: "center", gap: 12 }}>
             <h2 style={{ margin: 0, fontSize: 16 }}>Agendamentos</h2>
-            <div className="notif-bell" title="Notificações de agendamentos">
+            <div className="notif-bell" title="Notifica??es de agendamentos">
               <IconBell className="notif-bell__icon" aria-hidden="true" />
               <span className="notif-bell__pill"> Recebidos {totals.recebidos} </span>
               <span className="notif-bell__pill notif-bell__pill--cancel">
@@ -650,15 +655,22 @@ export default function DashboardEstabelecimento() {
           </div>
           <div
             className="row"
-            style={{ gap: 8, flexWrap: 'wrap', alignItems: 'center', justifyContent: 'flex-end' }}
+            style={{ gap: 8, flexWrap: "wrap", alignItems: "center", justifyContent: "flex-end" }}
           >
             <button
               type="button"
               className="btn btn--outline"
-              style={{ borderColor: 'var(--brand)', color: 'var(--brand)' }}
+              style={{ borderColor: "var(--brand)", color: "var(--brand)" }}
               onClick={() => setShowCalendar((open) => !open)}
             >
-              {showCalendar ? 'Ocultar calendário' : 'Ver calendário'}
+              {showCalendar ? "Ocultar calendario" : "Ver calendario"}
+            </button>
+            <button
+              type="button"
+              className="btn btn--outline"
+              onClick={() => setShowProAgenda((open) => !open)}
+            >
+              {showProAgenda ? "Ocultar agenda de profissionais" : "Agenda de profissionais"}
             </button>
             <select
               className="input"
@@ -667,7 +679,7 @@ export default function DashboardEstabelecimento() {
               title="Status"
             >
               <option value="confirmado">Confirmados</option>
-              <option value="concluido">Concluídos</option>
+              <option value="concluido">Conclu?dos</option>
               <option value="cancelado">Cancelados</option>
               <option value="todos">Todos</option>
             </select>
@@ -728,6 +740,11 @@ export default function DashboardEstabelecimento() {
       {showCalendar && (
         <div style={{ marginTop: 16 }}>
           <CalendarAvailability establishmentId={establishmentId} />
+        </div>
+      )}
+      {showProAgenda && (
+        <div style={{ marginTop: 16 }}>
+          <ProfessionalAgendaView items={filtered} />
         </div>
       )}
     </div>
@@ -973,5 +990,164 @@ function SlotPreview({ slot }) {
     >
       {DateHelpers.formatTime(slot.datetime)}
     </button>
+  )
+}
+
+
+function ProfessionalAgendaView({ items }) {
+  const resources = useMemo(() => {
+    const map = new Map()
+    ;(items || []).forEach((item) => {
+      const id =
+        item?.profissional_id ||
+        item?.professional_id ||
+        item?.profissional ||
+        item?.professional ||
+        item?.profissional_nome ||
+        'sem-id'
+      const name =
+        item?.profissional_nome ||
+        item?.profissional ||
+        item?.professional_name ||
+        item?.professional ||
+        'Profissional'
+      const avatar = item?.profissional_avatar_url || item?.professional_avatar || null
+      if (!map.has(id)) map.set(id, { id, title: name, avatar })
+    })
+    if (!map.size) map.set('sem-id', { id: 'sem-id', title: 'Profissional', avatar: null })
+    return Array.from(map.values())
+  }, [items])
+
+  const events = useMemo(() => {
+    return (items || [])
+      .map((item) => {
+        const start = new Date(item?.inicio || item?.start || 0)
+        const end = new Date(item?.fim || item?.fim_prevista || item?.end || start)
+        if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime())) return null
+        const resourceId =
+          item?.profissional_id ||
+          item?.professional_id ||
+          item?.profissional ||
+          item?.professional ||
+          item?.profissional_nome ||
+          item?.professional_name ||
+          'sem-id'
+        const service = item?.servico_nome || item?.service_name || 'Servico'
+        const client = item?.cliente_nome || item?.client_name || ''
+        const title = client ? `${client} · ${service}` : service
+        const color =
+          String(item?.status || '').toLowerCase() === 'cancelado'
+            ? '#fecaca'
+            : String(item?.status || '').toLowerCase() === 'concluido'
+            ? '#d9f99d'
+            : '#bfdbfe'
+        return {
+          id: item?.id || `${resourceId}-${start.getTime()}`,
+          title,
+          start,
+          end,
+          resourceId,
+          allDay: false,
+          _color: color,
+        }
+      })
+      .filter(Boolean)
+  }, [items])
+
+  const timeBounds = useMemo(() => {
+    if (!events.length) {
+      const min = new Date()
+      min.setHours(7, 0, 0, 0)
+      const max = new Date()
+      max.setHours(20, 0, 0, 0)
+      return { min, max, scrollToTime: min }
+    }
+    const minHour = Math.max(
+      0,
+      Math.min(...events.map((ev) => ev.start.getHours())) - 1
+    )
+    const maxHour = Math.min(
+      23,
+      Math.max(...events.map((ev) => ev.end.getHours())) + 2
+    )
+    const base = events[0].start instanceof Date ? events[0].start : new Date()
+    const min = new Date(base); min.setHours(minHour, 0, 0, 0)
+    const max = new Date(base); max.setHours(maxHour, 0, 0, 0)
+    const scrollToTime = new Date(base); scrollToTime.setHours(minHour + 1, 0, 0, 0)
+    return { min, max, scrollToTime }
+  }, [events])
+  const defaultDate = events.length && events[0]?.start instanceof Date ? events[0].start : new Date()
+
+  const eventStyleGetter = useCallback((event) => {
+    const backgroundColor = event?._color || '#bfdbfe'
+    return {
+      style: {
+        backgroundColor,
+        border: '1px solid rgba(15,23,42,0.08)',
+        color: '#0f172a',
+        borderRadius: 10,
+        padding: '6px 8px',
+        fontSize: 11,
+        boxShadow: '0 6px 16px rgba(15,23,42,0.10)',
+      },
+    }
+  }, [])
+
+  const formats = useMemo(
+    () => ({
+      timeGutterFormat: (date, culture, loc) => loc.format(date, 'HH:mm', culture),
+      eventTimeRangeFormat: ({ start, end }, culture, loc) =>
+        `${loc.format(start, 'HH:mm', culture)} - ${loc.format(end, 'HH:mm', culture)}`,
+      dayHeaderFormat: () => '',
+    }),
+    []
+  )
+
+  const ResourceHeader = useCallback(
+    ({ resource }) => (
+      <div className="pro-agenda__resource-header">
+        {resource?.avatar ? (
+          <img src={resource.avatar} alt={resource.title} className="pro-agenda__avatar" />
+        ) : (
+          <div className="pro-agenda__avatar pro-agenda__avatar--fallback">
+            {(resource?.title || 'PR').slice(0, 2).toUpperCase()}
+          </div>
+        )}
+        <span>{resource?.title || ''}</span>
+      </div>
+    ),
+    []
+  )
+
+  return (
+    <div className="pro-agenda">
+      <div className="pro-agenda__header">
+        <h3>Agenda de profissionais</h3>
+        <span className="muted">Visualize hor?rios ocupados e livres por profissional</span>
+      </div>
+      <BigCalendar
+        localizer={localizer}
+        events={events}
+        resources={resources}
+        resourceIdAccessor="id"
+        resourceTitleAccessor="title"
+        startAccessor="start"
+        endAccessor="end"
+        defaultView={Views.DAY}
+        views={[Views.DAY]}
+        step={15}
+        timeslots={4}
+        style={{ height: 560 }}
+        eventPropGetter={eventStyleGetter}
+        selectable={false}
+        toolbar={false}
+        formats={formats}
+        components={{ header: () => null, resourceHeader: ResourceHeader }}
+        min={timeBounds.min}
+        max={timeBounds.max}
+        scrollToTime={timeBounds.scrollToTime}
+        defaultDate={defaultDate}
+      />
+    </div>
   )
 }
