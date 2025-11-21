@@ -146,6 +146,14 @@ export function IconMapPin(props){
   );
 }
 
+export function IconWrench(props){
+  return (
+    <svg {...base} viewBox="0 0 24 24" aria-hidden="true" {...props}>
+      <path d="M14.7 6.3a4.9 4.9 0 00-6.6 6.6l-5.1 5.1a2 2 0 102.8 2.8l5.1-5.1a4.9 4.9 0 006.6-6.6 2.5 2.5 0 01-3.5-3.5z"/>
+    </svg>
+  );
+}
+
 export function IconSun(props){
   return (
     <svg {...base} viewBox="0 0 24 24" aria-hidden="true" {...props}>
@@ -181,4 +189,5 @@ export default {
   IconDownload,
   IconSearch,
   IconMapPin,
+  IconWrench,
 };

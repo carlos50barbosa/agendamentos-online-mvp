@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Api } from '../utils/api';
+import LogoAO from '../components/LogoAO.jsx';
 
 export default function RecuperarSenha(){
   const [email, setEmail] = useState('');
@@ -39,7 +40,7 @@ export default function RecuperarSenha(){
             </svg>
           </div>
           <div className="auth-hero">
-            <div className="brand__logo" aria-hidden>AO</div>
+            <LogoAO size={48} />
             <div>
               <h2 style={{ margin: 0 }}>Recuperar senha</h2>
               <small>Enviaremos um link para redefinir</small>

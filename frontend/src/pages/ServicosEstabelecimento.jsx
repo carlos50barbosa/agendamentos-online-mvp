@@ -290,14 +290,15 @@ export default function ServicosEstabelecimento() {
     <div className="grid" style={{ gap: 16 }}>
       {trialInfo && trialInfo.plan === 'starter' && (
         trialDaysLeft > 0 ? (
-          <div className="card box--highlight" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-            <div className="row" style={{ gap: 8, alignItems: 'center' }}>
-              <strong>Teste grátis ativo</strong>
-              <div className="small muted">{trialDaysLeft} {trialDaysLeft === 1 ? 'dia restante' : 'dias restantes'}</div>
+          <div className="card box--highlight" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+            <div className="row" style={{ gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <strong>Teste grátis ativo</strong>
+                <div className="small muted">{trialDaysLeft} {trialDaysLeft === 1 ? 'dia restante' : 'dias restantes'}</div>
+              </div>
             </div>
-            <Link className="btn btn--primary btn--sm" to="/planos">Experimentar Pro</Link>
-          </div>
-        ) : (
+            <Link className="btn btn--primary btn--sm" to="/planos" style={{ minWidth: 120, textAlign: 'center' }}>Experimentar Pro</Link>
+          </div>) : (
           <div className="card" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, borderColor: 'var(--warning-border)', background: 'var(--warning-bg)' }}>
             <div>
               <strong>Seu periodo de teste terminou</strong>
@@ -311,109 +312,108 @@ export default function ServicosEstabelecimento() {
       {toast && <div className={`toast ${toast.type}`}>{toast.msg}</div>}
 
       {/* Novo Servico */}
-      <div className="card">
-        <h2 style={{ marginBottom: 12 }}>Novo Serviço</h2>
-        <form onSubmit={add} className="row" style={{ gap: 8, flexWrap: "wrap" }}>
-          <input
-            className="input"
-            placeholder="Nome do serviço"
-            value={form.nome}
-            onChange={(e) => setForm((f) => ({ ...f, nome: e.target.value }))}
-            maxLength={80}
-          />
-          <textarea
-            className="input"
-            placeholder="Descrição (opcional)"
-            value={form.descricao}
-            onChange={(e) => setForm((f) => ({ ...f, descricao: e.target.value }))}
-            rows={2}
-            maxLength={200}
-            style={{ flex: '1 1 220px', minHeight: 64 }}
-          />
-
-          <select
-            className="input"
-            value={form.duracao_min}
-            onChange={(e) =>
-              setForm((f) => ({ ...f, duracao_min: parseInt(e.target.value, 10) }))
-            }
-            title="Duracao (min)"
-          >
-            {[15, 30, 45, 60, 75, 90, 120].map((m) => (
-              <option key={m} value={m}>
-                {m} min
-              </option>
-            ))}
-          </select>
-
-          <input
-            className="input"
-            type="text"
-            inputMode="numeric"
-            placeholder="Preco"
-            value={precoStr}
-            onChange={handlePrecoChange}
-          />
-
-          <label className="switch">
+        <div className="card">
+          <h2 style={{ marginBottom: 8 }}>Novo Serviço</h2>
+          <form onSubmit={add} className="service-form">
             <input
-              type="checkbox"
-              checked={form.ativo}
-              onChange={(e) => setForm((f) => ({ ...f, ativo: e.target.checked }))}
+              className="input"
+              placeholder="Nome do serviço"
+              value={form.nome}
+              onChange={(e) => setForm((f) => ({ ...f, nome: e.target.value }))}
+              maxLength={80}
             />
-            <span>Ativo</span>
-          </label>
+            <textarea
+              className="input"
+              placeholder="Descrição (opcional)"
+              value={form.descricao}
+              onChange={(e) => setForm((f) => ({ ...f, descricao: e.target.value }))}
+              rows={3}
+              maxLength={200}
+            />
 
-          {pros.length > 0 && (
-            <div className="grid" style={{ gap: 4, width: '100%', marginTop: 4 }}>
-              <div className="muted" style={{ fontSize: 12 }}>Vincular profissionais</div>
-              <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
-                {pros.map((p) => (
-                  <label key={p.id} className={`chip ${selectedProsNew.includes(p.id) ? 'chip--active' : ''}`} style={{ cursor: 'pointer' }}>
-                    <input
-                      type="checkbox"
-                      style={{ display: 'none' }}
-                      checked={selectedProsNew.includes(p.id)}
-                      onChange={(e) => {
-                        const checked = e.target.checked;
-                        setSelectedProsNew((curr) => checked ? Array.from(new Set([...curr, p.id])) : curr.filter((id) => id !== p.id));
-                      }}
-                    />
-                    {p.nome}
-                  </label>
-                ))}
+            <div className="service-form__meta">
+              <div className="service-form__field">
+                <label className="service-form__label">Preço</label>
+                <input
+                  className="input"
+                  type="text"
+                  inputMode="numeric"
+                  placeholder="R$ 0,00"
+                  value={precoStr}
+                  onChange={handlePrecoChange}
+                />
               </div>
+              <div className="service-form__field">
+                <label className="service-form__label">Duração</label>
+                <select
+                  className="input"
+                  value={form.duracao_min}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, duracao_min: parseInt(e.target.value, 10) }))
+                  }
+                  title="Duração (min)"
+                >
+                  {[15, 30, 45, 60, 75, 90, 120].map((m) => (
+                    <option key={m} value={m}>
+                      {m} min
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <label className="service-form__toggle">
+                <span>Ativo</span>
+                <label className="switch" style={{ margin: 0 }}>
+                  <input
+                    type="checkbox"
+                    checked={form.ativo}
+                    onChange={(e) => setForm((f) => ({ ...f, ativo: e.target.checked }))}
+                  />
+                  <span />
+                </label>
+              </label>
             </div>
+
+            {pros.length > 0 && (
+              <div className="grid" style={{ gap: 6, width: '100%', marginTop: 2 }}>
+                <div className="service-form__label" style={{ color: 'var(--muted)' }}>Vincular profissionais</div>
+                <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
+                  {pros.map((p) => (
+                    <label key={p.id} className={`chip ${selectedProsNew.includes(p.id) ? 'chip--active' : ''}`} style={{ cursor: 'pointer' }}>
+                      <input
+                        type="checkbox"
+                        style={{ display: 'none' }}
+                        checked={selectedProsNew.includes(p.id)}
+                        onChange={(e) => {
+                          const checked = e.target.checked;
+                          setSelectedProsNew((curr) => checked ? Array.from(new Set([...curr, p.id])) : curr.filter((id) => id !== p.id));
+                        }}
+                      />
+                      {p.nome}
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <button className="btn btn--primary" disabled={saving || formInvalid}>
+              {saving ? <span className="spinner" /> : "Salvar"}
+            </button>
+          </form>
+
+          {/* Dica de validacao */}
+          {formInvalid && (
+            <small className="muted">
+              Preencha todos os campos e escolha pelo menos um profissional para
+              cadastrar o serviço.
+            </small>
           )}
-
-          <button className="btn btn--primary" disabled={saving || formInvalid}>
-            {saving ? <span className="spinner" /> : "Salvar"}
-          </button>
-        </form>
-
-        {/* Dica de validacao */}
-        {formInvalid && (
-          <small className="muted">
-            Preencha todos os campos e escolha pelo menos um profissional para
-            cadastrar o serviço.
-          </small>
-        )}
-      </div>
+        </div>
 
       {/* Meus Servicos */}
       <div className="card">
-        <div
-          className="header-row"
-          style={{
-            display: "flex",
-            gap: 8,
-            alignItems: "center",
-            justifyContent: "space-between",
-            marginBottom: 12,
-          }}
-        >
-          <h2>Meus Serviços</h2>
-          <div className="filters" style={{ display: "flex", gap: 8 }}>
+        <div className="header-row" style={{ display: "flex", gap: 8, alignItems: "flex-start", flexDirection: "column", marginBottom: 12 }}>
+          <h2 style={{ margin: 0, fontSize: 20 }}>Meus Serviços</h2>
+          <div className="filters" style={{ display: "flex", gap: 8, flexWrap: 'wrap' }}>
             <input
               className="input"
               placeholder="Buscar por nome..."
@@ -445,7 +445,7 @@ export default function ServicosEstabelecimento() {
               Exibindo <b>{filtered.length}</b>{" "}
               {filtered.length === 1 ? "servico" : "servicos"}.
             </div>
-            <table>
+            <table className="services-table-plain">
               <thead>
                 <tr>
                   <th>Nome</th>
@@ -482,17 +482,18 @@ export default function ServicosEstabelecimento() {
                         Editar
                       </button>
                       <button
-                        className="btn btn--danger"
-                        onClick={() => askDelete(s)}
-                        disabled={deletingId === s.id}
-                      >
-                        {deletingId === s.id ? <span className="spinner" /> : "Excluir"}
-                      </button>
+                        className="btn btn--danger btn--sm"
+                          onClick={() => askDelete(s)}
+                          disabled={!!s._updating}
+                        >
+                          Excluir
+                        </button>
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
+
           </>
         )}
       </div>

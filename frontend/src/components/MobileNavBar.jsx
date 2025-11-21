@@ -9,6 +9,7 @@ function MobileNavBar({ user }) {
   const navigation = useMemo(() => buildNavigation(user), [user]);
   const items = useMemo(() => flattenNavigationSections(navigation), [navigation]);
   const [logoutOpen, setLogoutOpen] = useState(false);
+  const showLabels = !navigation.isAuthenticated;
 
   if (!items.length) return null;
 
@@ -22,7 +23,7 @@ function MobileNavBar({ user }) {
 
   return (
     <>
-      <nav className="mobile-nav" aria-label="Navegação principal">
+      <nav className={`mobile-nav${showLabels ? " mobile-nav--labeled" : ""}`} aria-label="Navegação principal">
         {items.map((item) => {
           if (item.type === 'action') {
             return (
@@ -33,7 +34,7 @@ function MobileNavBar({ user }) {
                 onClick={() => setLogoutOpen(true)}
               >
                 <item.icon aria-hidden="true" />
-                <span>{item.label}</span>
+                {showLabels && <span>{item.label}</span>}
               </button>
             );
           }
@@ -47,7 +48,7 @@ function MobileNavBar({ user }) {
               }
             >
               <item.icon aria-hidden="true" />
-              <span>{item.label}</span>
+              {showLabels && <span>{item.label}</span>}
             </NavLink>
           );
         })}

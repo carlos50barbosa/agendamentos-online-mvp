@@ -509,6 +509,9 @@ export default function Configuracoes() {
     notifyWhatsappEstab: Boolean(user?.notify_whatsapp_estab ?? true),
   });
   const [passwordForm, setPasswordForm] = useState({ atual: '', nova: '', confirmar: '' });
+  const [confirmPasswordModal, setConfirmPasswordModal] = useState(false);
+  const [confirmPasswordInput, setConfirmPasswordInput] = useState('');
+  const [confirmPasswordError, setConfirmPasswordError] = useState('');
   const [profileStatus, setProfileStatus] = useState({ type: '', message: '' });
   const [profileSaving, setProfileSaving] = useState(false);
 
@@ -1173,12 +1176,34 @@ export default function Configuracoes() {
     setPasswordForm((prev) => ({ ...prev, [key]: value }));
   };
 
-  const handleSaveProfile = async (event) => {
+  const closeConfirmPasswordModal = useCallback(() => {
+    setConfirmPasswordModal(false);
+    setConfirmPasswordInput('');
+    setConfirmPasswordError('');
+  }, []);
+
+  const handleConfirmPasswordSubmit = (event) => {
     event.preventDefault();
+    const value = confirmPasswordInput.trim();
+    if (!value) {
+      setConfirmPasswordError('Informe sua senha para continuar.');
+      return;
+    }
+    setConfirmPasswordError('');
+    setPasswordForm((prev) => ({ ...prev, atual: value }));
+    closeConfirmPasswordModal();
+    handleSaveProfile(null, value);
+  };
+
+  const handleSaveProfile = async (event, passwordOverride) => {
+    event?.preventDefault?.();
     setProfileStatus({ type: '', message: '' });
 
-    if (!passwordForm.atual) {
-      setProfileStatus({ type: 'error', message: 'Informe a senha atual para salvar as alteracoes.' });
+    const currentPassword = ((passwordOverride ?? passwordForm.atual) || '').trim();
+    if (!currentPassword) {
+      setConfirmPasswordError('');
+      setConfirmPasswordInput('');
+      setConfirmPasswordModal(true);
       return;
     }
     if (passwordForm.nova && passwordForm.nova !== passwordForm.confirmar) {
@@ -1195,20 +1220,20 @@ export default function Configuracoes() {
         nome: profileForm.nome.trim(),
         email: profileForm.email.trim(),
         telefone: telefoneNorm,
-        senhaAtual: passwordForm.atual,
+        senhaAtual: currentPassword,
         senhaNova: passwordForm.nova || undefined,
         cep: cepDigits || undefined,
         endereco: profileForm.endereco.trim() || undefined,
         numero: profileForm.numero.trim() || undefined,
         complemento: profileForm.complemento.trim() || undefined,
-      bairro: profileForm.bairro.trim() || undefined,
-      cidade: profileForm.cidade.trim() || undefined,
-      estado: profileForm.estado.trim().toUpperCase() || undefined,
-    };
-    if (isEstab) {
-      payload.notifyEmailEstab = !!profileForm.notifyEmailEstab;
-      payload.notifyWhatsappEstab = !!profileForm.notifyWhatsappEstab;
-    }
+        bairro: profileForm.bairro.trim() || undefined,
+        cidade: profileForm.cidade.trim() || undefined,
+        estado: profileForm.estado.trim().toUpperCase() || undefined,
+      };
+      if (isEstab) {
+        payload.notifyEmailEstab = !!profileForm.notifyEmailEstab;
+        payload.notifyWhatsappEstab = !!profileForm.notifyWhatsappEstab;
+      }
       if (avatarData) {
         payload.avatar = avatarData;
       } else if (avatarRemove && !avatarData) {
@@ -1235,6 +1260,8 @@ export default function Configuracoes() {
       handlePasswordChange('atual', '');
       handlePasswordChange('nova', '');
       handlePasswordChange('confirmar', '');
+      setConfirmPasswordInput('');
+      setConfirmPasswordModal(false);
       setProfileStatus({ type: 'success', message: 'Perfil atualizado com sucesso.' });
       if (response?.emailConfirmation?.pending) {
         setProfileStatus({
@@ -1446,19 +1473,18 @@ export default function Configuracoes() {
             </>
           )}
           <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
-            <label className="label" style={{ flex: '1 1 240px' }}>
-              <span>Senha atual</span>
-              <input className="input" type="password" value={passwordForm.atual} onChange={(e) => handlePasswordChange('atual', e.target.value)} required />
-            </label>
-            <label className="label" style={{ flex: '1 1 240px' }}>
+            <label className="label" style={{ flex: '1 1 260px' }}>
               <span>Nova senha (opcional)</span>
               <input className="input" type="password" value={passwordForm.nova} onChange={(e) => handlePasswordChange('nova', e.target.value)} />
             </label>
-            <label className="label" style={{ flex: '1 1 240px' }}>
+            <label className="label" style={{ flex: '1 1 260px' }}>
               <span>Confirmar nova senha</span>
               <input className="input" type="password" value={passwordForm.confirmar} onChange={(e) => handlePasswordChange('confirmar', e.target.value)} />
             </label>
           </div>
+          <p className="small muted" style={{ margin: '-4px 0 0' }}>
+            Vamos pedir sua senha atual ao salvar as alteações.
+          </p>
           {profileStatus.message && (
             <div className={`notice notice--${profileStatus.type}`} role="alert">{profileStatus.message}</div>
           )}
@@ -1785,13 +1811,7 @@ export default function Configuracoes() {
             key="upgrade-pro"
             className="btn btn--primary btn--sm"
             type="button"
-            onClick={() => {
-              if (hasActiveSubscription) {
-                handleChangePlan('pro');
-              } else {
-                handleCheckout('pro');
-              }
-            }}
+            onClick={() => handleChangePlan('pro')}
             disabled={checkoutLoading}
           >
             {checkoutLoading ? <span className="spinner" /> : 'Alterar para plano Pro'}
@@ -1990,6 +2010,7 @@ export default function Configuracoes() {
     handleWorkingHoursTimeChange,
     handleWorkingHoursBlockToggle,
     handleWorkingHoursBlockChange,
+    handleSaveProfile,
     handleSavePublicProfile,
     handleCopyPublicLink,
     qrCodeUrl,
@@ -2028,6 +2049,42 @@ export default function Configuracoes() {
           </div>
         );
       })}
+      {confirmPasswordModal && (
+        <Modal
+          title="Confirmar senha"
+          onClose={closeConfirmPasswordModal}
+          actions={[
+            <button key="cancel" type="button" className="btn btn--outline" onClick={closeConfirmPasswordModal} disabled={profileSaving}>
+              Cancelar
+            </button>,
+            <button key="confirm" form="confirm-password-form" type="submit" className="btn btn--primary" disabled={profileSaving}>
+              {profileSaving ? <span className="spinner" /> : 'Confirmar e salvar'}
+            </button>,
+          ]}
+        >
+          <form id="confirm-password-form" onSubmit={handleConfirmPasswordSubmit} className="grid" style={{ gap: 10 }}>
+            <p className="muted" style={{ margin: 0 }}>
+              Precisamos confirmar sua senha para salvar as alteações.
+            </p>
+            <label className="label" style={{ marginBottom: 0 }}>
+              <span>Senha atual</span>
+              <input
+                className="input"
+                type="password"
+                value={confirmPasswordInput}
+                onChange={(e) => setConfirmPasswordInput(e.target.value)}
+                autoFocus
+                disabled={profileSaving}
+              />
+            </label>
+            {confirmPasswordError && (
+              <div className="notice notice--error" role="alert" style={{ margin: 0 }}>
+                {confirmPasswordError}
+              </div>
+            )}
+          </form>
+        </Modal>
+      )}
       {pixCheckoutModal.open && (
         <Modal
           title="Pagamento via PIX"

@@ -2,8 +2,8 @@ import {
   IconUser,
   IconHome,
   IconPlus,
-  IconList,
   IconChart,
+  IconWrench,
   IconGear,
   IconLogout,
 } from '../components/Icons.jsx';
@@ -40,8 +40,8 @@ export function buildNavigation(user) {
 
   if (isEstab) {
     mainItems.push(
-      { key: 'services', label: 'Serviços', to: '/servicos', icon: IconList, type: 'link' },
-      { key: 'professionals', label: 'Profissionais', to: '/profissionais', icon: IconList, type: 'link' },
+      { key: 'services', label: 'Serviços', to: '/servicos', icon: IconWrench, type: 'link' },
+      { key: 'professionals', label: 'Profissionais', to: '/profissionais', icon: IconUser, type: 'link' },
       { key: 'reports', label: 'Relatórios', to: '/relatorios', icon: IconChart, type: 'link' },
     );
   } else {

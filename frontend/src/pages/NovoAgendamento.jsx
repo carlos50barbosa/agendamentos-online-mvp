@@ -983,6 +983,19 @@ export default function NovoAgendamento() {
   const [monthStart, setMonthStart] = useState(() => DateHelpers.firstOfMonthISO(new Date()));
   const [selectedDate, setSelectedDate] = useState(null); // YYYY-MM-DD
   const [professionalMenuOpen, setProfessionalMenuOpen] = useState(false);
+  const professionalMenuRef = useRef(null);
+
+  useEffect(() => {
+    if (!professionalMenuOpen) return;
+    const handleOutside = (event) => {
+      const node = professionalMenuRef.current;
+      if (node && !node.contains(event.target)) {
+        setProfessionalMenuOpen(false);
+      }
+    };
+    document.addEventListener('pointerdown', handleOutside);
+    return () => document.removeEventListener('pointerdown', handleOutside);
+  }, [professionalMenuOpen]);
 
   const {
     establishments, services, establishmentId, serviceId,
@@ -2370,7 +2383,7 @@ useEffect(() => {
                 {serviceProfessionals.length === 1 ? '1 profissional disponível' : `${serviceProfessionals.length} profissionais disponíveis`}
               </span>
             </div>
-            <div style={{ position: 'relative', maxWidth: 240 }}>
+            <div style={{ position: 'relative', maxWidth: 240 }} ref={professionalMenuRef}>
               <button
                 type="button"
                 onClick={() => setProfessionalMenuOpen((open) => !open)}
@@ -2419,14 +2432,22 @@ useEffect(() => {
 
       <div className="novo-agendamento__section">
         <div className="row spread" style={{ alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 6 }}>
-          <div className="row" style={{ gap: 8, alignItems: 'center' }}>
-            <span className="muted"><b>Estabelecimento:</b> {selectedEstablishmentName}</span>
-            <span className="muted">•</span>
-            <span className="muted">
-              <b>Serviço:</b> {ServiceHelpers.title(selectedService)}
-              {serviceDuration ? ` • ${serviceDuration} min` : ''}
-              {servicePrice !== 'R$ 0,00' ? ` • ${servicePrice}` : ''}
-            </span>
+          <div className="novo-agendamento__inline-summary">
+            <div className="inline-summary__item">
+              <span className="inline-summary__label">Estabelecimento:</span>
+              <span className="inline-summary__value">{selectedEstablishmentName}</span>
+            </div>
+            <span className="inline-summary__dot" aria-hidden />
+            <div className="inline-summary__item inline-summary__item--service">
+              <span className="inline-summary__label">Serviço:</span>
+              <span className="inline-summary__value">{ServiceHelpers.title(selectedService)}</span>
+              {(serviceDuration || servicePrice !== 'R$ 0,00') && (
+                <div className="inline-summary__meta">
+                  {serviceDuration ? <span>{serviceDuration} min</span> : null}
+                  {servicePrice !== 'R$ 0,00' ? <span>{servicePrice}</span> : null}
+                </div>
+              )}
+            </div>
           </div>
           <details className="filters" style={{ marginLeft: 'auto' }}>
             <summary>Filtros</summary>
