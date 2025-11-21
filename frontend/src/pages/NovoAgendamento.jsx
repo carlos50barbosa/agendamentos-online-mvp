@@ -933,6 +933,7 @@ export default function NovoAgendamento() {
   const [establishmentExtras, setEstablishmentExtras] = useState({});
   const [professionalsByEstab, setProfessionalsByEstab] = useState({});
   const [infoModalOpen, setInfoModalOpen] = useState(false);
+  const [galleryModalOpen, setGalleryModalOpen] = useState(false);
   const [infoModalError, setInfoModalError] = useState('');
   const [infoActiveTab, setInfoActiveTab] = useState('about');
   const [ratingModal, setRatingModal] = useState({ open: false, nota: 0, comentario: '', saving: false, error: '' });
@@ -1005,6 +1006,7 @@ export default function NovoAgendamento() {
   const selectedExtras = selectedEstablishmentId ? establishmentExtras[selectedEstablishmentId] : null;
   const selectedProfessionals = selectedEstablishmentId ? professionalsByEstab[selectedEstablishmentId] : null;
   const profileData = selectedExtras?.profile || null;
+  const galleryImages = Array.isArray(selectedExtras?.gallery) ? selectedExtras.gallery : [];
   const horariosList = useMemo(
     () => (Array.isArray(profileData?.horarios) ? profileData.horarios : []),
     [profileData?.horarios]
@@ -1279,6 +1281,11 @@ export default function NovoAgendamento() {
             rating: data?.rating || { average: null, count: 0, distribution: null },
             user_review: data?.user_review || null,
             is_favorite: Boolean(data?.is_favorite),
+            gallery: Array.isArray(data?.gallery) ? data.gallery : [],
+            gallery_limit:
+              data?.gallery_limit ??
+              data?.plan_context?.limits?.maxGalleryImages ??
+              null,
           },
         }));
       } catch (err) {
@@ -1304,6 +1311,7 @@ export default function NovoAgendamento() {
   useEffect(() => {
     if (!selectedEstablishmentId) return;
     setInfoModalOpen(false);
+    setGalleryModalOpen(false);
     setInfoModalError('');
     setInfoActiveTab('about');
     setRatingModal((prev) => (prev.open ? { open: false, nota: 0, comentario: '', saving: false, error: '' } : prev));
@@ -1975,6 +1983,15 @@ export default function NovoAgendamento() {
     loadReviews({ reset: false });
   };
 
+  const handleOpenGalleryModal = useCallback(() => {
+    if (!selectedEstablishment || !selectedEstablishmentId) return;
+    setGalleryModalOpen(true);
+  }, [selectedEstablishment, selectedEstablishmentId]);
+
+  const handleCloseGalleryModal = useCallback(() => {
+    setGalleryModalOpen(false);
+  }, []);
+
   const handleToggleFavorite = async () => {
     if (!selectedEstablishment || !selectedEstablishmentId) return;
     if (!user || user.tipo !== 'cliente') {
@@ -2595,6 +2612,15 @@ export default function NovoAgendamento() {
                     <span aria-hidden>🛈</span>
                     Informações
                   </button>
+                  <button
+                    type="button"
+                    className={`summary-action${galleryImages.length ? '' : ' summary-action--muted'}`}
+                    onClick={handleOpenGalleryModal}
+                    title={galleryImages.length ? 'Ver fotos do estabelecimento' : 'Ainda sem imagens enviadas.'}
+                  >
+                    <span aria-hidden>📷</span>
+                    Fotos
+                  </button>
                   {!isAuthenticated ? (
                     <Link to={loginHref} className="summary-action summary-action--cta">
                       <span aria-hidden>♡</span>
@@ -2668,6 +2694,14 @@ export default function NovoAgendamento() {
                 aria-selected={infoActiveTab === 'about'}
               >
                 Informações
+              </button>
+              <button
+                type="button"
+                className="estab-info__tab"
+                onClick={handleOpenGalleryModal}
+                aria-haspopup="dialog"
+              >
+                Fotos{galleryImages.length ? ` (${galleryImages.length})` : ''}
               </button>
               <button
                 type="button"
@@ -2954,6 +2988,76 @@ export default function NovoAgendamento() {
           </div>
         </Modal>
       )}
+
+      {galleryModalOpen && (
+        <Modal
+          title={`Fotos de ${selectedEstablishmentName || 'Estabelecimento'}`}
+          onClose={handleCloseGalleryModal}
+          closeButton
+          bodyClassName="modal__body--scroll"
+        >
+          {galleryImages.length ? (
+            <div
+              className="estab-info__gallery"
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
+                gap: 12,
+              }}
+            >
+              {galleryImages.map((image, index) => {
+                const key = image?.id || `${image?.url || 'img'}-${index}`;
+                const src = resolveAssetUrl(image?.url || '');
+                return (
+                  <figure key={key} className="estab-info__gallery-item" style={{ margin: 0 }}>
+                    <div
+                      style={{
+                        position: 'relative',
+                        width: '100%',
+                        paddingBottom: '64%',
+                        borderRadius: 10,
+                        overflow: 'hidden',
+                        background: '#f6f6f6',
+                      }}
+                    >
+                      {src ? (
+                        <img
+                          src={src}
+                          alt={
+                            image?.titulo ||
+                            `Imagem de ${selectedEstablishmentName || 'estabelecimento'}`
+                          }
+                          loading="lazy"
+                          style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }}
+                        />
+                      ) : (
+                        <span
+                          className="muted"
+                          style={{
+                            position: 'absolute',
+                            inset: 0,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            fontSize: 12,
+                          }}
+                        >
+                          Imagem indisponível
+                        </span>
+                      )}
+                    </div>
+                    {image?.titulo && (
+                      <figcaption style={{ fontSize: 12, marginTop: 4 }}>{image.titulo}</figcaption>
+                    )}
+                  </figure>
+                );
+              })}
+            </div>
+          ) : (
+            <p className="muted">Nenhuma imagem cadastrada ainda.</p>
+          )}
+        </Modal>
+      )}
       {ratingModal.open && (
         <Modal
           title="Avaliar estabelecimento"
@@ -3058,5 +3162,6 @@ export default function NovoAgendamento() {
     </div>
   );
 }
+
 
 

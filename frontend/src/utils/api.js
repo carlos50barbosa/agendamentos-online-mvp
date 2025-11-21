@@ -153,6 +153,12 @@ export const Api = {
   deleteEstablishmentReview: (id) => req(`/establishments/${id}/review`, { method: 'DELETE' }),
   favoriteEstablishment: (id) => req(`/establishments/${id}/favorite`, { method: 'POST' }),
   unfavoriteEstablishment: (id) => req(`/establishments/${id}/favorite`, { method: 'DELETE' }),
+  listEstablishmentImages: (id) => req(`/establishments/${id}/images`),
+  addEstablishmentImage: (id, payload) =>
+    req(`/establishments/${id}/images`, { method: 'POST', body: JSON.stringify(payload) }),
+  deleteEstablishmentImage: (id, imageId) => req(`/establishments/${id}/images/${imageId}`, { method: 'DELETE' }),
+  reorderEstablishmentImages: (id, order) =>
+    req(`/establishments/${id}/images/reorder`, { method: 'PUT', body: JSON.stringify({ order }) }),
   getEstablishmentMessages: (id) => req(`/establishments/${id}/messages`),
   updateEstablishmentMessages: (id, payload) => req(`/establishments/${id}/messages`, { method: 'PUT', body: JSON.stringify(payload) }),
   updateEstablishmentSlug: (id, slug) => req(`/establishments/${id}/slug`, { method: 'PUT', body: JSON.stringify({ slug }) }),

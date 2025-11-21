@@ -9,6 +9,7 @@ import { notifyEmail } from '../lib/notifications.js';
 import crypto from 'crypto';
 import { consumeLinkToken } from '../lib/wa_store.js';
 import { saveAvatarFromDataUrl, removeAvatarFile } from '../lib/avatar.js';
+import { MAX_TRIAL_DAYS } from '../lib/plans.js';
 
 const router = Router();
 
@@ -98,7 +99,10 @@ router.post('/register', async (req, res) => {
     if (rows.length) return res.status(400).json({ error: 'email_exists' });
 
     const now = new Date();
-    const trialEndsAt = tipo === 'estabelecimento' ? new Date(now.getTime() + 14 * 86400000) : null;
+    const trialEndsAt =
+      tipo === 'estabelecimento' && MAX_TRIAL_DAYS > 0
+        ? new Date(now.getTime() + MAX_TRIAL_DAYS * 86400000)
+        : null;
 
     const hash = await bcrypt.hash(String(senha), 10);
     const [r] = await pool.query(

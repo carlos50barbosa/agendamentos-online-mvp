@@ -7,6 +7,10 @@ import jwt from "jsonwebtoken";
 import { pool } from "../lib/db.js";
 
 import { resolveEstablishmentCoordinates } from "../lib/geocode.js";
+import {
+  saveEstablishmentImageFromDataUrl,
+  removeEstablishmentImageFile,
+} from "../lib/establishment_images.js";
 
 import { auth, isEstabelecimento, isCliente } from "../middleware/auth.js";
 
@@ -694,6 +698,60 @@ function normalizeProfile(establishmentRow, profileRow) {
 
 }
 
+function normalizeGalleryImage(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    estabelecimento_id: row.estabelecimento_id,
+    url: row.file_path,
+    titulo: row.titulo || null,
+    descricao: row.descricao || null,
+    ordem: Number.isFinite(row.ordem) ? Number(row.ordem) : 0,
+    created_at: row.created_at ? new Date(row.created_at).toISOString() : null,
+  };
+}
+
+async function fetchGalleryImages(estabelecimentoId) {
+  const [rows] = await pool.query(
+    `SELECT id, estabelecimento_id, file_path, titulo, descricao, ordem, created_at
+     FROM estabelecimento_imagens
+     WHERE estabelecimento_id=?
+     ORDER BY ordem ASC, id ASC`,
+    [estabelecimentoId]
+  );
+  return rows.map(normalizeGalleryImage);
+}
+
+async function countGalleryImages(estabelecimentoId) {
+  const [[row]] = await pool.query(
+    'SELECT COUNT(*) AS total FROM estabelecimento_imagens WHERE estabelecimento_id=?',
+    [estabelecimentoId]
+  );
+  return Number(row?.total || 0);
+}
+
+async function resolveNextGalleryOrder(estabelecimentoId) {
+  const [[row]] = await pool.query(
+    'SELECT COALESCE(MAX(ordem), 0) AS max_ordem FROM estabelecimento_imagens WHERE estabelecimento_id=?',
+    [estabelecimentoId]
+  );
+  return Number(row?.max_ordem || 0) + 1;
+}
+
+function sanitizeGalleryText(value, { maxLength = 255 } = {}) {
+  if (value == null) return null;
+  const text = String(value).trim();
+  if (!text) return null;
+  if (maxLength && text.length > maxLength) return text.slice(0, maxLength);
+  return text;
+}
+
+function resolveGalleryLimit(planContext) {
+  const limit = planContext?.config?.maxGalleryImages;
+  if (limit === null || limit === undefined) return null;
+  return Number.isFinite(limit) ? limit : null;
+}
+
 
 
 async function getRatingSummary(estabelecimentoId) {
@@ -948,7 +1006,7 @@ router.get('/:idOrSlug', async (req, res) => {
 
 
 
-    const [planContext, profileResult, rating] = await Promise.all([
+    const [planContext, profileResult, rating, galleryImages] = await Promise.all([
 
       getPlanContext(est.id),
 
@@ -961,6 +1019,8 @@ router.get('/:idOrSlug', async (req, res) => {
       ),
 
       getRatingSummary(est.id),
+
+      fetchGalleryImages(est.id),
 
     ]);
 
@@ -1010,6 +1070,10 @@ router.get('/:idOrSlug', async (req, res) => {
 
       is_favorite: isFavorite,
 
+      gallery: galleryImages,
+
+      gallery_limit: resolveGalleryLimit(planContext),
+
     };
 
 
@@ -1023,6 +1087,38 @@ router.get('/:idOrSlug', async (req, res) => {
     res.status(500).json({ error: 'establishment_fetch_failed' });
   }
 });
+
+router.get('/:id/images', async (req, res) => {
+
+  try {
+
+    const estabelecimentoId = Number(req.params.id);
+
+    if (!Number.isFinite(estabelecimentoId)) {
+
+      return res.status(400).json({ error: 'invalid_estabelecimento', message: 'Identificador invalido.' });
+
+    }
+
+    const est = await ensureEstabelecimento(estabelecimentoId);
+
+    if (!est) return res.status(404).json({ error: 'not_found' });
+
+    const images = await fetchGalleryImages(estabelecimentoId);
+
+    return res.json({ images });
+
+  } catch (e) {
+
+    console.error('GET /establishments/:id/images', e);
+
+    return res.status(500).json({ error: 'gallery_fetch_failed' });
+
+  }
+
+});
+
+
 
 router.get('/:id/reviews', async (req, res) => {
   try {
@@ -1714,6 +1810,282 @@ router.delete('/:id/favorite', auth, isCliente, async (req, res) => {
     console.error('DELETE /establishments/:id/favorite', err);
 
     return res.status(500).json({ error: 'favorite_failed' });
+
+  }
+
+});
+
+
+
+router.post('/:id/images', auth, isEstabelecimento, async (req, res) => {
+
+  try {
+
+    const estabelecimentoId = Number(req.params.id);
+
+    if (!Number.isFinite(estabelecimentoId) || req.user.id !== estabelecimentoId) {
+
+      return res.status(403).json({ error: 'forbidden' });
+
+    }
+
+    const est = await ensureEstabelecimento(estabelecimentoId);
+
+    if (!est) return res.status(404).json({ error: 'not_found' });
+
+    const imageRaw = typeof req.body?.image === 'string' ? req.body.image.trim() : '';
+
+    if (!imageRaw) {
+
+      return res.status(400).json({ error: 'image_required', message: 'Envie a imagem em formato data URL.' });
+
+    }
+
+    const titulo = sanitizeGalleryText(req.body?.titulo, { maxLength: 120 });
+
+    const descricao = sanitizeGalleryText(req.body?.descricao, { maxLength: 240 });
+
+    const planContext = await getPlanContext(estabelecimentoId);
+
+    const limit = resolveGalleryLimit(planContext);
+
+    const total = await countGalleryImages(estabelecimentoId);
+
+    if (limit !== null && total >= limit) {
+
+      const message =
+
+        limit === 0
+
+          ? 'Seu plano atual nao permite adicionar imagens.'
+
+          : `Seu plano atual permite cadastrar ate ${limit} imagens.`;
+
+      return res.status(409).json({ error: 'gallery_limit_reached', message, details: { limit } });
+
+    }
+
+    let filePath = null;
+
+    try {
+
+      filePath = await saveEstablishmentImageFromDataUrl(imageRaw, estabelecimentoId);
+
+    } catch (err) {
+
+      if (err?.code === 'GALLERY_IMAGE_TOO_LARGE') {
+
+        return res.status(400).json({ error: 'gallery_image_large', message: 'A imagem deve ter no maximo 3MB.' });
+
+      }
+
+      if (err?.code === 'GALLERY_IMAGE_INVALID') {
+
+        return res.status(400).json({ error: 'gallery_image_invalid', message: 'Envie PNG, JPG ou WEBP validos.' });
+
+      }
+
+      console.error('POST /establishments/:id/images parse', err);
+
+      return res.status(500).json({ error: 'gallery_upload_failed' });
+
+    }
+
+    const ordem = await resolveNextGalleryOrder(estabelecimentoId);
+
+    const [insertResult] = await pool.query(
+
+      'INSERT INTO estabelecimento_imagens (estabelecimento_id, file_path, titulo, descricao, ordem) VALUES (?,?,?,?,?)',
+
+      [estabelecimentoId, filePath, titulo, descricao, ordem]
+
+    );
+
+    const insertedId = insertResult.insertId;
+
+    const [[row]] = await pool.query(
+
+      'SELECT id, estabelecimento_id, file_path, titulo, descricao, ordem, created_at FROM estabelecimento_imagens WHERE id=? LIMIT 1',
+
+      [insertedId]
+
+    );
+
+    return res.status(201).json({
+
+      ok: true,
+
+      image: normalizeGalleryImage(row),
+
+      remaining_slots: limit === null ? null : Math.max(0, limit - (total + 1)),
+
+    });
+
+  } catch (err) {
+
+    console.error('POST /establishments/:id/images', err);
+
+    return res.status(500).json({ error: 'gallery_upload_failed' });
+
+  }
+
+});
+
+
+
+router.delete('/:id/images/:imageId', auth, isEstabelecimento, async (req, res) => {
+
+  try {
+
+    const estabelecimentoId = Number(req.params.id);
+
+    const imageId = Number(req.params.imageId);
+
+    if (!Number.isFinite(estabelecimentoId) || req.user.id !== estabelecimentoId) {
+
+      return res.status(403).json({ error: 'forbidden' });
+
+    }
+
+    if (!Number.isFinite(imageId)) {
+
+      return res.status(400).json({ error: 'invalid_image', message: 'Imagem invalida.' });
+
+    }
+
+    const [[row]] = await pool.query(
+
+      'SELECT id, estabelecimento_id, file_path FROM estabelecimento_imagens WHERE id=? LIMIT 1',
+
+      [imageId]
+
+    );
+
+    if (!row || row.estabelecimento_id !== estabelecimentoId) {
+
+      return res.status(404).json({ error: 'not_found' });
+
+    }
+
+    await pool.query('DELETE FROM estabelecimento_imagens WHERE id=? LIMIT 1', [imageId]);
+
+    if (row.file_path) {
+
+      try {
+
+        await removeEstablishmentImageFile(row.file_path);
+
+      } catch (e) {
+
+        if (e?.code !== 'ENOENT') {
+
+          console.warn('Failed to remove gallery image file', e?.message || e);
+
+        }
+
+      }
+
+    }
+
+    const images = await fetchGalleryImages(estabelecimentoId);
+
+    return res.json({ ok: true, images });
+
+  } catch (err) {
+
+    console.error('DELETE /establishments/:id/images/:imageId', err);
+
+    return res.status(500).json({ error: 'gallery_delete_failed' });
+
+  }
+
+});
+
+
+
+router.put('/:id/images/reorder', auth, isEstabelecimento, async (req, res) => {
+
+  try {
+
+    const estabelecimentoId = Number(req.params.id);
+
+    if (!Number.isFinite(estabelecimentoId) || req.user.id !== estabelecimentoId) {
+
+      return res.status(403).json({ error: 'forbidden' });
+
+    }
+
+    const est = await ensureEstabelecimento(estabelecimentoId);
+
+    if (!est) return res.status(404).json({ error: 'not_found' });
+
+    if (!Array.isArray(req.body?.order)) {
+
+      return res.status(400).json({ error: 'invalid_payload', message: 'Envie a lista ordenada de IDs.' });
+
+    }
+
+    const incomingOrder = req.body.order
+
+      .map((value) => Number(value))
+
+      .filter((num) => Number.isInteger(num) && num > 0);
+
+    const [rows] = await pool.query(
+
+      'SELECT id FROM estabelecimento_imagens WHERE estabelecimento_id=? ORDER BY ordem ASC, id ASC',
+
+      [estabelecimentoId]
+
+    );
+
+    if (!rows.length) {
+
+      return res.json({ ok: true, images: [] });
+
+    }
+
+    const existingIds = rows.map((r) => r.id);
+
+    const seen = new Set();
+
+    const normalized = [];
+
+    for (const imageId of incomingOrder) {
+
+      if (existingIds.includes(imageId) && !seen.has(imageId)) {
+
+        seen.add(imageId);
+
+        normalized.push(imageId);
+
+      }
+
+    }
+
+    const remainder = existingIds.filter((id) => !seen.has(id));
+
+    const finalOrder = normalized.concat(remainder);
+
+    await Promise.all(
+
+      finalOrder.map((imageId, index) =>
+
+        pool.query('UPDATE estabelecimento_imagens SET ordem=? WHERE id=? LIMIT 1', [index + 1, imageId])
+
+      )
+
+    );
+
+    const images = await fetchGalleryImages(estabelecimentoId);
+
+    return res.json({ ok: true, images });
+
+  } catch (err) {
+
+    console.error('PUT /establishments/:id/images/reorder', err);
+
+    return res.status(500).json({ error: 'gallery_reorder_failed' });
 
   }
 

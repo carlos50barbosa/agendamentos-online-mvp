@@ -6,7 +6,7 @@ export const PLAN_STATUS = ['trialing', 'active', 'delinquent', 'pending', 'canc
 
 const LIMIT_UNLIMITED = null;
 
-const MAX_TRIAL_DAYS = 7;
+export const MAX_TRIAL_DAYS = 7;
 const PLAN_CONFIG = {
   starter: {
     code: 'starter',
@@ -15,6 +15,7 @@ const PLAN_CONFIG = {
     annualPriceCents: 14900,
     maxServices: 10,
     maxProfessionals: 2,
+    maxGalleryImages: 5,
     allowWhatsApp: true,
     allowAdvancedReports: false,
   },
@@ -25,6 +26,7 @@ const PLAN_CONFIG = {
     annualPriceCents: 49900,
     maxServices: 100,
     maxProfessionals: 10,
+    maxGalleryImages: 15,
     allowWhatsApp: true,
     allowAdvancedReports: true,
   },
@@ -35,6 +37,7 @@ const PLAN_CONFIG = {
     annualPriceCents: 199000,
     maxServices: LIMIT_UNLIMITED,
     maxProfessionals: LIMIT_UNLIMITED,
+    maxGalleryImages: LIMIT_UNLIMITED,
     allowWhatsApp: true,
     allowAdvancedReports: true,
   },
@@ -170,6 +173,7 @@ export function serializePlanContext(context) {
     limits: {
       maxServices: config.maxServices,
       maxProfessionals: config.maxProfessionals,
+      maxGalleryImages: config.maxGalleryImages,
       allowWhatsApp: config.allowWhatsApp,
       allowAdvancedReports: config.allowAdvancedReports,
     },

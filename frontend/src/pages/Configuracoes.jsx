@@ -133,6 +133,8 @@ const WORKING_DAY_INDEX = WORKING_DAYS.reduce((acc, day, index) => {
   return acc;
 }, {});
 
+const GALLERY_MAX_BYTES = 3 * 1024 * 1024;
+
 function createEmptyWorkingHours() {
   return WORKING_DAYS.map((day) => ({
     key: day.key,
@@ -1708,6 +1710,17 @@ export default function Configuracoes() {
                 />
               </label>
             </div>
+            <section className="box" style={{ display: 'grid', gap: 8 }}>
+              <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+                <div>
+                  <h4 style={{ margin: 0 }}>Fotos do estabelecimento</h4>
+                  <p className="muted" style={{ margin: '4px 0 0', fontSize: 13 }}>
+                    Essas imagens aparecem na página pública e no fluxo de agendamento (/novo).
+                  </p>
+                </div>
+              </div>
+              <GalleryManager establishmentId={user?.id} />
+            </section>
             {publicProfileStatus.message && (
               <div className={`notice notice--${publicProfileStatus.type}`} role="alert">
                 {publicProfileStatus.message}
@@ -2124,5 +2137,393 @@ export default function Configuracoes() {
         </Modal>
       )}
     </div>
+  );
+}
+
+function sortGalleryImages(list) {
+  if (!Array.isArray(list)) return [];
+  return [...list].sort((a, b) => (a?.ordem || 0) - (b?.ordem || 0));
+}
+
+function GalleryManager({ establishmentId }) {
+  const [images, setImages] = useState([]);
+  const [limit, setLimit] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [feedback, setFeedback] = useState(null);
+  const [pendingImage, setPendingImage] = useState(null);
+  const [titulo, setTitulo] = useState('');
+  const [descricao, setDescricao] = useState('');
+  const [uploading, setUploading] = useState(false);
+  const [reordering, setReordering] = useState(false);
+  const [deletingId, setDeletingId] = useState(null);
+  const [reloadCounter, setReloadCounter] = useState(0);
+  const fileInputRef = useRef(null);
+  const timerRef = useRef(null);
+
+  const remainingSlots = limit == null ? null : Math.max(0, limit - images.length);
+  const limitReached = limit != null && images.length >= limit;
+
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) window.clearTimeout(timerRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!establishmentId) {
+      setImages([]);
+      setLimit(null);
+      setError('');
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    setError('');
+    (async () => {
+      try {
+        const [imagesResponse, establishmentData] = await Promise.all([
+          Api.listEstablishmentImages(establishmentId),
+          Api.getEstablishment(establishmentId),
+        ]);
+        if (cancelled) return;
+        const fetched = Array.isArray(imagesResponse?.images) ? imagesResponse.images : [];
+        setImages(sortGalleryImages(fetched));
+        const limitFromPlan =
+          establishmentData?.gallery_limit ??
+          establishmentData?.plan_context?.limits?.maxGalleryImages ??
+          null;
+        if (limitFromPlan === null || limitFromPlan === undefined || limitFromPlan === '') {
+          setLimit(null);
+        } else {
+          const numeric = Number(limitFromPlan);
+          setLimit(Number.isFinite(numeric) ? numeric : null);
+        }
+      } catch (err) {
+        if (cancelled) return;
+        setError(err?.data?.message || 'Falha ao carregar imagens.');
+        setImages([]);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [establishmentId, reloadCounter]);
+
+  useEffect(() => {
+    setPendingImage(null);
+    setTitulo('');
+    setDescricao('');
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  }, [establishmentId]);
+
+  const notify = useCallback((type, message) => {
+    setFeedback({ type, message });
+    if (timerRef.current) window.clearTimeout(timerRef.current);
+    timerRef.current = window.setTimeout(() => setFeedback(null), 3500);
+  }, []);
+
+  const handleReload = useCallback(() => {
+    setReloadCounter((prev) => prev + 1);
+  }, []);
+
+  const handleFileChange = (event) => {
+    const file = event.target.files && event.target.files[0];
+    if (!file) {
+      setPendingImage(null);
+      return;
+    }
+    if (file.size > GALLERY_MAX_BYTES) {
+      notify('error', 'A imagem deve ter no máximo 3MB.');
+      event.target.value = '';
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => setPendingImage({ dataUrl: reader.result, name: file.name });
+    reader.onerror = () => notify('error', 'Não foi possível ler a imagem.');
+    reader.readAsDataURL(file);
+  };
+
+  const handleUpload = async (event) => {
+    event.preventDefault();
+    if (!establishmentId) return;
+    if (!pendingImage?.dataUrl) {
+      notify('error', 'Selecione uma imagem.');
+      return;
+    }
+    if (limitReached) {
+      notify('error', 'Limite de imagens atingido para o plano atual.');
+      return;
+    }
+    setUploading(true);
+    try {
+      const payload = {
+        image: pendingImage.dataUrl,
+        titulo: titulo || undefined,
+        descricao: descricao || undefined,
+      };
+      const response = await Api.addEstablishmentImage(establishmentId, payload);
+      if (response?.image) {
+        setImages((prev) => sortGalleryImages([...(prev || []), response.image]));
+        notify('success', 'Imagem adicionada.');
+      } else {
+        handleReload();
+      }
+      setPendingImage(null);
+      setTitulo('');
+      setDescricao('');
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    } catch (err) {
+      const msg =
+        err?.data?.message ||
+        (err?.error === 'gallery_limit_reached'
+          ? 'Limite do plano atingido.'
+          : 'Falha ao enviar a imagem.');
+      notify('error', msg);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleDelete = async (imageId) => {
+    if (!establishmentId) return;
+    if (!window.confirm('Remover esta imagem da galeria?')) return;
+    setDeletingId(imageId);
+    try {
+      const response = await Api.deleteEstablishmentImage(establishmentId, imageId);
+      if (Array.isArray(response?.images)) {
+        setImages(sortGalleryImages(response.images));
+      } else {
+        handleReload();
+      }
+      notify('success', 'Imagem removida.');
+    } catch (err) {
+      notify('error', err?.data?.message || 'Falha ao remover imagem.');
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  const handleMove = async (imageId, direction) => {
+    if (!establishmentId) return;
+    if (!images.length) return;
+    const index = images.findIndex((img) => img.id === imageId);
+    const targetIndex = index + direction;
+    if (index === -1 || targetIndex < 0 || targetIndex >= images.length) return;
+    const nextOrder = [...images];
+    [nextOrder[index], nextOrder[targetIndex]] = [nextOrder[targetIndex], nextOrder[index]];
+    setImages(nextOrder);
+    setReordering(true);
+    try {
+      const response = await Api.reorderEstablishmentImages(
+        establishmentId,
+        nextOrder.map((img) => img.id)
+      );
+      if (Array.isArray(response?.images)) {
+        setImages(sortGalleryImages(response.images));
+      }
+    } catch (err) {
+      notify('error', err?.data?.message || 'Falha ao reordenar imagens.');
+      handleReload();
+    } finally {
+      setReordering(false);
+    }
+  };
+
+  if (!establishmentId) {
+    return <p className="muted">Disponível apenas para contas de estabelecimento.</p>;
+  }
+
+  return (
+    <>
+      <div className="row" style={{ gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+        <input
+          type="file"
+          accept="image/png,image/jpeg,image/webp"
+          ref={fileInputRef}
+          onChange={handleFileChange}
+          disabled={uploading || limitReached}
+        />
+        <input
+          type="text"
+          className="input"
+          placeholder="Legenda (opcional)"
+          value={titulo}
+          maxLength={120}
+          onChange={(e) => setTitulo(e.target.value)}
+          style={{ flex: 1, minWidth: 180 }}
+        />
+        <input
+          type="text"
+          className="input"
+          placeholder="Descrição (opcional)"
+          value={descricao}
+          maxLength={240}
+          onChange={(e) => setDescricao(e.target.value)}
+          style={{ flex: 1, minWidth: 220 }}
+        />
+        <button
+          type="button"
+          className="btn btn--sm"
+          onClick={handleUpload}
+          disabled={uploading || limitReached || !pendingImage?.dataUrl}
+        >
+          {uploading ? 'Enviando…' : 'Adicionar imagem'}
+        </button>
+        <button
+          type="button"
+          className="btn btn--ghost btn--sm"
+          onClick={handleReload}
+          disabled={loading}
+        >
+          Recarregar
+        </button>
+      </div>
+      <small className="muted">
+        {limit == null
+          ? 'Seu plano atual não possui limite para imagens.'
+          : remainingSlots > 0
+          ? `Você ainda pode adicionar ${remainingSlots} imagem(ns).`
+          : 'Limite de imagens do plano atingido.'}
+      </small>
+      {pendingImage?.dataUrl && (
+        <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+          <strong>Pré-visualização:</strong>
+          <div
+            style={{
+              position: 'relative',
+              width: 160,
+              paddingBottom: '60%',
+              borderRadius: 8,
+              overflow: 'hidden',
+              background: '#f6f6f6',
+            }}
+          >
+            <img
+              src={pendingImage.dataUrl}
+              alt="Pré-visualização"
+              style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }}
+            />
+          </div>
+        </div>
+      )}
+
+      {error && (
+        <div className="notice notice--error" role="alert">
+          {error}
+        </div>
+      )}
+      {feedback?.message && (
+        <div className={`notice notice--${feedback.type}`} role="status">
+          {feedback.message}
+        </div>
+      )}
+
+      <div
+        className="gallery-grid"
+        style={{ display: 'grid', gap: 12, marginTop: 12, gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}
+      >
+        {loading
+          ? Array.from({ length: 3 }).map((_, index) => (
+              <div
+                key={`gallery-skeleton-${index}`}
+                className="shimmer"
+                style={{ height: 200, borderRadius: 8 }}
+              />
+            ))
+          : images.length === 0 ? (
+              <div className="empty" style={{ gridColumn: '1 / -1' }}>
+                Nenhuma imagem cadastrada ainda.
+              </div>
+            ) : (
+              images.map((image, index) => {
+                const src = resolveAssetUrl(image?.url || '');
+                return (
+                  <div
+                    key={image.id || `${image.url}-${index}`}
+                    className="gallery-card"
+                    style={{
+                      border: '1px solid #eee',
+                      borderRadius: 8,
+                      padding: 10,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 8,
+                    }}
+                  >
+                    <div
+                      style={{
+                        position: 'relative',
+                        width: '100%',
+                        paddingBottom: '65%',
+                        borderRadius: 8,
+                        overflow: 'hidden',
+                        background: '#fafafa',
+                      }}
+                    >
+                      {src ? (
+                        <img
+                          src={src}
+                          alt={image?.titulo || `Imagem ${index + 1}`}
+                          loading="lazy"
+                          style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }}
+                        />
+                      ) : (
+                        <span
+                          className="muted"
+                          style={{
+                            position: 'absolute',
+                            inset: 0,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            fontSize: 12,
+                          }}
+                        >
+                          Imagem indisponível
+                        </span>
+                      )}
+                    </div>
+                    {image?.titulo && <strong>{image.titulo}</strong>}
+                    {image?.descricao && (
+                      <p style={{ fontSize: 13, margin: 0, color: '#555' }}>{image.descricao}</p>
+                    )}
+                    <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
+                      <button
+                        type="button"
+                        className="btn btn--sm"
+                        onClick={() => handleMove(image.id, -1)}
+                        disabled={reordering || index === 0}
+                      >
+                        Subir
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn--sm"
+                        onClick={() => handleMove(image.id, 1)}
+                        disabled={reordering || index === images.length - 1}
+                      >
+                        Descer
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn--sm"
+                        style={{ marginLeft: 'auto', color: 'var(--danger, #c00)', borderColor: 'var(--danger, #c00)' }}
+                        onClick={() => handleDelete(image.id)}
+                        disabled={deletingId === image.id}
+                      >
+                        {deletingId === image.id ? 'Removendo…' : 'Remover'}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+      </div>
+    </>
   );
 }
