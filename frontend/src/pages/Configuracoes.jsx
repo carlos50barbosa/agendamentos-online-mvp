@@ -2415,6 +2415,9 @@ function GalleryManager({ establishmentId }) {
         </button>
       </div>
       <small className="muted">
+        Formatos aceitos: PNG, JPG ou WEBP. Tamanho máximo: 3 MB por imagem.
+      </small>
+      <small className="muted">
         {limit == null
           ? 'Seu plano atual não possui limite para imagens.'
           : remainingSlots > 0

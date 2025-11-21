@@ -934,6 +934,7 @@ export default function NovoAgendamento() {
   const [professionalsByEstab, setProfessionalsByEstab] = useState({});
   const [infoModalOpen, setInfoModalOpen] = useState(false);
   const [galleryModalOpen, setGalleryModalOpen] = useState(false);
+  const [galleryViewIndex, setGalleryViewIndex] = useState(0);
   const [infoModalError, setInfoModalError] = useState('');
   const [infoActiveTab, setInfoActiveTab] = useState('about');
   const [ratingModal, setRatingModal] = useState({ open: false, nota: 0, comentario: '', saving: false, error: '' });
@@ -1311,11 +1312,27 @@ export default function NovoAgendamento() {
   useEffect(() => {
     if (!selectedEstablishmentId) return;
     setInfoModalOpen(false);
-    setGalleryModalOpen(false);
-    setInfoModalError('');
-    setInfoActiveTab('about');
-    setRatingModal((prev) => (prev.open ? { open: false, nota: 0, comentario: '', saving: false, error: '' } : prev));
-  }, [selectedEstablishmentId]);
+  setGalleryModalOpen(false);
+  setInfoModalError('');
+  setInfoActiveTab('about');
+  setRatingModal((prev) => (prev.open ? { open: false, nota: 0, comentario: '', saving: false, error: '' } : prev));
+}, [selectedEstablishmentId]);
+
+useEffect(() => {
+  if (galleryModalOpen) {
+    setGalleryViewIndex(0);
+  }
+}, [galleryModalOpen, selectedEstablishmentId]);
+
+useEffect(() => {
+  if (!galleryImages.length) {
+    setGalleryViewIndex(0);
+    return;
+  }
+  if (galleryViewIndex >= galleryImages.length) {
+    setGalleryViewIndex(0);
+  }
+}, [galleryImages.length, galleryViewIndex]);
 
   /* ====== NormalizaÃ§Ã£o de slots ====== */
   const normalizeSlots = useCallback((data) => {
@@ -1991,6 +2008,18 @@ export default function NovoAgendamento() {
   const handleCloseGalleryModal = useCallback(() => {
     setGalleryModalOpen(false);
   }, []);
+  const handleGalleryPrev = useCallback(() => {
+    setGalleryViewIndex((prev) => {
+      if (!galleryImages.length) return 0;
+      return prev === 0 ? galleryImages.length - 1 : prev - 1;
+    });
+  }, [galleryImages.length]);
+  const handleGalleryNext = useCallback(() => {
+    setGalleryViewIndex((prev) => {
+      if (!galleryImages.length) return 0;
+      return prev === galleryImages.length - 1 ? 0 : prev + 1;
+    });
+  }, [galleryImages.length]);
 
   const handleToggleFavorite = async () => {
     if (!selectedEstablishment || !selectedEstablishmentId) return;
@@ -2997,61 +3026,127 @@ export default function NovoAgendamento() {
           bodyClassName="modal__body--scroll"
         >
           {galleryImages.length ? (
-            <div
-              className="estab-info__gallery"
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
-                gap: 12,
-              }}
-            >
-              {galleryImages.map((image, index) => {
-                const key = image?.id || `${image?.url || 'img'}-${index}`;
-                const src = resolveAssetUrl(image?.url || '');
-                return (
-                  <figure key={key} className="estab-info__gallery-item" style={{ margin: 0 }}>
-                    <div
-                      style={{
-                        position: 'relative',
-                        width: '100%',
-                        paddingBottom: '64%',
-                        borderRadius: 10,
-                        overflow: 'hidden',
-                        background: '#f6f6f6',
-                      }}
-                    >
-                      {src ? (
-                        <img
-                          src={src}
-                          alt={
-                            image?.titulo ||
-                            `Imagem de ${selectedEstablishmentName || 'estabelecimento'}`
-                          }
-                          loading="lazy"
-                          style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }}
-                        />
-                      ) : (
-                        <span
-                          className="muted"
-                          style={{
-                            position: 'absolute',
-                            inset: 0,
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            fontSize: 12,
-                          }}
-                        >
-                          Imagem indisponível
-                        </span>
-                      )}
-                    </div>
-                    {image?.titulo && (
-                      <figcaption style={{ fontSize: 12, marginTop: 4 }}>{image.titulo}</figcaption>
-                    )}
-                  </figure>
-                );
-              })}
+            <div className="gallery-viewer" style={{ display: 'grid', gap: 12 }}>
+              <div
+                style={{
+                  position: 'relative',
+                  width: '100%',
+                  paddingBottom: '60%',
+                  borderRadius: 12,
+                  overflow: 'hidden',
+                  background: '#f6f6f6',
+                }}
+              >
+                <button
+                  type="button"
+                  className="btn btn--ghost btn--sm"
+                  onClick={handleGalleryPrev}
+                  disabled={galleryImages.length < 2}
+                  style={{
+                    position: 'absolute',
+                    top: '50%',
+                    left: 8,
+                    transform: 'translateY(-50%)',
+                    zIndex: 2,
+                  }}
+                >
+                  ‹
+                </button>
+                <button
+                  type="button"
+                  className="btn btn--ghost btn--sm"
+                  onClick={handleGalleryNext}
+                  disabled={galleryImages.length < 2}
+                  style={{
+                    position: 'absolute',
+                    top: '50%',
+                    right: 8,
+                    transform: 'translateY(-50%)',
+                    zIndex: 2,
+                  }}
+                >
+                  ›
+                </button>
+                {(() => {
+                  const currentImage = galleryImages[galleryViewIndex] || galleryImages[0];
+                  const src = resolveAssetUrl(currentImage?.url || '');
+                  if (!src) {
+                    return (
+                      <span
+                        className="muted"
+                        style={{
+                          position: 'absolute',
+                          inset: 0,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                        }}
+                      >
+                        Imagem indisponível
+                      </span>
+                    );
+                  }
+                  return (
+                    <img
+                      src={src}
+                      alt={currentImage?.titulo || `Imagem de ${selectedEstablishmentName || 'estabelecimento'}`}
+                      style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }}
+                    />
+                  );
+                })()}
+              </div>
+              <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                <div>
+                  <strong>{galleryImages[galleryViewIndex]?.titulo || 'Imagem'}</strong>
+                  {galleryImages.length > 1 && (
+                    <span className="muted" style={{ marginLeft: 8, fontSize: 12 }}>
+                      {galleryViewIndex + 1} de {galleryImages.length}
+                    </span>
+                  )}
+                </div>
+              </div>
+              {galleryImages.length > 1 && (
+                <div
+                  className="gallery-thumbs"
+                  style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 4 }}
+                >
+                  {galleryImages.map((image, index) => {
+                    const key = image?.id || `${image?.url || 'thumb'}-${index}`;
+                    const src = resolveAssetUrl(image?.url || '');
+                    const isActive = index === galleryViewIndex;
+                    return (
+                      <button
+                        key={key}
+                        type="button"
+                        onClick={() => setGalleryViewIndex(index)}
+                        className="gallery-thumb"
+                        style={{
+                          border: isActive ? '2px solid var(--brand, #6c2bd9)' : '1px solid #e0e0e0',
+                          borderRadius: 8,
+                          padding: 0,
+                          width: 80,
+                          height: 60,
+                          overflow: 'hidden',
+                          background: '#f6f6f6',
+                          flex: '0 0 auto',
+                        }}
+                      >
+                        {src ? (
+                          <img
+                            src={src}
+                            alt={image?.titulo || `Miniatura ${index + 1}`}
+                            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                          />
+                        ) : (
+                          <span className="muted" style={{ fontSize: 10 }}>
+                            Indisponível
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           ) : (
             <p className="muted">Nenhuma imagem cadastrada ainda.</p>
