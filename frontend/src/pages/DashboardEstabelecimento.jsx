@@ -993,6 +993,20 @@ function SlotPreview({ slot }) {
   )
 }
 
+const AGENDA_STATUS_THEME = Object.freeze({
+  confirmado: { label: 'Confirmado', bg: '#ecfdf3', border: '#bbf7d0', dot: '#16a34a', text: '#0a3b28', badge: 'rgba(22, 163, 74, 0.16)' },
+  concluido: { label: 'Concluido', bg: '#eff6ff', border: '#bfdbfe', dot: '#1d4ed8', text: '#102a59', badge: 'rgba(29, 78, 216, 0.14)' },
+  cancelado: { label: 'Cancelado', bg: '#fef2f2', border: '#fecaca', dot: '#dc2626', text: '#7f1d1d', badge: 'rgba(220, 38, 38, 0.12)' },
+  pendente: { label: 'Pendente', bg: '#fff7ed', border: '#fed7aa', dot: '#f97316', text: '#7c2d12', badge: 'rgba(249, 115, 22, 0.12)' },
+  default: { label: 'Agendamento', bg: '#e0f2fe', border: '#bae6fd', dot: '#0284c7', text: '#0c4a6e', badge: 'rgba(2, 132, 199, 0.12)' },
+})
+
+const getAgendaTheme = (status) => AGENDA_STATUS_THEME[status] || AGENDA_STATUS_THEME.default
+const formatHourRange = (start, end) => {
+  if (!start || !end) return ''
+  return `${DateHelpers.formatTime(start)} - ${DateHelpers.formatTime(end)}`
+}
+
 
 function ProfessionalAgendaView({ items }) {
   const resources = useMemo(() => {
@@ -1004,6 +1018,7 @@ function ProfessionalAgendaView({ items }) {
         item?.profissional ||
         item?.professional ||
         item?.profissional_nome ||
+        item?.professional_name ||
         'sem-id'
       const name =
         item?.profissional_nome ||
@@ -1022,8 +1037,11 @@ function ProfessionalAgendaView({ items }) {
     return (items || [])
       .map((item) => {
         const start = new Date(item?.inicio || item?.start || 0)
-        const end = new Date(item?.fim || item?.fim_prevista || item?.end || start)
-        if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime())) return null
+        let end = new Date(item?.fim || item?.fim_prevista || item?.end || start)
+        if (!Number.isFinite(start.getTime())) return null
+        if (!Number.isFinite(end.getTime()) || end <= start) {
+          end = new Date(start.getTime() + 30 * 60000)
+        }
         const resourceId =
           item?.profissional_id ||
           item?.professional_id ||
@@ -1034,13 +1052,9 @@ function ProfessionalAgendaView({ items }) {
           'sem-id'
         const service = item?.servico_nome || item?.service_name || 'Servico'
         const client = item?.cliente_nome || item?.client_name || ''
-        const title = client ? `${client} · ${service}` : service
-        const color =
-          String(item?.status || '').toLowerCase() === 'cancelado'
-            ? '#fecaca'
-            : String(item?.status || '').toLowerCase() === 'concluido'
-            ? '#d9f99d'
-            : '#bfdbfe'
+        const title = client ? `${client} - ${service}` : service
+        const status = String(item?.status || '').toLowerCase()
+        const theme = getAgendaTheme(status)
         return {
           id: item?.id || `${resourceId}-${start.getTime()}`,
           title,
@@ -1048,47 +1062,61 @@ function ProfessionalAgendaView({ items }) {
           end,
           resourceId,
           allDay: false,
-          _color: color,
+          status,
+          service,
+          client,
+          statusLabel: theme.label,
+          _theme: theme,
         }
       })
       .filter(Boolean)
   }, [items])
 
+  const initialDate = useMemo(
+    () => (events.length && events[0]?.start instanceof Date ? events[0].start : new Date()),
+    [events]
+  )
+  const [currentDate, setCurrentDate] = useState(initialDate)
+  useEffect(() => {
+    setCurrentDate(initialDate)
+  }, [initialDate])
+
+  const currentDateIso = useMemo(
+    () => DateHelpers.toISODate(currentDate instanceof Date ? currentDate : new Date()),
+    [currentDate]
+  )
+
+  const eventsForCurrentDate = useMemo(
+    () => events.filter((ev) => DateHelpers.sameYMD(DateHelpers.toISODate(ev.start), currentDateIso)),
+    [events, currentDateIso]
+  )
+
   const timeBounds = useMemo(() => {
-    if (!events.length) {
-      const min = new Date()
-      min.setHours(7, 0, 0, 0)
-      const max = new Date()
-      max.setHours(20, 0, 0, 0)
+    if (!eventsForCurrentDate.length) {
+      const min = new Date(); min.setHours(7, 0, 0, 0)
+      const max = new Date(); max.setHours(20, 0, 0, 0)
       return { min, max, scrollToTime: min }
     }
-    const minHour = Math.max(
-      0,
-      Math.min(...events.map((ev) => ev.start.getHours())) - 1
-    )
-    const maxHour = Math.min(
-      23,
-      Math.max(...events.map((ev) => ev.end.getHours())) + 2
-    )
-    const base = events[0].start instanceof Date ? events[0].start : new Date()
+    const minHour = Math.max(0, Math.min(...eventsForCurrentDate.map((ev) => ev.start.getHours())) - 1)
+    const maxHour = Math.min(23, Math.max(...eventsForCurrentDate.map((ev) => ev.end.getHours())) + 2)
+    const base = currentDate instanceof Date ? currentDate : new Date()
     const min = new Date(base); min.setHours(minHour, 0, 0, 0)
     const max = new Date(base); max.setHours(maxHour, 0, 0, 0)
     const scrollToTime = new Date(base); scrollToTime.setHours(minHour + 1, 0, 0, 0)
     return { min, max, scrollToTime }
-  }, [events])
-  const defaultDate = events.length && events[0]?.start instanceof Date ? events[0].start : new Date()
+  }, [eventsForCurrentDate, currentDate])
 
   const eventStyleGetter = useCallback((event) => {
-    const backgroundColor = event?._color || '#bfdbfe'
+    const theme = event?._theme || getAgendaTheme(event?.status)
     return {
+      className: 'pro-agenda__event',
       style: {
-        backgroundColor,
-        border: '1px solid rgba(15,23,42,0.08)',
-        color: '#0f172a',
-        borderRadius: 10,
-        padding: '6px 8px',
-        fontSize: 11,
-        boxShadow: '0 6px 16px rgba(15,23,42,0.10)',
+        backgroundColor: theme.bg,
+        border: `1px solid ${theme.border}`,
+        color: theme.text,
+        borderRadius: 12,
+        padding: 0,
+        boxShadow: '0 10px 24px rgba(15,23,42,0.16)',
       },
     }
   }, [])
@@ -1119,12 +1147,95 @@ function ProfessionalAgendaView({ items }) {
     []
   )
 
+  const legend = useMemo(() => {
+    const counts = new Map()
+    eventsForCurrentDate.forEach((ev) => {
+      const theme = ev?._theme || getAgendaTheme(ev?.status)
+      const key = ev?.status || 'agendamento'
+      if (!counts.has(key)) {
+        counts.set(key, { key, total: 0, label: theme.label, dot: theme.dot, border: theme.border, badge: theme.badge })
+      }
+      counts.get(key).total += 1
+    })
+    return Array.from(counts.values())
+  }, [eventsForCurrentDate])
+
+  const AgendaEvent = useCallback(({ event }) => {
+    const theme = event?._theme || getAgendaTheme(event?.status)
+    const badgeStyle = { backgroundColor: theme.badge, color: theme.text, borderColor: theme.border }
+    return (
+      <div className="pro-agenda__event-card">
+        <div className="pro-agenda__event-header">
+          <div className="pro-agenda__event-title">
+            <span className="pro-agenda__status-dot" style={{ backgroundColor: theme.dot }} />
+            <strong>{event?.service || event?.title || 'Servico'}</strong>
+          </div>
+          <span className="pro-agenda__event-status" style={badgeStyle}>
+            {event?.statusLabel || theme.label}
+          </span>
+        </div>
+        <div className="pro-agenda__event-meta">
+          <span className="pro-agenda__time">{formatHourRange(event?.start, event?.end)}</span>
+          {event?.client ? <span className="pro-agenda__client">{event.client}</span> : null}
+        </div>
+      </div>
+    )
+  }, [])
+
+  const handlePrevDay = () => setCurrentDate((d) => new Date(d.getFullYear(), d.getMonth(), d.getDate() - 1))
+  const handleNextDay = () => setCurrentDate((d) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1))
+  const handleToday = () => setCurrentDate(new Date())
+  const currentDateLabel = useMemo(
+    () =>
+      (currentDate instanceof Date ? currentDate : new Date()).toLocaleDateString('pt-BR', {
+        weekday: 'long',
+        day: '2-digit',
+        month: 'short',
+      }),
+    [currentDate]
+  )
+  const professionalCount = resources.length
+  const dayTotal = eventsForCurrentDate.length
+
   return (
     <div className="pro-agenda">
       <div className="pro-agenda__header">
-        <h3>Agenda de profissionais</h3>
-        <span className="muted">Visualize hor?rios ocupados e livres por profissional</span>
+        <div className="pro-agenda__title">
+          <h3>Agenda de profissionais</h3>
+          <span className="muted">Visualize horários ocupados e livres por profissiona </span>
+          <div className="pro-agenda__meta">
+            <span className="pro-agenda__chip">
+              <span className="muted">Profissionais</span>
+              <strong>{professionalCount}</strong>
+            </span>
+            <span className="pro-agenda__chip">
+              <span className="muted">Agendamentos</span>
+              <strong>{dayTotal}</strong>
+            </span>
+          </div>
+        </div>
+        <div className="pro-agenda__actions">
+          <button className="btn btn--sm" type="button" aria-label="Dia anterior" onClick={handlePrevDay}>{'<'}</button>
+          <button className="btn btn--sm" type="button" onClick={handleToday}>Hoje</button>
+          <button className="btn btn--sm" type="button" aria-label="Proximo dia" onClick={handleNextDay}>{'>'}</button>
+          <span className="pro-agenda__current-date">{currentDateLabel}</span>
+        </div>
       </div>
+
+      {legend.length ? (
+        <div className="pro-agenda__legend">
+          {legend.map((item) => (
+            <span key={item.key} className="pro-agenda__legend-item" style={{ borderColor: item.border }}>
+              <span className="pro-agenda__legend-dot" style={{ backgroundColor: item.dot }} />
+              <span>{item.label}</span>
+              <span className="pro-agenda__legend-count">{item.total}x</span>
+            </span>
+          ))}
+        </div>
+      ) : (
+        <div className="muted" style={{ padding: '6px 0 10px' }}>Sem agendamentos para o dia selecionado.</div>
+      )}
+
       <BigCalendar
         localizer={localizer}
         events={events}
@@ -1137,16 +1248,17 @@ function ProfessionalAgendaView({ items }) {
         views={[Views.DAY]}
         step={15}
         timeslots={4}
-        style={{ height: 560 }}
+        style={{ height: 600 }}
         eventPropGetter={eventStyleGetter}
         selectable={false}
         toolbar={false}
         formats={formats}
-        components={{ header: () => null, resourceHeader: ResourceHeader }}
+        components={{ header: () => null, resourceHeader: ResourceHeader, event: AgendaEvent }}
         min={timeBounds.min}
         max={timeBounds.max}
         scrollToTime={timeBounds.scrollToTime}
-        defaultDate={defaultDate}
+        date={currentDate}
+        onNavigate={(date) => setCurrentDate(date instanceof Date ? date : new Date(date))}
       />
     </div>
   )
