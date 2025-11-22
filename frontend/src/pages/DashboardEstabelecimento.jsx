@@ -661,16 +661,17 @@ export default function DashboardEstabelecimento() {
               type="button"
               className="btn btn--outline"
               style={{ borderColor: "var(--brand)", color: "var(--brand)" }}
-              onClick={() => setShowCalendar((open) => !open)}
+              onClick={() => setShowProAgenda((open) => !open)}
             >
-              {showCalendar ? "Ocultar calendario" : "Ver calendario"}
+              {showProAgenda ? "Ocultar agenda de profissionais" : "Agenda de profissionais"}
             </button>
             <button
               type="button"
               className="btn btn--outline"
-              onClick={() => setShowProAgenda((open) => !open)}
+              style={{ borderColor: "var(--brand)", color: "var(--brand)" }}
+              onClick={() => setShowCalendar((open) => !open)}
             >
-              {showProAgenda ? "Ocultar agenda de profissionais" : "Agenda de profissionais"}
+              {showCalendar ? "Ocultar calendário" : "Ver calendário"}
             </button>
             <select
               className="input"
@@ -1007,6 +1008,17 @@ const formatHourRange = (start, end) => {
   return `${DateHelpers.formatTime(start)} - ${DateHelpers.formatTime(end)}`
 }
 
+const RESOURCE_COLORS = [
+  { bg: '#ecfdf3', border: '#bbf7d0', dot: '#15803d', text: '#064e3b' },
+  { bg: '#eff6ff', border: '#bfdbfe', dot: '#1d4ed8', text: '#0f172a' },
+  { bg: '#fef3c7', border: '#fde68a', dot: '#d97706', text: '#78350f' },
+  { bg: '#f3e8ff', border: '#e9d5ff', dot: '#9333ea', text: '#581c87' },
+  { bg: '#e0f2fe', border: '#bae6fd', dot: '#0284c7', text: '#0c4a6e' },
+  { bg: '#fee2e2', border: '#fecaca', dot: '#dc2626', text: '#7f1d1d' },
+  { bg: '#f5f3ff', border: '#ddd6fe', dot: '#7c3aed', text: '#312e81' },
+  { bg: '#fef9c3', border: '#fde68a', dot: '#ca8a04', text: '#854d0e' },
+]
+
 
 function ProfessionalAgendaView({ items }) {
   const resources = useMemo(() => {
@@ -1030,8 +1042,21 @@ function ProfessionalAgendaView({ items }) {
       if (!map.has(id)) map.set(id, { id, title: name, avatar })
     })
     if (!map.size) map.set('sem-id', { id: 'sem-id', title: 'Profissional', avatar: null })
-    return Array.from(map.values())
+    return Array.from(map.values()).sort((a, b) => String(a.title || '').localeCompare(String(b.title || '')))
   }, [items])
+
+  const resourceThemes = useMemo(() => {
+    const themes = new Map()
+    resources.forEach((res, index) => {
+      const palette = RESOURCE_COLORS[index % RESOURCE_COLORS.length]
+      themes.set(res.id, palette)
+    })
+    return themes
+  }, [resources])
+
+  const [resourceFilter, setResourceFilter] = useState('all')
+  const [filterOpen, setFilterOpen] = useState(false)
+  const filterRef = React.useRef(null)
 
   const events = useMemo(() => {
     return (items || [])
@@ -1054,7 +1079,8 @@ function ProfessionalAgendaView({ items }) {
         const client = item?.cliente_nome || item?.client_name || ''
         const title = client ? `${client} - ${service}` : service
         const status = String(item?.status || '').toLowerCase()
-        const theme = getAgendaTheme(status)
+        const baseTheme = resourceThemes.get(resourceId) || RESOURCE_COLORS[0]
+        const theme = status === 'cancelado' ? getAgendaTheme(status) : baseTheme
         return {
           id: item?.id || `${resourceId}-${start.getTime()}`,
           title,
@@ -1070,11 +1096,30 @@ function ProfessionalAgendaView({ items }) {
         }
       })
       .filter(Boolean)
+      .sort((a, b) => {
+        if (a.resourceId !== b.resourceId) return String(a.resourceId).localeCompare(String(b.resourceId))
+        return new Date(a.start) - new Date(b.start)
+      })
   }, [items])
 
+  const filteredResources = useMemo(
+    () => (resourceFilter === 'all' ? resources : resources.filter((r) => r.id === resourceFilter)),
+    [resources, resourceFilter]
+  )
+
+  const selectedResource = useMemo(
+    () => (resourceFilter === 'all' ? null : resources.find((r) => r.id === resourceFilter)),
+    [resourceFilter, resources]
+  )
+
+  const filteredEvents = useMemo(
+    () => (resourceFilter === 'all' ? events : events.filter((ev) => ev.resourceId === resourceFilter)),
+    [events, resourceFilter]
+  )
+
   const initialDate = useMemo(
-    () => (events.length && events[0]?.start instanceof Date ? events[0].start : new Date()),
-    [events]
+    () => (filteredEvents.length && filteredEvents[0]?.start instanceof Date ? filteredEvents[0].start : new Date()),
+    [filteredEvents]
   )
   const [currentDate, setCurrentDate] = useState(initialDate)
   useEffect(() => {
@@ -1087,8 +1132,8 @@ function ProfessionalAgendaView({ items }) {
   )
 
   const eventsForCurrentDate = useMemo(
-    () => events.filter((ev) => DateHelpers.sameYMD(DateHelpers.toISODate(ev.start), currentDateIso)),
-    [events, currentDateIso]
+    () => filteredEvents.filter((ev) => DateHelpers.sameYMD(DateHelpers.toISODate(ev.start), currentDateIso)),
+    [filteredEvents, currentDateIso]
   )
 
   const timeBounds = useMemo(() => {
@@ -1114,9 +1159,10 @@ function ProfessionalAgendaView({ items }) {
         backgroundColor: theme.bg,
         border: `1px solid ${theme.border}`,
         color: theme.text,
-        borderRadius: 12,
-        padding: 0,
-        boxShadow: '0 10px 24px rgba(15,23,42,0.16)',
+        borderRadius: 10,
+        padding: '4px 6px',
+        boxShadow: '0 8px 14px rgba(15,23,42,0.10)',
+        borderLeft: `4px solid ${theme.dot || theme.border}`,
       },
     }
   }, [])
@@ -1132,37 +1178,28 @@ function ProfessionalAgendaView({ items }) {
   )
 
   const ResourceHeader = useCallback(
-    ({ resource }) => (
-      <div className="pro-agenda__resource-header">
-        {resource?.avatar ? (
-          <img src={resource.avatar} alt={resource.title} className="pro-agenda__avatar" />
-        ) : (
-          <div className="pro-agenda__avatar pro-agenda__avatar--fallback">
-            {(resource?.title || 'PR').slice(0, 2).toUpperCase()}
-          </div>
-        )}
-        <span>{resource?.title || ''}</span>
-      </div>
-    ),
-    []
+    ({ resource }) => {
+      const theme = resourceThemes.get(resource?.id) || RESOURCE_COLORS[0]
+      return (
+        <div className="pro-agenda__resource-header">
+          <span className="pro-agenda__resource-dot" style={{ backgroundColor: theme.dot || theme.border }} />
+          {resource?.avatar ? (
+            <img src={resource.avatar} alt={resource.title} className="pro-agenda__avatar" />
+          ) : (
+            <div className="pro-agenda__avatar pro-agenda__avatar--fallback">
+              {(resource?.title || 'PR').slice(0, 2).toUpperCase()}
+            </div>
+          )}
+          <span>{resource?.title || ''}</span>
+        </div>
+      )
+    },
+    [resourceThemes]
   )
-
-  const legend = useMemo(() => {
-    const counts = new Map()
-    eventsForCurrentDate.forEach((ev) => {
-      const theme = ev?._theme || getAgendaTheme(ev?.status)
-      const key = ev?.status || 'agendamento'
-      if (!counts.has(key)) {
-        counts.set(key, { key, total: 0, label: theme.label, dot: theme.dot, border: theme.border, badge: theme.badge })
-      }
-      counts.get(key).total += 1
-    })
-    return Array.from(counts.values())
-  }, [eventsForCurrentDate])
 
   const AgendaEvent = useCallback(({ event }) => {
     const theme = event?._theme || getAgendaTheme(event?.status)
-    const badgeStyle = { backgroundColor: theme.badge, color: theme.text, borderColor: theme.border }
+    const badgeStyle = { backgroundColor: theme.badge || theme.bg, color: theme.text, borderColor: theme.border }
     return (
       <div className="pro-agenda__event-card">
         <div className="pro-agenda__event-header">
@@ -1196,50 +1233,88 @@ function ProfessionalAgendaView({ items }) {
   )
   const professionalCount = resources.length
   const dayTotal = eventsForCurrentDate.length
+  const handleSelectResource = (id) => {
+    setResourceFilter(id)
+    setFilterOpen(false)
+  }
+
+  useEffect(() => {
+    if (!filterOpen) return
+    const handleClickOutside = (event) => {
+      if (filterRef.current && !filterRef.current.contains(event.target)) {
+        setFilterOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [filterOpen])
 
   return (
     <div className="pro-agenda">
-      <div className="pro-agenda__header">
-        <div className="pro-agenda__title">
-          <h3>Agenda de profissionais</h3>
-          <span className="muted">Visualize horários ocupados e livres por profissiona </span>
-          <div className="pro-agenda__meta">
-            <span className="pro-agenda__chip">
-              <span className="muted">Profissionais</span>
-              <strong>{professionalCount}</strong>
-            </span>
-            <span className="pro-agenda__chip">
-              <span className="muted">Agendamentos</span>
-              <strong>{dayTotal}</strong>
-            </span>
-          </div>
-        </div>
-        <div className="pro-agenda__actions">
-          <button className="btn btn--sm" type="button" aria-label="Dia anterior" onClick={handlePrevDay}>{'<'}</button>
+      <div className="pro-agenda__toolbar">
+        <div className="pro-agenda__toolbar-left">
           <button className="btn btn--sm" type="button" onClick={handleToday}>Hoje</button>
-          <button className="btn btn--sm" type="button" aria-label="Proximo dia" onClick={handleNextDay}>{'>'}</button>
-          <span className="pro-agenda__current-date">{currentDateLabel}</span>
+          <div className="pro-agenda__toolbar-arrows">
+            <button className="btn btn--sm" type="button" aria-label="Dia anterior" onClick={handlePrevDay}>{'<'}</button>
+            <button className="btn btn--sm" type="button" aria-label="Proximo dia" onClick={handleNextDay}>{'>'}</button>
+          </div>
+          <span className="pro-agenda__current-date pro-agenda__current-date--blue">{currentDateLabel}</span>
+        </div>
+        <div className="pro-agenda__toolbar-right">
+          <div className="pro-agenda__filter" ref={filterRef}>
+            <button
+              type="button"
+              className="pro-agenda__filter-btn"
+              onClick={() => setFilterOpen((open) => !open)}
+              title="Filtrar por profissional"
+            >
+              {selectedResource?.avatar ? (
+                <img src={selectedResource.avatar} alt={selectedResource.title} className="pro-agenda__filter-avatar" />
+              ) : (
+                <div className="pro-agenda__filter-avatar pro-agenda__filter-avatar--fallback">
+                  {(selectedResource?.title || 'Todos').slice(0, 2).toUpperCase()}
+                </div>
+              )}
+              <span>{selectedResource?.title || 'Todos profissionais'}</span>
+              <span className="pro-agenda__caret">▾</span>
+            </button>
+            {filterOpen && (
+              <div className="pro-agenda__filter-menu">
+                <button
+                  type="button"
+                  className={`pro-agenda__filter-option ${resourceFilter === 'all' ? 'is-active' : ''}`}
+                  onClick={() => handleSelectResource('all')}
+                >
+                  <div className="pro-agenda__filter-avatar pro-agenda__filter-avatar--fallback">TO</div>
+                  <span>Todos profissionais</span>
+                </button>
+                {resources.map((res) => (
+                  <button
+                    key={res.id}
+                    type="button"
+                    className={`pro-agenda__filter-option ${resourceFilter === res.id ? 'is-active' : ''}`}
+                    onClick={() => handleSelectResource(res.id)}
+                  >
+                    {res.avatar ? (
+                      <img src={res.avatar} alt={res.title} className="pro-agenda__filter-avatar" />
+                    ) : (
+                      <div className="pro-agenda__filter-avatar pro-agenda__filter-avatar--fallback">
+                        {(res.title || 'PR').slice(0, 2).toUpperCase()}
+                      </div>
+                    )}
+                    <span>{res.title}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
-      {legend.length ? (
-        <div className="pro-agenda__legend">
-          {legend.map((item) => (
-            <span key={item.key} className="pro-agenda__legend-item" style={{ borderColor: item.border }}>
-              <span className="pro-agenda__legend-dot" style={{ backgroundColor: item.dot }} />
-              <span>{item.label}</span>
-              <span className="pro-agenda__legend-count">{item.total}x</span>
-            </span>
-          ))}
-        </div>
-      ) : (
-        <div className="muted" style={{ padding: '6px 0 10px' }}>Sem agendamentos para o dia selecionado.</div>
-      )}
-
       <BigCalendar
         localizer={localizer}
-        events={events}
-        resources={resources}
+        events={filteredEvents}
+        resources={filteredResources}
         resourceIdAccessor="id"
         resourceTitleAccessor="title"
         startAccessor="start"
@@ -1247,8 +1322,8 @@ function ProfessionalAgendaView({ items }) {
         defaultView={Views.DAY}
         views={[Views.DAY]}
         step={15}
-        timeslots={4}
-        style={{ height: 600 }}
+        timeslots={2}
+        style={{ height: 720 }}
         eventPropGetter={eventStyleGetter}
         selectable={false}
         toolbar={false}
