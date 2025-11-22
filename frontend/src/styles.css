@@ -331,8 +331,10 @@ body{
 .btn--sm{ padding:6px 10px; font-size:12px; }
 .btn--primary{ background:var(--brand); border-color:var(--brand); color:#fff; }
 .btn--outline{ background:var(--surface); }
+.btn--outline-brand{ border-color:var(--brand); color:var(--brand); }
 .btn--brand-outline{ color: var(--primary); background: var(--brand-100); border-color: var(--brand-200); }
 .btn--brand-outline:hover{ box-shadow: 0 0 0 1px var(--brand-200) inset; filter: saturate(1.02); }
+.btn--active{ background:var(--primary-50); border-color:var(--primary-300); color:var(--primary-700); box-shadow:0 0 0 2px var(--primary-50); }
 .btn--chip{ border-radius:999px; padding:8px 12px; font-weight:600; background:var(--surface); }
 .btn--chip:hover{ box-shadow: 0 0 0 1px var(--border) inset; }
 .btn--lg{ height:48px; padding:0 16px; font-size:14px; }
@@ -1468,28 +1470,27 @@ button.danger:disabled,
 .pro-agenda__avatar{width:32px;height:32px;border-radius:50%;object-fit:cover;border:1px solid var(--border);}
 .pro-agenda__avatar--fallback{background:var(--surface-soft);color:var(--text);display:flex;align-items:center;justify-content:center;font-weight:700;}
 .pro-agenda__event{padding:0;border:none;background:transparent;}
-.pro-agenda__event-card{display:flex;flex-direction:column;gap:6px;padding:8px 10px;border-radius:10px;background:transparent;}
-.pro-agenda__event-header{display:flex;align-items:center;justify-content:space-between;gap:8px;}
-.pro-agenda__event-title{display:flex;align-items:center;gap:8px;font-size:12px;font-weight:700;line-height:1.3;color:var(--text);}
-.pro-agenda__event-status{font-size:11px;font-weight:700;padding:4px 8px;border-radius:999px;border:1px solid transparent;background:var(--surface-soft);}
-.pro-agenda__event-meta{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:11px;color:var(--muted);}
+.pro-agenda__event-card{display:flex;flex-direction:column;gap:4px;padding:6px 8px;border-radius:8px;background:transparent;}
+.pro-agenda__event-header{display:flex;align-items:center;justify-content:space-between;gap:6px;}
+.pro-agenda__event-title{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:700;line-height:1.25;color:var(--text);}
+.pro-agenda__event-status{font-size:10px;font-weight:700;padding:3px 8px;border-radius:999px;border:1px solid transparent;background:var(--surface-soft);}
+.pro-agenda__event-meta{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted);}
 .pro-agenda__time{font-weight:700;}
-.pro-agenda__client{color:var(--text);font-weight:600;}
 .pro-agenda__status-dot{width:9px;height:9px;border-radius:50%;}
 .pro-agenda .rbc-time-view{border:1px solid var(--border);border-radius:12px;}
 .pro-agenda .rbc-time-view .rbc-time-content{border-top:1px solid var(--border);background:linear-gradient(90deg,rgba(15,23,42,0.02) 0,rgba(15,23,42,0.02) 75%,transparent 75%,transparent 100%);}
-.pro-agenda .rbc-time-header{border-bottom:1px solid var(--border);padding:6px 6px;}
+.pro-agenda .rbc-time-header{border-bottom:1px solid var(--border);padding:6px 6px;background:linear-gradient(90deg,rgba(15,23,42,0.02) 0,rgba(15,23,42,0.02) 70%,transparent 70%,transparent 100%);}
 .pro-agenda .rbc-time-header .rbc-row:first-child{display:none;} /* oculta linha de cabeçalho de data/all-day */
 .pro-agenda .rbc-time-header-gutter{display:none;}
 .pro-agenda .rbc-allday-cell,.pro-agenda .rbc-allday-events{display:none;}
-.pro-agenda .rbc-time-gutter{background:var(--surface-soft);color:var(--muted);font-size:12px;width:60px;min-width:60px;}
-.pro-agenda .rbc-time-content > .rbc-time-gutter{flex:0 0 60px;}
-.pro-agenda .rbc-time-gutter .rbc-timeslot-group{border-color:var(--border);padding-left:6px;}
-.pro-agenda .rbc-time-gutter .rbc-time-slot{border:0;padding:0 4px;}
-.pro-agenda .rbc-time-gutter .rbc-label{display:block;transform:translateY(-4px);}
+.pro-agenda .rbc-time-gutter,
+.pro-agenda .rbc-time-header-gutter{display:none!important;width:0;min-width:0;padding:0;}
+.pro-agenda .rbc-time-content > .rbc-time-gutter{flex:0 0 0;}
+.pro-agenda .rbc-time-gutter .rbc-timeslot-group{padding-left:0;}
+.pro-agenda .rbc-time-gutter .rbc-label{display:none;}
 .pro-agenda .rbc-time-content{border-top:1px solid var(--border);}
-.pro-agenda .rbc-day-slot{padding-left:0;background:repeating-linear-gradient( -45deg, transparent, transparent 16px, rgba(15,23,42,0.02) 16px, rgba(15,23,42,0.02) 32px );}
-.pro-agenda .rbc-day-slot .rbc-timeslot-group{border-color:var(--border);}
+.pro-agenda .rbc-day-slot{padding-left:0;}
+.pro-agenda .rbc-day-slot .rbc-timeslot-group{border-color:var(--border);background:linear-gradient(180deg,rgba(15,23,42,0.018) 0,rgba(15,23,42,0.018) 50%,transparent 50%,transparent 100%);}
 .pro-agenda .rbc-day-slot .rbc-events{margin:0;padding-left:0;}
 .pro-agenda .rbc-event{border:none;}
 .pro-agenda .rbc-day-slot .rbc-events{margin:0;padding:6px;}

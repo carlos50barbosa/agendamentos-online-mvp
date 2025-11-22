@@ -581,8 +581,7 @@ export default function DashboardEstabelecimento() {
   useEffect(() => {
     let mounted = true
     setLoading(true)
-    const reqStatus =
-      status === 'todos' ? 'todos' : status === 'concluido' ? 'confirmado' : status
+    const reqStatus = status || 'todos'
     Api.agendamentosEstabelecimento(reqStatus)
       .then((data) => {
         if (mounted) setItens(Array.isArray(data) ? data : [])
@@ -617,8 +616,35 @@ export default function DashboardEstabelecimento() {
   }, [itens])
 
   const filtered = useMemo(() => {
-    if (status !== 'concluido') return itens
-    return itens.filter((i) => new Date(i.fim || i.inicio).getTime() < Date.now())
+    const now = Date.now()
+    const normalized = (i) =>
+      String(i?.status || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+
+    if (status === 'confirmado') {
+      return itens.filter((i) => {
+        if (normalized(i) !== 'confirmado') return false
+        const endTime = new Date(i.fim || i.inicio).getTime()
+        return Number.isFinite(endTime) ? endTime >= now : true
+      })
+    }
+    if (status === 'concluido') {
+      return itens.filter((i) => {
+        const st = normalized(i)
+        if (st === 'concluido' || st === 'concluido.') return true
+        if (st === 'confirmado') {
+          const endTime = new Date(i.fim || i.inicio).getTime()
+          return Number.isFinite(endTime) && endTime < now
+        }
+        return st === 'done'
+      })
+    }
+    if (status === 'cancelado') {
+      return itens.filter((i) => normalized(i) === 'cancelado')
+    }
+    return itens
   }, [itens, status])
 
   const calendarData = useMemo(() => {
@@ -659,16 +685,14 @@ export default function DashboardEstabelecimento() {
           >
             <button
               type="button"
-              className="btn btn--outline"
-              style={{ borderColor: "var(--brand)", color: "var(--brand)" }}
+              className={`btn btn--outline btn--outline-brand ${showProAgenda ? 'btn--active' : ''}`}
               onClick={() => setShowProAgenda((open) => !open)}
             >
               {showProAgenda ? "Ocultar agenda de profissionais" : "Agenda de profissionais"}
             </button>
             <button
               type="button"
-              className="btn btn--outline"
-              style={{ borderColor: "var(--brand)", color: "var(--brand)" }}
+              className={`btn btn--outline btn--outline-brand ${showCalendar ? 'btn--active' : ''}`}
               onClick={() => setShowCalendar((open) => !open)}
             >
               {showCalendar ? "Ocultar calendário" : "Ver calendário"}
@@ -680,7 +704,7 @@ export default function DashboardEstabelecimento() {
               title="Status"
             >
               <option value="confirmado">Confirmados</option>
-              <option value="concluido">Conclu?dos</option>
+              <option value="concluido">Concluídos</option>
               <option value="cancelado">Cancelados</option>
               <option value="todos">Todos</option>
             </select>
@@ -703,32 +727,31 @@ export default function DashboardEstabelecimento() {
             {calendarData.map((day) => (
               <div className="calendar-day" key={day.key}>
                 <header className="calendar-day__header">
-                  <span className="calendar-day__weekday">{day.weekday}</span>
-                  <strong>{day.label}</strong>
+                  <span className="calendar-day__weekday" style={{ fontSize: 11 }}>{day.weekday}</span>
+                  <strong style={{ fontSize: 12 }}>{day.label}</strong>
                 </header>
                 <ul className="calendar-day__list">
                   {day.items.map((item) => {
                     const past =
                       new Date(item.fim || item.inicio).getTime() < Date.now()
+                    const itemStatus = String(item.status || '').toLowerCase()
                     const effective =
-                      String(item.status || '').toLowerCase() === 'confirmado' && past
-                        ? 'concluido'
-                        : item.status
+                      itemStatus === 'confirmado' && past ? 'concluido' : item.status
                     const { cls, label } = statusMeta(effective)
                     return (
                       <li className="calendar-entry" key={item.id}>
-                        <span className="calendar-entry__time">
+                        <span className="calendar-entry__time" style={{ fontSize: 11 }}>
                           {timeFormatter.format(new Date(item.inicio))}
                         </span>
                         <div className="calendar-entry__info">
-                          <div className="calendar-entry__service">
+                          <div className="calendar-entry__service" style={{ fontSize: 12 }}>
                             {item.servico_nome}
                           </div>
-                          <div className="calendar-entry__client">
+                          <div className="calendar-entry__client" style={{ fontSize: 11 }}>
                             {item.cliente_nome}
                           </div>
                         </div>
-                        <span className={`badge ${cls}`}>{label}</span>
+                        <span className={`badge ${cls}`} style={{ fontSize: 10, padding: '2px 6px' }}>{label}</span>
                       </li>
                     )
                   })}
@@ -1138,16 +1161,20 @@ function ProfessionalAgendaView({ items }) {
 
   const timeBounds = useMemo(() => {
     if (!eventsForCurrentDate.length) {
-      const min = new Date(); min.setHours(7, 0, 0, 0)
+      const min = new Date(); min.setHours(8, 0, 0, 0)
       const max = new Date(); max.setHours(20, 0, 0, 0)
       return { min, max, scrollToTime: min }
     }
-    const minHour = Math.max(0, Math.min(...eventsForCurrentDate.map((ev) => ev.start.getHours())) - 1)
-    const maxHour = Math.min(23, Math.max(...eventsForCurrentDate.map((ev) => ev.end.getHours())) + 2)
+    const startTimes = eventsForCurrentDate.map((ev) => ev.start)
+    const endTimes = eventsForCurrentDate.map((ev) => ev.end)
+    const earliest = new Date(Math.min(...startTimes.map((d) => d.getTime())))
+    const latest = new Date(Math.max(...endTimes.map((d) => d.getTime())))
+    const minHour = Math.max(0, earliest.getHours() - 1)
+    const maxHour = Math.min(23, latest.getHours() + 1)
     const base = currentDate instanceof Date ? currentDate : new Date()
     const min = new Date(base); min.setHours(minHour, 0, 0, 0)
     const max = new Date(base); max.setHours(maxHour, 0, 0, 0)
-    const scrollToTime = new Date(base); scrollToTime.setHours(minHour + 1, 0, 0, 0)
+    const scrollToTime = new Date(base); scrollToTime.setHours(Math.max(0, earliest.getHours() - 0.5), earliest.getMinutes(), 0, 0)
     return { min, max, scrollToTime }
   }, [eventsForCurrentDate, currentDate])
 
@@ -1200,20 +1227,19 @@ function ProfessionalAgendaView({ items }) {
   const AgendaEvent = useCallback(({ event }) => {
     const theme = event?._theme || getAgendaTheme(event?.status)
     const badgeStyle = { backgroundColor: theme.badge || theme.bg, color: theme.text, borderColor: theme.border }
+    const serviceLabel = event?.service || event?.title || 'Servico'
+    const clientLabel = event?.client ? ` — ${event.client}` : ''
     return (
       <div className="pro-agenda__event-card">
         <div className="pro-agenda__event-header">
           <div className="pro-agenda__event-title">
             <span className="pro-agenda__status-dot" style={{ backgroundColor: theme.dot }} />
-            <strong>{event?.service || event?.title || 'Servico'}</strong>
+            <strong>{serviceLabel}{clientLabel}</strong>
           </div>
-          <span className="pro-agenda__event-status" style={badgeStyle}>
-            {event?.statusLabel || theme.label}
-          </span>
+          <span className="pro-agenda__event-status" style={badgeStyle}>{event?.statusLabel || theme.label}</span>
         </div>
         <div className="pro-agenda__event-meta">
           <span className="pro-agenda__time">{formatHourRange(event?.start, event?.end)}</span>
-          {event?.client ? <span className="pro-agenda__client">{event.client}</span> : null}
         </div>
       </div>
     )
