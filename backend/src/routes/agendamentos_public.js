@@ -3,7 +3,7 @@ import { Router } from 'express';
 import { pool } from '../lib/db.js';
 import { getPlanContext, isDelinquentStatus } from '../lib/plans.js';
 import bcrypt from 'bcryptjs';
-import { notifyEmail, notifyWhatsapp, scheduleWhatsApp, sendTemplate } from '../lib/notifications.js';
+import { notifyEmail, notifyWhatsapp, sendTemplate } from '../lib/notifications.js';
 import jwt from 'jsonwebtoken';
 
 const router = Router();

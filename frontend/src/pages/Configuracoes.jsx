@@ -595,7 +595,7 @@ export default function Configuracoes() {
       const plan = localStorage.getItem('plan_current') || 'starter';
       const status = localStorage.getItem('plan_status') || 'trialing';
       const trialEnd = localStorage.getItem('trial_end');
-      const daysLeft = trialEnd ? Math.max(0, Math.ceil((new Date(trialEnd).getTime() - Date.now()) / 86400000)) : null;
+      const daysLeft = trialEnd ? Math.max(0, Math.floor((new Date(trialEnd).getTime() - Date.now()) / 86400000)) : null;
       setPlanInfo((prev) => ({
         ...prev,
         plan,
@@ -990,7 +990,7 @@ export default function Configuracoes() {
     if (planInfo.trialDaysLeft != null) return planInfo.trialDaysLeft;
     if (!planInfo.trialEnd) return 0;
     const diff = new Date(planInfo.trialEnd).getTime() - Date.now();
-    return Math.max(0, Math.ceil(diff / 86400000));
+    return Math.max(0, Math.floor(diff / 86400000));
   }, [planInfo.trialDaysLeft, planInfo.trialEnd]);
 
   const fmtDate = (iso) =>

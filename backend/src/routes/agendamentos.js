@@ -3,7 +3,7 @@ import { Router } from 'express';
 import { pool } from '../lib/db.js';
 import { getPlanContext, isDelinquentStatus } from '../lib/plans.js';
 import { auth as authRequired, isCliente, isEstabelecimento } from '../middleware/auth.js';
-import { notifyEmail, notifyWhatsapp, scheduleWhatsApp, sendTemplate } from '../lib/notifications.js';
+import { notifyEmail, notifyWhatsapp, sendTemplate } from '../lib/notifications.js';
 
 const router = Router();
 
@@ -286,36 +286,7 @@ router.post('/', authRequired, isCliente, async (req, res) => {
       }
     });
 
-    // (c) Lembretes (WhatsApp) - somente se houver tempo habil
-    const now = Date.now();
-    const reminderTime = new Date(inicioDate.getTime() - 8 * 60 * 60 * 1000); // -8h
-
-    const msgCliReminder = `[Lembrete] Faltam 8 horas para o seu ${svc.nome}${profNome ? ' com ' + profNome : ''} em ${estNomeFriendly} (${hora} de ${data}).`;
-
-    fireAndForget(async () => {
-      if (telCli && reminderTime.getTime() > now) {
-        await scheduleWhatsApp({
-          to: telCli,
-          scheduledAt: reminderTime.toISOString(),
-          message: msgCliReminder,
-          bodyParams: (String(process.env.WA_TEMPLATE_PARAM_MODE || 'single').toLowerCase().match(/^triple|3$/)
-            ? [svc.nome, `${hora} de ${data}`, estNomeFriendly]
-            : undefined),
-          templateName: process.env.WA_TEMPLATE_NAME_REMINDER || process.env.WA_TEMPLATE_NAME_CONFIRM || process.env.WA_TEMPLATE_NAME,
-          templateLang: process.env.WA_TEMPLATE_LANG || 'pt_BR',
-          metadata: {
-            role: 'cliente',
-            kind: 'reminder_8h',
-            appointment_id: novo.id,
-            estabelecimento_id,
-            servico_id,
-            inicio: inicioISO,
-            clientPhone: telCli,
-            ownerPhone: telEst || null,
-          },
-        });
-      }
-    });
+    // (c) Lembretes de 8h: agora gerenciados por um worker em background que reprocessa mesmo apos restart
 
     // 7) resposta (NUNCA depende das notificacoes)
     return res.status(201).json({

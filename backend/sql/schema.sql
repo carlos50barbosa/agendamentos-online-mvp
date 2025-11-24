@@ -99,6 +99,8 @@ CREATE TABLE IF NOT EXISTS agendamentos (
   -- (NOVO) opcional: armazenar IDs dos jobs de lembrete do WhatsApp (1 dia / 15 min)
   wa_job_1d_id       VARCHAR(120) NULL,
   wa_job_15m_id      VARCHAR(120) NULL,
+  -- (NOVO) marca quando o lembrete de 8h foi enviado (evita duplicidade e permite reprocessar apos reboot)
+  reminder_8h_sent_at DATETIME    NULL,
   criado_em          TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
   CONSTRAINT fk_ag_cli   FOREIGN KEY (cliente_id)         REFERENCES usuarios(id) ON DELETE CASCADE,
