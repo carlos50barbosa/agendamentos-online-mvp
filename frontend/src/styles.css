@@ -29,6 +29,7 @@
   --ring-shadow: 0 0 0 3px rgba(99, 102, 241, 0.25);
   --transition: .18s cubic-bezier(.2,.8,.2,1);
   --topbar-h: 60px;
+  --topbar-current-h: var(--topbar-h);
   --topbar-bg: rgba(255,255,255,.92);
   --topbar-border: var(--brand-200);
   --topbar-shadow: 0 8px 24px rgba(99, 102, 241, 0.12);
@@ -1181,8 +1182,8 @@ button.danger:disabled,
 }
 .app-shell.is-collapsed{ grid-template-columns: 0 1fr; }
 .sidebar{
-  position: fixed; left: 0; top: var(--topbar-h); bottom: 0; z-index: 60;
-  width: 260px; height: calc(100dvh - var(--topbar-h));
+  position: fixed; left: 0; top: var(--topbar-current-h); bottom: 0; z-index: 60;
+  width: 260px; height: calc(100dvh - var(--topbar-current-h));
   overflow-y: auto;
   background: var(--surface-soft);
   border-right: 1px solid var(--border);
@@ -1196,7 +1197,7 @@ button.danger:disabled,
 }
 .app-shell.is-collapsed .sidebar{ transform: translateX(-100%); }
 .mainnav--vertical{ display: flex; flex-direction: column; gap: 8px; flex: 0 0 auto; align-items: stretch; justify-content: flex-start; margin-top: 0; padding-top: 0; height: auto; }
-.app-main{ background: var(--bg); min-width: 0; padding-top: var(--topbar-h); grid-column: 2; }
+.app-main{ background: var(--bg); min-width: 0; padding-top: var(--topbar-current-h); grid-column: 2; }
 
 /* Toggle da sidebar */
 .sidebar-toggle{
@@ -1255,8 +1256,8 @@ button.danger:disabled,
 /* Topbar simples no conteúdo */
 .app-topbar{
   position: fixed; left: 0; right: 0; top: 0; z-index: 70; /* fixada no topo da viewport */
-  height: var(--topbar-h);
-  display: flex; align-items: center;
+  min-height: var(--topbar-h);
+  display: flex; flex-direction: column; align-items: stretch; gap: 0;
   background: var(--topbar-bg);
   backdrop-filter: saturate(160%) blur(8px);
   border-bottom: 1px solid var(--topbar-border);
@@ -1265,7 +1266,7 @@ button.danger:disabled,
 .app-topbar__inner{
   max-width: 1100px; margin: 0 auto; padding: 0 12px;
   display: flex; flex-direction: row; align-items: center; justify-content: space-between;
-  height: 100%; line-height: 1.1;
+  height: var(--topbar-h); line-height: 1.1;
 }
 /* Desktop: brand encostada no canto esquerdo da topbar */
 @media (min-width: 781px){
@@ -1283,6 +1284,27 @@ button.danger:disabled,
 .theme-toggle:disabled{ cursor:default; background:transparent; color:var(--muted); box-shadow:none; opacity:0.6; }
 .theme-toggle.is-disabled:hover,
 .theme-toggle.is-disabled:focus-visible{ background:transparent; color:var(--muted); box-shadow:none; }
+
+.app-topbar__alert{
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 12px;
+  font-size: 13px;
+  border-top: 1px solid var(--border);
+}
+.app-topbar__alert--warning{
+  background: var(--warning-bg);
+  color: var(--warning-text);
+  border-color: var(--warning-border);
+}
+.app-topbar__alert--danger{
+  background: var(--danger-bg);
+  color: var(--danger-text);
+  border-color: var(--danger-border);
+}
+.app-topbar__alert .btn{ white-space: nowrap; }
 
 .billing-banner{
   border-bottom: 1px solid var(--warning-border);

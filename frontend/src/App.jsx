@@ -1,15 +1,6 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { NavLink, Routes, Route, useNavigate, useLocation } from 'react-router-dom';
 import { getUser, logout, USER_EVENT } from './utils/auth';
-import LoginCliente from './pages/LoginCliente.jsx';
-import LoginEstabelecimento from './pages/LoginEstabelecimento.jsx';
-import Login from './pages/Login.jsx';
-import Cadastro from './pages/Cadastro.jsx';
-import DashboardCliente from './pages/DashboardCliente.jsx';
-import DashboardEstabelecimento from './pages/DashboardEstabelecimento.jsx';
-import ServicosEstabelecimento from './pages/ServicosEstabelecimento.jsx';
-import ProfissionaisEstabelecimento from './pages/ProfissionaisEstabelecimento.jsx';
-import NovoAgendamento from './pages/NovoAgendamento.jsx';
 import EstabelecimentosList from './pages/EstabelecimentosList.jsx';
 import {
   IconUser,
@@ -21,20 +12,6 @@ import {
 import LogoAO from './components/LogoAO.jsx';
 import Modal from './components/Modal.jsx';
 import MobileNavBar from './components/MobileNavBar.jsx';
-import Loading from './pages/Loading.jsx';
-import Configuracoes from './pages/Configuracoes.jsx';
-import Ajuda from './pages/Ajuda.jsx';
-import Relatorios from './pages/Relatorios.jsx';
-import Planos from './pages/Planos.jsx';
-import RecuperarSenha from './pages/RecuperarSenha.jsx';
-import DefinirSenha from './pages/DefinirSenha.jsx';
-import AdminTools from './pages/AdminTools.jsx';
-import AdminDB from './pages/AdminDB.jsx';
-import AdminBilling from './pages/AdminBilling.jsx';
-import Contato from './pages/Contato.jsx';
-import LinkPhone from './pages/LinkPhone.jsx';
-import Termos from './pages/Termos.jsx';
-import PoliticaPrivacidade from './pages/PoliticaPrivacidade.jsx';
 import { buildNavigation } from './utils/navigation.js';
 import { Api } from './utils/api.js';
 import {
@@ -46,6 +23,30 @@ import {
   applyThemePreference,
   broadcastPreferences,
 } from './utils/preferences.js';
+
+const LoginCliente = React.lazy(() => import('./pages/LoginCliente.jsx'));
+const LoginEstabelecimento = React.lazy(() => import('./pages/LoginEstabelecimento.jsx'));
+const Login = React.lazy(() => import('./pages/Login.jsx'));
+const Cadastro = React.lazy(() => import('./pages/Cadastro.jsx'));
+const DashboardCliente = React.lazy(() => import('./pages/DashboardCliente.jsx'));
+const DashboardEstabelecimento = React.lazy(() => import('./pages/DashboardEstabelecimento.jsx'));
+const ServicosEstabelecimento = React.lazy(() => import('./pages/ServicosEstabelecimento.jsx'));
+const ProfissionaisEstabelecimento = React.lazy(() => import('./pages/ProfissionaisEstabelecimento.jsx'));
+const NovoAgendamento = React.lazy(() => import('./pages/NovoAgendamento.jsx'));
+const Configuracoes = React.lazy(() => import('./pages/Configuracoes.jsx'));
+const Ajuda = React.lazy(() => import('./pages/Ajuda.jsx'));
+const Relatorios = React.lazy(() => import('./pages/Relatorios.jsx'));
+const Planos = React.lazy(() => import('./pages/Planos.jsx'));
+const RecuperarSenha = React.lazy(() => import('./pages/RecuperarSenha.jsx'));
+const DefinirSenha = React.lazy(() => import('./pages/DefinirSenha.jsx'));
+const AdminTools = React.lazy(() => import('./pages/AdminTools.jsx'));
+const AdminDB = React.lazy(() => import('./pages/AdminDB.jsx'));
+const AdminBilling = React.lazy(() => import('./pages/AdminBilling.jsx'));
+const Contato = React.lazy(() => import('./pages/Contato.jsx'));
+const LinkPhone = React.lazy(() => import('./pages/LinkPhone.jsx'));
+const Termos = React.lazy(() => import('./pages/Termos.jsx'));
+const PoliticaPrivacidade = React.lazy(() => import('./pages/PoliticaPrivacidade.jsx'));
+const Loading = React.lazy(() => import('./pages/Loading.jsx'));
 
 const APP_ROUTES = [
   { path: '/', element: <EstabelecimentosList /> },
@@ -338,8 +339,10 @@ export default function App() {
   const [billingStatus, setBillingStatus] = useState(null);
   const { preferences, isDark, toggleTheme } = useAppPreferences();
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [planBarInfo, setPlanBarInfo] = useState({ plan: '', status: '', trialEnd: null, trialDaysLeft: null });
   const isPlanos = (loc?.pathname || '') === '/planos';
   const hideShell = false;
+  const topbarRef = useRef(null);
 
   useEffect(() => {
     const handleUserEvent = (event) => {
@@ -363,6 +366,32 @@ export default function App() {
       window.removeEventListener('storage', handleStorage);
     };
   }, []);
+
+  useEffect(() => {
+    const loadPlanInfo = () => {
+      try {
+        const plan = localStorage.getItem('plan_current') || '';
+        const status = localStorage.getItem('plan_status') || '';
+        const trialEnd = localStorage.getItem('trial_end');
+        const trialDaysLeft = trialEnd
+          ? Math.floor((new Date(trialEnd).getTime() - Date.now()) / 86400000)
+          : null;
+        setPlanBarInfo({ plan, status, trialEnd, trialDaysLeft });
+      } catch {
+        setPlanBarInfo({ plan: '', status: '', trialEnd: null, trialDaysLeft: null });
+      }
+    };
+
+    loadPlanInfo();
+
+    const handleStorage = (event) => {
+      if (!event?.key) return;
+      if (['plan_current', 'plan_status', 'trial_end'].includes(event.key)) loadPlanInfo();
+    };
+    window.addEventListener('storage', handleStorage);
+
+    return () => window.removeEventListener('storage', handleStorage);
+  }, [currentUser?.id]);
 
   useEffect(() => {
     let cancelled = false;
@@ -421,6 +450,68 @@ export default function App() {
     };
   }, [isPlanos, preferences?.theme]);
 
+  const trialDaysLeft = useMemo(() => {
+    if (planBarInfo.trialEnd) {
+      const diff = new Date(planBarInfo.trialEnd).getTime() - Date.now();
+      return Math.floor(diff / 86400000);
+    }
+    if (typeof planBarInfo.trialDaysLeft === 'number') return planBarInfo.trialDaysLeft;
+    return null;
+  }, [planBarInfo.trialDaysLeft, planBarInfo.trialEnd]);
+
+  const planStatus = String(planBarInfo.status || '').toLowerCase();
+  const trialExpired = planStatus === 'trialing' && trialDaysLeft != null && trialDaysLeft < 0;
+  const trialEndingSoon =
+    planStatus === 'trialing' && trialDaysLeft != null && trialDaysLeft >= 0 && trialDaysLeft <= 3;
+
+  const topbarAlert = useMemo(() => {
+    if (!currentUser || currentUser.tipo !== 'estabelecimento') return null;
+    if (trialExpired) {
+      return {
+        variant: 'danger',
+        message: 'Seu teste gratuito encerrou. Escolha um plano para manter o acesso.',
+      };
+    }
+    if (trialEndingSoon) {
+      const label =
+        trialDaysLeft === 0
+          ? 'termina hoje'
+          : trialDaysLeft === 1
+          ? 'termina em 1 dia'
+          : `termina em ${trialDaysLeft} dias`;
+      return {
+        variant: 'warning',
+        message: `Seu teste gratuito ${label}. Assine agora para não perder o acesso.`,
+      };
+    }
+    return null;
+  }, [currentUser, trialEndingSoon, trialExpired, trialDaysLeft]);
+
+  const updateTopbarHeight = useCallback(() => {
+    const el = topbarRef.current;
+    if (!el || typeof document === 'undefined') return;
+    const h = el.offsetHeight || 0;
+    if (h > 0) {
+      document.documentElement.style.setProperty('--topbar-current-h', `${h}px`);
+    }
+  }, []);
+
+  useEffect(() => {
+    updateTopbarHeight();
+    const handleResize = () => updateTopbarHeight();
+    window.addEventListener('resize', handleResize);
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      try {
+        document.documentElement.style.removeProperty('--topbar-current-h');
+      } catch {}
+    };
+  }, [updateTopbarHeight]);
+
+  useEffect(() => {
+    updateTopbarHeight();
+  }, [topbarAlert, sidebarOpen, updateTopbarHeight]);
+
   return (
     <>
       <div className={`app-shell ${sidebarOpen ? 'sidebar-open' : 'is-collapsed'}`}>
@@ -442,7 +533,7 @@ export default function App() {
           </>
         )}
         <main className="app-main">
-          <div className="app-topbar">
+          <div className="app-topbar" ref={topbarRef}>
             <div className="app-topbar__inner">
               <NavLink to="/" className="brand">
                 <LogoAO size={28} />
@@ -464,14 +555,30 @@ export default function App() {
                 </button>
               </div>
             </div>
+            {topbarAlert && (
+              <div className={`app-topbar__alert app-topbar__alert--${topbarAlert.variant}`}>
+                <span>{topbarAlert.message}</span>
+                <NavLink className="btn btn--primary btn--sm" to="/configuracoes">
+                  Ver planos
+                </NavLink>
+              </div>
+            )}
           </div>
           <BillingStatusBanner status={billingStatus} user={currentUser} />
           <div className="container">
-            <Routes>
-              {APP_ROUTES.map(({ path, element }) => (
-                <Route key={path} path={path} element={element} />
-              ))}
-            </Routes>
+            <Suspense
+              fallback={
+                <div className="card" role="status" aria-live="polite">
+                  <span className="spinner" /> Carregando...
+                </div>
+              }
+            >
+              <Routes>
+                {APP_ROUTES.map(({ path, element }) => (
+                  <Route key={path} path={path} element={element} />
+                ))}
+              </Routes>
+            </Suspense>
           </div>
         </main>
       </div>

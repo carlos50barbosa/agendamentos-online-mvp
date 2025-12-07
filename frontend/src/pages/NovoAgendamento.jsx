@@ -616,9 +616,16 @@ const haversineDistance = (origin, point) => {
   return R * c;
 };
 
+const parseCoord = (value) => {
+  if (value == null) return null;
+  const text = String(value).trim().replace(',', '.');
+  const num = Number(text);
+  return Number.isFinite(num) ? num : null;
+};
+
 const geocodeEstablishment = async (est) => {
-  const lat = Number(est?.latitude ?? est?.lat ?? null);
-  const lng = Number(est?.longitude ?? est?.lng ?? null);
+  const lat = parseCoord(est?.latitude ?? est?.lat ?? null);
+  const lng = parseCoord(est?.longitude ?? est?.lng ?? null);
   if (Number.isFinite(lat) && Number.isFinite(lng)) return { lat, lng };
 
   const parts = [];
@@ -805,7 +812,7 @@ const ProfessionalTile = ({ professional, selected, onSelect }) => {
 };
 
 
-const EstablishmentCard = ({ est, selected, onSelect, distance, userLocation, formatter }) => {
+const EstablishmentCard = ({ est, selected, onSelect, distance, userLocation, formatter, hasDistance }) => {
   const name = est?.nome || est?.name || est?.fantasia || est?.razao_social || `Estabelecimento #${est?.id || ''}`;
   const address = formatAddress(est);
   const avatarSource = est?.foto_url || est?.avatar_url || '';
@@ -813,11 +820,13 @@ const EstablishmentCard = ({ est, selected, onSelect, distance, userLocation, fo
   const ratingCount = Number(est?.rating_count ?? est?.ratingCount ?? 0);
   const hasRatings = Number.isFinite(ratingAverageRaw) && ratingCount > 0;
   const ratingLabel = hasRatings ? ratingNumberFormatter.format(ratingAverageRaw) : null;
-  const distanceLabel = userLocation
+  const distanceLabel = !userLocation
+    ? 'Ative a localizacao para ver a distancia'
+    : hasDistance
     ? Number.isFinite(distance)
       ? `${formatter.format(distance)} km`
       : 'Distancia indisponivel'
-    : 'Ative a localizacao para ver a distancia';
+    : 'Calculando distancias...';
 
   const handleKeyDown = (event) => {
     if (event.key === 'Enter' || event.key === ' ') {
@@ -1065,14 +1074,36 @@ export default function NovoAgendamento() {
     []
   );
 
+  const planContext = selectedExtras?.plan_context || null;
+  const planStatus = String(planContext?.status || '').toLowerCase();
+  const subscriptionStatus = String(
+    planContext?.subscription_status ||
+    planContext?.subscription?.status ||
+    ''
+  ).toLowerCase();
+  const trialEndsAt = planContext?.trial?.ends_at || null;
+  const trialDaysLeft = typeof planContext?.trial?.days_left === 'number' ? planContext.trial.days_left : null;
+  const trialExpired =
+    planStatus === 'trialing' &&
+    ((trialDaysLeft != null && trialDaysLeft < 0) ||
+      (trialEndsAt && new Date(trialEndsAt).getTime() < Date.now()));
+  const planExpired = planStatus === 'expired';
+  const subscriptionActive =
+    planStatus === 'active' ||
+    subscriptionStatus === 'active' ||
+    subscriptionStatus === 'authorized';
+  const bookingBlocked = !subscriptionActive && (planExpired || trialExpired);
+  const bookingBlockedMessage = 'Agendamentos indisponíveis no momento. Entre em contato com o estabelecimento.';
+
   useEffect(() => {
     const cache = coordsCacheRef.current;
     let changed = false;
     establishments.forEach((est) => {
       const lat = Number(est?.latitude ?? est?.lat ?? null);
       const lng = Number(est?.longitude ?? est?.lng ?? null);
-      if (Number.isFinite(lat) && Number.isFinite(lng) && !cache.has(est.id)) {
-        cache.set(est.id, { lat, lng });
+      const key = String(est.id);
+      if (Number.isFinite(lat) && Number.isFinite(lng) && !cache.has(key)) {
+        cache.set(key, { lat, lng });
         changed = true;
       }
     });
@@ -1092,7 +1123,7 @@ export default function NovoAgendamento() {
     }
     const next = {};
     coordsCacheRef.current.forEach((coords, id) => {
-      if (coords) next[id] = haversineDistance(userLocation, coords);
+      next[id] = coords ? haversineDistance(userLocation, coords) : null;
     });
     setDistanceMap(next);
   }, [userLocation]);
@@ -1102,7 +1133,7 @@ export default function NovoAgendamento() {
       setGeocoding(false);
       return;
     }
-    const pending = filteredEstablishments.filter((est) => !coordsCacheRef.current.has(est.id));
+    const pending = filteredEstablishments.filter((est) => !coordsCacheRef.current.has(String(est.id)));
     if (!pending.length) {
       setGeocoding(false);
       return;
@@ -1120,7 +1151,7 @@ export default function NovoAgendamento() {
         if (coords) {
           setDistanceMap((prev) => ({
             ...prev,
-            [est.id]: haversineDistance(userLocation, coords),
+            [String(est.id)]: haversineDistance(userLocation, coords),
           }));
         }
       }
@@ -1135,7 +1166,8 @@ export default function NovoAgendamento() {
   const establishmentResults = useMemo(() => {
     const mapped = filteredEstablishments.map((est) => ({
       est,
-      distance: distanceMap[est.id],
+      distance: distanceMap[String(est.id)],
+      hasDistance: Object.prototype.hasOwnProperty.call(distanceMap, String(est.id)),
     }));
     const sortKey = (value) =>
       normalizeText(value?.nome || value?.name || value?.fantasia || value?.razao_social || `est-${value?.id || ''}`);
@@ -1300,6 +1332,7 @@ export default function NovoAgendamento() {
               data?.gallery_limit ??
               data?.plan_context?.limits?.maxGalleryImages ??
               null,
+            plan_context: data?.plan_context || null,
           },
         }));
       } catch (err) {
@@ -1651,6 +1684,11 @@ useEffect(() => {
   const confirmBooking = useCallback(async () => {
     if (!selectedSlot || !serviceId || !selectedService) return;
 
+    if (bookingBlocked) {
+      showToast('error', bookingBlockedMessage);
+      return;
+    }
+
     if (DateHelpers.isPastSlot(selectedSlot.datetime)) {
       showToast("error", "Não foi possível agendar no passado.");
       return;
@@ -1751,6 +1789,8 @@ useEffect(() => {
     selectedService,
     selectedEstablishment,
     establishmentId,
+    bookingBlocked,
+    bookingBlockedMessage,
     scheduleWhatsAppReminders,
     loadSlots,
     showToast,
@@ -1843,12 +1883,16 @@ useEffect(() => {
     setState((p) => ({ ...p, selectedSlot: slot }));
 
   const handleConfirmClick = useCallback(() => {
+    if (bookingBlocked) {
+      showToast('error', bookingBlockedMessage);
+      return;
+    }
     if (!isAuthenticated) {
       showToast('info', 'Faça login para confirmar seu agendamento.')
       return
     }
     setModal((m) => ({ ...m, isOpen: true }))
-  }, [isAuthenticated, showToast])
+  }, [bookingBlocked, bookingBlockedMessage, isAuthenticated, showToast])
 
   const handleFilterToggle = (filter) =>
     setState((p) => ({ ...p, filters: { ...p.filters, [filter]: !p.filters[filter] } }));
@@ -2316,13 +2360,14 @@ useEffect(() => {
     }
     return (
       <div className="establishments__grid">
-        {establishmentResults.map(({ est, distance }) => (
+        {establishmentResults.map(({ est, distance, hasDistance }) => (
           <EstablishmentCard
             key={est.id}
             est={est}
             selected={String(est.id) === establishmentId}
             onSelect={handleEstablishmentClick}
             distance={distance}
+            hasDistance={hasDistance}
             userLocation={userLocation}
             formatter={kmFormatter}
           />
@@ -2591,6 +2636,12 @@ useEffect(() => {
             )}
           </div>
 
+          {bookingBlocked && (
+            <div className="notice notice--warn" role="alert" style={{ marginTop: 8 }}>
+              {bookingBlockedMessage}
+            </div>
+          )}
+
           <div className="row" style={{ marginTop: 8, justifyContent: 'flex-end', gap: 6 }}>
             <button className="btn" onClick={() => setState((p) => ({ ...p, selectedSlot: null }))} disabled={!selectedSlot}>
               Limpar seleção
@@ -2603,7 +2654,8 @@ useEffect(() => {
                 (serviceProfessionals.length && !state.professionalId) ||
                 (selectedSlotNow && !isAvailableLabel(selectedSlotNow.label)) ||
                 DateHelpers.isPastSlot(selectedSlot.datetime) ||
-                !inBusinessHours(selectedSlot.datetime, workingSchedule)
+                !inBusinessHours(selectedSlot.datetime, workingSchedule) ||
+                bookingBlocked
               }
             >
               {modal.isSaving ? <span className="spinner" /> : 'Confirmar agendamento'}

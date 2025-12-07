@@ -993,6 +993,15 @@ export default function Configuracoes() {
     return Math.max(0, Math.floor(diff / 86400000));
   }, [planInfo.trialDaysLeft, planInfo.trialEnd]);
 
+  const trialExpired = useMemo(() => {
+    if (String(planInfo.status || '').toLowerCase() !== 'trialing') return false;
+    if (typeof planInfo.trialDaysLeft === 'number' && planInfo.trialDaysLeft < 0) return true;
+    if (!planInfo.trialEnd) return false;
+    const endTs = new Date(planInfo.trialEnd).getTime();
+    if (!Number.isFinite(endTs)) return false;
+    return endTs < Date.now();
+  }, [planInfo.status, planInfo.trialDaysLeft, planInfo.trialEnd]);
+
   const fmtDate = (iso) =>
     iso ? new Date(iso).toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' }) : '';
 
@@ -1333,7 +1342,11 @@ export default function Configuracoes() {
     // Se a assinatura do MP estiver ativa/autorizada, tratamos como ativo para exibição
     const subStatusRaw = String(billing.subscription?.status || '').toLowerCase();
     const subscriptionIsActive = subStatusRaw === 'active' || subStatusRaw === 'authorized';
-    const effectivePlanStatus = subscriptionIsActive ? 'active' : (planInfo.status || '');
+    const effectivePlanStatus = subscriptionIsActive
+      ? 'active'
+      : trialExpired
+      ? 'expired'
+      : (planInfo.status || '');
     const baseStatusLabel =
       statusLabelMap[effectivePlanStatus] || (effectivePlanStatus ? effectivePlanStatus.toUpperCase() : '');
     const trialDaysLabel =
@@ -1787,6 +1800,7 @@ export default function Configuracoes() {
         planAlerts.push({ key: 'loading', variant: 'info', message: 'Atualizando informações de cobrança...' });
       }
       if (planInfo.status === 'delinquent') planAlerts.push({ key: 'delinquent', variant: 'error', message: 'Pagamento em atraso. Regularize para manter o acesso aos recursos.' });
+      if (trialExpired) planAlerts.push({ key: 'trial-expired', variant: 'warn', message: 'Seu teste gratuito terminou. Contrate um plano para manter o acesso aos recursos.' });
       if (effectivePlanStatus === 'pending') planAlerts.push({ key: 'pending', variant: 'warn', message: 'Pagamento pendente. Finalize o checkout para concluir a contratação.' });
       if (planInfo.plan === 'starter' && hasPaidHistory) planAlerts.push({ key: 'trial-blocked', variant: 'muted', message: 'Teste grátis indisponível: já houve uma assinatura contratada nesta conta.' });
       else if (planInfo.plan === 'starter' && trialEligible) planAlerts.push({ key: 'trial-available', variant: 'info', message: 'Experimente o plano Pro gratuitamente por 7 dias quando desejar.' });
@@ -1974,6 +1988,7 @@ export default function Configuracoes() {
     planInfo.trialWarn,
     planInfo.allowAdvanced,
     planInfo.activeUntil,
+    trialExpired,
     daysLeft,
     fmtDate,
     publicLink,

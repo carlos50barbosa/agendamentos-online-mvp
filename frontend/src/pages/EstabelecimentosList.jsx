@@ -44,6 +44,13 @@ const formatAddress = (est) => {
   return parts.join(', ');
 };
 
+const parseCoord = (value) => {
+  if (value == null) return null;
+  const text = String(value).trim().replace(',', '.');
+  const num = Number(text);
+  return Number.isFinite(num) ? num : null;
+};
+
 const haversineDistance = (origin, point) => {
   if (!origin || !point) return null;
   const toRad = (value) => (value * Math.PI) / 180;
@@ -57,6 +64,8 @@ const haversineDistance = (origin, point) => {
   return R * c;
 };
 
+const hasKey = (obj, key) => Object.prototype.hasOwnProperty.call(obj || {}, key);
+
 const fallbackAvatar = (label) => {
   const name = encodeURIComponent(String(label || 'AO'));
   return `https://ui-avatars.com/api/?name=${name}&size=128&background=1C64F2&color=ffffff&rounded=true`;
@@ -67,8 +76,8 @@ const ratingNumberFormatter = new Intl.NumberFormat('pt-BR', {
   maximumFractionDigits: 1,
 });
 const geocodeEstablishment = async (est) => {
-  const lat = Number(est?.latitude ?? est?.lat ?? null);
-  const lng = Number(est?.longitude ?? est?.lng ?? null);
+  const lat = parseCoord(est?.latitude ?? est?.lat ?? null);
+  const lng = parseCoord(est?.longitude ?? est?.lng ?? null);
   if (Number.isFinite(lat) && Number.isFinite(lng)) return { lat, lng };
 
   const parts = [];
@@ -168,10 +177,11 @@ export default function EstabelecimentosList() {
     const cache = coordsCacheRef.current;
     let changed = false;
     items.forEach((est) => {
-      const lat = Number(est?.latitude ?? est?.lat ?? null);
-      const lng = Number(est?.longitude ?? est?.lng ?? null);
-      if (Number.isFinite(lat) && Number.isFinite(lng) && !cache.has(est.id)) {
-        cache.set(est.id, { lat, lng });
+      const lat = parseCoord(est?.latitude ?? est?.lat ?? null);
+      const lng = parseCoord(est?.longitude ?? est?.lng ?? null);
+      const key = String(est.id);
+      if (Number.isFinite(lat) && Number.isFinite(lng) && !cache.has(key)) {
+        cache.set(key, { lat, lng });
         changed = true;
       }
     });
@@ -205,7 +215,7 @@ export default function EstabelecimentosList() {
     }
     const next = {};
     coordsCacheRef.current.forEach((coords, id) => {
-      if (coords) next[id] = haversineDistance(userLocation, coords);
+      next[id] = coords ? haversineDistance(userLocation, coords) : null;
     });
     setDistanceMap(next);
   }, [userLocation]);
@@ -215,7 +225,7 @@ export default function EstabelecimentosList() {
       setGeocoding(false);
       return;
     }
-    const pending = filteredItems.filter((est) => !coordsCacheRef.current.has(est.id));
+    const pending = filteredItems.filter((est) => !coordsCacheRef.current.has(String(est.id)));
   if (!pending.length) {
     setGeocoding(false);
     return;
@@ -229,13 +239,11 @@ export default function EstabelecimentosList() {
         if (cancelled) break;
         const coords = await geocodeEstablishment(est);
         if (cancelled) break;
-        coordsCacheRef.current.set(est.id, coords);
-        if (coords) {
-          setDistanceMap((prev) => ({
-            ...prev,
-            [est.id]: haversineDistance(userLocation, coords),
-          }));
-        }
+        coordsCacheRef.current.set(String(est.id), coords);
+        setDistanceMap((prev) => ({
+          ...prev,
+          [String(est.id)]: coords ? haversineDistance(userLocation, coords) : null,
+        }));
       }
       if (!cancelled) setGeocoding(false);
     })();
@@ -252,7 +260,8 @@ export default function EstabelecimentosList() {
   const results = useMemo(() => {
     const mapped = filteredItems.map((est) => ({
       est,
-      distance: distanceMap[est.id],
+      distance: distanceMap[String(est.id)],
+      hasDistance: hasKey(distanceMap, String(est.id)),
     }));
     const sortKey = (value) => normalize(value?.nome || value?.name || `est-${value?.id || ''}`);
     const sorted = [...mapped];
@@ -403,7 +412,8 @@ export default function EstabelecimentosList() {
           )}
           {!loading && !error && results.length > 0 && (
             <div className="home-results__grid">
-              {results.map(({ est, distance }) => {
+              {results.map((item) => {
+                const { est, distance, hasDistance } = item;
                 const name = est?.nome || est?.name || `Estabelecimento #${est?.id || ''}`;
                 const address = formatAddress(est);
                 const sp = new URLSearchParams();
@@ -415,11 +425,13 @@ export default function EstabelecimentosList() {
                 const path = slug ? `/novo/${slug}` : '/novo';
               const avatarSource = est?.foto_url || est?.avatar_url || '';
               const image = avatarSource ? resolveAssetUrl(avatarSource) : fallbackAvatar(name);
-              const distanceLabel = userLocation
+              const distanceLabel = !userLocation
+                ? 'Ative a localizacao para ver a distancia'
+                : hasDistance
                 ? distance != null
                   ? `${kmFormatter.format(distance)} km`
                   : 'Distancia indisponivel'
-                : 'Ative a localizacao para ver a distancia';
+                : 'Calculando distancias...';
               const ratingAverageRaw = Number(est?.rating_average ?? est?.ratingAverage ?? NaN);
               const ratingCount = Number(est?.rating_count ?? est?.ratingCount ?? 0);
               const hasRatings = Number.isFinite(ratingAverageRaw) && ratingCount > 0;
