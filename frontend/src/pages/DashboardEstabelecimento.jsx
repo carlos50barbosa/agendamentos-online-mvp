@@ -911,11 +911,11 @@ function SlotPreview({ slot }) {
 }
 
 const AGENDA_STATUS_THEME = Object.freeze({
-  confirmado: { label: 'Confirmado', bg: '#d9f5e3', border: '#b9e8c9', dot: '#2ca36c', text: '#0f3d2a', badge: 'rgba(44,163,108,0.14)' },
-  concluido: { label: 'Concluido', bg: '#e7efff', border: '#d0dffe', dot: '#3b82f6', text: '#0f1f3c', badge: 'rgba(59,130,246,0.12)' },
-  cancelado: { label: 'Cancelado', bg: '#ffe4e6', border: '#fecdd3', dot: '#e11d48', text: '#7a1026', badge: 'rgba(225,29,72,0.12)' },
-  pendente: { label: 'Pendente', bg: '#fff4e5', border: '#ffe0b8', dot: '#f59e0b', text: '#783b04', badge: 'rgba(245,158,11,0.14)' },
-  default: { label: 'Agendamento', bg: '#d9f5e3', border: '#b9e8c9', dot: '#2ca36c', text: '#0f3d2a', badge: 'rgba(44,163,108,0.14)' },
+  confirmado: { label: 'Confirmado', bg: '#dcfce7', border: '#86efac', dot: '#16a34a', text: '#064e3b', badge: 'rgba(22,163,74,0.14)' },
+  concluido: { label: 'Concluido', bg: '#e0f2fe', border: '#bfdbfe', dot: '#2563eb', text: '#0f172a', badge: 'rgba(37,99,235,0.12)' },
+  cancelado: { label: 'Cancelado', bg: '#fee2e2', border: '#fecdd3', dot: '#dc2626', text: '#7f1d1d', badge: 'rgba(220,38,38,0.14)' },
+  pendente: { label: 'Pendente', bg: '#fff7ed', border: '#fed7aa', dot: '#f97316', text: '#7c2d12', badge: 'rgba(249,115,22,0.14)' },
+  default: { label: 'Agendamento', bg: '#dcfce7', border: '#86efac', dot: '#16a34a', text: '#064e3b', badge: 'rgba(22,163,74,0.14)' },
 })
 
 const getAgendaTheme = (status) => AGENDA_STATUS_THEME[status] || AGENDA_STATUS_THEME.default
@@ -1017,7 +1017,12 @@ function ProfessionalAgendaView({ items }) {
         const service = item?.servico_nome || item?.service_name || 'Servico'
         const client = item?.cliente_nome || item?.client_name || ''
         const title = client ? `${client} - ${service}` : service
-        const status = String(item?.status || '').toLowerCase()
+        const rawStatus = String(item?.status || '').toLowerCase()
+        let status = normalizeText(rawStatus)
+        if (status.startsWith('conclu')) status = 'concluido'
+        else if (status.startsWith('confirm')) status = 'confirmado'
+        else if (status.startsWith('cancel')) status = 'cancelado'
+        else if (status.startsWith('pend')) status = 'pendente'
         const baseTheme = resourceThemes.get(resourceId) || RESOURCE_COLORS[0]
         const statusTheme = getAgendaTheme(status)
         const theme = {
@@ -1111,6 +1116,7 @@ function ProfessionalAgendaView({ items }) {
         borderRadius: 12,
         padding: '10px 12px',
         boxShadow: '0 10px 18px rgba(15,23,42,0.08)',
+        borderLeft: `6px solid ${theme.dot || theme.border}`,
       },
     }
   }, [])
@@ -1195,9 +1201,9 @@ function ProfessionalAgendaView({ items }) {
     <div className="pro-agenda">
       <div className="pro-agenda__toolbar">
         <div className="pro-agenda__toolbar-left">
-          <button className="btn btn--sm" type="button" onClick={handleToday}>Hoje</button>
           <div className="pro-agenda__toolbar-arrows">
             <button className="btn btn--sm" type="button" aria-label="Dia anterior" onClick={handlePrevDay}>{'<'}</button>
+            <button className="btn btn--sm" type="button" onClick={handleToday}>Hoje</button>
             <button className="btn btn--sm" type="button" aria-label="Proximo dia" onClick={handleNextDay}>{'>'}</button>
           </div>
           <span className="pro-agenda__current-date pro-agenda__current-date--blue">{currentDateLabel}</span>

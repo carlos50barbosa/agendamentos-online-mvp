@@ -1527,26 +1527,17 @@ button.danger:disabled,
 .pro-agenda .rbc-time-header-content{border-left:1px solid var(--border);}
 .pro-agenda .rbc-header{border:none;font-weight:600;font-size:12px;padding:6px 4px;}
 .pro-agenda .rbc-current-time-indicator{background:var(--primary-400);}
-.pro-agenda .rbc-calendar{--agenda-time-width:74px;}
+.pro-agenda .rbc-calendar{--agenda-time-width:0px;}
 .pro-agenda .rbc-time-header-gutter,
 .pro-agenda .rbc-time-gutter{
-  display:block!important;
-  width:var(--agenda-time-width);
-  min-width:var(--agenda-time-width);
-  padding:6px 8px;
-  background:var(--surface-soft);
-  border-right:1px solid var(--border);
-  color:var(--muted);
-  font-weight:700;
-  position:sticky;
-  left:0;
-  z-index:3;
+  display:none!important;
+  width:0;
+  min-width:0;
+  padding:0;
+  border:0;
 }
-.pro-agenda .rbc-time-header-gutter{border-bottom:1px solid var(--border);}
-.pro-agenda .rbc-time-gutter .rbc-timeslot-group{padding-left:0;border-color:var(--border);}
-.pro-agenda .rbc-time-gutter .rbc-label{display:none;}
 .pro-agenda .rbc-time-content{overflow-y:auto;}
-.pro-agenda .rbc-time-content > .rbc-time-gutter{flex:0 0 var(--agenda-time-width);}
+.pro-agenda .rbc-time-content > .rbc-time-gutter{flex:0 0 0;}
 .pro-agenda .rbc-time-content > * + * > * {border-left:1px solid var(--border);}
 .rbc-toolbar{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px;}
 .rbc-toolbar .rbc-btn-group{display:flex;gap:6px;}

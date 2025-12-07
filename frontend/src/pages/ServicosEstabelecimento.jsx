@@ -288,25 +288,16 @@ export default function ServicosEstabelecimento() {
 
   return (
     <div className="grid" style={{ gap: 16 }}>
-      {trialInfo && trialInfo.plan === 'starter' && (
-        trialDaysLeft > 0 ? (
-          <div className="card box--highlight" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-            <div className="row" style={{ gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                <strong>Teste grátis ativo</strong>
-                <div className="small muted">{trialDaysLeft} {trialDaysLeft === 1 ? 'dia restante' : 'dias restantes'}</div>
-              </div>
+      {trialInfo && trialInfo.plan === 'starter' && trialDaysLeft > 0 && (
+        <div className="card box--highlight" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+          <div className="row" style={{ gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <strong>Teste grátis ativo</strong>
+              <div className="small muted">{trialDaysLeft} {trialDaysLeft === 1 ? 'dia restante' : 'dias restantes'}</div>
             </div>
-            <Link className="btn btn--primary btn--sm" to="/planos" style={{ minWidth: 120, textAlign: 'center' }}>Experimentar Pro</Link>
-          </div>) : (
-          <div className="card" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, borderColor: 'var(--warning-border)', background: 'var(--warning-bg)' }}>
-            <div>
-              <strong>Seu periodo de teste terminou</strong>
-              <div className="small muted">Desbloqueie WhatsApp, relatorios avancados e mais com o Pro.</div>
-            </div>
-            <Link className="btn btn--outline btn--sm" to="/planos">Conhecer planos</Link>
           </div>
-        )
+          <Link className="btn btn--primary btn--sm" to="/planos" style={{ minWidth: 120, textAlign: 'center' }}>Experimentar Pro</Link>
+        </div>
       )}
       {/* Toast */}
       {toast && <div className={`toast ${toast.type}`}>{toast.msg}</div>}
