@@ -205,7 +205,7 @@ router.post('/', async (req, res) => {
       try {
         if (emailNorm) {
           const subject = tmpl.email_subject || 'Agendamento confirmado';
-          const html = (tmpl.email_html || `<p>Ola, <b>{{cliente_nome}}</b>! Seu agendamento de <b>{{servico_nome}}</b>{{profissional_nome}} foi confirmado para <b>{{data_hora}}</b>.</p>`) 
+          const html = (tmpl.email_html || `<p>Olá, <b>{{cliente_nome}}</b>! Seu agendamento de <b>{{servico_nome}}</b>{{profissional_nome}} foi confirmado para <b>{{data_hora}}</b>.</p>`) 
             .replace(/{{\s*cliente_nome\s*}}/g, String(nome).split(' ')[0] || 'cliente')
             .replace(/{{\s*servico_nome\s*}}/g, svc.nome)
             .replace(/{{\s*data_hora\s*}}/g, inicioBR)
