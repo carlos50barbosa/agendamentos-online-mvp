@@ -2642,7 +2642,7 @@ useEffect(() => {
             </div>
           )}
 
-          <div className="row" style={{ marginTop: 8, justifyContent: 'flex-end', gap: 6 }}>
+          <div className="action-bar action-bar--booking">
             <button className="btn" onClick={() => setState((p) => ({ ...p, selectedSlot: null }))} disabled={!selectedSlot}>
               Limpar seleção
             </button>

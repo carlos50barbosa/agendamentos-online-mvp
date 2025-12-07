@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom';
 import { Api, resolveAssetUrl } from '../utils/api';
 import LogoAO from '../components/LogoAO.jsx';
+import Modal from '../components/Modal.jsx';
 import { IconMapPin, IconSearch } from '../components/Icons.jsx';
 
 const STORAGE_KEY = 'ao:lastLocation';
@@ -129,6 +130,7 @@ export default function EstabelecimentosList() {
   const [distanceMap, setDistanceMap] = useState({});
   const searchInputRef = useRef(null);
   const resultsSectionRef = useRef(null);
+  const [promoOpen, setPromoOpen] = useState(false);
 
   useEffect(() => {
     const q = (searchParams.get('q') || '').trim();
@@ -164,6 +166,15 @@ export default function EstabelecimentosList() {
         setUserLocation(parsed);
       }
     } catch {}
+  }, []);
+
+  useEffect(() => {
+    try {
+      const dismissed = localStorage.getItem('home_promo_dismissed');
+      if (!dismissed) setPromoOpen(true);
+    } catch {
+      setPromoOpen(true);
+    }
   }, []);
 
   useEffect(() => {
@@ -344,10 +355,42 @@ export default function EstabelecimentosList() {
     setPendingScroll(true);
   }, []);
 
+  const handleClosePromo = useCallback(() => {
+    setPromoOpen(false);
+    try { localStorage.setItem('home_promo_dismissed', '1'); } catch {}
+  }, []);
+
   const displayHeading = HEADLINE_TEXT;
 
   return (
     <div className="home">
+      {promoOpen && (
+        <Modal
+          title="Novidades"
+          onClose={handleClosePromo}
+          closeButton
+          actions={[
+            <button key="close" className="btn btn--outline" type="button" onClick={handleClosePromo}>
+              Fechar
+            </button>,
+            <a
+              key="cta"
+              className="btn btn--primary"
+              href="/planos"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Quero saber mais
+            </a>,
+          ]}
+        >
+          <p>
+            Em breve, espaços dedicados a parceiros e publicidades pagas. Clique em &quot;Quero saber mais&quot; para
+            ser redirecionado.
+          </p>
+        </Modal>
+      )}
+
       <section className="home-hero" aria-labelledby="home-hero-title">
         <div className="home-hero__inner">
           <LogoAO size={72} className="home-hero__logo" />

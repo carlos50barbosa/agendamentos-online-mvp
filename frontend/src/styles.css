@@ -855,6 +855,15 @@ a:hover { opacity: 1; text-decoration: underline; }
 /* Placeholder mínimo para “Sem horários” */
 .empty-dot{ width:8px; height:8px; border-radius:50%; background:var(--border); margin:6px auto; }
 
+@media (max-width: 720px){
+  .slots--grid{
+    grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
+    gap: 6px;
+  }
+  .slot-btn.slot-btn--comfortable{ padding:6px 8px; font-size:13px; }
+  .slot-btn.slot-btn--compact{ padding:4px 6px; font-size:12px; }
+}
+
 /* =======================
    Mensagens / Skeleton
    ======================= */
@@ -1284,6 +1293,14 @@ button.danger:disabled,
 .theme-toggle:disabled{ cursor:default; background:transparent; color:var(--muted); box-shadow:none; opacity:0.6; }
 .theme-toggle.is-disabled:hover,
 .theme-toggle.is-disabled:focus-visible{ background:transparent; color:var(--muted); box-shadow:none; }
+
+.action-bar{
+  display:flex;
+  align-items:center;
+  justify-content:flex-end;
+  gap:8px;
+}
+.action-bar--booking{ margin-top:8px; }
 
 .app-topbar__alert{
   display: flex;
@@ -2405,5 +2422,25 @@ button.danger:disabled,
   .help-quick__grid{grid-template-columns:1fr;}
   .help-guides__links{grid-template-columns:1fr;}
   .help-support__grid{grid-template-columns:1fr;}
+}
+
+@media (max-width:720px){
+  :root{ --topbar-h: 52px; }
+  .app-topbar__inner{ padding-left: 10px; padding-right: 10px; }
+  .action-bar--booking{
+    position: sticky;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    padding: 10px;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    box-shadow: 0 -8px 18px rgba(0,0,0,.06);
+    z-index: 12;
+  }
+  .action-bar--booking .btn{
+    flex: 1;
+    min-width: 0;
+  }
 }
 
