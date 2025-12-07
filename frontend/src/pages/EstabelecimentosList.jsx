@@ -131,6 +131,7 @@ export default function EstabelecimentosList() {
   const searchInputRef = useRef(null);
   const resultsSectionRef = useRef(null);
   const [promoOpen, setPromoOpen] = useState(false);
+  const PROMO_KEY = 'home_promo_dismissed_at';
 
   useEffect(() => {
     const q = (searchParams.get('q') || '').trim();
@@ -170,8 +171,19 @@ export default function EstabelecimentosList() {
 
   useEffect(() => {
     try {
-      const dismissed = localStorage.getItem('home_promo_dismissed');
-      if (!dismissed) setPromoOpen(true);
+      const dismissed = localStorage.getItem(PROMO_KEY);
+      if (!dismissed) {
+        setPromoOpen(true);
+      } else {
+        const ts = Number(dismissed);
+        if (!Number.isFinite(ts)) {
+          setPromoOpen(true);
+        } else {
+          const oneDay = 24 * 60 * 60 * 1000;
+          const now = Date.now();
+          if (now - ts > oneDay) setPromoOpen(true);
+        }
+      }
     } catch {
       setPromoOpen(true);
     }
@@ -357,7 +369,7 @@ export default function EstabelecimentosList() {
 
   const handleClosePromo = useCallback(() => {
     setPromoOpen(false);
-    try { localStorage.setItem('home_promo_dismissed', '1'); } catch {}
+    try { localStorage.setItem(PROMO_KEY, String(Date.now())); } catch {}
   }, []);
 
   const displayHeading = HEADLINE_TEXT;
