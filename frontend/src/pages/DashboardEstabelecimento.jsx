@@ -525,36 +525,12 @@ const normalizeSlotsList = (data) => {
 export default function DashboardEstabelecimento() {
   const [itens, setItens] = useState([])
   const [loading, setLoading] = useState(true)
-  const [status, setStatus] = useState('confirmado')
+  const [status, setStatus] = useState('todos')
   const [currentUser, setCurrentUser] = useState(() => getUser())
   const [showCalendar, setShowCalendar] = useState(false)
-  const [showProAgenda, setShowProAgenda] = useState(false)
+  const [showProAgenda, setShowProAgenda] = useState(true)
   const establishmentId =
     currentUser && currentUser.tipo === 'estabelecimento' ? currentUser.id : null
-
-  const dayFormatter = useMemo(
-    () =>
-      new Intl.DateTimeFormat('pt-BR', {
-        day: '2-digit',
-        month: 'short',
-      }),
-    []
-  )
-  const weekdayFormatter = useMemo(
-    () =>
-      new Intl.DateTimeFormat('pt-BR', {
-        weekday: 'short',
-      }),
-    []
-  )
-  const timeFormatter = useMemo(
-    () =>
-      new Intl.DateTimeFormat('pt-BR', {
-        hour: '2-digit',
-        minute: '2-digit',
-      }),
-    []
-  )
 
   useEffect(() => {
     const handleUserEvent = (event) => {
@@ -596,14 +572,6 @@ export default function DashboardEstabelecimento() {
       mounted = false
     }
   }, [status])
-
-  const statusMeta = (s) => {
-    const v = String(s || '').toLowerCase()
-    if (v === 'confirmado') return { cls: 'ok', label: 'confirmado' }
-    if (v === 'concluido') return { cls: 'done', label: 'concluído' }
-    if (v === 'cancelado') return { cls: 'out', label: 'cancelado' }
-    return { cls: 'pending', label: v || 'pendente' }
-  }
 
   const totals = useMemo(() => {
     const acc = { recebidos: 0, cancelados: 0 }
@@ -647,24 +615,6 @@ export default function DashboardEstabelecimento() {
     return itens
   }, [itens, status])
 
-  const calendarData = useMemo(() => {
-    const map = new Map()
-    for (const item of filtered) {
-      const date = new Date(item.inicio)
-      const key = date.toISOString().slice(0, 10)
-      if (!map.has(key)) map.set(key, { date, items: [] })
-      map.get(key).items.push(item)
-    }
-    return Array.from(map.values())
-      .sort((a, b) => a.date - b.date)
-      .map((entry) => ({
-        key: entry.date.toISOString(),
-        label: dayFormatter.format(entry.date),
-        weekday: weekdayFormatter.format(entry.date),
-        items: entry.items.sort((a, b) => new Date(a.inicio) - new Date(b.inicio)),
-      }))
-  }, [filtered, dayFormatter, weekdayFormatter])
-
   return (
     <div className="dashboard-narrow">
       <div className="card">
@@ -685,13 +635,6 @@ export default function DashboardEstabelecimento() {
           >
             <button
               type="button"
-              className={`btn btn--outline btn--outline-brand ${showProAgenda ? 'btn--active' : ''}`}
-              onClick={() => setShowProAgenda((open) => !open)}
-            >
-              {showProAgenda ? "Ocultar agenda de profissionais" : "Agenda de profissionais"}
-            </button>
-            <button
-              type="button"
               className={`btn btn--outline btn--outline-brand ${showCalendar ? 'btn--active' : ''}`}
               onClick={() => setShowCalendar((open) => !open)}
             >
@@ -703,74 +646,24 @@ export default function DashboardEstabelecimento() {
               onChange={(e) => setStatus(e.target.value)}
               title="Status"
             >
+              <option value="todos">Todos</option>
               <option value="confirmado">Confirmados</option>
               <option value="concluido">Concluídos</option>
               <option value="cancelado">Cancelados</option>
-              <option value="todos">Todos</option>
             </select>
           </div>
         </div>
 
-        {loading ? (
-          <div
-            className="day-skeleton"
-            style={{ gridTemplateColumns: '1fr', marginTop: 8 }}
-          >
-            {Array.from({ length: 5 }).map((_, i) => (
-              <div key={i} className="shimmer pill" />
-            ))}
-          </div>
-        ) : calendarData.length === 0 ? (
-          <div className="empty">Nenhum agendamento nesta visão.</div>
-        ) : (
-          <div className="calendar-grid">
-            {calendarData.map((day) => (
-              <div className="calendar-day" key={day.key}>
-                <header className="calendar-day__header">
-                  <span className="calendar-day__weekday" style={{ fontSize: 11 }}>{day.weekday}</span>
-                  <strong style={{ fontSize: 12 }}>{day.label}</strong>
-                </header>
-                <ul className="calendar-day__list">
-                  {day.items.map((item) => {
-                    const past =
-                      new Date(item.fim || item.inicio).getTime() < Date.now()
-                    const itemStatus = String(item.status || '').toLowerCase()
-                    const effective =
-                      itemStatus === 'confirmado' && past ? 'concluido' : item.status
-                    const { cls, label } = statusMeta(effective)
-                    return (
-                      <li className="calendar-entry" key={item.id}>
-                        <span className="calendar-entry__time" style={{ fontSize: 11 }}>
-                          {timeFormatter.format(new Date(item.inicio))}
-                        </span>
-                        <div className="calendar-entry__info">
-                          <div className="calendar-entry__service" style={{ fontSize: 12 }}>
-                            {item.servico_nome}
-                          </div>
-                          <div className="calendar-entry__client" style={{ fontSize: 11 }}>
-                            {item.cliente_nome}
-                          </div>
-                        </div>
-                        <span className={`badge ${cls}`} style={{ fontSize: 10, padding: '2px 6px' }}>{label}</span>
-                      </li>
-                    )
-                  })}
-                </ul>
-              </div>
-            ))}
-          </div>
-        )}
+        {/* calendar-grid removido em favor da agenda de profissionais */}
       </div>
       {showCalendar && (
         <div style={{ marginTop: 16 }}>
           <CalendarAvailability establishmentId={establishmentId} />
         </div>
       )}
-      {showProAgenda && (
-        <div style={{ marginTop: 16 }}>
-          <ProfessionalAgendaView items={filtered} />
-        </div>
-      )}
+      <div style={{ marginTop: 16 }}>
+        <ProfessionalAgendaView items={filtered} />
+      </div>
     </div>
   )
 }
@@ -1018,17 +911,36 @@ function SlotPreview({ slot }) {
 }
 
 const AGENDA_STATUS_THEME = Object.freeze({
-  confirmado: { label: 'Confirmado', bg: '#ecfdf3', border: '#bbf7d0', dot: '#16a34a', text: '#0a3b28', badge: 'rgba(22, 163, 74, 0.16)' },
-  concluido: { label: 'Concluido', bg: '#eff6ff', border: '#bfdbfe', dot: '#1d4ed8', text: '#102a59', badge: 'rgba(29, 78, 216, 0.14)' },
-  cancelado: { label: 'Cancelado', bg: '#fef2f2', border: '#fecaca', dot: '#dc2626', text: '#7f1d1d', badge: 'rgba(220, 38, 38, 0.12)' },
-  pendente: { label: 'Pendente', bg: '#fff7ed', border: '#fed7aa', dot: '#f97316', text: '#7c2d12', badge: 'rgba(249, 115, 22, 0.12)' },
-  default: { label: 'Agendamento', bg: '#e0f2fe', border: '#bae6fd', dot: '#0284c7', text: '#0c4a6e', badge: 'rgba(2, 132, 199, 0.12)' },
+  confirmado: { label: 'Confirmado', bg: '#d9f5e3', border: '#b9e8c9', dot: '#2ca36c', text: '#0f3d2a', badge: 'rgba(44,163,108,0.14)' },
+  concluido: { label: 'Concluido', bg: '#e7efff', border: '#d0dffe', dot: '#3b82f6', text: '#0f1f3c', badge: 'rgba(59,130,246,0.12)' },
+  cancelado: { label: 'Cancelado', bg: '#ffe4e6', border: '#fecdd3', dot: '#e11d48', text: '#7a1026', badge: 'rgba(225,29,72,0.12)' },
+  pendente: { label: 'Pendente', bg: '#fff4e5', border: '#ffe0b8', dot: '#f59e0b', text: '#783b04', badge: 'rgba(245,158,11,0.14)' },
+  default: { label: 'Agendamento', bg: '#d9f5e3', border: '#b9e8c9', dot: '#2ca36c', text: '#0f3d2a', badge: 'rgba(44,163,108,0.14)' },
 })
 
 const getAgendaTheme = (status) => AGENDA_STATUS_THEME[status] || AGENDA_STATUS_THEME.default
+const formatTime12h = (date, { showMinutes = false, compact = false, lowercase = false } = {}) => {
+  const dt = date instanceof Date ? date : new Date(date)
+  if (!Number.isFinite(dt?.getTime?.())) return ''
+  const hours = dt.getHours()
+  const minutes = dt.getMinutes()
+  const h12 = hours % 12 || 12
+  const suffix = hours >= 12 ? 'PM' : 'AM'
+  const minsPart = showMinutes || minutes ? `:${String(minutes).padStart(2, '0')}` : ''
+  const space = compact ? '' : ' '
+  const text = `${h12}${minsPart}${space}${suffix}`
+  return lowercase ? text.toLowerCase() : text
+}
 const formatHourRange = (start, end) => {
-  if (!start || !end) return ''
-  return `${DateHelpers.formatTime(start)} - ${DateHelpers.formatTime(end)}`
+  const s = start instanceof Date ? start : new Date(start)
+  const e = end instanceof Date ? end : new Date(end)
+  if (!Number.isFinite(s?.getTime?.()) || !Number.isFinite(e?.getTime?.())) return ''
+  const showMinutes = s.getMinutes() !== 0 || e.getMinutes() !== 0
+  return `${formatTime12h(s, { showMinutes, compact: true, lowercase: true })} – ${formatTime12h(e, {
+    showMinutes,
+    compact: true,
+    lowercase: true,
+  })}`
 }
 
 const RESOURCE_COLORS = [
@@ -1081,6 +993,10 @@ function ProfessionalAgendaView({ items }) {
   const [filterOpen, setFilterOpen] = useState(false)
   const filterRef = React.useRef(null)
 
+  useEffect(() => {
+    setResourceFilter('all')
+  }, [])
+
   const events = useMemo(() => {
     return (items || [])
       .map((item) => {
@@ -1103,7 +1019,12 @@ function ProfessionalAgendaView({ items }) {
         const title = client ? `${client} - ${service}` : service
         const status = String(item?.status || '').toLowerCase()
         const baseTheme = resourceThemes.get(resourceId) || RESOURCE_COLORS[0]
-        const theme = status === 'cancelado' ? getAgendaTheme(status) : baseTheme
+        const statusTheme = getAgendaTheme(status)
+        const theme = {
+          ...statusTheme,
+          dot: statusTheme.dot || baseTheme.dot,
+          border: statusTheme.border || baseTheme.border,
+        }
         return {
           id: item?.id || `${resourceId}-${start.getTime()}`,
           title,
@@ -1161,20 +1082,21 @@ function ProfessionalAgendaView({ items }) {
 
   const timeBounds = useMemo(() => {
     if (!eventsForCurrentDate.length) {
-      const min = new Date(); min.setHours(8, 0, 0, 0)
-      const max = new Date(); max.setHours(20, 0, 0, 0)
+      const base = currentDate instanceof Date ? currentDate : new Date()
+      const min = new Date(base); min.setHours(8, 0, 0, 0)
+      const max = new Date(base); max.setHours(20, 0, 0, 0)
       return { min, max, scrollToTime: min }
     }
+
     const startTimes = eventsForCurrentDate.map((ev) => ev.start)
     const endTimes = eventsForCurrentDate.map((ev) => ev.end)
     const earliest = new Date(Math.min(...startTimes.map((d) => d.getTime())))
     const latest = new Date(Math.max(...endTimes.map((d) => d.getTime())))
-    const minHour = Math.max(0, earliest.getHours() - 1)
-    const maxHour = Math.min(23, latest.getHours() + 1)
     const base = currentDate instanceof Date ? currentDate : new Date()
-    const min = new Date(base); min.setHours(minHour, 0, 0, 0)
-    const max = new Date(base); max.setHours(maxHour, 0, 0, 0)
-    const scrollToTime = new Date(base); scrollToTime.setHours(Math.max(0, earliest.getHours() - 0.5), earliest.getMinutes(), 0, 0)
+    const min = new Date(base); min.setTime(Math.max(earliest.getTime() - 30 * 60000, min.getTime()))
+    min.setSeconds(0, 0)
+    const max = new Date(base); max.setTime(Math.min(latest.getTime() + 60 * 60000, new Date(base).setHours(23, 59, 59, 999)))
+    const scrollToTime = new Date(Math.max(earliest.getTime() - 15 * 60000, min.getTime()))
     return { min, max, scrollToTime }
   }, [eventsForCurrentDate, currentDate])
 
@@ -1186,19 +1108,17 @@ function ProfessionalAgendaView({ items }) {
         backgroundColor: theme.bg,
         border: `1px solid ${theme.border}`,
         color: theme.text,
-        borderRadius: 10,
-        padding: '4px 6px',
-        boxShadow: '0 8px 14px rgba(15,23,42,0.10)',
-        borderLeft: `4px solid ${theme.dot || theme.border}`,
+        borderRadius: 12,
+        padding: '10px 12px',
+        boxShadow: '0 10px 18px rgba(15,23,42,0.08)',
       },
     }
   }, [])
 
   const formats = useMemo(
     () => ({
-      timeGutterFormat: (date, culture, loc) => loc.format(date, 'HH:mm', culture),
-      eventTimeRangeFormat: ({ start, end }, culture, loc) =>
-        `${loc.format(start, 'HH:mm', culture)} - ${loc.format(end, 'HH:mm', culture)}`,
+      timeGutterFormat: (date) => formatTime12h(date, { showMinutes: false, compact: false }),
+      eventTimeRangeFormat: ({ start, end }) => formatHourRange(start, end),
       dayHeaderFormat: () => '',
     }),
     []
@@ -1226,20 +1146,16 @@ function ProfessionalAgendaView({ items }) {
 
   const AgendaEvent = useCallback(({ event }) => {
     const theme = event?._theme || getAgendaTheme(event?.status)
-    const badgeStyle = { backgroundColor: theme.badge || theme.bg, color: theme.text, borderColor: theme.border }
     const serviceLabel = event?.service || event?.title || 'Servico'
-    const clientLabel = event?.client ? ` — ${event.client}` : ''
+    const clientLabel = event?.client ? ` • ${event.client}` : ''
     return (
       <div className="pro-agenda__event-card">
-        <div className="pro-agenda__event-header">
-          <div className="pro-agenda__event-title">
-            <span className="pro-agenda__status-dot" style={{ backgroundColor: theme.dot }} />
+        <div className="pro-agenda__event-title">
+          <span className="pro-agenda__status-dot" style={{ backgroundColor: theme.dot }} />
+          <div className="pro-agenda__event-lines">
             <strong>{serviceLabel}{clientLabel}</strong>
+            <span className="pro-agenda__time">{formatHourRange(event?.start, event?.end)}</span>
           </div>
-          <span className="pro-agenda__event-status" style={badgeStyle}>{event?.statusLabel || theme.label}</span>
-        </div>
-        <div className="pro-agenda__event-meta">
-          <span className="pro-agenda__time">{formatHourRange(event?.start, event?.end)}</span>
         </div>
       </div>
     )
@@ -1347,8 +1263,8 @@ function ProfessionalAgendaView({ items }) {
         endAccessor="end"
         defaultView={Views.DAY}
         views={[Views.DAY]}
-        step={15}
-        timeslots={2}
+        step={60}
+        timeslots={1}
         style={{ height: 720 }}
         eventPropGetter={eventStyleGetter}
         selectable={false}
