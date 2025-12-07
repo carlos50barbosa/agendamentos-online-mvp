@@ -1023,6 +1023,10 @@ function ProfessionalAgendaView({ items }) {
         else if (status.startsWith('confirm')) status = 'confirmado'
         else if (status.startsWith('cancel')) status = 'cancelado'
         else if (status.startsWith('pend')) status = 'pendente'
+        // normaliza confirmados passados para concluido
+        if (status === 'confirmado' && end.getTime() < Date.now()) {
+          status = 'concluido'
+        }
         const baseTheme = resourceThemes.get(resourceId) || RESOURCE_COLORS[0]
         const statusTheme = getAgendaTheme(status)
         const theme = {
@@ -1070,10 +1074,7 @@ function ProfessionalAgendaView({ items }) {
     () => (filteredEvents.length && filteredEvents[0]?.start instanceof Date ? filteredEvents[0].start : new Date()),
     [filteredEvents]
   )
-  const [currentDate, setCurrentDate] = useState(initialDate)
-  useEffect(() => {
-    setCurrentDate(initialDate)
-  }, [initialDate])
+  const [currentDate, setCurrentDate] = useState(() => initialDate)
 
   const currentDateIso = useMemo(
     () => DateHelpers.toISODate(currentDate instanceof Date ? currentDate : new Date()),
