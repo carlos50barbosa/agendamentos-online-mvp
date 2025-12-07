@@ -1517,8 +1517,7 @@ button.danger:disabled,
 .pro-agenda__status-dot{width:9px;height:9px;border-radius:50%;}
 .pro-agenda .rbc-time-view{border:1px solid var(--border);border-radius:12px;background:var(--surface);}
 .pro-agenda .rbc-time-view .rbc-time-content{border-top:1px solid var(--border);background:#ffffff;}
-.pro-agenda .rbc-time-header{border-bottom:1px solid var(--border);padding:6px 6px;background:var(--surface);}
-.pro-agenda .rbc-time-header .rbc-row:first-child{display:none;} /* oculta linha de cabecalho de data/all-day */
+.pro-agenda .rbc-time-header{display:none;}
 .pro-agenda .rbc-allday-cell,.pro-agenda .rbc-allday-events{display:none;}
 .pro-agenda .rbc-day-slot{padding-left:0;}
 .pro-agenda .rbc-day-slot .rbc-timeslot-group{border-color:#e5e7eb;background:transparent;border-bottom:1px solid #e5e7eb;}
