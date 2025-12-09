@@ -115,6 +115,8 @@ const DateHelpers = {
 
 const DEFAULT_BUSINESS_HOURS = { start: 7, end: 22 }
 
+const isValidDate = (d) => d instanceof Date && Number.isFinite(d.getTime())
+
 const normalizeText = (value) =>
   String(value || '')
     .normalize('NFD')
@@ -1087,22 +1089,40 @@ function ProfessionalAgendaView({ items }) {
   )
 
   const timeBounds = useMemo(() => {
-    if (!eventsForCurrentDate.length) {
-      const base = currentDate instanceof Date ? currentDate : new Date()
+    const buildDefaultBounds = (baseDate) => {
+      const base = isValidDate(baseDate) ? baseDate : new Date()
       const min = new Date(base); min.setHours(8, 0, 0, 0)
       const max = new Date(base); max.setHours(20, 0, 0, 0)
       return { min, max, scrollToTime: min }
+    }
+
+    const baseDate = currentDate instanceof Date ? currentDate : new Date()
+
+    if (!eventsForCurrentDate.length) {
+      return buildDefaultBounds(baseDate)
     }
 
     const startTimes = eventsForCurrentDate.map((ev) => ev.start)
     const endTimes = eventsForCurrentDate.map((ev) => ev.end)
     const earliest = new Date(Math.min(...startTimes.map((d) => d.getTime())))
     const latest = new Date(Math.max(...endTimes.map((d) => d.getTime())))
-    const base = currentDate instanceof Date ? currentDate : new Date()
-    const min = new Date(base); min.setTime(Math.max(earliest.getTime() - 30 * 60000, min.getTime()))
+    const min = new Date(baseDate); min.setTime(Math.max(earliest.getTime() - 30 * 60000, min.getTime()))
     min.setSeconds(0, 0)
-    const max = new Date(base); max.setTime(Math.min(latest.getTime() + 60 * 60000, new Date(base).setHours(23, 59, 59, 999)))
-    const scrollToTime = new Date(Math.max(earliest.getTime() - 15 * 60000, min.getTime()))
+
+    const maxBase = new Date(baseDate)
+    const max = new Date(baseDate); max.setTime(Math.min(latest.getTime() + 60 * 60000, maxBase.setHours(23, 59, 59, 999)))
+
+    if (!isValidDate(min) || !isValidDate(max)) {
+      return buildDefaultBounds(baseDate)
+    }
+
+    if (max <= min) {
+      const adjustedMax = new Date(min.getTime() + 60 * 60000)
+      return { min, max: adjustedMax, scrollToTime: min }
+    }
+
+    const scrollCandidate = new Date(Math.max(earliest.getTime() - 15 * 60000, min.getTime()))
+    const scrollToTime = scrollCandidate > max ? max : scrollCandidate
     return { min, max, scrollToTime }
   }, [eventsForCurrentDate, currentDate])
 
