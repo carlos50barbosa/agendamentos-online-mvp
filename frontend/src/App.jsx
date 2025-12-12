@@ -87,13 +87,26 @@ function formatBillingDate(value) {
   }
 }
 
-function BillingStatusBanner({ status, user }) {
+function BillingStatusBanner({ status, user, planInfo }) {
   if (!user || user?.tipo !== 'estabelecimento') return null;
-  if (!status || !BILLING_ALERT_STATES.has(status.state)) return null;
 
-  const state = status.state;
-  const dueLabel = formatBillingDate(status?.due_at);
-  const graceDeadline = formatBillingDate(status?.grace_deadline);
+  const trialDaysLeft = (() => {
+    if (planInfo?.trialEnd) {
+      const diff = new Date(planInfo.trialEnd).getTime() - Date.now();
+      return Math.floor(diff / 86400000);
+    }
+    if (typeof planInfo?.trialDaysLeft === 'number') return planInfo.trialDaysLeft;
+    return null;
+  })();
+  const planStatus = String(planInfo?.status || '').toLowerCase();
+  const trialExpired = planStatus === 'trialing' && trialDaysLeft != null && trialDaysLeft < 0;
+
+  const shouldShowBilling = status && BILLING_ALERT_STATES.has(status.state);
+  if (!shouldShowBilling && !trialExpired) return null;
+
+  const state = shouldShowBilling ? status.state : null;
+  const dueLabel = shouldShowBilling ? formatBillingDate(status?.due_at) : '';
+  const graceDeadline = shouldShowBilling ? formatBillingDate(status?.grace_deadline) : '';
 
   let tone = 'warning';
   let title = '';
@@ -126,6 +139,13 @@ function BillingStatusBanner({ status, user }) {
     ctaLabel = 'Regularizar agora';
   }
 
+  if (!shouldShowBilling && trialExpired) {
+    tone = 'warning';
+    title = 'Teste gratuito encerrado';
+    body = 'Escolha um plano para continuar usando a plataforma sem interrupções.';
+    ctaLabel = 'Ver planos';
+  }
+
   return (
     <div className={`billing-banner billing-banner--${tone}`}>
       <div className="billing-banner__inner">
@@ -133,9 +153,7 @@ function BillingStatusBanner({ status, user }) {
           <strong>{title}</strong>
           <p>{body}</p>
         </div>
-        <NavLink to="/configuracoes" className="btn btn--sm btn--primary">
-          {ctaLabel}
-        </NavLink>
+        <NavLink to="/configuracoes" className="btn btn--sm btn--primary">{ctaLabel}</NavLink>
       </div>
     </div>
   );
@@ -464,14 +482,30 @@ export default function App() {
   const trialEndingSoon =
     planStatus === 'trialing' && trialDaysLeft != null && trialDaysLeft >= 0 && trialDaysLeft <= 3;
 
-  const topbarAlert = useMemo(() => {
+const topbarAlert = useMemo(() => {
     if (!currentUser || currentUser.tipo !== 'estabelecimento') return null;
-    if (trialExpired) {
+    // Trial expirado já é exibido no banner fixo abaixo da topbar (BillingStatusBanner)
+    if (trialExpired) return null;
+
+    // Atraso de mensalidade: alerta rápido na topbar
+    const billingState = String(billingStatus?.state || '').toLowerCase();
+    if (billingState === 'blocked') {
       return {
         variant: 'danger',
-        message: 'Seu teste gratuito encerrou. Escolha um plano para manter o acesso.',
+        message: 'Plano suspenso por falta de pagamento. Regularize para liberar o acesso.',
       };
     }
+    if (billingState === 'overdue') {
+      const dueLabel = formatBillingDate(billingStatus?.due_at);
+      const remainingRaw = Number(billingStatus?.grace_days_remaining ?? 0);
+      const remaining = Number.isNaN(remainingRaw) ? 0 : Math.max(0, remainingRaw);
+      const suffix = remaining ? ` Bloqueio em ${remaining} ${remaining === 1 ? 'dia' : 'dias'}.` : '';
+      return {
+        variant: 'warning',
+        message: `Pagamento em atraso${dueLabel ? ` (venc. ${dueLabel})` : ''}.${suffix}`,
+      };
+    }
+
     if (trialEndingSoon) {
       const label =
         trialDaysLeft === 0
@@ -485,7 +519,7 @@ export default function App() {
       };
     }
     return null;
-  }, [currentUser, trialEndingSoon, trialExpired, trialDaysLeft]);
+  }, [currentUser, trialEndingSoon, trialExpired, trialDaysLeft, billingStatus]);
 
   const updateTopbarHeight = useCallback(() => {
     const el = topbarRef.current;
@@ -564,7 +598,7 @@ export default function App() {
               </div>
             )}
           </div>
-          <BillingStatusBanner status={billingStatus} user={currentUser} />
+          <BillingStatusBanner status={billingStatus} user={currentUser} planInfo={planBarInfo} />
           <div className="container">
             <Suspense
               fallback={

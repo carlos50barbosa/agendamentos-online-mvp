@@ -84,9 +84,9 @@ const WORKING_DAYS = [
 ];
 
 const PLAN_META = {
-  starter: { label: 'Starter', maxServices: 10, maxProfessionals: 2 },
-  pro: { label: 'Pro', maxServices: 100, maxProfessionals: 10 },
-  premium: { label: 'Premium', maxServices: null, maxProfessionals: null },
+  starter: { label: 'Starter', maxServices: 10, maxProfessionals: 2, maxAppointments: 100 },
+  pro: { label: 'Pro', maxServices: 100, maxProfessionals: 10, maxAppointments: 500 },
+  premium: { label: 'Premium', maxServices: null, maxProfessionals: null, maxAppointments: null },
 };
 const PLAN_TIERS = Object.keys(PLAN_META);
 const planLabel = (plan) => PLAN_META[plan]?.label || plan?.toUpperCase() || '';
@@ -423,6 +423,9 @@ export default function Configuracoes() {
     trialWarn: false,
     allowAdvanced: false,
     activeUntil: null,
+    appointmentsUsed: null,
+    appointmentsLimit: null,
+    appointmentsMonth: '',
   });
   const [slug, setSlug] = useState('');
   const [msg, setMsg] = useState({ email_subject: '', email_html: '', wa_template: '' });
@@ -596,6 +599,8 @@ export default function Configuracoes() {
       const status = localStorage.getItem('plan_status') || 'trialing';
       const trialEnd = localStorage.getItem('trial_end');
       const daysLeft = trialEnd ? Math.max(0, Math.floor((new Date(trialEnd).getTime() - Date.now()) / 86400000)) : null;
+      const metaLimit = PLAN_META[plan]?.maxAppointments ?? null;
+      const monthLabel = new Date().toLocaleString('pt-BR', { month: 'long', year: 'numeric' });
       setPlanInfo((prev) => ({
         ...prev,
         plan,
@@ -603,6 +608,9 @@ export default function Configuracoes() {
         trialEnd,
         trialDaysLeft: daysLeft,
         trialWarn: daysLeft != null ? daysLeft <= 3 : prev.trialWarn,
+        appointmentsLimit: metaLimit,
+        appointmentsMonth: prev.appointmentsMonth || monthLabel,
+        appointmentsUsed: prev.appointmentsUsed ?? null,
       }));
     } catch {}
   }, []);
@@ -670,6 +678,11 @@ export default function Configuracoes() {
         setPlanInfo((prev) => {
           const nextStatus = data.plan.status || prev.status;
           const nextPlan = nextStatus === 'active' ? (data.plan.plan || prev.plan) : prev.plan;
+          const usageAppointments = data.plan.usage?.appointments;
+          const nowMonthLabel = new Date().toLocaleString('pt-BR', { month: 'long', year: 'numeric' });
+          const appointmentsUsed = (typeof usageAppointments?.total === 'number' ? usageAppointments.total : 0);
+          const appointmentsLimit = usageAppointments?.limit ?? data.plan.limits?.maxMonthlyAppointments ?? prev.appointmentsLimit ?? null;
+          const appointmentsMonth = usageAppointments?.month || prev.appointmentsMonth || nowMonthLabel;
           const next = {
             ...prev,
             plan: nextPlan,
@@ -679,6 +692,9 @@ export default function Configuracoes() {
             trialWarn: !!data.plan.trial?.warn,
             allowAdvanced: !!data.plan.limits?.allowAdvancedReports,
             activeUntil: data.plan.active_until || prev.activeUntil,
+            appointmentsUsed,
+            appointmentsLimit,
+            appointmentsMonth,
           };
           try {
             localStorage.setItem('plan_current', next.plan);
@@ -1785,15 +1801,21 @@ export default function Configuracoes() {
       const reportsFeature = planInfo.allowAdvanced ? 'Relatórios avançados' : 'Relatórios básicos';
       const servicesLimit = PLAN_META[planInfo.plan]?.maxServices;
       const professionalsLimit = PLAN_META[planInfo.plan]?.maxProfessionals;
-      const usageText = 'Seu uso: ' + (serviceCount == null ? '...' : serviceCount) + ' serviços · ' + (professionalCount == null ? '...' : professionalCount) + ' profissionais';
-      const limitsText = 'Limites do plano ' + planTierLabel + ': ' +
+      const appointmentsLimit = planInfo.appointmentsLimit ?? PLAN_META[planInfo.plan]?.maxAppointments ?? null;
+      const appointmentsUsageText = appointmentsLimit == null
+        ? `${planInfo.appointmentsMonth ? `(${planInfo.appointmentsMonth}) ` : ''}ilimitados`
+        : `${planInfo.appointmentsMonth ? `(${planInfo.appointmentsMonth}) ` : ''}${planInfo.appointmentsUsed ?? 'carregando'} / ${appointmentsLimit}`;
+      const usageText = (serviceCount == null ? '...' : serviceCount) + ' serviços · ' + (professionalCount == null ? '...' : professionalCount) + ' profissionais';
+      const limitsText =
         (servicesLimit == null ? 'serviços ilimitados' : 'até ' + servicesLimit + ' serviços') + ' · ' +
-        (professionalsLimit == null ? 'profissionais ilimitados' : 'até ' + professionalsLimit + ' profissionais');
+        (professionalsLimit == null ? 'profissionais ilimitados' : 'até ' + professionalsLimit + ' profissionais') + ' · ' +
+        (appointmentsLimit == null ? 'agendamentos ilimitados' : 'até ' + appointmentsLimit + ' agendamentos/mês');
       const planFeatures = [whatsappFeature, reportsFeature];
       const pricedAmount = amountLabel ? `${amountLabel}/mês` : null;
       const summarySubscription = subscriptionStatusLabel || statusLabel || 'Em análise';
       const summaryWithPrice = pricedAmount ? `${summarySubscription} · ${pricedAmount}` : summarySubscription;
-      const nextChargeDisplay = nextChargeLabel || (planInfo.activeUntil ? fmtDate(planInfo.activeUntil) : '—');
+      const nextChargeDisplay = nextChargeLabel || (planInfo.activeUntil ? fmtDate(planInfo.activeUntil) : '-');
+      const showSubscriptionChip = subscriptionStatusLabel && subStatus !== effectivePlanStatus;
 
       const planAlerts = [];
       if (billingLoading) {
@@ -1897,8 +1919,8 @@ export default function Configuracoes() {
               <div>
                 <h3 className="plan-card__title">{planTierLabel}</h3>
                 <div className="plan-card__chips">
-                  <span className={'chip chip--status-' + (effectivePlanStatus || 'default')}>{statusLabel || '—'}</span>
-                  {subscriptionStatusLabel && (
+                  <span className={'chip chip--status-' + (effectivePlanStatus || 'default')}>{statusLabel || '-'}</span>
+                  {showSubscriptionChip && (
                     <span className={'chip chip--status-' + (subStatus || 'default')}>{subscriptionStatusLabel}</span>
                   )}
                 </div>
@@ -1956,9 +1978,10 @@ export default function Configuracoes() {
               )}
             </div>
 
-            <footer className="plan-card__foot">
-              <span>{usageText}</span>
-              <span>{limitsText}</span>
+            <footer className="plan-card__foot" style={{ display: 'grid', gap: 6 }}>
+              <div><strong>Agendamentos:</strong> {appointmentsUsageText}</div>
+              <div><strong>Seu uso:</strong> {usageText}</div>
+              <div><strong>Limites do plano {planTierLabel}:</strong> {limitsText}</div>
             </footer>
           </article>
         ),

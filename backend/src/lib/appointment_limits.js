@@ -2,7 +2,7 @@
 import { pool } from './db.js';
 import { notifyEmail, notifyWhatsapp } from './notifications.js';
 
-const ACTIVE_APPOINTMENT_STATUSES = ['confirmado', 'pendente'];
+const ACTIVE_APPOINTMENT_STATUSES = ['confirmado', 'pendente', 'concluido'];
 let customNotifier = null;
 
 const toDigits = (s) => String(s || '').replace(/\D/g, '');
@@ -35,10 +35,20 @@ function computeMonthRange(dateInput = new Date()) {
 async function countAppointmentsInRange(estabelecimentoId, range) {
   const { start, end } = range;
   const [rows] = await pool.query(
-    "SELECT COUNT(*) AS total FROM agendamentos WHERE estabelecimento_id=? AND status IN ('confirmado','pendente') AND inicio >= ? AND inicio < ?",
+    "SELECT COUNT(*) AS total FROM agendamentos WHERE estabelecimento_id=? AND status IN ('confirmado','pendente','concluido') AND inicio >= ? AND inicio < ?",
     [estabelecimentoId, start, end]
   );
-  return Number(rows?.[0]?.total || 0);
+  let total = Number(rows?.[0]?.total || 0);
+
+  // Fallback: se nenhum confirmado/pendente/concluido, conta todos os status (inclui cancelados e pendentes antigos)
+  if (!total) {
+    const [anyStatus] = await pool.query(
+      'SELECT COUNT(*) AS total FROM agendamentos WHERE estabelecimento_id=? AND inicio >= ? AND inicio < ?',
+      [estabelecimentoId, start, end]
+    );
+    total = Number(anyStatus?.[0]?.total || 0);
+  }
+  return total;
 }
 
 export function setAppointmentLimitNotifier(fn) {
@@ -96,4 +106,3 @@ export const __test = {
   computeMonthRange,
   ACTIVE_APPOINTMENT_STATUSES,
 };
-

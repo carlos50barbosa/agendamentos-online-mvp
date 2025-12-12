@@ -157,7 +157,33 @@ function buildEmailCopy(kind, row, state) {
   const friendlyDate = dueAt ? formatPtDate(dueAt) : 'hoje'
   const name = firstName(row.nome)
   const graceDeadline = dueAt ? new Date(dueAt.getTime() + state.graceDays * DAY_MS) : null
+  const trialEndsAt = toDate(row.plan_trial_ends_at)
+  const trialDate = trialEndsAt ? formatPtDate(trialEndsAt) : null
 
+  if (kind === 'trial_ending') {
+    const daysLabel = state?.trialDaysRemaining != null ? pluralDays(state.trialDaysRemaining) : 'poucos dias'
+    return {
+      subject: 'Seu teste gratuito está terminando',
+      html: `
+        <p>Oi ${name},</p>
+        <p>O teste gratuito do plano <strong>${planLabel}</strong> termina em <strong>${trialDate || 'breve'}</strong> (${daysLabel}).</p>
+        <p>Para evitar interrupções nos agendamentos, escolha um plano e finalize o pagamento.</p>
+        <p><a href="${BILLING_URL}" target="_blank" rel="noopener">Ir para planos e pagamento</a></p>
+      `,
+    }
+  }
+
+  if (kind === 'trial_expired') {
+    return {
+      subject: 'Seu teste gratuito terminou',
+      html: `
+        <p>Oi ${name},</p>
+        <p>O teste gratuito do plano <strong>${planLabel}</strong> terminou em <strong>${trialDate || 'hoje'}</strong>.</p>
+        <p>Os novos agendamentos serão interrompidos até você contratar um plano.</p>
+        <p><a href="${BILLING_URL}" target="_blank" rel="noopener">Escolher um plano e ativar agora</a></p>
+      `,
+    }
+  }
   if (kind === 'due_soon') {
     const daysLabel = pluralDays(Math.max(state.daysToDue || 0, 0))
     return {
@@ -190,7 +216,7 @@ function buildEmailCopy(kind, row, state) {
     subject: 'Plano temporariamente suspenso',
     html: `
       <p>Oi ${name},</p>
-      <p>Seu acesso foi suspenso porque não identificamos o pagamento do plano ${planLabel}.</p>
+      <p>Seu acesso e os agendamentos foram suspensos porque não identificamos o pagamento do plano ${planLabel}.</p>
       <p>Assim que o PIX for pago e confirmado, liberamos tudo automaticamente.</p>
       <p><a href="${BILLING_URL}" target="_blank" rel="noopener">Abrir página de pagamento</a></p>
     `,
@@ -260,6 +286,24 @@ async function applyDelinquentStatus(row) {
 }
 
 async function handleAccount(row) {
+  // === Trial reminders (email only) ===
+  const trialEndsAt = toDate(row.plan_trial_ends_at)
+  if (String(row.plan_status || '').toLowerCase() === 'trialing' && trialEndsAt) {
+    const days = Math.ceil((trialEndsAt.getTime() - Date.now()) / DAY_MS)
+    const trialState = {
+      trialDaysRemaining: days,
+      dueAt: trialEndsAt,
+      graceDays: GRACE_DAYS,
+      daysToDue: days,
+      daysOverdue: days < 0 ? Math.abs(days) : 0,
+    }
+    if (days < 0) {
+      await sendEmailReminder(row, trialEndsAt, 'trial_expired', trialState)
+    } else if (days <= WARN_DAYS) {
+      await sendEmailReminder(row, trialEndsAt, 'trial_ending', trialState)
+    }
+  }
+
   const state = resolveBillingState(
     {
       planStatus: row.plan_status,
@@ -352,4 +396,3 @@ export function startBillingMonitor({ intervalMs } = {}) {
   }, 15_000)
   return timer
 }
-

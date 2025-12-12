@@ -397,7 +397,7 @@ export default function EstabelecimentosList() {
           ]}
         >
           <p>
-            Em breve, espaços dedicados a parceiros e publicidades pagas. Clique em &quot;Quero saber mais&quot; para
+            Em breve, espaços dedicados a parceiros e publicidades. Clique em &quot;Quero saber mais&quot; para
             ser redirecionado.
           </p>
         </Modal>

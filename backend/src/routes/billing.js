@@ -13,6 +13,7 @@ import {
   countProfessionals,
   formatPlanLimitExceeded,
 } from '../lib/plans.js'
+import { checkMonthlyAppointmentLimit } from '../lib/appointment_limits.js'
 import {
   getLatestSubscriptionForEstabelecimento,
   listSubscriptionsForEstabelecimento,
@@ -439,8 +440,40 @@ router.get('/subscription', auth, isEstabelecimento, async (req, res) => {
     }
     if (!effective && history.length) effective = history[0]
 
+    const planLimit = planContext?.config?.maxMonthlyAppointments ?? null
+    let usage = { total: 0, limit: planLimit, range: null }
+    if (planContext) {
+      try {
+        const result = await checkMonthlyAppointmentLimit({
+          estabelecimentoId: req.user.id,
+          planConfig: planContext.config,
+          appointmentDate: new Date(),
+        })
+        usage = {
+          total: typeof result?.total === 'number' ? result.total : 0,
+          limit: result?.limit ?? planLimit,
+          range: result?.range || null,
+        }
+      } catch (err) {
+        console.warn('[billing/subscription][usage]', err?.message || err)
+      }
+    }
+
+    const serializedPlan = serializePlanContext(planContext)
+    if (serializedPlan) {
+      serializedPlan.usage = {
+        appointments: {
+          total: usage.total,
+          limit: usage.limit,
+          month: usage.range?.label || null,
+          period_start: usage.range?.start ? usage.range.start.toISOString() : null,
+          period_end: usage.range?.end ? usage.range.end.toISOString() : null,
+        },
+      }
+    }
+
     return res.json({
-      plan: serializePlanContext(planContext),
+      plan: serializedPlan,
       subscription: serializeSubscription(effective),
       history: history.map(serializeSubscription),
     })
@@ -592,4 +625,3 @@ router.post('/pix', auth, isEstabelecimento, async (req, res) => {
 })
 
 export default router
-

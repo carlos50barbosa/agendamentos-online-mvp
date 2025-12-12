@@ -54,7 +54,7 @@ export default function ServicosEstabelecimento() {
         setList(rows || []);
         try { setPros(await Api.profissionaisList()); } catch {}
       } catch (e) {
-        showToast("error", "Nao foi possivel carregar os servicos.");
+        showToast("error", "Não foi possível carregar os serviços.");
       } finally {
         setLoadingList(false);
       }
@@ -153,17 +153,17 @@ export default function ServicosEstabelecimento() {
       setForm({ nome: "", descricao: "", duracao_min: 30, preco_centavos: 0, ativo: true });
       setPrecoStr("R$ 0,00");
       setSelectedProsNew([]);
-      showToast("success", "Servico cadastrado!");
+      showToast("success", "Serviço cadastrado!");
     } catch (err) {
       if (err?.data?.error === 'plan_limit') {
-        setPlanLimitMessage(err?.message || 'Seu plano atual nao permite adicionar mais servicos. Atualize o plano para continuar.');
+        setPlanLimitMessage(err?.message || 'Seu plano atual não permite adicionar mais serviços. Atualize o plano para continuar.');
         setPlanLimitOpen(true);
       } else if (err?.data?.error === 'missing_professionals') {
         showToast('error', err?.data?.message || 'Selecione pelo menos um profissional.');
       } else if (err?.data?.message) {
         showToast('error', err.data.message);
       } else {
-        showToast("error", "Erro ao salvar o servico.");
+        showToast("error", "Erro ao salvar o serviço.");
       }
     } finally {
       setSaving(false);
@@ -216,9 +216,9 @@ export default function ServicosEstabelecimento() {
       setList(curr => curr.map(x => x.id === editItem.id ? { ...x, ...updated } : x));
       setEditOpen(false);
       setEditItem(null);
-      showToast('success', 'Servico atualizado.');
+      showToast('success', 'Serviço atualizado.');
     }catch(e){
-      showToast('error', 'Falha ao atualizar o servico.');
+      showToast('error', 'Falha ao atualizar o serviço.');
     }finally{
       setEditSaving(false);
     }
@@ -236,7 +236,7 @@ export default function ServicosEstabelecimento() {
 
     try {
       await Api.servicosDelete(id);
-      showToast("success", "Servico excluido.");
+      showToast("success", "Serviço excluído.");
     } catch (e) {
       // reverte se falhar
       setList(prev);
@@ -261,10 +261,10 @@ export default function ServicosEstabelecimento() {
       setList((curr) =>
         curr.map((x) => (x.id === svc.id ? { ...x, _updating: false } : x))
       );
-      showToast("success", `Servico ${novoAtivo ? "ativado" : "inativado"}.`);
+      showToast("success", `Serviço ${novoAtivo ? "ativado" : "inativado"}.`);
     } catch (e) {
       setList(prev);
-      showToast("error", "Nao foi possivel atualizar o status.");
+      showToast("error", "Não foi possível atualizar o status.");
     }
   }
 
@@ -302,7 +302,7 @@ export default function ServicosEstabelecimento() {
       {/* Toast */}
       {toast && <div className={`toast ${toast.type}`}>{toast.msg}</div>}
 
-      {/* Novo Servico */}
+      {/* Novo Serviço */}
         <div className="card">
           <h2 style={{ marginBottom: 8 }}>Novo Serviço</h2>
           <form onSubmit={add} className="service-form">
@@ -400,7 +400,7 @@ export default function ServicosEstabelecimento() {
           )}
         </div>
 
-      {/* Meus Servicos */}
+      {/* Meus Serviços */}
       <div className="card">
         <div className="header-row" style={{ display: "flex", gap: 8, alignItems: "flex-start", flexDirection: "column", marginBottom: 12 }}>
           <h2 style={{ margin: 0, fontSize: 20 }}>Meus Serviços</h2>
@@ -492,9 +492,9 @@ export default function ServicosEstabelecimento() {
       {/* Modal de confirmacao */}
       {confirmOpen && (
         <Modal onClose={() => setConfirmOpen(false)}>
-          <h3>Excluir servico?</h3>
+          <h3>Excluir serviço?</h3>
           <p>
-            Tem certeza que deseja excluir <b>{toDelete?.nome}</b>? Esta acao nao
+            Tem certeza que deseja excluir <b>{toDelete?.nome}</b>? Esta ação não
             pode ser desfeita.
           </p>
           <div
@@ -515,7 +515,7 @@ export default function ServicosEstabelecimento() {
         <Modal onClose={() => setPlanLimitOpen(false)}>
           <h3>Atualize seu plano</h3>
           <p>
-            {planLimitMessage || 'Seu plano atual (Starter) permite cadastrar ate 10 servicos. Para adicionar novos servicos, migre para o plano Pro ou Premium.'}
+            {planLimitMessage || 'Seu plano atual (Starter) permite cadastrar ate 10 serviços. Para adicionar novos serviços, migre para o plano Pro ou Premium.'}
           </p>
           <p className="muted">
             Acesse <strong>Configurações &gt; Planos</strong> ou utilize os botões abaixo para mudar de plano.
