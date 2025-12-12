@@ -7,12 +7,21 @@ export default function Modal({
   onClose,
   actions,
   closeButton = false,
+  disableOutsideClick = false,
   bodyClassName = '',
 }) {
   const bodyClass = bodyClassName ? `modal__body ${bodyClassName}` : 'modal__body';
 
+  const handleBackdropClick = (event) => {
+    if (disableOutsideClick) {
+      event.stopPropagation();
+      return;
+    }
+    if (typeof onClose === 'function') onClose(event);
+  };
+
   return (
-    <div className="modal-backdrop" role="presentation" onClick={onClose}>
+    <div className="modal-backdrop" role="presentation" onClick={handleBackdropClick}>
       <div
         className="modal"
         role="dialog"
@@ -36,4 +45,3 @@ export default function Modal({
     </div>
   );
 }
-

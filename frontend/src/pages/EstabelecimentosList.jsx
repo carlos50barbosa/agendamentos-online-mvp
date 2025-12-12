@@ -381,25 +381,31 @@ export default function EstabelecimentosList() {
           title="Novidades"
           onClose={handleClosePromo}
           closeButton
+          disableOutsideClick
           actions={[
-            <button key="close" className="btn btn--outline" type="button" onClick={handleClosePromo}>
-              Fechar
-            </button>,
             <a
               key="cta"
               className="btn btn--primary"
               href="/planos"
               target="_blank"
               rel="noopener noreferrer"
+              style={{ margin: '0 auto' }}
             >
               Quero saber mais
             </a>,
           ]}
         >
-          <p>
-            Em breve, espaços dedicados a parceiros e publicidades. Clique em &quot;Quero saber mais&quot; para
-            ser redirecionado.
-          </p>
+          <a
+            href="/planos"
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ display: 'block', textDecoration: 'none', color: 'inherit' }}
+          >
+            <p>
+              Em breve, espaços dedicados a parceiros e publicidades. Clique em &quot;Quero saber mais&quot; para
+              ser redirecionado.
+            </p>
+          </a>
         </Modal>
       )}
 
@@ -542,7 +548,5 @@ export default function EstabelecimentosList() {
     </div>
   );
 }
-
-
 
 
