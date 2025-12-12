@@ -947,6 +947,7 @@ export default function NovoAgendamento() {
   const [infoModalError, setInfoModalError] = useState('');
   const [infoActiveTab, setInfoActiveTab] = useState('about');
   const [ratingModal, setRatingModal] = useState({ open: false, nota: 0, comentario: '', saving: false, error: '' });
+  const [planLimitModal, setPlanLimitModal] = useState({ open: false, message: '', details: null });
 
   // Inicializa estQuery a partir de ?q= da URL e reage a mudanÃ§as no histÃ³rico
   useEffect(() => {
@@ -1727,52 +1728,61 @@ useEffect(() => {
         estabelecimentoNome: selectedEstablishment?.name || "seu estabelecimento",
       });
       showToast("success", "Agendado com sucesso!");
-
     } catch (e) {
-      const code =
-        e?.status || e?.data?.status || (/\b(409|500)\b/.exec(String(e?.message))?.[1] | 0);
-
-      const { slotIndisponivel, meu } = await verifyBookingCreated(selectedSlot.datetime);
-
-      if (Number(code) === 409) {
-        if (meu) {
-          success = true;
-          setModal((p) => ({ ...p, isOpen: false }));
-          showToast("success", "Seu agendamento já existia e foi confirmado.");
-          // persiste overlay para sobreviver ao reload
-          {
-            const key = `fb:${establishmentId}:${currentWeek}`;
-            setState((p) => {
-              const list = Array.from(new Set([...p.forceBusy, minuteISO(selectedSlot.datetime)]));
-              try { localStorage.setItem(key, JSON.stringify(list)); } catch {}
-              return { ...p, forceBusy: list };
-            });
-          }
-        } else {
-          showToast("error", "Este horário acabou de ficar indisponí­vel. Escolha outro.");
-        }
-      } else if (Number(code) === 500) {
-        // Se criou (meu) OU o slot ficou indisponí­vel por qualquer fonte, tratamos como sucesso.
-        if (slotIndisponivel || meu) {
-          success = true;
-          setModal((p) => ({ ...p, isOpen: false }));
-          showToast("success", "Agendado com sucesso! (o servidor retornou 500)");
-
-          // Se o /slots ainda NÃƒO marcou ocupado, forÃ§a overlay vermelho neste minuto
-          if (!slotIndisponivel) {
-            const key = `fb:${establishmentId}:${currentWeek}`;
-            setState((p) => {
-              const list = Array.from(new Set([...p.forceBusy, minuteISO(selectedSlot.datetime)]));
-              try { localStorage.setItem(key, JSON.stringify(list)); } catch {}
-              return { ...p, forceBusy: list };
-            });
-          }
-
-        } else {
-          showToast("error", "Erro no servidor ao agendar. Tente novamente.");
-        }
+      if (e?.data?.error === 'plan_limit_agendamentos') {
+        const details = e?.data?.details || {};
+        const message = e?.data?.message || 'Limite de agendamentos do plano atingido.';
+        setPlanLimitModal({
+          open: true,
+          message,
+          details: {
+            limit: details.limit ?? null,
+            total: details.total ?? null,
+            month: details.month ?? null,
+          },
+        });
+        showToast('error', message);
       } else {
-        showToast("error", e?.message || "Falha ao agendar.");
+        const code =
+          e?.status || e?.data?.status || (/(409|500)/.exec(String(e?.message))?.[1] | 0);
+
+        const { slotIndisponivel, meu } = await verifyBookingCreated(selectedSlot.datetime);
+
+        if (Number(code) === 409) {
+          if (meu) {
+            success = true;
+            setModal((p) => ({ ...p, isOpen: false }));
+            showToast("success", "Seu agendamento ja existia e foi confirmado.");
+            {
+              const key = `fb:${establishmentId}:${currentWeek}`;
+              setState((p) => {
+                const list = Array.from(new Set([...p.forceBusy, minuteISO(selectedSlot.datetime)]));
+                try { localStorage.setItem(key, JSON.stringify(list)); } catch {}
+                return { ...p, forceBusy: list };
+              });
+            }
+          } else {
+            showToast("error", "Este horario acabou de ficar indisponivel. Escolha outro.");
+          }
+        } else if (Number(code) === 500) {
+          if (slotIndisponivel || meu) {
+            success = true;
+            setModal((p) => ({ ...p, isOpen: false }));
+            showToast("success", "Agendado com sucesso! (o servidor retornou 500)");
+            if (!slotIndisponivel) {
+              const key = `fb:${establishmentId}:${currentWeek}`;
+              setState((p) => {
+                const list = Array.from(new Set([...p.forceBusy, minuteISO(selectedSlot.datetime)]));
+                try { localStorage.setItem(key, JSON.stringify(list)); } catch {}
+                return { ...p, forceBusy: list };
+              });
+            }
+          } else {
+            showToast("error", "Erro no servidor ao agendar. Tente novamente.");
+          }
+        } else {
+          showToast("error", e?.message || "Falha ao agendar.");
+        }
       }
     } finally {
       // Sempre recarrega para refletir indisponÃ­veis
@@ -3296,6 +3306,33 @@ useEffect(() => {
               </div>
             )}
           </div>
+        </Modal>
+      )}
+      {planLimitModal.open && (
+        <Modal onClose={() => setPlanLimitModal({ open: false, message: '', details: null })} closeButton>
+          <h3>Limite de agendamentos atingido</h3>
+          <p>{planLimitModal.message || 'Este estabelecimento atingiu o limite de agendamentos do plano atual.'}</p>
+          {planLimitModal.details?.month && (
+            <p className="muted" style={{ marginTop: 4 }}>
+              Período: {planLimitModal.details.month}
+              {planLimitModal.details.limit ? ` • Limite: ${planLimitModal.details.limit}/mês` : ''}
+              {planLimitModal.details.total ? ` • Atual: ${planLimitModal.details.total}` : ''}
+            </p>
+          )}
+          {user?.tipo === 'estabelecimento' ? (
+            <div className="row" style={{ gap: 8, marginTop: 12, justifyContent: 'flex-end' }}>
+              <Link className="btn btn--outline" to="/configuracoes" onClick={() => setPlanLimitModal({ open: false, message: '', details: null })}>
+                Ir para Configurações
+              </Link>
+              <Link className="btn btn--primary" to="/planos" onClick={() => setPlanLimitModal({ open: false, message: '', details: null })}>
+                Ver planos
+              </Link>
+            </div>
+          ) : (
+            <p className="muted" style={{ marginTop: 8 }}>
+              Se você é o estabelecimento, faça login e atualize seu plano para continuar recebendo novos agendamentos.
+            </p>
+          )}
         </Modal>
       )}
       {modal.isOpen && selectedSlot && selectedService && (

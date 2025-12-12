@@ -29,6 +29,19 @@ pool.query = async (sql, params = []) => {
     const u = state.usuarios.get(id)
     return [[{ plan: u.plan, plan_status: u.plan_status, plan_trial_ends_at: null, plan_active_until: null, plan_subscription_id: null, plan_cycle: 'mensal' }], []]
   }
+  if (norm.startsWith("SELECT COUNT(*) AS total FROM agendamentos WHERE estabelecimento_id=? AND status IN ('confirmado','pendente') AND inicio >= ? AND inicio < ?")) {
+    const [estId, start, end] = params
+    const startMs = new Date(start).getTime()
+    const endMs = new Date(end).getTime()
+    const total = state.agendamentos.filter((a) => {
+      if (Number(a.estabelecimento_id) !== Number(estId)) return false
+      const ms = new Date(a.inicio).getTime()
+      if (Number.isNaN(ms)) return false
+      const status = String(a.status || 'confirmado').toLowerCase()
+      return ['confirmado', 'pendente'].includes(status) && ms >= startMs && ms < endMs
+    }).length
+    return [[{ total }], []]
+  }
   // service
   if (norm.startsWith('SELECT duracao_min, nome FROM servicos WHERE id=? AND estabelecimento_id=? AND ativo=1')) {
     const [id, estId] = params

@@ -12,15 +12,22 @@ const agendamentosRouter = (await import('../src/routes/agendamentos.js')).defau
 const servicosRouter = (await import('../src/routes/servicos.js')).default
 const slotsRouter = (await import('../src/routes/slots.js')).default
 const relatoriosRouter = (await import('../src/routes/relatorios.js')).default
+const { setAppointmentLimitNotifier } = await import('../src/lib/appointment_limits.js')
 
 const state = {
   usuarios: new Map(),
   servicos: [],
+  agendamentos: [],
   profissionais: [],
   servicoProfissionais: new Map(),
   bloqueios: [],
   report: defaultReport()
 }
+
+const appointmentLimitNotifications = []
+setAppointmentLimitNotifier(async (payload) => {
+  appointmentLimitNotifications.push(payload)
+})
 
 function applyReportOverrides(base, overrides = {}) {
   const next = clone(base);
@@ -59,7 +66,7 @@ function clone(value) {
   return JSON.parse(JSON.stringify(value))
 }
 
-function seedScenario({ user = {}, services = null, professionals = [], serviceProfessionals = [], bloqueios = [], report = null } = {}) {
+function seedScenario({ user = {}, services = null, professionals = [], serviceProfessionals = [], bloqueios = [], appointments = [], report = null } = {}) {
   state.usuarios.clear()
   state.usuarios.set(1, {
     id: 1,
@@ -134,6 +141,13 @@ function seedScenario({ user = {}, services = null, professionals = [], serviceP
     fim: new Date(item.fim)
   }))
 
+  state.agendamentos = appointments.map((item, index) => ({
+    id: item.id ?? index + 1,
+    estabelecimento_id: item.estabelecimento_id ?? 1,
+    inicio: item.inicio ? new Date(item.inicio) : new Date(),
+    status: item.status || 'confirmado'
+  }))
+
   state.report = applyReportOverrides(defaultReport(), report)
 }
 
@@ -168,6 +182,20 @@ pool.query = async (sql, params = []) => {
       plan_trial_ends_at: user.plan_trial_ends_at ? new Date(user.plan_trial_ends_at) : null,
       plan_active_until: user.plan_active_until ? new Date(user.plan_active_until) : null
     }], []]
+  }
+
+  if (norm.startsWith("SELECT COUNT(*) AS total FROM agendamentos WHERE estabelecimento_id=? AND status IN ('confirmado','pendente') AND inicio >= ? AND inicio < ?")) {
+    const [estId, start, end] = params
+    const startMs = new Date(start).getTime()
+    const endMs = new Date(end).getTime()
+    const total = state.agendamentos.filter((a) => {
+      if (Number(a.estabelecimento_id) !== Number(estId)) return false
+      const ms = new Date(a.inicio).getTime()
+      if (Number.isNaN(ms)) return false
+      const status = String(a.status || 'confirmado').toLowerCase()
+      return ['confirmado', 'pendente'].includes(status) && ms >= startMs && ms < endMs
+    }).length
+    return [[{ total }], []]
   }
 
   if (norm.startsWith("SELECT plan, plan_status, plan_trial_ends_at, plan_active_until, plan_subscription_id, plan_cycle FROM usuarios WHERE id=?")) {
@@ -300,6 +328,19 @@ pool.query = async (sql, params = []) => {
     const [id, estId] = params
     const p = state.profissionais.find((row) => row.id === id && row.estabelecimento_id === estId)
     return [p ? [{ id: p.id, nome: p.nome, avatar_url: p.avatar_url || null, ativo: p.ativo ? 1 : 0 }] : [], []]
+  }
+
+  if (norm.startsWith('SELECT email, telefone, nome, notify_email_estab, notify_whatsapp_estab FROM usuarios WHERE id=?')) {
+    const id = params[0]
+    const user = findUserById(id)
+    if (!user) return [[], []]
+    return [[{
+      email: user.email || null,
+      telefone: user.telefone || null,
+      nome: user.nome || null,
+      notify_email_estab: user.notify_email_estab ?? 1,
+      notify_whatsapp_estab: user.notify_whatsapp_estab ?? 1
+    }], []]
   }
 
   if (norm.startsWith("INSERT INTO servicos")) {
@@ -609,6 +650,40 @@ const res12 = await callHandler(relatorioHandler, {
 results.push({ name: 'relatorio bloqueado por plano', response: res12 })
 assert.equal(res12.status, 402)
 assert.equal(res12.body?.error, 'plan_delinquent')
+
+// 13) agendamento bloqueado por limite mensal do plano
+const limitMonth = new Date()
+limitMonth.setMonth(limitMonth.getMonth() + 1)
+limitMonth.setDate(10)
+limitMonth.setHours(14, 0, 0, 0)
+const appointments = Array.from({ length: 100 }, (_, index) => {
+  const d = new Date(limitMonth)
+  d.setDate(1 + (index % 10))
+  d.setHours(9 + (index % 4), 0, 0, 0)
+  return { id: 500 + index, estabelecimento_id: 1, inicio: d, status: 'confirmado' }
+})
+seedScenario({
+  user: { plan: 'starter', plan_status: 'active' },
+  appointments,
+})
+appointmentLimitNotifications.length = 0
+const limitAttempt = new Date(limitMonth)
+limitAttempt.setDate(limitMonth.getDate() + 2)
+limitAttempt.setHours(15, 0, 0, 0)
+const res13 = await callHandler(createAppointmentHandler, {
+  body: {
+    estabelecimento_id: 1,
+    servico_id: 10,
+    inicio: limitAttempt.toISOString(),
+  },
+  user: { id: 77, tipo: 'cliente' }
+})
+results.push({ name: 'agendar bloqueado por limite do plano', response: res13 })
+assert.equal(res13.status, 403)
+assert.equal(res13.body?.error, 'plan_limit_agendamentos')
+assert.equal(appointmentLimitNotifications.length, 1)
+assert.equal(appointmentLimitNotifications[0]?.limit, 100)
+assert.equal(appointmentLimitNotifications[0]?.total, 100)
 
 console.log('Testes executados com sucesso:')
 for (const { name, response } of results) {

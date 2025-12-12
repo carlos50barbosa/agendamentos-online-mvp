@@ -1,9 +1,10 @@
 // backend/src/routes/agendamentos.js
 import { Router } from 'express';
 import { pool } from '../lib/db.js';
-import { getPlanContext, isDelinquentStatus } from '../lib/plans.js';
+import { getPlanContext, isDelinquentStatus, formatPlanLimitExceeded } from '../lib/plans.js';
 import { auth as authRequired, isCliente, isEstabelecimento } from '../middleware/auth.js';
 import { notifyEmail, notifyWhatsapp, sendTemplate } from '../lib/notifications.js';
+import { checkMonthlyAppointmentLimit, notifyAppointmentLimitReached } from '../lib/appointment_limits.js';
 
 const router = Router();
 
@@ -191,6 +192,30 @@ router.post('/', authRequired, isCliente, async (req, res) => {
       return res.status(400).json({ error: 'duracao_invalida', message: 'Duracao do servico invalida.' });
     }
     const fimDate = new Date(inicioDate.getTime() + dur * 60_000);
+    const planConfig = planContext?.config;
+    const limitCheck = await checkMonthlyAppointmentLimit({
+      estabelecimentoId: estabelecimento_id,
+      planConfig,
+      appointmentDate: inicioDate,
+    });
+    if (!limitCheck.ok) {
+      fireAndForget(() => notifyAppointmentLimitReached({
+        estabelecimentoId: estabelecimento_id,
+        limit: limitCheck.limit,
+        total: limitCheck.total,
+        range: limitCheck.range,
+        planConfig,
+      }));
+      return res.status(403).json({
+        error: 'plan_limit_agendamentos',
+        message: formatPlanLimitExceeded(planConfig, 'appointments') || 'Limite de agendamentos atingido para este mes.',
+        details: {
+          limit: limitCheck.limit,
+          total: limitCheck.total,
+          month: limitCheck.range?.label || null,
+        },
+      });
+    }
 
     // 3) transacao + checagem de conflito
     conn = await pool.getConnection();

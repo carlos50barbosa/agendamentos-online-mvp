@@ -1,10 +1,11 @@
 ﻿// backend/src/routes/agendamentos_public.js
 import { Router } from 'express';
 import { pool } from '../lib/db.js';
-import { getPlanContext, isDelinquentStatus } from '../lib/plans.js';
+import { getPlanContext, isDelinquentStatus, formatPlanLimitExceeded } from '../lib/plans.js';
 import bcrypt from 'bcryptjs';
 import { notifyEmail, notifyWhatsapp, sendTemplate } from '../lib/notifications.js';
 import jwt from 'jsonwebtoken';
+import { checkMonthlyAppointmentLimit, notifyAppointmentLimitReached } from '../lib/appointment_limits.js';
 
 const router = Router();
 const TZ = 'America/Sao_Paulo';
@@ -113,6 +114,32 @@ router.post('/', async (req, res) => {
     const dur = Number(svc.duracao_min || 0);
     if (!Number.isFinite(dur) || dur <= 0) return res.status(400).json({ error: 'duracao_invalida' });
     const fimDate = new Date(inicioDate.getTime() + dur * 60_000);
+    const planConfig = planContext?.config;
+    const limitCheck = await checkMonthlyAppointmentLimit({
+      estabelecimentoId: estabelecimento_id,
+      planConfig,
+      appointmentDate: inicioDate,
+    });
+    if (!limitCheck.ok) {
+      (async () => {
+        try {
+          await notifyAppointmentLimitReached({
+            estabelecimentoId: estabelecimento_id,
+            limit: limitCheck.limit,
+            total: limitCheck.total,
+            range: limitCheck.range,
+            planConfig,
+          });
+        } catch (e) {
+          console.warn('[agendamentos_public][limit_notify]', e?.message || e);
+        }
+      })();
+      return res.status(403).json({
+        error: 'plan_limit_agendamentos',
+        message: formatPlanLimitExceeded(planConfig, 'appointments') || 'Limite de agendamentos atingido para este mes.',
+        details: { limit: limitCheck.limit, total: limitCheck.total, month: limitCheck.range?.label || null },
+      });
+    }
 
     const emailNorm = String(email).trim().toLowerCase();
     const telDigits = toDigits(telefone);

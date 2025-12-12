@@ -13,6 +13,7 @@ const PLAN_CONFIG = {
     label: 'Starter',
     priceCents: 1490,
     annualPriceCents: 14900,
+    maxMonthlyAppointments: 100,
     maxServices: 10,
     maxProfessionals: 2,
     maxGalleryImages: 5,
@@ -24,6 +25,7 @@ const PLAN_CONFIG = {
     label: 'Pro',
     priceCents: 4990,
     annualPriceCents: 49900,
+    maxMonthlyAppointments: 500,
     maxServices: 100,
     maxProfessionals: 10,
     maxGalleryImages: 15,
@@ -35,6 +37,7 @@ const PLAN_CONFIG = {
     label: 'Premium',
     priceCents: 19900,
     annualPriceCents: 199000,
+    maxMonthlyAppointments: LIMIT_UNLIMITED,
     maxServices: LIMIT_UNLIMITED,
     maxProfessionals: LIMIT_UNLIMITED,
     maxGalleryImages: LIMIT_UNLIMITED,
@@ -150,6 +153,11 @@ export async function getPlanContext(estabelecimentoId) {
 }
 
 export function formatPlanLimitExceeded(planConfig, type) {
+  if (type === 'appointments') {
+    if (planConfig.maxMonthlyAppointments === null) return null;
+    const nextPlan = planConfig.code === 'starter' ? 'Pro' : 'Premium';
+    return `Seu plano atual (${planConfig.label}) permite receber ate ${planConfig.maxMonthlyAppointments} agendamentos por mes. Atualize para o plano ${nextPlan} para continuar confirmando novos horarios.`;
+  }
   if (type === 'services') {
     if (planConfig.maxServices === null) return null;
     const nextPlan = planConfig.code === 'starter' ? 'Pro' : 'Premium';
@@ -171,6 +179,7 @@ export function serializePlanContext(context) {
     status,
     billing_cycle: cycle,
     limits: {
+      maxMonthlyAppointments: config.maxMonthlyAppointments,
       maxServices: config.maxServices,
       maxProfessionals: config.maxProfessionals,
       maxGalleryImages: config.maxGalleryImages,

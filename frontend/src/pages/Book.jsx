@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Api } from '../utils/api';
+import { getUser } from '../utils/auth';
 
 function formatDateBR(input) {
   try {
@@ -32,9 +33,11 @@ function formatPhone(input) {
 export default function Book(){
   const { id } = useParams();
   const nav = useNavigate();
+  const user = getUser();
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [planLimit, setPlanLimit] = useState(null);
 
   const [estab, setEstab] = useState(null);
   const [services, setServices] = useState([]);
@@ -118,10 +121,22 @@ export default function Book(){
       const effectiveToken = token ?? otpToken;
       if (effectiveToken) payload.otp_token = effectiveToken;
       await Api.publicAgendar(payload, { idempotencyKey: idem });
+      setPlanLimit(null);
       setDone(true);
     } catch (e) {
-      const msg = e?.data?.message || e?.message || 'Falha ao agendar.';
-      setError(String(msg));
+      if (e?.data?.error === 'plan_limit_agendamentos') {
+        const msg = e?.data?.message || 'Este estabelecimento atingiu o limite de agendamentos do plano.';
+        setError(String(msg));
+        setPlanLimit({
+          message: msg,
+          month: e?.data?.details?.month || null,
+          limit: e?.data?.details?.limit || null,
+        });
+      } else {
+        const msg = e?.data?.message || e?.message || 'Falha ao agendar.';
+        setError(String(msg));
+        setPlanLimit(null);
+      }
       if (e?.data?.error === 'otp_required') {
         setOtpMsg('Verifique seu email para continuar. Envie e valide o codigo.');
       }
@@ -189,6 +204,29 @@ export default function Book(){
         </div>
         <div className="chatbox__body">
           {error && <div className="chatmsg chatmsg--error" style={{ marginBottom: 8 }}>{error}</div>}
+          {planLimit && (
+            <div className="notice notice--warn" role="alert" style={{ marginBottom: 12 }}>
+              <div style={{ fontWeight: 700 }}>Agenda bloqueada pelo plano</div>
+              <div>{planLimit.message}</div>
+              {planLimit.month && (
+                <div className="muted">Período: {planLimit.month}{planLimit.limit ? ` • Limite: ${planLimit.limit}/mês` : ''}</div>
+              )}
+              {user?.tipo === 'estabelecimento' ? (
+                <div className="row" style={{ gap: 8, marginTop: 8 }}>
+                  <button className="btn btn--outline" type="button" onClick={() => nav('/configuracoes')}>
+                    Ir para Configurações
+                  </button>
+                  <button className="btn btn--primary" type="button" onClick={() => nav('/planos')}>
+                    Ver planos
+                  </button>
+                </div>
+              ) : (
+                <div className="muted" style={{ marginTop: 6 }}>
+                  Se você é o estabelecimento, faça login e atualize seu plano para liberar novos agendamentos.
+                </div>
+              )}
+            </div>
+          )}
 
           {!done && (
             <div className="chatpanel">
