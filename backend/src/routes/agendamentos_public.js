@@ -5,7 +5,7 @@ import { getPlanContext, isDelinquentStatus, formatPlanLimitExceeded } from '../
 import bcrypt from 'bcryptjs';
 import { notifyEmail, notifyWhatsapp, sendTemplate } from '../lib/notifications.js';
 import { estabNotificationsDisabled } from '../lib/estab_notifications.js';
-import { clientWhatsappDisabled } from '../lib/client_notifications.js';
+import { clientWhatsappDisabled, whatsappImmediateDisabled } from '../lib/client_notifications.js';
 import jwt from 'jsonwebtoken';
 import { checkMonthlyAppointmentLimit, notifyAppointmentLimitReached } from '../lib/appointment_limits.js';
 
@@ -230,6 +230,7 @@ router.post('/', async (req, res) => {
     const canWhatsappEst = boolPref(est?.notify_whatsapp_estab, true);
     const blockEstabNotifications = estabNotificationsDisabled();
     const blockClientWhatsapp = clientWhatsappDisabled();
+    const blockWhatsappImmediate = whatsappImmediateDisabled();
     const profNome = profissionalRow?.nome || '';
     const profLabel = profNome ? ` com ${profNome}` : '';
     (async () => {
@@ -245,7 +246,7 @@ router.post('/', async (req, res) => {
         }
       } catch {}
       try {
-        if (!blockClientWhatsapp && telCli) {
+        if (!blockWhatsappImmediate && !blockClientWhatsapp && telCli) {
           const paramMode = String(process.env.WA_TEMPLATE_PARAM_MODE || 'single').toLowerCase();
           const tplName = process.env.WA_TEMPLATE_NAME_CONFIRM || process.env.WA_TEMPLATE_NAME || 'confirmacao_agendamento';
           const tplLang = process.env.WA_TEMPLATE_LANG || 'pt_BR';
@@ -268,7 +269,7 @@ router.post('/', async (req, res) => {
           }
         }
       } catch {}
-      try { if (!blockEstabNotifications && canWhatsappEst && telEst && telEst !== telCli) await notifyWhatsapp(`🔔 Novo agendamento: ${svc.nome} em ${inicioBR} — Cliente: ${String(nome)||''}`, telEst); } catch {}
+      try { if (!blockWhatsappImmediate && !blockEstabNotifications && canWhatsappEst && telEst && telEst !== telCli) await notifyWhatsapp(`🔔 Novo agendamento: ${svc.nome} em ${inicioBR} — Cliente: ${String(nome)||''}`, telEst); } catch {}
     })();
 
     return res.status(201).json({ id: ins.insertId, cliente_id: userId, estabelecimento_id, servico_id, profissional_id: profissional_id || null, inicio: inicioDate, fim: fimDate, status: 'confirmado' });

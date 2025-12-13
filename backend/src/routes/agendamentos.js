@@ -6,7 +6,7 @@ import { auth as authRequired, isCliente, isEstabelecimento } from '../middlewar
 import { notifyEmail, notifyWhatsapp, sendTemplate } from '../lib/notifications.js';
 import { checkMonthlyAppointmentLimit, notifyAppointmentLimitReached } from '../lib/appointment_limits.js';
 import { estabNotificationsDisabled } from '../lib/estab_notifications.js';
-import { clientWhatsappDisabled } from '../lib/client_notifications.js';
+import { clientWhatsappDisabled, whatsappImmediateDisabled } from '../lib/client_notifications.js';
 
 const router = Router();
 
@@ -270,6 +270,7 @@ router.post('/', authRequired, isCliente, async (req, res) => {
     const canWhatsappEst = boolPref(est?.notify_whatsapp_estab, true);
     const blockEstabNotifications = estabNotificationsDisabled();
     const blockClientWhatsapp = clientWhatsappDisabled();
+    const blockWhatsappImmediate = whatsappImmediateDisabled();
     const estNome = est?.nome || '';
     const estNomeFriendly = estNome || 'nosso estabelecimento';
     const profNome = profissionalRow?.nome || '';
@@ -295,6 +296,7 @@ router.post('/', authRequired, isCliente, async (req, res) => {
 
     // (b) WhatsApp imediato
     fireAndForget(async () => {
+      if (blockWhatsappImmediate) return; // WhatsApp imediato desativado via env
       const paramMode = String(process.env.WA_TEMPLATE_PARAM_MODE || 'single').toLowerCase();
       const tplName = process.env.WA_TEMPLATE_NAME_CONFIRM || process.env.WA_TEMPLATE_NAME || 'confirmacao_agendamento';
       const tplLang = process.env.WA_TEMPLATE_LANG || 'pt_BR';
@@ -371,6 +373,7 @@ router.put('/:id/cancel', authRequired, isCliente, async (req, res) => {
     const telEst = toDigits(est?.telefone);
     const blockEstabNotifications = estabNotificationsDisabled();
     const blockClientWhatsapp = clientWhatsappDisabled();
+    const blockWhatsappImmediate = whatsappImmediateDisabled();
 
     fireAndForget(async () => {
       const paramMode = String(process.env.WA_TEMPLATE_PARAM_MODE || 'single').toLowerCase();
@@ -400,6 +403,84 @@ router.put('/:id/cancel', authRequired, isCliente, async (req, res) => {
     return res.json({ ok: true });
   } catch (e) {
     console.error('[agendamentos/cancel]', e);
+    return res.status(500).json({ error: 'server_error' });
+  }
+});
+
+// Cancelar (forçado pelo estabelecimento) — apenas se ainda não houve confirmação via WhatsApp
+router.put('/:id/cancel-estab', authRequired, isEstabelecimento, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const estId = req.user.id;
+
+    const [[ag]] = await pool.query(
+      'SELECT id, cliente_id, servico_id, inicio, status, cliente_confirmou_whatsapp_at FROM agendamentos WHERE id=? AND estabelecimento_id=?',
+      [id, estId]
+    );
+    if (!ag) {
+      return res.status(404).json({ error: 'not_found', message: 'Agendamento nao encontrado.' });
+    }
+
+    const statusNorm = String(ag.status || '').toLowerCase();
+    if (statusNorm === 'cancelado') {
+      return res.status(400).json({ error: 'already_cancelled', message: 'Agendamento já está cancelado.' });
+    }
+    if (statusNorm === 'concluido') {
+      return res.status(409).json({ error: 'cancel_forbidden', message: 'Não é possível cancelar um atendimento já concluído.' });
+    }
+    if (ag.cliente_confirmou_whatsapp_at) {
+      return res.status(409).json({ error: 'cancel_forbidden', message: 'Cancelamento bloqueado: o cliente já confirmou pelo WhatsApp.' });
+    }
+
+    const [rows] = await pool.query(
+      'UPDATE agendamentos SET status="cancelado" WHERE id=? AND estabelecimento_id=?',
+      [id, estId]
+    );
+    if (!rows.affectedRows) {
+      return res.status(404).json({ error: 'not_found', message: 'Agendamento nao encontrado.' });
+    }
+
+    const [[svc]] = await pool.query('SELECT nome FROM servicos WHERE id=?', [ag?.servico_id || 0]);
+    const [[cli]] = await pool.query('SELECT nome, telefone FROM usuarios WHERE id=?', [ag?.cliente_id || 0]);
+    const [[est]] = await pool.query(
+      'SELECT nome, telefone, notify_whatsapp_estab FROM usuarios WHERE id=?',
+      [estId]
+    );
+
+    const inicioBR = ag?.inicio ? brDateTime(new Date(ag.inicio).toISOString()) : '';
+    const telCli = toDigits(cli?.telefone);
+    const telEst = toDigits(est?.telefone);
+    const blockEstabNotifications = estabNotificationsDisabled();
+    const blockClientWhatsapp = clientWhatsappDisabled();
+    const blockWhatsappImmediate = whatsappImmediateDisabled();
+    const canWhatsappEstCancel = boolPref(est?.notify_whatsapp_estab, true);
+
+    fireAndForget(async () => {
+      const paramMode = String(process.env.WA_TEMPLATE_PARAM_MODE || 'single').toLowerCase();
+      const tplName = process.env.WA_TEMPLATE_NAME_CANCEL || process.env.WA_TEMPLATE_NAME || 'confirmacao_agendamento';
+      const tplLang = process.env.WA_TEMPLATE_LANG || 'pt_BR';
+      const params3 = [svc?.nome || '', inicioBR, est?.nome || ''];
+
+      if (/^triple|3$/.test(paramMode)) {
+        if (!blockClientWhatsapp && telCli) {
+          try { await sendTemplate({ to: telCli, name: tplName, lang: tplLang, bodyParams: params3 }); } catch (e) { console.warn('[wa/cancel cli est]', e?.message || e); }
+        }
+        if (!blockEstabNotifications && canWhatsappEstCancel && telEst && telEst !== telCli) {
+          try { await sendTemplate({ to: telEst, name: tplName, lang: tplLang, bodyParams: params3 }); } catch (e) { console.warn('[wa/cancel est est]', e?.message || e); }
+        }
+      } else {
+        if (!blockClientWhatsapp && telCli) {
+          await notifyWhatsapp(`Seu agendamento ${id} (${svc?.nome ?? 'servico'}) em ${inicioBR} foi cancelado pelo estabelecimento.`, telCli);
+        }
+        if (!blockEstabNotifications && canWhatsappEstCancel && telEst && telEst !== telCli) {
+          await notifyWhatsapp(`[Aviso interno] Cancelamento forcado: agendamento ${id} (${svc?.nome ?? 'servico'}) em ${inicioBR}.`, telEst);
+        }
+      }
+    });
+
+    return res.json({ ok: true });
+  } catch (e) {
+    console.error('[agendamentos/cancel-estab]', e);
     return res.status(500).json({ error: 'server_error' });
   }
 });

@@ -98,10 +98,7 @@ const DateHelpers = {
     return `${s1} • ${s2}`.replace(/\./g, '')
   },
   formatTime: (datetime) => {
-    const dt = new Date(datetime)
-    const hh = String(dt.getHours()).padStart(2, '0')
-    const mm = String(dt.getMinutes()).padStart(2, '0')
-    return `${hh}:${mm}`
+    return formatTime24h(datetime)
   },
   isPastSlot: (datetime) => new Date(datetime).getTime() < Date.now(),
   formatDateFull: (date) =>
@@ -617,6 +614,11 @@ export default function DashboardEstabelecimento() {
     return itens
   }, [itens, status])
 
+  const handleForceCancel = useCallback(async (id) => {
+    await Api.cancelarAgendamentoEstab(id)
+    setItens((prev) => prev.map((item) => (item.id === id ? { ...item, status: 'cancelado' } : item)))
+  }, [])
+
   return (
     <div className="dashboard-narrow">
       <div className="card">
@@ -664,7 +666,7 @@ export default function DashboardEstabelecimento() {
         </div>
       )}
       <div style={{ marginTop: 16 }}>
-        <ProfessionalAgendaView items={filtered} />
+        <ProfessionalAgendaView items={filtered} onForceCancel={handleForceCancel} />
       </div>
     </div>
   )
@@ -922,6 +924,13 @@ const AGENDA_STATUS_THEME = Object.freeze({
 })
 
 const getAgendaTheme = (status) => AGENDA_STATUS_THEME[status] || AGENDA_STATUS_THEME.default
+const formatTime24h = (date) => {
+  const dt = date instanceof Date ? date : new Date(date)
+  if (!Number.isFinite(dt?.getTime?.())) return ''
+  const hours = String(dt.getHours()).padStart(2, '0')
+  const minutes = String(dt.getMinutes()).padStart(2, '0')
+  return `${hours}:${minutes}`
+}
 const formatTime12h = (date, { showMinutes = false, compact = false, lowercase = false } = {}) => {
   const dt = date instanceof Date ? date : new Date(date)
   if (!Number.isFinite(dt?.getTime?.())) return ''
@@ -938,12 +947,7 @@ const formatHourRange = (start, end) => {
   const s = start instanceof Date ? start : new Date(start)
   const e = end instanceof Date ? end : new Date(end)
   if (!Number.isFinite(s?.getTime?.()) || !Number.isFinite(e?.getTime?.())) return ''
-  const showMinutes = s.getMinutes() !== 0 || e.getMinutes() !== 0
-  return `${formatTime12h(s, { showMinutes, compact: true, lowercase: true })} – ${formatTime12h(e, {
-    showMinutes,
-    compact: true,
-    lowercase: true,
-  })}`
+  return `${formatTime24h(s)} - ${formatTime24h(e)}`
 }
 
 const RESOURCE_COLORS = [
@@ -958,7 +962,7 @@ const RESOURCE_COLORS = [
 ]
 
 
-function ProfessionalAgendaView({ items }) {
+function ProfessionalAgendaView({ items, onForceCancel }) {
   const resources = useMemo(() => {
     const map = new Map()
     ;(items || []).forEach((item) => {
@@ -1155,7 +1159,7 @@ function ProfessionalAgendaView({ items }) {
 
   const formats = useMemo(
     () => ({
-      timeGutterFormat: (date) => formatTime12h(date, { showMinutes: false, compact: false }),
+      timeGutterFormat: (date) => formatTime24h(date),
       eventTimeRangeFormat: ({ start, end }) => formatHourRange(start, end),
       dayHeaderFormat: () => '',
     }),
@@ -1183,11 +1187,12 @@ function ProfessionalAgendaView({ items }) {
     [resourceThemes]
   )
 
-  const AgendaEvent = useCallback(({ event }) => {
+  const AgendaEvent = ({ event }) => {
     const theme = event?._theme || getAgendaTheme(event?.status)
     const serviceLabel = event?.service || event?.title || 'Servico'
     const clientLabel = event?.client ? ` - ${event.client}` : ''
     const isConfirmed = Boolean(event?.confirmedAt)
+    const isCancelled = String(event?.status || '').toLowerCase() === 'cancelado'
     const confirmationLabel = isConfirmed
       ? 'Cliente confirmou via WhatsApp'
       : 'Aguardando confirmação via WhatsApp'
@@ -1200,6 +1205,22 @@ function ProfessionalAgendaView({ items }) {
           background: 'rgba(107, 114, 128, 0.14)',
           color: '#374151',
         }
+    const [cancelling, setCancelling] = useState(false)
+    const handleForceCancel = async () => {
+      if (!onForceCancel || cancelling || isCancelled) return
+      const confirmed = window.confirm('Cancelar este agendamento? O cliente será notificado.')
+      if (!confirmed) return
+      try {
+        setCancelling(true)
+        await onForceCancel(event?.id)
+      } catch (err) {
+        const msg = err?.data?.message || err?.message || 'Não foi possível cancelar.'
+        window.alert(msg)
+      } finally {
+        setCancelling(false)
+      }
+    }
+
     return (
       <div className="pro-agenda__event-card">
         <div className="pro-agenda__event-title">
@@ -1207,27 +1228,46 @@ function ProfessionalAgendaView({ items }) {
           <div className="pro-agenda__event-lines">
             <strong>{serviceLabel}{clientLabel}</strong>
             <span className="pro-agenda__time">{formatHourRange(event?.start, event?.end)}</span>
-            <span
-              className="pro-agenda__pill"
-              title={confirmationLabel}
-              aria-label={confirmationLabel}
-              style={{
-                display: 'inline-block',
-                marginTop: 4,
-                padding: '3px 8px',
-                borderRadius: 999,
-                fontSize: 12,
-                fontWeight: 600,
-                ...pillStyle,
-              }}
-            >
-              {confirmationLabel}
-            </span>
+            {isCancelled ? (
+              <span className="badge badge--pro" style={{ background: '#fee2e2', color: '#7f1d1d', borderColor: '#fecdd3' }}>
+                Cancelado
+              </span>
+            ) : (
+              <span
+                className="pro-agenda__pill"
+                title={confirmationLabel}
+                aria-label={confirmationLabel}
+                style={{
+                  display: 'inline-block',
+                  marginTop: 4,
+                  padding: '3px 8px',
+                  borderRadius: 999,
+                  fontSize: 12,
+                  fontWeight: 600,
+                  ...pillStyle,
+                }}
+              >
+                {confirmationLabel}
+              </span>
+            )}
           </div>
         </div>
+        {!isCancelled && onForceCancel && (
+          <div style={{ marginTop: 8 }}>
+            <button
+              type="button"
+              className="btn btn--sm btn--danger"
+              onClick={handleForceCancel}
+              disabled={cancelling || isConfirmed}
+              title={isConfirmed ? 'Cancelamento bloqueado: cliente já confirmou via WhatsApp.' : undefined}
+            >
+              {cancelling ? 'Cancelando...' : isConfirmed ? 'Cancelamento bloqueado' : 'Cancelar agendamento'}
+            </button>
+          </div>
+        )}
       </div>
     )
-  }, [])
+  }
 
   const handlePrevDay = () => setCurrentDate((d) => new Date(d.getFullYear(), d.getMonth(), d.getDate() - 1))
   const handleNextDay = () => setCurrentDate((d) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1))

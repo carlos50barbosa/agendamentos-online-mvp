@@ -30,6 +30,7 @@ const Login = React.lazy(() => import('./pages/Login.jsx'));
 const Cadastro = React.lazy(() => import('./pages/Cadastro.jsx'));
 const DashboardCliente = React.lazy(() => import('./pages/DashboardCliente.jsx'));
 const DashboardEstabelecimento = React.lazy(() => import('./pages/DashboardEstabelecimento.jsx'));
+const Clientes = React.lazy(() => import('./pages/Clientes.jsx'));
 const ServicosEstabelecimento = React.lazy(() => import('./pages/ServicosEstabelecimento.jsx'));
 const ProfissionaisEstabelecimento = React.lazy(() => import('./pages/ProfissionaisEstabelecimento.jsx'));
 const NovoAgendamento = React.lazy(() => import('./pages/NovoAgendamento.jsx'));
@@ -59,6 +60,7 @@ const APP_ROUTES = [
   { path: '/cadastro', element: <Cadastro /> },
   { path: '/cliente', element: <DashboardCliente /> },
   { path: '/estab', element: <DashboardEstabelecimento /> },
+  { path: '/clientes', element: <Clientes /> },
   { path: '/servicos', element: <ServicosEstabelecimento /> },
   { path: '/profissionais', element: <ProfissionaisEstabelecimento /> },
   { path: '/novo/:estabelecimentoSlug', element: <NovoAgendamento /> },

@@ -5,6 +5,8 @@ import {
   IconChart,
   IconWrench,
   IconGear,
+  IconList,
+  IconUsers,
   IconLogout,
 } from '../components/Icons.jsx';
 
@@ -40,16 +42,17 @@ export function buildNavigation(user) {
 
   if (isEstab) {
     mainItems.push(
-      { key: 'services', label: 'Serviços', to: '/servicos', icon: IconWrench, type: 'link' },
+      { key: 'services', label: 'Servicos', to: '/servicos', icon: IconWrench, type: 'link' },
+      { key: 'clients', label: 'Clientes', to: '/clientes', icon: IconUsers, type: 'link' },
       { key: 'professionals', label: 'Profissionais', to: '/profissionais', icon: IconUser, type: 'link' },
-      { key: 'reports', label: 'Relatórios', to: '/relatorios', icon: IconChart, type: 'link' },
+      { key: 'reports', label: 'Relatorios', to: '/relatorios', icon: IconChart, type: 'link' },
     );
   } else {
     mainItems.push({ key: 'new', label: 'Novo Agendamento', to: '/novo', icon: IconPlus, type: 'link' });
   }
 
   const accountItems = [
-    { key: 'settings', label: 'Configurações', to: '/configuracoes', icon: IconGear, type: 'link' },
+    { key: 'settings', label: 'Configuracoes', to: '/configuracoes', icon: IconGear, type: 'link' },
     { key: 'logout', label: 'Sair', to: null, icon: IconLogout, type: 'action' },
   ];
 

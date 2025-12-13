@@ -35,6 +35,7 @@ function MobileNavBar({ user }) {
               >
                 <item.icon aria-hidden="true" />
                 {showLabels && <span>{item.label}</span>}
+                <span className="mobile-nav__tooltip">{item.label}</span>
               </button>
             );
           }
@@ -49,6 +50,7 @@ function MobileNavBar({ user }) {
             >
               <item.icon aria-hidden="true" />
               {showLabels && <span>{item.label}</span>}
+              <span className="mobile-nav__tooltip">{item.label}</span>
             </NavLink>
           );
         })}

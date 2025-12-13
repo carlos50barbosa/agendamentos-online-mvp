@@ -127,6 +127,7 @@ export default function EstabelecimentosList() {
   const [geoError, setGeoError] = useState('');
   const [geocoding, setGeocoding] = useState(false);
   const coordsCacheRef = useRef(new Map());
+  const geoFallbackRef = useRef(false);
   const [distanceMap, setDistanceMap] = useState({});
   const searchInputRef = useRef(null);
   const resultsSectionRef = useRef(null);
@@ -336,28 +337,72 @@ export default function EstabelecimentosList() {
   );
 
   const handleUseLocation = useCallback(() => {
+    if (typeof window !== 'undefined' && !window.isSecureContext) {
+      setGeoError('A localização exige conexão segura (HTTPS). Acesse pelo site ou habilite HTTPS/localhost.');
+      return;
+    }
     if (!navigator?.geolocation) {
-      setGeoError('Geolocalizacao nao esta disponivel neste dispositivo.');
+      setGeoError('Geolocalização não está disponível neste dispositivo.');
       return;
     }
     setShowResults(true);
     setPendingScroll(true);
     setGeoError('');
     setLocating(true);
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        setLocating(false);
-        const coords = {
-          lat: pos.coords.latitude,
-          lng: pos.coords.longitude,
-        };
-        setUserLocation(coords);
-      },
-      () => {
-        setLocating(false);
-        setGeoError('Nao foi possível obter sua localizacao.');
-      },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
+    geoFallbackRef.current = false;
+
+    const requestLocation = (opts, onError) => {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          setLocating(false);
+          const coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+          setUserLocation(coords);
+        },
+        onError,
+        opts
+      );
+    };
+
+    const handleError = (err, triedFallback) => {
+      if (err?.code === 3 && !triedFallback) {
+        geoFallbackRef.current = true;
+        setGeoError('Buscando com precisão padrão...');
+        requestLocation(
+          { enableHighAccuracy: false, timeout: 12000, maximumAge: 180000 },
+          (err2) => handleError(err2, true)
+        );
+        return;
+      }
+
+      // Se temos coordenadas salvas de sessão, use-as como fallback rápido.
+      try {
+        if (!triedFallback) {
+          const stored = sessionStorage.getItem(STORAGE_KEY);
+          if (stored) {
+            const parsed = JSON.parse(stored);
+            if (parsed && Number.isFinite(parsed.lat) && Number.isFinite(parsed.lng)) {
+              setLocating(false);
+              setUserLocation(parsed);
+              setGeoError('Usando última localização conhecida.');
+              return;
+            }
+          }
+        }
+      } catch {}
+
+      setLocating(false);
+      let message = 'Não foi possível obter sua localização.';
+      if (err?.code === 1) message = 'Permissão de localização negada. Verifique as permissões do navegador.';
+      else if (err?.code === 2) message = 'Sinal de localização indisponível no momento. Tente novamente em instantes.';
+      else if (err?.code === 3) message = 'Tempo esgotado para buscar sua localização. Tente novamente.';
+      else if (err?.message) message = err.message;
+      setGeoError(message);
+    };
+
+    // Prioriza resposta mais rápida: primeiro tentativa com precisão padrão
+    requestLocation(
+      { enableHighAccuracy: false, timeout: 8000, maximumAge: 180000 },
+      (err) => handleError(err, false)
     );
   }, []);
 
@@ -383,29 +428,59 @@ export default function EstabelecimentosList() {
           closeButton
           disableOutsideClick
           actions={[
-            <a
-              key="cta"
+            <button
+              key="ok"
+              type="button"
               className="btn btn--primary"
-              href="/planos"
-              target="_blank"
-              rel="noopener noreferrer"
+              onClick={handleClosePromo}
               style={{ margin: '0 auto' }}
             >
-              Quero saber mais
-            </a>,
+              Continuar
+            </button>,
           ]}
         >
-          <a
-            href="/planos"
-            target="_blank"
-            rel="noopener noreferrer"
-            style={{ display: 'block', textDecoration: 'none', color: 'inherit' }}
+          <div
+            style={{
+              position: 'relative',
+              overflow: 'hidden',
+              borderRadius: 14,
+              padding: 16,
+              background: 'linear-gradient(135deg, #111827, #1d2539)',
+              color: '#e5e7eb',
+              boxShadow: '0 18px 36px rgba(0,0,0,0.28)',
+            }}
           >
-            <p>
-              Em breve, espaços dedicados a parceiros e publicidades. Clique em &quot;Quero saber mais&quot; para
-              ser redirecionado.
-            </p>
-          </a>
+            <div
+              aria-hidden
+              style={{
+                position: 'absolute',
+                inset: 0,
+                background:
+                  'radial-gradient(280px at 12% 18%, rgba(129,140,248,0.28), transparent 50%), radial-gradient(220px at 82% 18%, rgba(16,185,129,0.24), transparent 50%), radial-gradient(320px at 52% 90%, rgba(14,165,233,0.22), transparent 55%)',
+              }}
+            />
+            <div style={{ position: 'relative', display: 'grid', gap: 10 }}>
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '6px 10px', borderRadius: 12, background: 'rgba(255,255,255,0.08)', width: 'fit-content', fontSize: 12, letterSpacing: '.04em', textTransform: 'uppercase' }}>
+                <span style={{ width: 10, height: 10, borderRadius: '50%', background: '#22c55e', boxShadow: '0 0 0 6px rgba(34,197,94,0.16)' }} />
+                Bem-vindo(a)
+              </div>
+              <h3 style={{ margin: 0, fontSize: 20, lineHeight: 1.3, color: '#f8fafc' }}>
+                Agendamentos Online chegou para facilitar seus horários.
+              </h3>
+              <p style={{ margin: 0, fontSize: 14, lineHeight: 1.6, color: '#cbd5e1' }}>
+                Monte sua agenda, confirme clientes e deixe que a plataforma cuida do resto. Em breve, mais novidades e parcerias exclusivas.
+              </p>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 4 }}>
+                <div style={{ width: 52, height: 52, borderRadius: 14, background: 'rgba(255,255,255,0.08)', display: 'grid', placeItems: 'center', boxShadow: '0 12px 28px rgba(0,0,0,0.24)' }}>
+                  <LogoAO size={28} />
+                </div>
+                <div style={{ display: 'grid', gap: 4 }}>
+                  <strong style={{ color: '#f8fafc', fontSize: 14 }}>Acompanhe por aqui</strong>
+                  <span style={{ color: '#cbd5e1', fontSize: 12 }}>Novos recursos e integrações aparecem primeiro neste espaço.</span>
+                </div>
+              </div>
+            </div>
+          </div>
         </Modal>
       )}
 
@@ -487,12 +562,12 @@ export default function EstabelecimentosList() {
               const avatarSource = est?.foto_url || est?.avatar_url || '';
               const image = avatarSource ? resolveAssetUrl(avatarSource) : fallbackAvatar(name);
               const distanceLabel = !userLocation
-                ? 'Ative a localizacao para ver a distancia'
+                ? 'Ative a localização para ver a distância'
                 : hasDistance
                 ? distance != null
                   ? `${kmFormatter.format(distance)} km`
-                  : 'Distancia indisponivel'
-                : 'Calculando distancias...';
+                  : 'Distância indisponível'
+                : 'Calculando distâncias...';
               const ratingAverageRaw = Number(est?.rating_average ?? est?.ratingAverage ?? NaN);
               const ratingCount = Number(est?.rating_count ?? est?.ratingCount ?? 0);
               const hasRatings = Number.isFinite(ratingAverageRaw) && ratingCount > 0;
@@ -548,5 +623,3 @@ export default function EstabelecimentosList() {
     </div>
   );
 }
-
-

@@ -146,6 +146,8 @@ export const Api = {
   // Estabelecimentos + ServiÃ§os (NOVOS)
   listEstablishments: () => req('/establishments'),
   getEstablishment: (idOrSlug) => req(`/establishments/${idOrSlug}`),
+  getEstablishmentClients: (id, params = {}) =>
+    req(`/establishments/${id}/clients${toQuery(params)}`),
   getEstablishmentReviews: (id, params = {}) =>
     req(`/establishments/${id}/reviews${toQuery(params)}`),
   saveEstablishmentReview: (id, payload) =>
@@ -202,6 +204,7 @@ export const Api = {
   meusAgendamentos: () => req('/agendamentos'),
   agendamentosEstabelecimento: (status) => req(`/agendamentos/estabelecimento${toQuery({ status })}`),
   cancelarAgendamento: (id) => req(`/agendamentos/${id}/cancel`, { method: 'PUT' }),
+  cancelarAgendamentoEstab: (id) => req(`/agendamentos/${id}/cancel-estab`, { method: 'PUT' }),
 
   // NotificaÃ§Ãµes (NOVO)
   scheduleWhatsApp: (payload) =>
@@ -279,7 +282,5 @@ export const Api = {
 
 // Exporta para depuraÃ§Ã£o no console do navegador
 export const API_BASE_URL = BASE;
-
-
 
 

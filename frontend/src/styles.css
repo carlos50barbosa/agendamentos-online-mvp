@@ -1464,6 +1464,33 @@ button.danger:disabled,
   font-size: 11px;
 }
 .mobile-nav--labeled .mobile-nav__item svg{ width: 18px; height: 18px; }
+
+.mobile-nav__item{ position: relative; }
+.mobile-nav__tooltip{
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translate(-50%, 6px);
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-soft);
+  font-size: 11px;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .15s ease, transform .15s ease;
+  z-index: 5;
+}
+.mobile-nav__item:hover .mobile-nav__tooltip,
+.mobile-nav__item:focus-visible .mobile-nav__tooltip,
+.mobile-nav__item:active .mobile-nav__tooltip{
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+.mobile-nav--labeled .mobile-nav__tooltip{ display: none; }
 .services-table-plain td,.services-table-plain th{font-size:13px;vertical-align:middle;}
 .service-form{display:grid;gap:10px;}
 .service-form .input{width:100%;}
@@ -1520,10 +1547,12 @@ button.danger:disabled,
 .pro-agenda .rbc-time-header{display:none;}
 .pro-agenda .rbc-allday-cell,.pro-agenda .rbc-allday-events{display:none;}
 .pro-agenda .rbc-day-slot{padding-left:0;}
+.pro-agenda .rbc-day-slot{padding-right:0;}
 .pro-agenda .rbc-day-slot .rbc-timeslot-group{border-color:#e5e7eb;background:transparent;border-bottom:1px solid #e5e7eb;}
 .pro-agenda .rbc-time-gutter .rbc-timeslot-group{border-bottom:1px solid #e5e7eb;}
-.pro-agenda .rbc-day-slot .rbc-events{margin:0;padding:4px 8px;}
-.pro-agenda .rbc-event{border:none;}
+.pro-agenda .rbc-day-slot .rbc-events{margin:0;padding:4px 4px;}
+.pro-agenda .rbc-day-slot .rbc-event{left:0!important;right:0!important;width:100%!important;border:none;}
+.pro-agenda .rbc-day-slot .rbc-event-label{display:none;}
 .pro-agenda .rbc-time-header-content{border-left:1px solid var(--border);}
 .pro-agenda .rbc-header{border:none;font-weight:600;font-size:12px;padding:6px 4px;}
 .pro-agenda .rbc-current-time-indicator{background:var(--primary-400);}
@@ -2459,4 +2488,3 @@ button.danger:disabled,
     min-width: 0;
   }
 }
-

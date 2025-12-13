@@ -1275,6 +1275,85 @@ router.get('/:id/messages', auth, isEstabelecimento, async (req, res) => {
 
 });
 
+// Lista clientes do estabelecimento com resumo de agendamentos
+router.get('/:id/clients', auth, isEstabelecimento, async (req, res) => {
+  try {
+    const estabelecimentoId = Number(req.params.id);
+    if (!Number.isFinite(estabelecimentoId) || req.user.id !== estabelecimentoId) {
+      return res.status(403).json({ error: 'forbidden' });
+    }
+
+    const page = Math.max(1, Number(req.query.page || 1));
+    const pageSize = Math.min(100, Math.max(1, Number(req.query.pageSize || req.query.limit || 20)));
+    const offset = (page - 1) * pageSize;
+    const searchRaw = String(req.query.q || '').trim().toLowerCase();
+    const searchDigits = searchRaw.replace(/\D/g, '');
+
+    const searchClauses = [];
+    const searchParams = [];
+    if (searchRaw) {
+      const like = `%${searchRaw}%`;
+      const telLike = `%${searchDigits || searchRaw.replace(/\s+/g, '')}%`;
+      searchClauses.push(`(LOWER(u.nome) LIKE ? OR LOWER(u.email) LIKE ? OR REPLACE(REPLACE(REPLACE(u.telefone,'+',''),'-',''),' ','') LIKE ?)`);
+      searchParams.push(like, like, telLike);
+    }
+    const searchWhere = searchClauses.length ? `WHERE ${searchClauses.join(' AND ')}` : '';
+
+    const statsSql = `
+      SELECT
+        a.cliente_id,
+        COUNT(*) AS total_appointments,
+        SUM(a.status='cancelado') AS total_cancelled,
+        MAX(a.inicio) AS last_appointment_at,
+        SUBSTRING_INDEX(GROUP_CONCAT(a.status ORDER BY a.inicio DESC SEPARATOR ','), ',', 1) AS last_status,
+        SUBSTRING_INDEX(GROUP_CONCAT(s.nome ORDER BY a.inicio DESC SEPARATOR ','), ',', 1) AS last_service
+      FROM agendamentos a
+      LEFT JOIN servicos s ON s.id = a.servico_id
+      WHERE a.estabelecimento_id=?
+      GROUP BY a.cliente_id
+    `;
+
+    const countSql = `
+      SELECT COUNT(*) AS total
+      FROM (${statsSql}) stats
+      JOIN usuarios u ON u.id = stats.cliente_id
+      ${searchWhere}
+    `;
+    const [countRows] = await pool.query(countSql, [estabelecimentoId, ...searchParams]);
+    const total = Number(countRows?.[0]?.total || 0);
+
+    const dataSql = `
+      SELECT
+        u.id,
+        u.nome,
+        u.email,
+        u.telefone,
+        stats.total_appointments,
+        stats.total_cancelled,
+        stats.last_appointment_at,
+        stats.last_status,
+        stats.last_service
+      FROM (${statsSql}) stats
+      JOIN usuarios u ON u.id = stats.cliente_id
+      ${searchWhere}
+      ORDER BY stats.last_appointment_at DESC
+      LIMIT ? OFFSET ?
+    `;
+    const [rows] = await pool.query(dataSql, [estabelecimentoId, ...searchParams, pageSize, offset]);
+
+    return res.json({
+      items: rows || [],
+      page,
+      pageSize,
+      total,
+      hasNext: offset + (rows?.length || 0) < total,
+    });
+  } catch (err) {
+    console.error('GET /establishments/:id/clients', err);
+    return res.status(500).json({ error: 'clients_fetch_failed' });
+  }
+});
+
 
 
 router.put('/:id/messages', auth, isEstabelecimento, async (req, res) => {
@@ -2140,7 +2219,6 @@ router.get('/:id/stats', auth, isEstabelecimento, async (req, res) => {
 
 
 export default router;
-
 
 
 
