@@ -1418,6 +1418,7 @@ button.danger:disabled,
   box-shadow: 0 -10px 24px rgba(15, 23, 42, 0.12);
   gap: 4px;
   overflow-x: auto;
+  overflow-y: visible; /* permite tooltips sairem do contêiner */
   -webkit-overflow-scrolling: touch;
 }
 .mobile-nav::-webkit-scrollbar{ display: none; height: 0; }
@@ -1442,6 +1443,7 @@ button.danger:disabled,
   text-decoration: none;
   cursor: pointer;
   transition: background .18s ease, color .18s ease;
+  overflow: visible; /* não corta tooltip */
 }
 .mobile-nav__item svg{ width: 16px; height: 16px; }
 .mobile-nav__item span{ display: none; }
@@ -1465,32 +1467,6 @@ button.danger:disabled,
 }
 .mobile-nav--labeled .mobile-nav__item svg{ width: 18px; height: 18px; }
 
-.mobile-nav__item{ position: relative; }
-.mobile-nav__tooltip{
-  position: absolute;
-  bottom: calc(100% + 6px);
-  left: 50%;
-  transform: translate(-50%, 6px);
-  padding: 6px 8px;
-  border-radius: 8px;
-  background: var(--surface);
-  color: var(--text);
-  border: 1px solid var(--border);
-  box-shadow: var(--shadow-soft);
-  font-size: 11px;
-  white-space: nowrap;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity .15s ease, transform .15s ease;
-  z-index: 5;
-}
-.mobile-nav__item:hover .mobile-nav__tooltip,
-.mobile-nav__item:focus-visible .mobile-nav__tooltip,
-.mobile-nav__item:active .mobile-nav__tooltip{
-  opacity: 1;
-  transform: translate(-50%, 0);
-}
-.mobile-nav--labeled .mobile-nav__tooltip{ display: none; }
 .services-table-plain td,.services-table-plain th{font-size:13px;vertical-align:middle;}
 .service-form{display:grid;gap:10px;}
 .service-form .input{width:100%;}

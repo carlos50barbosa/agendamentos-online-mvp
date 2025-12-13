@@ -1,7 +1,7 @@
 ﻿export const PREFERENCES_STORAGE_KEY = 'ao_preferences';
 export const PREFERENCES_EVENT = 'ao:preferences-changed';
 export const DEFAULT_PREFERENCES = Object.freeze({
-  theme: 'auto',
+  theme: 'light',
   chatWidget: true,
 });
 
