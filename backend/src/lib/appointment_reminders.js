@@ -1,9 +1,15 @@
 import { notifyWhatsapp, sendTemplate } from './notifications.js';
+import { clientWhatsappDisabled } from './client_notifications.js';
 
 const TZ = 'America/Sao_Paulo';
 const INTERVAL_MS = Number(process.env.REMINDER_8H_INTERVAL_MS || 60_000); // 1 min default
 
 const toDigits = (s) => String(s || '').replace(/\D/g, '');
+const firstName = (full) => {
+  if (!full) return '';
+  const part = String(full).trim().split(/\s+/)[0];
+  return part || '';
+};
 const normalizePhoneBR = (value) => {
   let digits = toDigits(value);
   if (!digits) return '';
@@ -25,11 +31,11 @@ function brDate(iso) {
   return new Date(iso).toLocaleDateString('pt-BR', { timeZone: TZ });
 }
 
-async function markReminderSent(pool, id) {
+async function markReminderSent(pool, id, messageId) {
   try {
     await pool.query(
-      'UPDATE agendamentos SET reminder_8h_sent_at=NOW() WHERE id=? AND reminder_8h_sent_at IS NULL',
-      [id]
+      'UPDATE agendamentos SET reminder_8h_sent_at=NOW(), reminder_8h_msg_id=COALESCE(reminder_8h_msg_id, ?) WHERE id=? AND reminder_8h_sent_at IS NULL',
+      [messageId || null, id]
     );
   } catch (e) {
     console.warn('[reminder8h] falha ao marcar reminder_8h_sent_at', e?.message || e);
@@ -42,6 +48,10 @@ async function sendReminder(pool, row) {
     await markReminderSent(pool, row.id); // sem telefone, nao adianta tentar de novo
     return { sent: false, reason: 'no_phone' };
   }
+  if (clientWhatsappDisabled()) {
+    await markReminderSent(pool, row.id); // evita reprocessar se optou por desligar cliente
+    return { sent: false, reason: 'client_whatsapp_disabled' };
+  }
 
   const inicioISO = new Date(row.inicio).toISOString();
   const hora = brTime(inicioISO);
@@ -50,9 +60,14 @@ async function sendReminder(pool, row) {
   const estNomeFriendly = estNome || 'nosso estabelecimento';
   const profNome = row?.profissional_nome || '';
   const profLabel = profNome ? ` com ${profNome}` : '';
+  const profFriendly = profNome || estNomeFriendly;
   const msg = `[Lembrete] Faltam 8 horas para o seu ${row.servico_nome}${profNome ? ' com ' + profNome : ''} em ${estNomeFriendly} (${hora} de ${data}).`;
 
-  const paramMode = String(process.env.WA_TEMPLATE_PARAM_MODE || 'single').toLowerCase();
+  const paramMode = String(
+    process.env.WA_TEMPLATE_PARAM_MODE_REMINDER ||
+    process.env.WA_TEMPLATE_PARAM_MODE ||
+    'single'
+  ).toLowerCase();
   const tplName =
     process.env.WA_TEMPLATE_NAME_REMINDER ||
     process.env.WA_TEMPLATE_NAME_CONFIRM ||
@@ -61,17 +76,32 @@ async function sendReminder(pool, row) {
   const tplLang = process.env.WA_TEMPLATE_LANG || 'pt_BR';
 
   try {
-    if (/^triple|3$/.test(paramMode)) {
-      await sendTemplate({
+    let waMessageId = null;
+    if (/^quad|4|quatro/.test(paramMode)) {
+      const resp = await sendTemplate({
+        to: telCli,
+        name: tplName,
+        lang: tplLang,
+        bodyParams: [
+          firstName(row?.cliente_nome) || 'cliente',
+          profFriendly,
+          data,
+          hora,
+        ],
+      });
+      waMessageId = resp?.messages?.[0]?.id || null;
+    } else if (/^triple|3$/.test(paramMode)) {
+      const resp = await sendTemplate({
         to: telCli,
         name: tplName,
         lang: tplLang,
         bodyParams: [row.servico_nome, `${hora} de ${data}`, estNome],
       });
+      waMessageId = resp?.messages?.[0]?.id || null;
     } else {
       await notifyWhatsapp(msg, telCli);
     }
-    await markReminderSent(pool, row.id);
+    await markReminderSent(pool, row.id, waMessageId);
     return { sent: true };
   } catch (err) {
     console.error('[reminder8h] erro ao enviar', row.id, err?.status, err?.body || err?.message || err);

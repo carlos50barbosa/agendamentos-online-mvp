@@ -5,6 +5,8 @@ import { getPlanContext, isDelinquentStatus, formatPlanLimitExceeded } from '../
 import { auth as authRequired, isCliente, isEstabelecimento } from '../middleware/auth.js';
 import { notifyEmail, notifyWhatsapp, sendTemplate } from '../lib/notifications.js';
 import { checkMonthlyAppointmentLimit, notifyAppointmentLimitReached } from '../lib/appointment_limits.js';
+import { estabNotificationsDisabled } from '../lib/estab_notifications.js';
+import { clientWhatsappDisabled } from '../lib/client_notifications.js';
 
 const router = Router();
 
@@ -266,6 +268,8 @@ router.post('/', authRequired, isCliente, async (req, res) => {
     const telEst = toDigits(est?.telefone);
     const canEmailEst = boolPref(est?.notify_email_estab, true);
     const canWhatsappEst = boolPref(est?.notify_whatsapp_estab, true);
+    const blockEstabNotifications = estabNotificationsDisabled();
+    const blockClientWhatsapp = clientWhatsappDisabled();
     const estNome = est?.nome || '';
     const estNomeFriendly = estNome || 'nosso estabelecimento';
     const profNome = profissionalRow?.nome || '';
@@ -280,7 +284,7 @@ router.post('/', authRequired, isCliente, async (req, res) => {
           `<p>Olá, <b>${cli?.nome ?? 'cliente'}</b>! Seu agendamento de <b>${svc.nome}</b>${profLabel ? ` com <b>${profNome}</b>` : ''} foi confirmado para <b>${inicioBR}</b>.</p>`
         );
       }
-      if (est?.email && canEmailEst) {
+      if (!blockEstabNotifications && est?.email && canEmailEst) {
         await notifyEmail(
           est.email,
           'Novo agendamento recebido',
@@ -295,14 +299,14 @@ router.post('/', authRequired, isCliente, async (req, res) => {
       const tplName = process.env.WA_TEMPLATE_NAME_CONFIRM || process.env.WA_TEMPLATE_NAME || 'confirmacao_agendamento';
       const tplLang = process.env.WA_TEMPLATE_LANG || 'pt_BR';
       const estNomeLabel = estNome || '';
-      if (telCli) {
+      if (!blockClientWhatsapp && telCli) {
         if (/^triple|3$/.test(paramMode)) {
           try { await sendTemplate({ to: telCli, name: tplName, lang: tplLang, bodyParams: [svc.nome, inicioBR, estNomeLabel] }); } catch (e) { console.warn('[wa/confirm cli]', e?.message || e); }
         } else {
           await notifyWhatsapp(`[OK] Confirmacao: ${svc.nome}${profNome ? ' / ' + profNome : ''} em ${inicioBR} - ${estNomeLabel}`, telCli);
         }
       }
-      if (canWhatsappEst && telEst && telEst !== telCli) {
+      if (!blockEstabNotifications && canWhatsappEst && telEst && telEst !== telCli) {
         if (/^triple|3$/.test(paramMode)) {
           try { await sendTemplate({ to: telEst, name: tplName, lang: tplLang, bodyParams: [svc.nome, inicioBR, estNomeLabel] }); } catch (e) { console.warn('[wa/confirm est]', e?.message || e); }
         } else {
@@ -365,6 +369,8 @@ router.put('/:id/cancel', authRequired, isCliente, async (req, res) => {
 
     const telCli = toDigits(cli?.telefone);
     const telEst = toDigits(est?.telefone);
+    const blockEstabNotifications = estabNotificationsDisabled();
+    const blockClientWhatsapp = clientWhatsappDisabled();
 
     fireAndForget(async () => {
       const paramMode = String(process.env.WA_TEMPLATE_PARAM_MODE || 'single').toLowerCase();
@@ -375,17 +381,17 @@ router.put('/:id/cancel', authRequired, isCliente, async (req, res) => {
       const canWhatsappEstCancel = boolPref(est?.notify_whatsapp_estab, true);
 
       if (/^triple|3$/.test(paramMode)) {
-        if (telCli) {
+        if (!blockClientWhatsapp && telCli) {
           try { await sendTemplate({ to: telCli, name: tplName, lang: tplLang, bodyParams: params3 }); } catch (e) { console.warn('[wa/cancel cli]', e?.message || e); }
         }
-        if (canWhatsappEstCancel && telEst && telEst !== telCli) {
+        if (!blockEstabNotifications && canWhatsappEstCancel && telEst && telEst !== telCli) {
           try { await sendTemplate({ to: telEst, name: tplName, lang: tplLang, bodyParams: params3 }); } catch (e) { console.warn('[wa/cancel est]', e?.message || e); }
         }
       } else {
-        if (telCli) {
+        if (!blockClientWhatsapp && telCli) {
           await notifyWhatsapp(`Seu agendamento ${id} (${svc?.nome ?? 'servico'}) em ${inicioBR} foi cancelado.`, telCli);
         }
-        if (canWhatsappEstCancel && telEst && telEst !== telCli) {
+        if (!blockEstabNotifications && canWhatsappEstCancel && telEst && telEst !== telCli) {
           await notifyWhatsapp(`[Aviso] Cancelamento: agendamento ${id} (${svc?.nome ?? 'servico'}) em ${inicioBR} pelo cliente ${cli?.nome ?? ''}.`, telEst);
         }
       }
@@ -399,7 +405,3 @@ router.put('/:id/cancel', authRequired, isCliente, async (req, res) => {
 });
 
 export default router;
-
-
-
-

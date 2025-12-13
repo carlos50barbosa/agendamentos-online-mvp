@@ -118,6 +118,31 @@ async function getSession(phone) {
 }
 async function setSession(phone, state) { await dbSet(phone, state); }
 
+async function tryRecordReminderConfirmation({ contextMessageId, fromDigits }) {
+  if (!contextMessageId) return false;
+  try {
+    const [[row]] = await pool.query(
+      `SELECT a.id, a.cliente_id, u.telefone
+       FROM agendamentos a
+       JOIN usuarios u ON u.id = a.cliente_id
+       WHERE a.reminder_8h_msg_id=? LIMIT 1`,
+      [contextMessageId]
+    );
+    if (!row) return false;
+    const tel = toDigits(row.telefone);
+    if (tel && tel !== fromDigits) return false;
+
+    await pool.query(
+      'UPDATE agendamentos SET cliente_confirmou_whatsapp_at = COALESCE(cliente_confirmou_whatsapp_at, NOW()) WHERE id=? LIMIT 1',
+      [row.id]
+    );
+    return true;
+  } catch (e) {
+    console.warn('[wa/confirm-btn] erro ao registrar confirmacao', e?.message || e);
+    return false;
+  }
+}
+
 // GET: verificação do webhook do Facebook
 router.get('/', (req, res) => {
   const mode = req.query['hub.mode'];
@@ -147,6 +172,18 @@ router.post('/', async (req, res) => {
     if (!from) return res.sendStatus(200);
 
     let s = await getSession(from);
+
+    // Confirmacao de lembrete (botao "CONFIRMAR") usando context.id do template
+    const interactive = msg?.interactive?.button_reply || null;
+    const buttonPayload = msg?.button?.payload || interactive?.id || null;
+    const contextMsgId = msg?.context?.id || null;
+    if (buttonPayload || contextMsgId) {
+      const recorded = await tryRecordReminderConfirmation({ contextMessageId: contextMsgId, fromDigits: from });
+      if (recorded) {
+        await send(from, 'Confirmado! Vamos te aguardar no horario combinado.');
+        return res.sendStatus(200);
+      }
+    }
 
     // Fluxo simples tipo menu → coleta
     if (s.step === 'WELCOME') {

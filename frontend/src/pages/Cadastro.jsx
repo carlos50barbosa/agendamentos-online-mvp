@@ -229,13 +229,13 @@ export default function Cadastro() {
               className="input"
               type="tel"
               inputMode="tel"
-              placeholder="Telefone (WhatsApp) com DDD"
+              placeholder="Telefone WhatsApp - (11) 99999-9999"
               value={formatBRPhone(form.telefone)}
               onChange={(e) => updateField('telefone', e.target.value)}
               autoComplete="tel"
               required
             />
-            {!phoneOk && <small className="muted">Informe um telefone valido com DDD. Ex.: (11) 99999-9999</small>}
+            {/* {!phoneOk && <small className="muted">  Ex.: (11) 99999-9999</small>} */}
 
             <div className="row" style={{ gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
               <input
@@ -378,11 +378,11 @@ export default function Cadastro() {
               />
               <span>
                 Li e concordo com os <Link to="/termos" target="_blank" rel="noreferrer">Termos de Uso</Link> e com a{' '}
-                <Link to="/politica-privacidade" target="_blank" rel="noreferrer">Politica de Privacidade</Link>.
+                <Link to="/politica-privacidade" target="_blank" rel="noreferrer">Política de Privacidade</Link>.
               </span>
             </label>
             <small className="auth-legal__version">
-              Versoes vigentes: Termos {legalMeta.terms?.version} • Política {legalMeta.privacy?.version}
+              Versões vigentes: Termos {legalMeta.terms?.version} • Política {legalMeta.privacy?.version}
             </small>
 
             <div className="auth-actions" style={{ marginTop: 4 }}>

@@ -913,11 +913,12 @@ function SlotPreview({ slot }) {
 }
 
 const AGENDA_STATUS_THEME = Object.freeze({
-  confirmado: { label: 'Confirmado', bg: '#dcfce7', border: '#86efac', dot: '#16a34a', text: '#064e3b', badge: 'rgba(22,163,74,0.14)' },
+  confirmado_wa: { label: 'Confirmado (WhatsApp)', bg: '#dcfce7', border: '#86efac', dot: '#16a34a', text: '#064e3b', badge: 'rgba(22,163,74,0.14)' },
+  confirmado: { label: 'Confirmado', bg: '#e5e7eb', border: '#d1d5db', dot: '#6b7280', text: '#374151', badge: 'rgba(107,114,128,0.16)' }, // aguardando confirmacao
   concluido: { label: 'Concluido', bg: '#e0f2fe', border: '#bfdbfe', dot: '#2563eb', text: '#0f172a', badge: 'rgba(37,99,235,0.12)' },
   cancelado: { label: 'Cancelado', bg: '#fee2e2', border: '#fecdd3', dot: '#dc2626', text: '#7f1d1d', badge: 'rgba(220,38,38,0.14)' },
-  pendente: { label: 'Pendente', bg: '#fff7ed', border: '#fed7aa', dot: '#f97316', text: '#7c2d12', badge: 'rgba(249,115,22,0.14)' },
-  default: { label: 'Agendamento', bg: '#dcfce7', border: '#86efac', dot: '#16a34a', text: '#064e3b', badge: 'rgba(22,163,74,0.14)' },
+  pendente: { label: 'Pendente', bg: '#e5e7eb', border: '#d1d5db', dot: '#6b7280', text: '#374151', badge: 'rgba(107,114,128,0.16)' },
+  default: { label: 'Agendamento', bg: '#e5e7eb', border: '#d1d5db', dot: '#6b7280', text: '#374151', badge: 'rgba(107,114,128,0.16)' },
 })
 
 const getAgendaTheme = (status) => AGENDA_STATUS_THEME[status] || AGENDA_STATUS_THEME.default
@@ -1018,6 +1019,12 @@ function ProfessionalAgendaView({ items }) {
           'sem-id'
         const service = item?.servico_nome || item?.service_name || 'Servico'
         const client = item?.cliente_nome || item?.client_name || ''
+        const confirmedAt =
+          item?.cliente_confirmou_whatsapp_at ||
+          item?.cliente_confirmou_whatsapp_em ||
+          item?.client_confirmed_whatsapp_at ||
+          item?.client_confirmed_at ||
+          null
         const title = client ? `${client} - ${service}` : service
         const rawStatus = String(item?.status || '').toLowerCase()
         let status = normalizeText(rawStatus)
@@ -1028,6 +1035,9 @@ function ProfessionalAgendaView({ items }) {
         // normaliza confirmados passados para concluido
         if (status === 'confirmado' && end.getTime() < Date.now()) {
           status = 'concluido'
+        }
+        if (status === 'confirmado') {
+          status = confirmedAt ? 'confirmado_wa' : 'pendente'
         }
         const baseTheme = resourceThemes.get(resourceId) || RESOURCE_COLORS[0]
         const statusTheme = getAgendaTheme(status)
@@ -1047,6 +1057,7 @@ function ProfessionalAgendaView({ items }) {
           service,
           client,
           statusLabel: theme.label,
+          confirmedAt,
           _theme: theme,
         }
       })
@@ -1167,6 +1178,7 @@ function ProfessionalAgendaView({ items }) {
           <span>{resource?.title || ''}</span>
         </div>
       )
+
     },
     [resourceThemes]
   )
@@ -1174,7 +1186,20 @@ function ProfessionalAgendaView({ items }) {
   const AgendaEvent = useCallback(({ event }) => {
     const theme = event?._theme || getAgendaTheme(event?.status)
     const serviceLabel = event?.service || event?.title || 'Servico'
-    const clientLabel = event?.client ? ` • ${event.client}` : ''
+    const clientLabel = event?.client ? ` - ${event.client}` : ''
+    const isConfirmed = Boolean(event?.confirmedAt)
+    const confirmationLabel = isConfirmed
+      ? 'Cliente confirmou via WhatsApp'
+      : 'Aguardando confirmação via WhatsApp'
+    const pillStyle = isConfirmed
+      ? {
+          background: 'rgba(16, 185, 129, 0.12)',
+          color: '#0f9d58',
+        }
+      : {
+          background: 'rgba(107, 114, 128, 0.14)',
+          color: '#374151',
+        }
     return (
       <div className="pro-agenda__event-card">
         <div className="pro-agenda__event-title">
@@ -1182,6 +1207,22 @@ function ProfessionalAgendaView({ items }) {
           <div className="pro-agenda__event-lines">
             <strong>{serviceLabel}{clientLabel}</strong>
             <span className="pro-agenda__time">{formatHourRange(event?.start, event?.end)}</span>
+            <span
+              className="pro-agenda__pill"
+              title={confirmationLabel}
+              aria-label={confirmationLabel}
+              style={{
+                display: 'inline-block',
+                marginTop: 4,
+                padding: '3px 8px',
+                borderRadius: 999,
+                fontSize: 12,
+                fontWeight: 600,
+                ...pillStyle,
+              }}
+            >
+              {confirmationLabel}
+            </span>
           </div>
         </div>
       </div>

@@ -3,6 +3,7 @@ import { pool } from './db.js'
 import { config } from './config.js'
 import { notifyEmail, notifyWhatsapp } from './notifications.js'
 import { getPlanLabel } from './plans.js'
+import { estabNotificationsDisabled } from './estab_notifications.js'
 
 const DAY_MS = 86400000
 const remindersCfg = config.billing?.reminders || {}
@@ -10,6 +11,7 @@ const WARN_DAYS = Number(remindersCfg.warnDays ?? 3) || 3
 const GRACE_DAYS = Number(remindersCfg.graceDays ?? 3) || 3
 const INTERVAL_MS = Number(remindersCfg.intervalMs ?? 30 * 60 * 1000) || 30 * 60 * 1000
 const REMINDERS_DISABLED = Boolean(remindersCfg.disabled)
+const BLOCK_ESTAB_NOTIFICATIONS = estabNotificationsDisabled()
 
 const FRONT_BASE = String(process.env.FRONTEND_BASE_URL || process.env.APP_URL || 'http://localhost:3001').replace(/\/$/, '')
 const BILLING_URL = remindersCfg.paymentUrl || `${FRONT_BASE}/configuracoes`
@@ -245,6 +247,7 @@ function buildWhatsappCopy(kind, row, state) {
 }
 
 async function sendEmailReminder(row, dueAt, kind, state) {
+  if (BLOCK_ESTAB_NOTIFICATIONS) return false
   if (!row.notify_email_estab || !row.email) return false
   const marker = await markReminder(row.id, dueAt, kind, 'email')
   if (!marker.inserted) return false
@@ -261,6 +264,7 @@ async function sendEmailReminder(row, dueAt, kind, state) {
 }
 
 async function sendWhatsappReminder(row, dueAt, kind, state) {
+  if (BLOCK_ESTAB_NOTIFICATIONS) return false
   if (!row.notify_whatsapp_estab || !row.telefone) return false
   const marker = await markReminder(row.id, dueAt, kind, 'whatsapp')
   if (!marker.inserted) return false

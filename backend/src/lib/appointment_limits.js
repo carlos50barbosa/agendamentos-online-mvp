@@ -1,6 +1,7 @@
 // backend/src/lib/appointment_limits.js
 import { pool } from './db.js';
 import { notifyEmail, notifyWhatsapp } from './notifications.js';
+import { estabNotificationsDisabled } from './estab_notifications.js';
 
 const ACTIVE_APPOINTMENT_STATUSES = ['confirmado', 'pendente', 'concluido'];
 let customNotifier = null;
@@ -68,6 +69,7 @@ export async function checkMonthlyAppointmentLimit({ estabelecimentoId, planConf
 }
 
 async function defaultLimitNotifier({ estabelecimentoId, limit, total, range, planConfig }) {
+  if (estabNotificationsDisabled()) return;
   try {
     const [[est]] = await pool.query(
       'SELECT email, telefone, nome, notify_email_estab, notify_whatsapp_estab FROM usuarios WHERE id=?',
