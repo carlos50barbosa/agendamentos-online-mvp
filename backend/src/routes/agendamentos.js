@@ -138,7 +138,7 @@ router.post('/', authRequired, isCliente, async (req, res) => {
       return res.status(400).json({ error: 'invalid_date', message: 'Formato de data/hora invalido.' });
     }
     if (inicioDate.getTime() <= Date.now()) {
-      return res.status(400).json({ error: 'past_datetime', message: 'Nao e possivel agendar no passado.' });
+      return res.status(400).json({ error: 'past_datetime', message: 'Não é possível agendar no passado.' });
     }
     if (!inBusinessHours(inicioDate.toISOString())) {
       return res.status(400).json({ error: 'outside_business_hours', message: 'Horario fora do expediente (07:00-22:00).' });

@@ -134,7 +134,7 @@ export default function Cadastro() {
       })
       .catch(() => {
         if (!active) return;
-        setCepStatus({ loading: false, error: 'Nao foi possivel buscar o CEP.' });
+        setCepStatus({ loading: false, error: 'Não foi possível buscar o CEP.' });
       });
 
     return () => {

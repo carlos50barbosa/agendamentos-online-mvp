@@ -356,7 +356,7 @@ router.put('/me', auth, async (req, res) => {
 
     const [[row]] = await pool.query('SELECT senha_hash FROM usuarios WHERE id=? LIMIT 1', [userId]);
     if (!row || !row.senha_hash) {
-      return res.status(400).json({ error: 'senha_indefinida', message: 'Nao foi possivel validar a senha atual.' });
+      return res.status(400).json({ error: 'senha_indefinida', message: 'Não foi possível validar a senha atual.' });
     }
 
     const okAtual = await bcrypt.compare(atual, row.senha_hash);
@@ -393,7 +393,7 @@ router.put('/me', auth, async (req, res) => {
           return res.status(400).json({ error: 'avatar_invalido', message: 'Envie uma imagem PNG, JPG ou WEBP.' });
         }
         console.error('[auth/me][avatar] erro:', err);
-        return res.status(500).json({ error: 'avatar_falhou', message: 'Nao foi possivel salvar a foto de perfil.' });
+        return res.status(500).json({ error: 'avatar_falhou', message: 'Não foi possível salvar a foto de perfil.' });
       }
     }
 

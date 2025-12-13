@@ -1090,7 +1090,7 @@ export default function Configuracoes() {
       alert('Teste gratuito do plano Pro ativado por 7 dias!');
     } catch (err) {
       console.error('startTrial failed', err);
-      alert('Nao foi possivel iniciar o teste gratuito agora.');
+      alert('Não foi possível iniciar o teste gratuito agora.');
     }
   }, [isEstab, user?.id, fetchBilling]);
 

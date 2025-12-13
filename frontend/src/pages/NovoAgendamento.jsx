@@ -1240,8 +1240,8 @@ export default function NovoAgendamento() {
         }));
       } catch {
         if (cancelled) return;
-        setEstablishmentsError('Nao foi possivel carregar estabelecimentos.');
-        showToast('error', 'Nao foi possivel carregar estabelecimentos.');
+        setEstablishmentsError('Não foi possível carregar estabelecimentos.');
+        showToast('error', 'Não foi possível carregar estabelecimentos.');
       } finally {
         if (!cancelled) setEstablishmentsLoading(false);
       }
@@ -1839,7 +1839,7 @@ useEffect(() => {
       },
       () => {
         setLocating(false);
-        setGeoError('Nao foi possivel obter sua localizacao.');
+        setGeoError('Não foi possível obter sua localizacao.');
       },
       { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
     );

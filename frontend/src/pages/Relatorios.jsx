@@ -139,7 +139,7 @@ export default function Relatorios() {
   const filterError = useMemo(() => {
     if (!showCustomRangeInputs) return '';
     if (!customStart || !customEnd) return 'Informe data inicial e final para gerar o relatorio.';
-    if (customStart > customEnd) return 'A data inicial nao pode ser maior que a data final.';
+    if (customStart > customEnd) return 'A data inicial Não pode ser maior que a data final.';
     return '';
   }, [showCustomRangeInputs, customStart, customEnd]);
 
@@ -172,7 +172,7 @@ export default function Relatorios() {
       })
       .catch((err) => {
         if (!active) return;
-        const message = err?.message || 'Nao foi possivel carregar os relatorios.';
+        const message = err?.message || 'Não foi possível carregar os relatorios.';
         setError(message);
         setData(null);
       })

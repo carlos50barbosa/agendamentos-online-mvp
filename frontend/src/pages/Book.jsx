@@ -138,7 +138,7 @@ export default function Book(){
         setPlanLimit(null);
       }
       if (e?.data?.error === 'otp_required') {
-        setOtpMsg('Verifique seu email para continuar. Envie e valide o codigo.');
+        setOtpMsg('Verifique seu email para continuar. Envie e valide o Código.');
       }
     } finally {
       if (manageLoading) setLoading(false);
@@ -148,16 +148,16 @@ export default function Book(){
   async function sendOtp(){
     const emailTrim = email.trim();
     if (!emailTrim) {
-      setError('Informe um email valido para receber o codigo.');
+      setError('Informe um email valido para receber o Código.');
       return;
     }
     try {
       setLoading(true); setOtpMsg(''); setError('');
       const r = await Api.requestOtp('email', emailTrim);
       setOtpReqId(r?.request_id || '');
-      setOtpMsg('Codigo enviado para o seu email.');
+      setOtpMsg('Código enviado para o seu email.');
     } catch (e) {
-      setError('Nao foi possivel enviar o codigo.');
+      setError('Não foi possível enviar o Código.');
     } finally { setLoading(false); }
   }
 
@@ -167,11 +167,11 @@ export default function Book(){
       return;
     }
     if (!otpReqId) {
-      setError('Solicite o envio do codigo antes de confirmar.');
+      setError('Solicite o envio do Código antes de confirmar.');
       return;
     }
     if (!otpCode || !otpCode.trim()) {
-      setError('Informe o codigo recebido.');
+      setError('Informe o Código recebido.');
       return;
     }
     try {
@@ -179,14 +179,14 @@ export default function Book(){
       const r = await Api.verifyOtp(otpReqId, otpCode);
       const token = r?.otp_token;
       if (!token) {
-        setError('Codigo invalido ou expirado.');
+        setError('Código inválido ou expirado.');
         return;
       }
       setOtpToken(token);
       setOtpMsg('Contato verificado.');
       await performBooking({ token, manageLoading: false });
     } catch (e) {
-      const msg = e?.data?.message || e?.message || 'Codigo invalido ou expirado.';
+      const msg = e?.data?.message || e?.message || 'Código inválido ou expirado.';
       setError(String(msg));
     } finally {
       setLoading(false);

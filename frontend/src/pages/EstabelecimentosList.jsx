@@ -148,7 +148,7 @@ export default function EstabelecimentosList() {
         setItems(Array.isArray(list) ? list : []);
       } catch (e) {
         if (!mounted) return;
-        setError('Nao foi possivel carregar os estabelecimentos.');
+        setError('Não foi possível carregar os estabelecimentos.');
       } finally {
         if (mounted) setLoading(false);
       }
@@ -355,7 +355,7 @@ export default function EstabelecimentosList() {
       },
       () => {
         setLocating(false);
-        setGeoError('Nao foi possivel obter sua localizacao.');
+        setGeoError('Nao foi possível obter sua localizacao.');
       },
       { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
     );

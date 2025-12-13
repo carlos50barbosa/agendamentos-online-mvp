@@ -109,7 +109,7 @@ router.post('/', auth, isEstabelecimento, async (req, res) => {
           return res.status(400).json({ error: 'avatar_invalido', message: 'Envie uma imagem PNG, JPG ou WEBP.' });
         }
         console.error('[profissionais][create] avatar', err);
-        return res.status(500).json({ error: 'avatar_falhou', message: 'Nao foi possivel salvar a foto.' });
+        return res.status(500).json({ error: 'avatar_falhou', message: 'Não foi possível salvar a foto.' });
       }
     }
 
@@ -162,7 +162,7 @@ router.put('/:id', auth, isEstabelecimento, async (req, res) => {
           return res.status(400).json({ error: 'avatar_invalido', message: 'Envie uma imagem PNG, JPG ou WEBP.' });
         }
         console.error('[profissionais][update] avatar', err);
-        return res.status(500).json({ error: 'avatar_falhou', message: 'Nao foi possivel salvar a foto.' });
+        return res.status(500).json({ error: 'avatar_falhou', message: 'Não foi possível salvar a foto.' });
       }
     }
 
