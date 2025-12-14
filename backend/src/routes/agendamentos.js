@@ -434,7 +434,10 @@ router.put('/:id/cancel-estab', authRequired, isEstabelecimento, async (req, res
       [estId]
     );
 
-    const inicioBR = ag?.inicio ? brDateTime(new Date(ag.inicio).toISOString()) : '';
+    const inicioISO = ag?.inicio ? new Date(ag.inicio).toISOString() : null;
+    const inicioBR = inicioISO ? brDateTime(inicioISO) : '';
+    const hora = inicioISO ? brTime(inicioISO) : '';
+    const data = inicioISO ? brDate(inicioISO) : '';
     const telCli = toDigits(cli?.telefone);
     const telEst = toDigits(est?.telefone);
     const blockEstabNotifications = estabNotificationsDisabled();
@@ -452,8 +455,9 @@ router.put('/:id/cancel-estab', authRequired, isEstabelecimento, async (req, res
       const paramCountHint = Number(process.env.WA_TEMPLATE_CANCEL_PARAMS || NaN);
       const tplName = process.env.WA_TEMPLATE_NAME_CANCEL || process.env.WA_TEMPLATE_NAME || 'confirmacao_agendamento';
       const tplLang = process.env.WA_TEMPLATE_LANG || 'pt_BR';
-      const params3 = [svc?.nome || '', inicioBR, est?.nome || ''];
-      const params4 = [cli?.nome || 'cliente', svc?.nome || '', inicioBR, est?.nome || ''];
+      // Ajuste de ordem: em {{3}} -> estabelecimento; às {{4}} -> hora+data
+      const params3 = [svc?.nome || '', `${hora} de ${data}`.trim(), est?.nome || ''];
+      const params4 = [cli?.nome || 'cliente', svc?.nome || '', est?.nome || '', `${hora} de ${data}`.trim()];
 
       let paramMode = paramModeEnv;
       const tplNameLower = String(tplName || '').toLowerCase();
