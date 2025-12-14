@@ -6,7 +6,7 @@ import { getUser } from "../utils/auth";
 import Modal from "../components/Modal.jsx";
 import EstablishmentsHero from "../components/EstablishmentsHero.jsx";
 
-import { IconMapPin } from "../components/Icons.jsx";
+import { IconMapPin, IconList } from "../components/Icons.jsx";
 
 /* =================== Helpers de Data =================== */
 const TZ = Intl.DateTimeFormat().resolvedOptions().timeZone || "America/Sao_Paulo";
@@ -2727,7 +2727,7 @@ useEffect(() => {
                     </button>
                   )}
                   <button type="button" className="summary-action" onClick={handleOpenInfo}>
-                    <span aria-hidden>ℹ</span>
+                    <IconList aria-hidden style={{ width: 14, height: 14, color: '#6c2bd9' }} />
                     Informações
                   </button>
                   <button
