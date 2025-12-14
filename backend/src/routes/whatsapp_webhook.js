@@ -190,6 +190,13 @@ router.post('/', async (req, res) => {
       }
     }
 
+    // Resposta fixa (bot desativado)
+    const autoReply = 'Ol?! Aqui ? o assistente do Agendamentos Online. Para marcar, reagendar ou cancelar, use nosso site. Se tiver qualquer d?vida, acesse https://agendamentosonline.com/ajuda. Obrigado!';
+    await send(from, autoReply);
+    s.step = 'MENU';
+    await setSession(from, s);
+    return res.sendStatus(200);
+
     // Fluxo simples tipo menu → coleta
     if (s.step === 'WELCOME') {
       await send(from, welcomeText());
