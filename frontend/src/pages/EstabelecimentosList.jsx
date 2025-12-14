@@ -3,9 +3,8 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { Api, resolveAssetUrl } from '../utils/api';
 import LogoAO from '../components/LogoAO.jsx';
 import Modal from '../components/Modal.jsx';
-import { IconMapPin, IconSearch } from '../components/Icons.jsx';
-
-const STORAGE_KEY = 'ao:lastLocation';
+import EstablishmentsHero from '../components/EstablishmentsHero.jsx';
+import { IconMapPin } from '../components/Icons.jsx';
 
 const normalize = (value) =>
   String(value || '')
@@ -45,28 +44,6 @@ const formatAddress = (est) => {
   return parts.join(', ');
 };
 
-const parseCoord = (value) => {
-  if (value == null) return null;
-  const text = String(value).trim().replace(',', '.');
-  const num = Number(text);
-  return Number.isFinite(num) ? num : null;
-};
-
-const haversineDistance = (origin, point) => {
-  if (!origin || !point) return null;
-  const toRad = (value) => (value * Math.PI) / 180;
-  const R = 6371; // km
-  const dLat = toRad(point.lat - origin.lat);
-  const dLon = toRad(point.lng - origin.lng);
-  const lat1 = toRad(origin.lat);
-  const lat2 = toRad(point.lat);
-  const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return R * c;
-};
-
-const hasKey = (obj, key) => Object.prototype.hasOwnProperty.call(obj || {}, key);
-
 const fallbackAvatar = (label) => {
   const name = encodeURIComponent(String(label || 'AO'));
   return `https://ui-avatars.com/api/?name=${name}&size=128&background=1C64F2&color=ffffff&rounded=true`;
@@ -76,40 +53,6 @@ const ratingNumberFormatter = new Intl.NumberFormat('pt-BR', {
   minimumFractionDigits: 1,
   maximumFractionDigits: 1,
 });
-const geocodeEstablishment = async (est) => {
-  const lat = parseCoord(est?.latitude ?? est?.lat ?? null);
-  const lng = parseCoord(est?.longitude ?? est?.lng ?? null);
-  if (Number.isFinite(lat) && Number.isFinite(lng)) return { lat, lng };
-
-  const parts = [];
-  const street = [est?.endereco, est?.numero].filter(Boolean).join(' ');
-  if (street) parts.push(street);
-  if (est?.bairro) parts.push(est.bairro);
-  if (est?.cidade) parts.push(est.cidade);
-  if (est?.estado) parts.push(est.estado);
-  if (est?.cep) parts.push(est.cep);
-  if (!parts.length) return null;
-  parts.push('Brasil');
-
-  const query = encodeURIComponent(parts.join(', '));
-  const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&addressdetails=0&countrycodes=br&q=${query}&email=contato@agendamentos.app`;
-
-  try {
-    const response = await fetch(url, {
-      headers: { 'Accept-Language': 'pt-BR' },
-    });
-    if (!response.ok) return null;
-    const data = await response.json();
-    if (!Array.isArray(data) || !data.length) return null;
-    const { lat, lon } = data[0] || {};
-    const latNum = Number(lat);
-    const lonNum = Number(lon);
-    if (!Number.isFinite(latNum) || !Number.isFinite(lonNum)) return null;
-    return { lat: latNum, lng: lonNum };
-  } catch {
-    return null;
-  }
-};
 
 export default function EstabelecimentosList() {
   const [items, setItems] = useState([]);
@@ -122,13 +65,6 @@ export default function EstabelecimentosList() {
     return initial.length > 0;
   });
   const [pendingScroll, setPendingScroll] = useState(false);
-  const [userLocation, setUserLocation] = useState(null);
-  const [locating, setLocating] = useState(false);
-  const [geoError, setGeoError] = useState('');
-  const [geocoding, setGeocoding] = useState(false);
-  const coordsCacheRef = useRef(new Map());
-  const geoFallbackRef = useRef(false);
-  const [distanceMap, setDistanceMap] = useState({});
   const searchInputRef = useRef(null);
   const resultsSectionRef = useRef(null);
   const [promoOpen, setPromoOpen] = useState(false);
@@ -161,17 +97,6 @@ export default function EstabelecimentosList() {
 
   useEffect(() => {
     try {
-      const stored = sessionStorage.getItem(STORAGE_KEY);
-      if (!stored) return;
-      const parsed = JSON.parse(stored);
-      if (parsed && Number.isFinite(parsed.lat) && Number.isFinite(parsed.lng)) {
-        setUserLocation(parsed);
-      }
-    } catch {}
-  }, []);
-
-  useEffect(() => {
-    try {
       const dismissed = localStorage.getItem(PROMO_KEY);
       if (!dismissed) {
         setPromoOpen(true);
@@ -190,34 +115,6 @@ export default function EstabelecimentosList() {
     }
   }, []);
 
-  useEffect(() => {
-    try {
-      if (userLocation) sessionStorage.setItem(STORAGE_KEY, JSON.stringify(userLocation));
-      else sessionStorage.removeItem(STORAGE_KEY);
-    } catch {}
-  }, [userLocation]);
-
-  useEffect(() => {
-    const cache = coordsCacheRef.current;
-    let changed = false;
-    items.forEach((est) => {
-      const lat = parseCoord(est?.latitude ?? est?.lat ?? null);
-      const lng = parseCoord(est?.longitude ?? est?.lng ?? null);
-      const key = String(est.id);
-      if (Number.isFinite(lat) && Number.isFinite(lng) && !cache.has(key)) {
-        cache.set(key, { lat, lng });
-        changed = true;
-      }
-    });
-    if (changed && userLocation) {
-      const next = {};
-      cache.forEach((coords, id) => {
-        next[id] = haversineDistance(userLocation, coords);
-      });
-      setDistanceMap(next);
-    }
-  }, [items, userLocation]);
-
   const normalizedQuery = useMemo(() => normalize(query.trim()), [query]);
   const queryTokens = useMemo(
     () => (normalizedQuery ? normalizedQuery.split(/\s+/).filter(Boolean) : []),
@@ -232,75 +129,11 @@ export default function EstabelecimentosList() {
     });
   }, [items, queryTokens]);
 
-  useEffect(() => {
-    if (!userLocation) {
-      setDistanceMap({});
-      return;
-    }
-    const next = {};
-    coordsCacheRef.current.forEach((coords, id) => {
-      next[id] = coords ? haversineDistance(userLocation, coords) : null;
-    });
-    setDistanceMap(next);
-  }, [userLocation]);
-
-  useEffect(() => {
-    if (!userLocation) {
-      setGeocoding(false);
-      return;
-    }
-    const pending = filteredItems.filter((est) => !coordsCacheRef.current.has(String(est.id)));
-  if (!pending.length) {
-    setGeocoding(false);
-    return;
-  }
-
-    let cancelled = false;
-    setGeocoding(true);
-
-    (async () => {
-      for (const est of pending) {
-        if (cancelled) break;
-        const coords = await geocodeEstablishment(est);
-        if (cancelled) break;
-        coordsCacheRef.current.set(String(est.id), coords);
-        setDistanceMap((prev) => ({
-          ...prev,
-          [String(est.id)]: coords ? haversineDistance(userLocation, coords) : null,
-        }));
-      }
-      if (!cancelled) setGeocoding(false);
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [filteredItems, userLocation]);
-
-  const kmFormatter = useMemo(
-    () => new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 }),
-    []
-  );
   const results = useMemo(() => {
-    const mapped = filteredItems.map((est) => ({
-      est,
-      distance: distanceMap[String(est.id)],
-      hasDistance: hasKey(distanceMap, String(est.id)),
-    }));
+    const mapped = filteredItems.map((est) => ({ est }));
     const sortKey = (value) => normalize(value?.nome || value?.name || `est-${value?.id || ''}`);
-    const sorted = [...mapped];
-    if (userLocation) {
-      sorted.sort((a, b) => {
-        const da = Number.isFinite(a.distance) ? a.distance : Number.POSITIVE_INFINITY;
-        const db = Number.isFinite(b.distance) ? b.distance : Number.POSITIVE_INFINITY;
-        if (da !== db) return da - db;
-        return sortKey(a.est).localeCompare(sortKey(b.est));
-      });
-    } else {
-      sorted.sort((a, b) => sortKey(a.est).localeCompare(sortKey(b.est)));
-    }
-    return sorted;
-  }, [distanceMap, filteredItems, userLocation]);
+    return mapped.sort((a, b) => sortKey(a.est).localeCompare(sortKey(b.est)));
+  }, [filteredItems]);
 
   useEffect(() => {
     if (!showResults || !pendingScroll) return;
@@ -336,76 +169,6 @@ export default function EstabelecimentosList() {
     [searchParams, setSearchParams]
   );
 
-  const handleUseLocation = useCallback(() => {
-    if (typeof window !== 'undefined' && !window.isSecureContext) {
-      setGeoError('A localização exige conexão segura (HTTPS). Acesse pelo site ou habilite HTTPS/localhost.');
-      return;
-    }
-    if (!navigator?.geolocation) {
-      setGeoError('Geolocalização não está disponível neste dispositivo.');
-      return;
-    }
-    setShowResults(true);
-    setPendingScroll(true);
-    setGeoError('');
-    setLocating(true);
-    geoFallbackRef.current = false;
-
-    const requestLocation = (opts, onError) => {
-      navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          setLocating(false);
-          const coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-          setUserLocation(coords);
-        },
-        onError,
-        opts
-      );
-    };
-
-    const handleError = (err, triedFallback) => {
-      if (err?.code === 3 && !triedFallback) {
-        geoFallbackRef.current = true;
-        setGeoError('Buscando com precisão padrão...');
-        requestLocation(
-          { enableHighAccuracy: false, timeout: 12000, maximumAge: 180000 },
-          (err2) => handleError(err2, true)
-        );
-        return;
-      }
-
-      // Se temos coordenadas salvas de sessão, use-as como fallback rápido.
-      try {
-        if (!triedFallback) {
-          const stored = sessionStorage.getItem(STORAGE_KEY);
-          if (stored) {
-            const parsed = JSON.parse(stored);
-            if (parsed && Number.isFinite(parsed.lat) && Number.isFinite(parsed.lng)) {
-              setLocating(false);
-              setUserLocation(parsed);
-              setGeoError('Usando última localização conhecida.');
-              return;
-            }
-          }
-        }
-      } catch {}
-
-      setLocating(false);
-      let message = 'Não foi possível obter sua localização.';
-      if (err?.code === 1) message = 'Permissão de localização negada. Verifique as permissões do navegador.';
-      else if (err?.code === 2) message = 'Sinal de localização indisponível no momento. Tente novamente em instantes.';
-      else if (err?.code === 3) message = 'Tempo esgotado para buscar sua localização. Tente novamente.';
-      else if (err?.message) message = err.message;
-      setGeoError(message);
-    };
-
-    // Prioriza resposta mais rápida: primeiro tentativa com precisão padrão
-    requestLocation(
-      { enableHighAccuracy: false, timeout: 8000, maximumAge: 180000 },
-      (err) => handleError(err, false)
-    );
-  }, []);
-
   const handleSubmit = useCallback((event) => {
     event.preventDefault();
     setShowResults(true);
@@ -416,8 +179,6 @@ export default function EstabelecimentosList() {
     setPromoOpen(false);
     try { localStorage.setItem(PROMO_KEY, String(Date.now())); } catch {}
   }, []);
-
-  const displayHeading = HEADLINE_TEXT;
 
   return (
     <div className="home">
@@ -484,61 +245,23 @@ export default function EstabelecimentosList() {
         </Modal>
       )}
 
-      <section className="home-hero" aria-labelledby="home-hero-title">
-        <div className="home-hero__inner">
-          <LogoAO size={72} className="home-hero__logo" />
-          <h1 id="home-hero-title" className="home-hero__heading">
-            <span className="home-hero__heading-text">{displayHeading}</span>
-          </h1>
-          <p className="home-hero__subtitle">
-            Descubra estabelecimentos perto de você, escolha o horario ideal e confirme em segundos.
-          </p>
-          <form className="novo-agendamento__search" onSubmit={handleSubmit}>
-            <div className="novo-agendamento__searchbox">
-              <IconSearch className="novo-agendamento__search-icon" aria-hidden />
-              <input
-                ref={searchInputRef}
-                className="input novo-agendamento__search-input"
-                type="search"
-                placeholder="Buscar por nome, bairro ou cidade"
-                value={query}
-                onChange={(e) => handleQueryChange(e.target.value)}
-                aria-label="Buscar estabelecimentos por nome, bairro ou cidade"
-              />
-              <span className="novo-agendamento__search-caret" aria-hidden>▾</span>
-            </div>
-            <button
-              type="button"
-              className="novo-agendamento__location"
-              onClick={handleUseLocation}
-              disabled={locating}
-            >
-              <IconMapPin className="novo-agendamento__location-icon" aria-hidden />
-              <span>{locating ? 'Localizando...' : 'Usar minha localização atual'}</span>
-            </button>
-          </form>
-          {geoError && (
-            <div className="notice notice--error" role="alert">
-              {geoError}
-            </div>
-          )}
-          {geocoding && !geoError && (
-            <div className="novo-agendamento__status muted" aria-live="polite">
-              Calculando distâncias dos estabelecimentos...
-            </div>
-          )}
-        </div>
-      </section>
+      <EstablishmentsHero
+        heading={HEADLINE_TEXT}
+        subtitle="Descubra estabelecimentos perto de você, escolha o horário ideal e confirme em segundos."
+        query={query}
+        onChange={handleQueryChange}
+        onSubmit={handleSubmit}
+        placeholder="Buscar por nome, bairro ou cidade"
+        inputRef={searchInputRef}
+        headingId="home-hero-title"
+      />
 
       {showResults && (
         <section
           ref={resultsSectionRef}
           className="home-results"
-          aria-labelledby="home-results-title"
+          aria-label="Resultados da busca"
         >
-          <h2 id="home-results-title" className="home-results__title">
-            Estabelecimentos
-          </h2>
           {loading && <div className="home-results__state">Carregando...</div>}
           {!loading && error && (
             <div className="home-results__state home-results__state--error">{error}</div>
@@ -549,7 +272,7 @@ export default function EstabelecimentosList() {
           {!loading && !error && results.length > 0 && (
             <div className="home-results__grid">
               {results.map((item) => {
-                const { est, distance, hasDistance } = item;
+                const { est } = item;
                 const name = est?.nome || est?.name || `Estabelecimento #${est?.id || ''}`;
                 const address = formatAddress(est);
                 const sp = new URLSearchParams();
@@ -559,19 +282,24 @@ export default function EstabelecimentosList() {
                 const slugSource = est?.slug || name;
                 const slug = slugSource ? toSlug(slugSource) : 'estabelecimento';
                 const path = slug ? `/novo/${slug}` : '/novo';
-              const avatarSource = est?.foto_url || est?.avatar_url || '';
-              const image = avatarSource ? resolveAssetUrl(avatarSource) : fallbackAvatar(name);
-              const distanceLabel = !userLocation
-                ? 'Ative a localização para ver a distância'
-                : hasDistance
-                ? distance != null
-                  ? `${kmFormatter.format(distance)} km`
-                  : 'Distância indisponível'
-                : 'Calculando distâncias...';
-              const ratingAverageRaw = Number(est?.rating_average ?? est?.ratingAverage ?? NaN);
-              const ratingCount = Number(est?.rating_count ?? est?.ratingCount ?? 0);
-              const hasRatings = Number.isFinite(ratingAverageRaw) && ratingCount > 0;
-              const ratingLabel = hasRatings ? ratingNumberFormatter.format(ratingAverageRaw) : null;
+                const avatarSource = est?.foto_url || est?.avatar_url || '';
+                const image = avatarSource ? resolveAssetUrl(avatarSource) : fallbackAvatar(name);
+                const coords = (() => {
+                  const lat = Number(est?.latitude ?? est?.lat ?? est?.coord_lat ?? null);
+                  const lng = Number(est?.longitude ?? est?.lng ?? est?.coord_lng ?? null);
+                  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+                  if (lat === 0 && lng === 0) return null;
+                  return { lat, lng };
+                })();
+                const mapLink = (() => {
+                  if (coords) return `https://www.google.com/maps/search/?api=1&query=${coords.lat},${coords.lng}`;
+                  if (address) return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`;
+                  return '';
+                })();
+                const ratingAverageRaw = Number(est?.rating_average ?? est?.ratingAverage ?? NaN);
+                const ratingCount = Number(est?.rating_count ?? est?.ratingCount ?? 0);
+                const hasRatings = Number.isFinite(ratingAverageRaw) && ratingCount > 0;
+                const ratingLabel = hasRatings ? ratingNumberFormatter.format(ratingAverageRaw) : null;
 
               return (
                 <Link
@@ -599,7 +327,25 @@ export default function EstabelecimentosList() {
                       {address || 'Endereco nao informado'}
                     </p>
                     <div className="establishment-card__meta-row">
-                      <span className="establishment-card__distance">{distanceLabel}</span>
+                      {mapLink ? (
+                        <button
+                          type="button"
+                          className="establishment-card__distance establishment-card__distance--btn"
+                          onClick={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            try {
+                              window.open(mapLink, '_blank', 'noopener,noreferrer');
+                            } catch {
+                              window.location.href = mapLink;
+                            }
+                          }}
+                        >
+                          <IconMapPin aria-hidden style={{ width: 14, height: 14 }} /> Ver no mapa
+                        </button>
+                      ) : (
+                        <span className="establishment-card__distance">Mapa indisponível</span>
+                      )}
                       <span
                         className={`establishment-card__rating${hasRatings ? '' : ' establishment-card__rating--muted'}`}
                         aria-label={

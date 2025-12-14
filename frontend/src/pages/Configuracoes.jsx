@@ -1477,28 +1477,7 @@ export default function Configuracoes() {
                   <input className="input" value={profileForm.estado} onChange={(e) => handleProfileChange('estado', e.target.value.toUpperCase().slice(0, 2))} required />
                 </label>
               </div>
-              <div className="box" style={{ display: 'grid', gap: 8 }}>
-                <div className="muted" style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: '.06em' }}>Notificações</div>
-                <p className="small muted" style={{ margin: 0 }}>
-                  Escolha como deseja ser avisado sempre que um novo agendamento for criado ou cancelado.
-                </p>
-                <label className="switch">
-                  <input
-                    type="checkbox"
-                    checked={!!profileForm.notifyEmailEstab}
-                    onChange={(e) => handleProfileChange('notifyEmailEstab', e.target.checked)}
-                  />
-                  <span>Receber notificações por email</span>
-                </label>
-                <label className="switch">
-                  <input
-                    type="checkbox"
-                    checked={!!profileForm.notifyWhatsappEstab}
-                    onChange={(e) => handleProfileChange('notifyWhatsappEstab', e.target.checked)}
-                  />
-                  <span>Receber notificações no WhatsApp</span>
-                </label>
-              </div>
+              {/* Notificações removidas: mantém padrão backend */}
             </>
           )}
           <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
@@ -1688,20 +1667,6 @@ export default function Configuracoes() {
                 Ative os dias em que atende e informe os horários.
               </span>
             </div>
-            <label className="label">
-              <span>Observações (opcional)</span>
-              <textarea
-                className="input"
-                rows={3}
-                value={publicProfileForm.horarios_text}
-                onChange={(e) => handlePublicProfileChange('horarios_text', e.target.value)}
-                disabled={publicProfileLoading || publicProfileSaving}
-                placeholder={'Plantões, feriados ou orientacões especiais'}
-              />
-              <span className="muted" style={{ fontSize: 12 }}>
-                Essas observações aparecem junto aos horários no agendamento.
-              </span>
-            </label>
             <div className="grid" style={{ gap: 10, gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}>
               <label className="label">
                 <span>Site</span>

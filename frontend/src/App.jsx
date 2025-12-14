@@ -100,8 +100,10 @@ function BillingStatusBanner({ status, user, planInfo }) {
     if (typeof planInfo?.trialDaysLeft === 'number') return planInfo.trialDaysLeft;
     return null;
   })();
-  const planStatus = String(planInfo?.status || '').toLowerCase();
-  const trialExpired = planStatus === 'trialing' && trialDaysLeft != null && trialDaysLeft < 0;
+  const billingState = String(status?.state || '').toLowerCase();
+  const planStatus = billingState || String(planInfo?.status || '').toLowerCase();
+  const isTrialing = planStatus === 'trialing';
+  const trialExpired = isTrialing && trialDaysLeft != null && trialDaysLeft < 0;
 
   const shouldShowBilling = status && BILLING_ALERT_STATES.has(status.state);
   if (!shouldShowBilling && !trialExpired) return null;
@@ -479,10 +481,12 @@ export default function App() {
     return null;
   }, [planBarInfo.trialDaysLeft, planBarInfo.trialEnd]);
 
-  const planStatus = String(planBarInfo.status || '').toLowerCase();
-  const trialExpired = planStatus === 'trialing' && trialDaysLeft != null && trialDaysLeft < 0;
-  const trialEndingSoon =
-    planStatus === 'trialing' && trialDaysLeft != null && trialDaysLeft >= 0 && trialDaysLeft <= 3;
+  const planStatusLocal = String(planBarInfo.status || '').toLowerCase();
+  const billingState = String(billingStatus?.state || '').toLowerCase();
+  const planStatus = billingState || planStatusLocal;
+  const isTrialing = planStatus === 'trialing';
+  const trialExpired = isTrialing && trialDaysLeft != null && trialDaysLeft < 0;
+  const trialEndingSoon = isTrialing && trialDaysLeft != null && trialDaysLeft >= 0 && trialDaysLeft <= 3;
 
 const topbarAlert = useMemo(() => {
     if (!currentUser || currentUser.tipo !== 'estabelecimento') return null;

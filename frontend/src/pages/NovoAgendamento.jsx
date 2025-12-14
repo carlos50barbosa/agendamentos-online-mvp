@@ -4,8 +4,9 @@ import { Link, useNavigate, useSearchParams, useLocation } from "react-router-do
 import { Api, resolveAssetUrl } from "../utils/api";
 import { getUser } from "../utils/auth";
 import Modal from "../components/Modal.jsx";
+import EstablishmentsHero from "../components/EstablishmentsHero.jsx";
 
-import { IconSearch, IconMapPin } from "../components/Icons.jsx";
+import { IconMapPin } from "../components/Icons.jsx";
 
 /* =================== Helpers de Data =================== */
 const TZ = Intl.DateTimeFormat().resolvedOptions().timeZone || "America/Sao_Paulo";
@@ -812,7 +813,7 @@ const ProfessionalTile = ({ professional, selected, onSelect }) => {
 };
 
 
-const EstablishmentCard = ({ est, selected, onSelect, distance, userLocation, formatter, hasDistance }) => {
+const EstablishmentCard = ({ est, selected, onSelect }) => {
   const name = est?.nome || est?.name || est?.fantasia || est?.razao_social || `Estabelecimento #${est?.id || ''}`;
   const address = formatAddress(est);
   const avatarSource = est?.foto_url || est?.avatar_url || '';
@@ -820,13 +821,18 @@ const EstablishmentCard = ({ est, selected, onSelect, distance, userLocation, fo
   const ratingCount = Number(est?.rating_count ?? est?.ratingCount ?? 0);
   const hasRatings = Number.isFinite(ratingAverageRaw) && ratingCount > 0;
   const ratingLabel = hasRatings ? ratingNumberFormatter.format(ratingAverageRaw) : null;
-  const distanceLabel = !userLocation
-    ? 'Ative a localizacao para ver a distancia'
-    : hasDistance
-    ? Number.isFinite(distance)
-      ? `${formatter.format(distance)} km`
-      : 'Distancia indisponivel'
-    : 'Calculando distancias...';
+  const coords = (() => {
+    const lat = Number(est?.latitude ?? est?.lat ?? est?.coord_lat ?? null);
+    const lng = Number(est?.longitude ?? est?.lng ?? est?.coord_lng ?? null);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+    if (lat === 0 && lng === 0) return null;
+    return { lat, lng };
+  })();
+  const mapLink = (() => {
+    if (coords) return `https://www.google.com/maps/search/?api=1&query=${coords.lat},${coords.lng}`;
+    if (address) return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`;
+    return '';
+  })();
 
   const handleKeyDown = (event) => {
     if (event.key === 'Enter' || event.key === ' ') {
@@ -861,7 +867,25 @@ const EstablishmentCard = ({ est, selected, onSelect, distance, userLocation, fo
         <h3 className="establishment-card__name">{name}</h3>
         <p className="establishment-card__address">{address || 'Endereco nao informado'}</p>
         <div className="establishment-card__meta-row">
-          <span className="establishment-card__distance">{distanceLabel}</span>
+          {mapLink ? (
+            <button
+              type="button"
+              className="establishment-card__distance establishment-card__distance--btn"
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                try {
+                  window.open(mapLink, '_blank', 'noopener,noreferrer');
+                } catch {
+                  window.location.href = mapLink;
+                }
+              }}
+            >
+              <IconMapPin aria-hidden style={{ width: 14, height: 14 }} /> Ver no mapa
+            </button>
+          ) : (
+            <span className="establishment-card__distance">Mapa indisponivel</span>
+          )}
           <span
             className={`establishment-card__rating${hasRatings ? '' : ' establishment-card__rating--muted'}`}
             aria-label={
@@ -935,6 +959,7 @@ export default function NovoAgendamento() {
   const [geoError, setGeoError] = useState('');
   const [geocoding, setGeocoding] = useState(false);
   const coordsCacheRef = useRef(new Map());
+  const estSearchInputRef = useRef(null);
   const servicesSectionRef = useRef(null);
   const [distanceMap, setDistanceMap] = useState({});
   const [establishmentsLoading, setEstablishmentsLoading] = useState(true);
@@ -1821,6 +1846,10 @@ useEffect(() => {
     [searchParams, setSearchParams]
   );
 
+  const handleSearchSubmit = useCallback((event) => {
+    if (event?.preventDefault) event.preventDefault();
+  }, []);
+
   const handleUseLocation = useCallback(() => {
     if (!navigator?.geolocation) {
       setGeoError('Geolocalizacao nao esta disponivel neste dispositivo.');
@@ -2310,42 +2339,13 @@ useEffect(() => {
   const introSubtitle = step === 1
     ? 'Encontre um estabelecimento para iniciar um novo agendamento.'
     : selectedEstablishmentName
-    ? `Agendamento em ${selectedEstablishmentName}.`
+    ? (
+      <span>
+        Agendamento em <strong style={{ color: '#6366f1' }}>{selectedEstablishmentName}</strong>.
+      </span>
+    )
     : 'Selecione um estabelecimento para continuar.';
 
-  const renderEstablishmentSearch = () => (
-    <>
-      <div className="novo-agendamento__search">
-        <div className="novo-agendamento__searchbox">
-          <IconSearch className="novo-agendamento__search-icon" aria-hidden />
-          <input
-            className="input novo-agendamento__search-input"
-            type="search"
-            placeholder="Buscar por nome, bairro ou cidade"
-            value={estQuery}
-            onChange={(event) => handleQueryChange(event.target.value)}
-            aria-label="Buscar estabelecimentos"
-          />
-          <span className="novo-agendamento__search-caret" aria-hidden>▾</span>
-        </div>
-        <button
-          type="button"
-          className="novo-agendamento__location"
-          onClick={handleUseLocation}
-          disabled={locating}
-        >
-          <IconMapPin className="novo-agendamento__location-icon" aria-hidden />
-          <span>{locating ? 'Localizando...' : 'Usar minha localização'}</span>
-        </button>
-      </div>
-      {geoError && <div className="notice notice--error" role="alert">{geoError}</div>}
-      {geocoding && (
-        <div className="novo-agendamento__status muted" aria-live="polite">
-          Calculando distâncias dos estabelecimentos...
-        </div>
-      )}
-    </>
-  );
   const renderEstablishmentResults = () => {
     if (establishmentsLoading) {
       return (
@@ -2370,16 +2370,12 @@ useEffect(() => {
     }
     return (
       <div className="establishments__grid">
-        {establishmentResults.map(({ est, distance, hasDistance }) => (
+        {establishmentResults.map(({ est }) => (
           <EstablishmentCard
             key={est.id}
             est={est}
             selected={String(est.id) === establishmentId}
             onSelect={handleEstablishmentClick}
-            distance={distance}
-            hasDistance={hasDistance}
-            userLocation={userLocation}
-            formatter={kmFormatter}
           />
         ))}
       </div>
@@ -2685,12 +2681,22 @@ useEffect(() => {
         </div>
       )}
       <div className="establishments">
-        <div className="card establishments__intro novo-agendamento__intro">
-          <h1 className="establishments__title">Novo agendamento</h1>
-          <p className="muted establishments__subtitle">{introSubtitle}</p>
+        {step === 1 ? (
+          <EstablishmentsHero
+            heading="Novo agendamento"
+            subtitle={introSubtitle}
+            query={estQuery}
+            onChange={handleQueryChange}
+            onSubmit={handleSearchSubmit}
+            placeholder="Buscar por nome, bairro ou cidade"
+            inputRef={estSearchInputRef}
+            headingId="novo-agendamento-hero-title"
+          />
+        ) : (
+          <div className="card establishments__intro novo-agendamento__intro">
+            <h1 className="establishments__title">Novo agendamento</h1>
+            <p className="muted establishments__subtitle">{introSubtitle}</p>
 
-          {step === 1 && renderEstablishmentSearch()}
-          {step > 1 && (
             <div className="novo-agendamento__summary novo-agendamento__summary--establishment">
               <div className="novo-agendamento__summary-avatar">
                 {establishmentAvatar ? (
@@ -2705,7 +2711,7 @@ useEffect(() => {
                 <div className="novo-agendamento__summary-actions">
                   {!isAuthenticated ? (
                     <Link to={loginHref} className="summary-action summary-action--cta">
-                      <span aria-hidden>🔒</span>
+                      <span aria-hidden>★</span>
                       Entre para avaliar
                     </Link>
                   ) : (
@@ -2716,12 +2722,12 @@ useEffect(() => {
                       disabled={!isClientUser || selectedExtras?.loading}
                       title={!isClientUser ? 'Disponível apenas para clientes.' : undefined}
                     >
-                      <span aria-hidden>{ratingCount > 0 ? '★' : '☆'}</span>
+                      <span aria-hidden>★</span>
                       {ratingButtonLabel}
                     </button>
                   )}
                   <button type="button" className="summary-action" onClick={handleOpenInfo}>
-                    <span aria-hidden>🛈</span>
+                    <span aria-hidden>ℹ</span>
                     Informações
                   </button>
                   <button
@@ -2730,12 +2736,10 @@ useEffect(() => {
                     onClick={handleOpenGalleryModal}
                     title={galleryImages.length ? 'Ver fotos do estabelecimento' : 'Ainda sem imagens enviadas.'}
                   >
-                    <span aria-hidden>📷</span>
                     Fotos
                   </button>
                   {!isAuthenticated ? (
                     <Link to={loginHref} className="summary-action summary-action--cta">
-                      <span aria-hidden>♡</span>
                       Entre para favoritar
                     </Link>
                   ) : (
@@ -2746,7 +2750,7 @@ useEffect(() => {
                       disabled={!isClientUser || favoriteUpdating}
                       title={!isClientUser ? 'Disponível apenas para clientes.' : undefined}
                     >
-                      <span aria-hidden>{selectedExtras?.is_favorite ? '♥' : '♡'}</span>
+                      <span aria-hidden>♡</span>
                       {selectedExtras?.is_favorite ? 'Favorito' : 'Favoritar'}
                     </button>
                   )}
@@ -2760,8 +2764,8 @@ useEffect(() => {
                 </div>
               )}
             </div>
-          )}
-        </div>
+          </div>
+        )}
 
         <div className="establishments__results novo-agendamento__results">
           {step === 1 && renderEstablishmentResults()}
@@ -3367,6 +3371,3 @@ useEffect(() => {
     </div>
   );
 }
-
-
-
