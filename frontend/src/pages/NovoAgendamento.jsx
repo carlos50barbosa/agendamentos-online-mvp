@@ -8,6 +8,8 @@ import EstablishmentsHero from "../components/EstablishmentsHero.jsx";
 
 import { IconMapPin, IconList } from "../components/Icons.jsx";
 
+const FAVORITES_CACHE_KEY = 'ao:favorites_local';
+
 /* =================== Helpers de Data =================== */
 const TZ = Intl.DateTimeFormat().resolvedOptions().timeZone || "America/Sao_Paulo";
 
@@ -962,6 +964,17 @@ export default function NovoAgendamento() {
   const estSearchInputRef = useRef(null);
   const servicesSectionRef = useRef(null);
   const [distanceMap, setDistanceMap] = useState({});
+  const [favoriteIds, setFavoriteIds] = useState(() => {
+    try {
+      const raw = localStorage.getItem(FAVORITES_CACHE_KEY);
+      if (!raw) return new Set();
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return new Set();
+      return new Set(parsed.map((v) => String(v)));
+    } catch {
+      return new Set();
+    }
+  });
   const [establishmentsLoading, setEstablishmentsLoading] = useState(true);
   const [establishmentsError, setEstablishmentsError] = useState('');
   const [establishmentExtras, setEstablishmentExtras] = useState({});
@@ -1077,13 +1090,18 @@ export default function NovoAgendamento() {
     [normalizedQuery]
   );
 
+  const [favoritesOnly, setFavoritesOnly] = useState(false);
+
   const filteredEstablishments = useMemo(() => {
-    if (!queryTokens.length) return establishments;
     return establishments.filter((est) => {
+      const isFavorite = favoriteIds.has(String(est?.id)) || Boolean(est?.is_favorite || est?.isFavorite);
+      est.is_favorite = isFavorite;
+      if (favoritesOnly && !isFavorite) return false;
+      if (!queryTokens.length) return true;
       const haystack = buildEstablishmentSearchText(est);
       return queryTokens.every((token) => haystack.includes(token));
     });
-  }, [establishments, queryTokens]);
+  }, [establishments, queryTokens, favoritesOnly, favoriteIds]);
 
   const kmFormatter = useMemo(
     () => new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 }),
@@ -1190,26 +1208,11 @@ export default function NovoAgendamento() {
   }, [filteredEstablishments, userLocation]);
 
   const establishmentResults = useMemo(() => {
-    const mapped = filteredEstablishments.map((est) => ({
-      est,
-      distance: distanceMap[String(est.id)],
-      hasDistance: Object.prototype.hasOwnProperty.call(distanceMap, String(est.id)),
-    }));
+    const mapped = filteredEstablishments.map((est) => ({ est }));
     const sortKey = (value) =>
       normalizeText(value?.nome || value?.name || value?.fantasia || value?.razao_social || `est-${value?.id || ''}`);
-    const sorted = [...mapped];
-    if (userLocation) {
-      sorted.sort((a, b) => {
-        const da = Number.isFinite(a.distance) ? a.distance : Number.POSITIVE_INFINITY;
-        const db = Number.isFinite(b.distance) ? b.distance : Number.POSITIVE_INFINITY;
-        if (da !== db) return da - db;
-        return sortKey(a.est).localeCompare(sortKey(b.est));
-      });
-    } else {
-      sorted.sort((a, b) => sortKey(a.est).localeCompare(sortKey(b.est)));
-    }
-    return sorted;
-  }, [distanceMap, filteredEstablishments, userLocation]);
+    return [...mapped].sort((a, b) => sortKey(a.est).localeCompare(sortKey(b.est)));
+  }, [filteredEstablishments]);
 
   // Passo da grade
   const stepMinutes = useMemo(() => {
@@ -2130,6 +2133,13 @@ useEffect(() => {
       ...prev,
       [key]: { ...(prev[key] || {}), is_favorite: nextState, favoriteUpdating: true },
     }));
+    setFavoriteIds((prev) => {
+      const next = new Set(prev);
+      if (nextState) next.add(String(selectedEstablishment.id));
+      else next.delete(String(selectedEstablishment.id));
+      try { localStorage.setItem(FAVORITES_CACHE_KEY, JSON.stringify([...next])); } catch {}
+      return next;
+    });
     try {
       const response = nextState
         ? await Api.favoriteEstablishment(selectedEstablishment.id)
@@ -2691,7 +2701,28 @@ useEffect(() => {
             placeholder="Buscar por nome, bairro ou cidade"
             inputRef={estSearchInputRef}
             headingId="novo-agendamento-hero-title"
-          />
+          >
+            <button
+              type="button"
+              className={`pill-btn${favoritesOnly ? ' pill-btn--active' : ''}`}
+              onClick={() => setFavoritesOnly((prev) => !prev)}
+              style={{
+                borderRadius: 9999,
+                padding: '6px 12px',
+                border: '1px solid var(--border, #e5e7eb)',
+                background: favoritesOnly ? 'var(--primary-50, #f3e8ff)' : 'var(--surface, #fff)',
+                color: 'var(--primary-700, #6c2bd9)',
+                fontWeight: 600,
+                cursor: 'pointer',
+                boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
+                width: 'fit-content',
+                display: 'block',
+                margin: '12px auto 0 auto',
+              }}
+            >
+              {favoritesOnly ? 'Mostrando favoritos' : 'Mostrar favoritos'}
+            </button>
+          </EstablishmentsHero>
         ) : (
           <div className="card establishments__intro novo-agendamento__intro">
             <h1 className="establishments__title">Novo agendamento</h1>

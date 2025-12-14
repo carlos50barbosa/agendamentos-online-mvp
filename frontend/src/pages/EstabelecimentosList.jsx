@@ -6,6 +6,8 @@ import Modal from '../components/Modal.jsx';
 import EstablishmentsHero from '../components/EstablishmentsHero.jsx';
 import { IconMapPin } from '../components/Icons.jsx';
 
+const FAVORITES_CACHE_KEY = 'ao:favorites_local';
+
 const normalize = (value) =>
   String(value || '')
     .normalize('NFD')
@@ -68,6 +70,18 @@ export default function EstabelecimentosList() {
   const searchInputRef = useRef(null);
   const resultsSectionRef = useRef(null);
   const [promoOpen, setPromoOpen] = useState(false);
+  const [favoritesOnly, setFavoritesOnly] = useState(false);
+  const [favoriteIds, setFavoriteIds] = useState(() => {
+    try {
+      const raw = localStorage.getItem(FAVORITES_CACHE_KEY);
+      if (!raw) return new Set();
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return new Set();
+      return new Set(parsed.map((v) => String(v)));
+    } catch {
+      return new Set();
+    }
+  });
   const PROMO_KEY = 'home_promo_dismissed_at';
 
   useEffect(() => {
@@ -122,12 +136,17 @@ export default function EstabelecimentosList() {
   );
 
   const filteredItems = useMemo(() => {
-    if (!queryTokens.length) return items;
     return items.filter((est) => {
+      const isFavorite = favoriteIds.has(String(est?.id)) || Boolean(est?.is_favorite || est?.isFavorite);
+      est.is_favorite = isFavorite;
+      if (favoritesOnly) {
+        if (!isFavorite) return false;
+      }
+      if (!queryTokens.length) return true;
       const haystack = buildSearchText(est);
       return queryTokens.every((token) => haystack.includes(token));
     });
-  }, [items, queryTokens]);
+  }, [items, queryTokens, favoritesOnly, favoriteIds]);
 
   const results = useMemo(() => {
     const mapped = filteredItems.map((est) => ({ est }));
@@ -178,6 +197,12 @@ export default function EstabelecimentosList() {
   const handleClosePromo = useCallback(() => {
     setPromoOpen(false);
     try { localStorage.setItem(PROMO_KEY, String(Date.now())); } catch {}
+  }, []);
+
+  const handleToggleFavorites = useCallback(() => {
+    setFavoritesOnly((prev) => !prev);
+    setShowResults(true);
+    setPendingScroll(true);
   }, []);
 
   return (
@@ -254,7 +279,28 @@ export default function EstabelecimentosList() {
         placeholder="Buscar por nome, bairro ou cidade"
         inputRef={searchInputRef}
         headingId="home-hero-title"
-      />
+      >
+        <button
+          type="button"
+          className={`pill-btn${favoritesOnly ? ' pill-btn--active' : ''}`}
+          onClick={handleToggleFavorites}
+          style={{
+            borderRadius: 9999,
+            padding: '6px 12px',
+            border: '1px solid var(--border, #e5e7eb)',
+            background: favoritesOnly ? 'var(--primary-50, #f3e8ff)' : 'var(--surface, #fff)',
+            color: 'var(--primary-700, #6c2bd9)',
+            fontWeight: 600,
+            cursor: 'pointer',
+            boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
+            width: 'fit-content',
+            display: 'block',
+            margin: '12px auto 0 auto',
+          }}
+        >
+          {favoritesOnly ? 'Mostrando favoritos' : 'Mostrar favoritos'}
+        </button>
+      </EstablishmentsHero>
 
       {showResults && (
         <section
