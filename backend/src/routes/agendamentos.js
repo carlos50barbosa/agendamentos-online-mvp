@@ -354,10 +354,17 @@ router.put('/:id/cancel', authRequired, isCliente, async (req, res) => {
     const { id } = req.params;
 
     const [rows] = await pool.query(
-      'UPDATE agendamentos SET status="cancelado" WHERE id=? AND cliente_id=?',
+      `UPDATE agendamentos
+         SET status="cancelado"
+       WHERE id=? AND cliente_id=? AND cliente_confirmou_whatsapp_at IS NULL`,
       [id, req.user.id]
     );
     if (!rows.affectedRows) {
+      // Pode ser porque já confirmou via WhatsApp ou não existe/pertence a outro cliente.
+      const [[ag]] = await pool.query('SELECT cliente_confirmou_whatsapp_at FROM agendamentos WHERE id=? AND cliente_id=?', [id, req.user.id]);
+      if (ag?.cliente_confirmou_whatsapp_at) {
+        return res.status(409).json({ error: 'cancel_forbidden_after_confirm', message: 'Cancelamento bloqueado: agendamento j\u00e1 confirmado via WhatsApp.' });
+      }
       return res.status(404).json({ error: 'not_found', message: 'Agendamento nao encontrado.' });
     }
 
