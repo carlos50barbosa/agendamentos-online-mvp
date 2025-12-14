@@ -375,30 +375,7 @@ router.put('/:id/cancel', authRequired, isCliente, async (req, res) => {
     const blockClientWhatsapp = clientWhatsappDisabled();
     const blockWhatsappImmediate = whatsappImmediateDisabled();
 
-    fireAndForget(async () => {
-      const paramMode = String(process.env.WA_TEMPLATE_PARAM_MODE || 'single').toLowerCase();
-      const tplName = process.env.WA_TEMPLATE_NAME_CANCEL || process.env.WA_TEMPLATE_NAME || 'confirmacao_agendamento';
-      const tplLang = process.env.WA_TEMPLATE_LANG || 'pt_BR';
-      const params3 = [svc?.nome || '', inicioBR, est?.nome || ''];
-
-      const canWhatsappEstCancel = boolPref(est?.notify_whatsapp_estab, true);
-
-      if (/^triple|3$/.test(paramMode)) {
-        if (!blockClientWhatsapp && telCli) {
-          try { await sendTemplate({ to: telCli, name: tplName, lang: tplLang, bodyParams: params3 }); } catch (e) { console.warn('[wa/cancel cli]', e?.message || e); }
-        }
-        if (!blockEstabNotifications && canWhatsappEstCancel && telEst && telEst !== telCli) {
-          try { await sendTemplate({ to: telEst, name: tplName, lang: tplLang, bodyParams: params3 }); } catch (e) { console.warn('[wa/cancel est]', e?.message || e); }
-        }
-      } else {
-        if (!blockClientWhatsapp && telCli) {
-          await notifyWhatsapp(`Seu agendamento ${id} (${svc?.nome ?? 'servico'}) em ${inicioBR} foi cancelado.`, telCli);
-        }
-        if (!blockEstabNotifications && canWhatsappEstCancel && telEst && telEst !== telCli) {
-          await notifyWhatsapp(`[Aviso] Cancelamento: agendamento ${id} (${svc?.nome ?? 'servico'}) em ${inicioBR} pelo cliente ${cli?.nome ?? ''}.`, telEst);
-        }
-      }
-    });
+    // WhatsApp: não notificar cliente quando ele mesmo cancela e não notificar estabelecimento (somente email configurado permanece).
 
     return res.json({ ok: true });
   } catch (e) {
@@ -455,6 +432,7 @@ router.put('/:id/cancel-estab', authRequired, isEstabelecimento, async (req, res
     const blockWhatsappImmediate = whatsappImmediateDisabled();
     const canWhatsappEstCancel = boolPref(est?.notify_whatsapp_estab, true);
 
+    // WhatsApp: apenas cliente deve ser notificado quando o estabelecimento cancela; não envia para o estabelecimento.
     fireAndForget(async () => {
       const paramMode = String(process.env.WA_TEMPLATE_PARAM_MODE || 'single').toLowerCase();
       const tplName = process.env.WA_TEMPLATE_NAME_CANCEL || process.env.WA_TEMPLATE_NAME || 'confirmacao_agendamento';
@@ -465,15 +443,9 @@ router.put('/:id/cancel-estab', authRequired, isEstabelecimento, async (req, res
         if (!blockClientWhatsapp && telCli) {
           try { await sendTemplate({ to: telCli, name: tplName, lang: tplLang, bodyParams: params3 }); } catch (e) { console.warn('[wa/cancel cli est]', e?.message || e); }
         }
-        if (!blockEstabNotifications && canWhatsappEstCancel && telEst && telEst !== telCli) {
-          try { await sendTemplate({ to: telEst, name: tplName, lang: tplLang, bodyParams: params3 }); } catch (e) { console.warn('[wa/cancel est est]', e?.message || e); }
-        }
       } else {
         if (!blockClientWhatsapp && telCli) {
           await notifyWhatsapp(`Seu agendamento ${id} (${svc?.nome ?? 'servico'}) em ${inicioBR} foi cancelado pelo estabelecimento.`, telCli);
-        }
-        if (!blockEstabNotifications && canWhatsappEstCancel && telEst && telEst !== telCli) {
-          await notifyWhatsapp(`[Aviso interno] Cancelamento forcado: agendamento ${id} (${svc?.nome ?? 'servico'}) em ${inicioBR}.`, telEst);
         }
       }
     });
