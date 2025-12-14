@@ -116,7 +116,7 @@ async function sendReminder(pool, row) {
   const tripleParams = [row.servico_nome, `${hora} de ${data}`, estNome];
   const quadParams = [
     firstName(row?.cliente_nome) || 'cliente',
-    profFriendly,
+    estNomeFriendly,
     data,
     hora,
   ];
