@@ -444,14 +444,50 @@ router.put('/:id/cancel-estab', authRequired, isEstabelecimento, async (req, res
 
     // WhatsApp: apenas cliente deve ser notificado quando o estabelecimento cancela; não envia para o estabelecimento.
     fireAndForget(async () => {
-      const paramMode = String(process.env.WA_TEMPLATE_PARAM_MODE || 'single').toLowerCase();
+      const paramModeEnv = String(
+        process.env.WA_TEMPLATE_PARAM_MODE_CANCEL ||
+        process.env.WA_TEMPLATE_PARAM_MODE ||
+        'single'
+      ).toLowerCase();
+      const paramCountHint = Number(process.env.WA_TEMPLATE_CANCEL_PARAMS || NaN);
       const tplName = process.env.WA_TEMPLATE_NAME_CANCEL || process.env.WA_TEMPLATE_NAME || 'confirmacao_agendamento';
       const tplLang = process.env.WA_TEMPLATE_LANG || 'pt_BR';
       const params3 = [svc?.nome || '', inicioBR, est?.nome || ''];
+      const params4 = [cli?.nome || 'cliente', svc?.nome || '', inicioBR, est?.nome || ''];
 
-      if (/^triple|3$/.test(paramMode)) {
+      let paramMode = paramModeEnv;
+      const tplNameLower = String(tplName || '').toLowerCase();
+      if (paramCountHint === 4) {
+        paramMode = 'quad';
+      } else if (paramCountHint === 3) {
+        paramMode = 'triple';
+      } else if (/v2/.test(tplNameLower)) {
+        paramMode = 'quad';
+      }
+
+      const sendParams = async (p) => sendTemplate({ to: telCli, name: tplName, lang: tplLang, bodyParams: p });
+
+      if (/^quad|4|quatro/.test(paramMode)) {
         if (!blockClientWhatsapp && telCli) {
-          try { await sendTemplate({ to: telCli, name: tplName, lang: tplLang, bodyParams: params3 }); } catch (e) { console.warn('[wa/cancel cli est]', e?.message || e); }
+          try { await sendParams(params4); } catch (e) {
+            const details = e?.body?.error?.error_data?.details || e?.body?.error?.message || e?.message || '';
+            if (/expected number of params\s*\(3\)/i.test(String(details))) {
+              try { await sendParams(params3); } catch (e2) { console.warn('[wa/cancel cli est] (fallback 3)', e2?.message || e2); }
+            } else {
+              console.warn('[wa/cancel cli est]', e?.message || e);
+            }
+          }
+        }
+      } else if (/^triple|3$/.test(paramMode)) {
+        if (!blockClientWhatsapp && telCli) {
+          try { await sendParams(params3); } catch (e) {
+            const details = e?.body?.error?.error_data?.details || e?.body?.error?.message || e?.message || '';
+            if (/expected number of params\s*\(4\)/i.test(String(details))) {
+              try { await sendParams(params4); } catch (e2) { console.warn('[wa/cancel cli est] (fallback 4)', e2?.message || e2); }
+            } else {
+              console.warn('[wa/cancel cli est]', e?.message || e);
+            }
+          }
         }
       } else {
         if (!blockClientWhatsapp && telCli) {
