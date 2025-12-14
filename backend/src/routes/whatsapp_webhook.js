@@ -163,6 +163,11 @@ router.post('/', async (req, res) => {
     const entry = req.body?.entry?.[0];
     const changes = entry?.changes?.[0];
     const value = changes?.value;
+    const statuses = value?.statuses;
+    if (Array.isArray(statuses) && statuses.length) {
+      console.log('[wa/webhook/status]', JSON.stringify(statuses));
+      return res.sendStatus(200);
+    }
     const msgs = value?.messages;
     if (!msgs || !msgs.length) return res.sendStatus(200);
 
