@@ -61,8 +61,9 @@ export default function DashboardCliente() {
       const errCode = String(e?.response?.data?.error || '');
       const serverMsg = e?.response?.data?.message || '';
       const msg = serverMsg || e?.message || '';
-      if (errCode.includes('cancel_forbidden_after_confirm')) {
-        alert(serverMsg || 'Cancelamento bloqueado: agendamento já foi confirmado via WhatsApp. Se precisar de ajuda, entre em contato com o estabelecimento.');
+      const blockedMsg = 'Cancelamento bloqueado: agendamento já foi confirmado via WhatsApp. Se precisar de ajuda, entre em contato com o estabelecimento.';
+      if (errCode.includes('cancel_forbidden_after_confirm') || /confirmado via whatsapp/i.test(msg)) {
+        alert(serverMsg || blockedMsg);
       } else if (/forbidden|bloqueado|blocked/i.test(msg)) {
         alert(msg);
       } else {
