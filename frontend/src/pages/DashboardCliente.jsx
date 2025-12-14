@@ -54,8 +54,19 @@ export default function DashboardCliente() {
   const cancelar = async (id) => {
     const ok = window.confirm('Cancelar este agendamento?');
     if (!ok) return;
-    await Api.cancelarAgendamento(id);
-    setItens((xs) => xs.map((y) => (y.id === id ? { ...y, status: 'cancelado' } : y)));
+    try {
+      await Api.cancelarAgendamento(id);
+      setItens((xs) => xs.map((y) => (y.id === id ? { ...y, status: 'cancelado' } : y)));
+    } catch (e) {
+      const msg = e?.response?.data?.message || e?.message || '';
+      if (String(e?.response?.data?.error).includes('cancel_forbidden_after_confirm')) {
+        alert('Cancelamento bloqueado: agendamento já foi confirmado via WhatsApp. Se precisar de ajuda, entre em contato com o estabelecimento.');
+      } else if (/forbidden|bloqueado|blocked/i.test(msg)) {
+        alert(msg);
+      } else {
+        alert('Não foi possível cancelar. Tente novamente ou contate o estabelecimento.');
+      }
+    }
   };
 
   // filtro em memória por status (considera "concluído" quando horário já passou)
