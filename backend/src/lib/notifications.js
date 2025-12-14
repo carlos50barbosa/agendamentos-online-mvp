@@ -94,7 +94,16 @@ async function callGraph(url, payload) {
 }
 
 // ============== WhatsApp: Template ==============
-export async function sendTemplate({ to, name, lang, bodyParams = [] }) {
+export async function sendTemplate({
+  to,
+  name,
+  lang,
+  bodyParams = [],
+  headerImageUrl,
+  headerDocumentUrl,
+  headerVideoUrl,
+  headerText,
+}) {
   const phone = normalizePhoneDigits(to);
   if (!phone) {
     if (cfg.debug) console.warn('[whatsapp] invalid phone -> %s', to);
@@ -113,13 +122,40 @@ export async function sendTemplate({ to, name, lang, bodyParams = [] }) {
     language: { code: lang || cfg.templateLang },
   };
 
-  // IMPORTANTE: só inclua components se houver params (evita erro 132000)
+  const components = [];
+
+  // Header opcional (necessario se o template tiver header de imagem/documento/video/texto)
+  if (headerImageUrl) {
+    components.push({
+      type: 'header',
+      parameters: [{ type: 'image', image: { link: headerImageUrl } }],
+    });
+  } else if (headerDocumentUrl) {
+    components.push({
+      type: 'header',
+      parameters: [{ type: 'document', document: { link: headerDocumentUrl } }],
+    });
+  } else if (headerVideoUrl) {
+    components.push({
+      type: 'header',
+      parameters: [{ type: 'video', video: { link: headerVideoUrl } }],
+    });
+  } else if (headerText) {
+    components.push({
+      type: 'header',
+      parameters: [{ type: 'text', text: String(headerText) }],
+    });
+  }
+
+  // IMPORTANTE: so inclua components se houver params (evita erro 132000)
   if (Array.isArray(bodyParams) && bodyParams.length > 0) {
-    template.components = [{
+    components.push({
       type: 'body',
       parameters: bodyParams.map(t => ({ type: 'text', text: String(t) })),
-    }];
+    });
   }
+
+  if (components.length) template.components = components;
 
   const payload = {
     messaging_product: 'whatsapp',
@@ -135,7 +171,6 @@ export async function sendTemplate({ to, name, lang, bodyParams = [] }) {
   }
   return callGraph(url, payload);
 }
-
 // ============== WhatsApp: Texto (ou Template se forceTemplate=true) ==============
 export async function notifyWhatsapp(message, to) {
   const phone = normalizePhoneDigits(to);
