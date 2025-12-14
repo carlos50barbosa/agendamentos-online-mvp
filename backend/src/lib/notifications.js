@@ -122,13 +122,27 @@ export async function sendTemplate({
     language: { code: lang || cfg.templateLang },
   };
 
+  const nameLower = String(name || cfg.templateName || '').toLowerCase();
+
+  // Herdar header de imagem do .env quando nao for enviado via argumento
+  let headerImage = headerImageUrl || null;
+  if (!headerImage && /lembrete_agendamento_v2/.test(nameLower) && process.env.WA_TEMPLATE_REMINDER_HEADER_URL) {
+    headerImage = process.env.WA_TEMPLATE_REMINDER_HEADER_URL;
+  }
+  if (!headerImage && process.env.WA_TEMPLATE_HEADER_IMAGE_URL) {
+    headerImage = process.env.WA_TEMPLATE_HEADER_IMAGE_URL;
+  }
+  if (!headerImage && process.env.WA_TEMPLATE_HEADER_URL) {
+    headerImage = process.env.WA_TEMPLATE_HEADER_URL;
+  }
+
   const components = [];
 
   // Header opcional (necessario se o template tiver header de imagem/documento/video/texto)
-  if (headerImageUrl) {
+  if (headerImage) {
     components.push({
       type: 'header',
-      parameters: [{ type: 'image', image: { link: headerImageUrl } }],
+      parameters: [{ type: 'image', image: { link: headerImage } }],
     });
   } else if (headerDocumentUrl) {
     components.push({
