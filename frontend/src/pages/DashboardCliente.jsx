@@ -58,9 +58,11 @@ export default function DashboardCliente() {
       await Api.cancelarAgendamento(id);
       setItens((xs) => xs.map((y) => (y.id === id ? { ...y, status: 'cancelado' } : y)));
     } catch (e) {
-      const msg = e?.response?.data?.message || e?.message || '';
-      if (String(e?.response?.data?.error).includes('cancel_forbidden_after_confirm')) {
-        alert('Cancelamento bloqueado: agendamento já foi confirmado via WhatsApp. Se precisar de ajuda, entre em contato com o estabelecimento.');
+      const errCode = String(e?.response?.data?.error || '');
+      const serverMsg = e?.response?.data?.message || '';
+      const msg = serverMsg || e?.message || '';
+      if (errCode.includes('cancel_forbidden_after_confirm')) {
+        alert(serverMsg || 'Cancelamento bloqueado: agendamento já foi confirmado via WhatsApp. Se precisar de ajuda, entre em contato com o estabelecimento.');
       } else if (/forbidden|bloqueado|blocked/i.test(msg)) {
         alert(msg);
       } else {
