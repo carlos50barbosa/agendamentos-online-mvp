@@ -158,6 +158,7 @@ router.get('/', (req, res) => {
 });
 
 // POST: eventos de mensagens
+
 router.post('/', async (req, res) => {
   try {
     const entry = req.body?.entry?.[0];
@@ -173,10 +174,7 @@ router.post('/', async (req, res) => {
 
     const msg = msgs[0];
     const from = toDigits(msg?.from);
-    const text = (msg?.text?.body || '').trim();
     if (!from) return res.sendStatus(200);
-
-    let s = await getSession(from);
 
     // Confirmacao de lembrete (botao "CONFIRMAR") usando context.id do template
     const interactive = msg?.interactive?.button_reply || null;
@@ -185,197 +183,14 @@ router.post('/', async (req, res) => {
     if (buttonPayload || contextMsgId) {
       const recorded = await tryRecordReminderConfirmation({ contextMessageId: contextMsgId, fromDigits: from });
       if (recorded) {
-        await send(from, 'Confirmado! Vamos te aguardar no horário combinado.');
+        await send(from, 'Confirmado! Vamos te aguardar no horario combinado.');
         return res.sendStatus(200);
       }
     }
 
-    // Resposta fixa (bot desativado)
-    const autoReply = 'Ol?! Aqui ? o assistente do Agendamentos Online. Para marcar, reagendar ou cancelar, use nosso site. Se tiver qualquer d?vida, acesse https://agendamentosonline.com/ajuda. Obrigado!';
+    // Resposta fixa (menu desativado)
+    const autoReply = 'Ola! Aqui e o assistente do Agendamentos Online. Para marcar, reagendar ou cancelar, use nosso site. Se tiver qualquer duvida, acesse https://agendamentosonline.com/ajuda. Obrigado!';
     await send(from, autoReply);
-    s.step = 'MENU';
-    await setSession(from, s);
-    return res.sendStatus(200);
-
-    // Fluxo simples tipo menu → coleta
-    if (s.step === 'WELCOME') {
-      await send(from, welcomeText());
-      s.step = 'MENU';
-      await setSession(from, s);
-      return res.sendStatus(200);
-    }
-
-    if (s.step === 'MENU') {
-      if (text === '1') {
-        // novo agendamento
-        const ests = await listEstablishments();
-        if (!ests.length) { await send(from, 'Sem estabelecimentos no momento.'); return res.sendStatus(200); }
-        s.data.ests = ests;
-        s.step = 'ASK_ESTAB';
-        await setSession(from, s);
-        const lines = ['Escolha o estabelecimento (envie o número):'];
-        ests.slice(0, 9).forEach((e, i) => lines.push(`${i+1}) ${e.nome}`));
-        await send(from, lines.join('\n'));
-        return res.sendStatus(200);
-      }
-      if (text === '2') {
-        // lista meus agendamentos (por telefone do cliente)
-        const [rows] = await pool.query(
-          `SELECT a.id, a.inicio, s.nome AS servico, u.nome AS estabelecimento
-           FROM agendamentos a
-           JOIN servicos s ON s.id=a.servico_id
-           JOIN usuarios u ON u.id=a.estabelecimento_id
-           JOIN usuarios c ON c.id=a.cliente_id
-           WHERE REPLACE(REPLACE(REPLACE(c.telefone,'+',''),'-',''),' ','') = ?
-           ORDER BY a.inicio DESC LIMIT 5`,
-          [from]
-        );
-        if (!rows.length) { await send(from, 'Você não tem agendamentos recentes.'); return res.sendStatus(200); }
-        const lines = ['Seus últimos agendamentos:'];
-        rows.forEach(a => {
-          const dt = new Date(a.inicio).toLocaleString('pt-BR', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' });
-          lines.push(`#${a.id} — ${a.servico} em ${a.estabelecimento} — ${dt}`);
-        });
-        lines.push('\nEnvie: CANCELAR #ID ou REMARCAR #ID');
-        await send(from, lines.join('\n'));
-        s.step = 'MENU';
-        await setSession(from, s);
-        return res.sendStatus(200);
-      }
-      if (text === '3') {
-        await send(from, 'Envie 1 para novo agendamento, 2 para listar seus agendamentos.');
-        s.step = 'MENU';
-        return res.sendStatus(200);
-      }
-      await send(from, 'Opção inválida. ' + welcomeText());
-      return res.sendStatus(200);
-    }
-
-    if (s.step === 'ASK_ESTAB') {
-      const n = Number(text);
-      const idx = Number.isFinite(n) ? n - 1 : -1;
-      const est = s.data.ests?.[idx];
-      if (!est) { await send(from, 'Escolha inválida. Envie um número da lista.'); return res.sendStatus(200); }
-      s.data.est = est;
-      // serviços
-      const svcs = await listServices(est.id);
-      if (!svcs.length) { await send(from, 'Este estabelecimento não tem serviços disponíveis. Digite 1 para voltar ao menu.'); s.step='MENU'; return res.sendStatus(200); }
-      s.data.svcs = svcs;
-      s.step = 'ASK_SERVICE';
-      await setSession(from, s);
-      const lines = ['Escolha o serviço (número):'];
-      svcs.slice(0, 9).forEach((sv, i) => lines.push(`${i+1}) ${sv.nome}`));
-      await send(from, lines.join('\n'));
-      return res.sendStatus(200);
-    }
-
-    if (s.step === 'ASK_SERVICE') {
-      const n = Number(text);
-      const idx = Number.isFinite(n) ? n - 1 : -1;
-      const sv = s.data.svcs?.[idx];
-      if (!sv) { await send(from, 'Escolha inválida. Envie um número da lista.'); return res.sendStatus(200); }
-      s.data.sv = sv;
-      s.step = 'ASK_DATE';
-      await setSession(from, s);
-      await send(from, 'Informe a data (ex.: hoje, amanhã, 2025-09-30 ou 30/09)');
-      return res.sendStatus(200);
-    }
-
-    if (s.step === 'ASK_DATE') {
-      const d = parseDate(text);
-      if (!d || Number.isNaN(+d)) { await send(from, 'Data inválida. Tente: hoje, amanhã, YYYY-MM-DD ou DD/MM'); return res.sendStatus(200); }
-      s.data.date = d;
-      const slots = await listFreeSlots(s.data.est.id, d);
-      if (!slots.length) { await send(from, 'Sem horários livres nesta data. Informe outra data.'); return res.sendStatus(200); }
-      s.data.slots = slots;
-      s.step = 'ASK_TIME';
-      await setSession(from, s);
-      const lines = ['Escolha o horário (número):'];
-      slots.slice(0, 9).forEach((sl, i) => lines.push(`${i+1}) ${sl.label}`));
-      await send(from, lines.join('\n'));
-      return res.sendStatus(200);
-    }
-
-    if (s.step === 'ASK_TIME') {
-      const n = Number(text);
-      const idx = Number.isFinite(n) ? n - 1 : -1;
-      const sl = s.data.slots?.[idx];
-      if (!sl) { await send(from, 'Escolha inválida. Envie um número da lista.'); return res.sendStatus(200); }
-      s.data.slot = sl;
-      s.step = 'CONFIRM';
-      await setSession(from, s);
-      const dt = new Date(sl.iso).toLocaleString('pt-BR', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' });
-      await send(from, `Confirmar ${s.data.sv.nome} em ${s.data.est.nome} — ${dt}?\nResponda SIM ou NAO`);
-      return res.sendStatus(200);
-    }
-
-    if (s.step === 'CONFIRM') {
-      const yes = /^s(im)?$/i.test(text);
-      if (!yes) { await send(from, 'Cancelado. Envie 1 para iniciar novamente.'); s.step='MENU'; await setSession(from, s); return res.sendStatus(200); }
-      // Precisamos vincular telefone ao cliente no sistema; aqui buscamos usuário pelo telefone
-      const [[cli]] = await pool.query("SELECT id FROM usuarios WHERE tipo='cliente' AND REPLACE(REPLACE(REPLACE(telefone,'+',''),'-',''),' ','')=?", [from]);
-      if (!cli) {
-        // Gera link mágico para vincular telefone após login no site
-        const token = crypto.randomBytes(20).toString('hex');
-        try {
-          const { createLinkToken } = await import('../lib/wa_store.js');
-          await createLinkToken(from, token);
-        } catch (e) { console.warn('[wa/link] falhou criar token', e?.message || e); }
-        const base = (process.env.APP_URL || process.env.FRONTEND_BASE_URL || 'http://localhost:3001').replace(/\/$/,'');
-        const link = `${base}/link-phone?token=${encodeURIComponent(token)}`;
-        await send(from, `Para concluir, acesse: ${link} e faça login. Isso associará seu WhatsApp à sua conta.`);
-        s.step='MENU';
-        await setSession(from, s);
-        return res.sendStatus(200);
-      }
-
-      // calcula fim com base na duração do serviço
-      const start = new Date(s.data.slot.iso);
-      const fim   = new Date(start.getTime() + (Number(s.data.sv.duracao_min||30) * 60000));
-
-      try {
-        // checagem simples de conflito na hora de salvar
-        const [conf] = await pool.query(
-          `SELECT id FROM agendamentos WHERE estabelecimento_id=? AND status IN ('confirmado','pendente') AND (inicio < ? AND fim > ?)`,
-          [s.data.est.id, fim, start]
-        );
-        if (conf.length) { await send(from, 'Ih! O horário acabou de ficar indisponível. Tente outro.'); s.step='ASK_TIME'; return res.sendStatus(200); }
-        const [r] = await pool.query(
-          `INSERT INTO agendamentos (cliente_id, estabelecimento_id, servico_id, inicio, fim, status) VALUES (?,?,?,?,?,'confirmado')`,
-          [cli.id, s.data.est.id, s.data.sv.id, start, fim]
-        );
-        await send(from, `Agendado com sucesso! Número ${r.insertId}.`);
-      } catch (e) {
-        console.error('[wa/webhook][confirm] erro', e);
-        await send(from, 'Falha ao salvar seu agendamento. Tente novamente.');
-      }
-      s.step='MENU';
-      await setSession(from, s);
-      return res.sendStatus(200);
-    }
-
-    // Comandos curtos no menu para cancelar/remarcar
-    if (/^cancelar\s*#?\d+$/i.test(text)) {
-      const id = Number(text.replace(/\D+/g,'').trim());
-      try {
-        const [[cli]] = await pool.query("SELECT id FROM usuarios WHERE tipo='cliente' AND REPLACE(REPLACE(REPLACE(telefone,'+',''),'-',''),' ','')=?", [from]);
-        if (!cli) { await send(from, 'Não identifiquei seu cadastro.'); return res.sendStatus(200); }
-        const [r] = await pool.query(`UPDATE agendamentos SET status='cancelado' WHERE id=? AND cliente_id=?`, [id, cli.id]);
-        if (!r.affectedRows) { await send(from, 'Não encontrei esse agendamento para você.'); return res.sendStatus(200); }
-        await send(from, `Agendamento #${id} cancelado.`);
-      } catch (e) {
-        await send(from, 'Não foi possível cancelar agora.');
-      }
-      return res.sendStatus(200);
-    }
-
-    if (/^remarcar\s*#?\d+$/i.test(text)) {
-      await send(from, 'Remarcação: envie 1 para iniciar um novo fluxo e depois cancele o antigo com CANCELAR #ID.');
-      return res.sendStatus(200);
-    }
-
-    // fallback
-    await send(from, 'Não entendi. ' + welcomeText());
     return res.sendStatus(200);
   } catch (e) {
     console.error('[wa/webhook] erro geral', e);
