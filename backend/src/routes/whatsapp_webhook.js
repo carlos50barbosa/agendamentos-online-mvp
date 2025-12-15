@@ -189,7 +189,7 @@ router.post('/', async (req, res) => {
     }
 
     // Resposta fixa (menu desativado)
-    const autoReply = 'Olá! Aqui e o assistênte do Agendamentos Online. Para marcar, reagendar ou cancelar, use nosso site. Se tiver qualquer dúvida, acesse https://agendamentosonline.com/ajuda. Obrigado!';
+    const autoReply = 'Olá! Aqui é o assistênte do Agendamentos Online. Para marcar, reagendar ou cancelar, use nosso site. Se tiver qualquer dúvida, acesse https://agendamentosonline.com/ajuda. Obrigado!';
     await send(from, autoReply);
     return res.sendStatus(200);
   } catch (e) {
