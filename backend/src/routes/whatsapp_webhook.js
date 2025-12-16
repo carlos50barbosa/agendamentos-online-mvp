@@ -15,6 +15,8 @@ const CLOSE_HOUR = 18;
 const INTERVAL_MIN = 30;
 
 const toDigits = (s) => String(s || '').replace(/\D/g, '');
+const HOURS_BACK_FALLBACK = 2;
+const HOURS_FORWARD_FALLBACK = 24;
 
 function parseDate(str) {
   // aceita YYYY-MM-DD ou DD/MM
@@ -118,8 +120,61 @@ async function getSession(phone) {
 }
 async function setSession(phone, state) { await dbSet(phone, state); }
 
+async function findAppointmentByPhoneFallback({ fromDigits, reason }) {
+  if (!fromDigits) return null;
+  try {
+    const now = Date.now();
+    const lower = new Date(now - HOURS_BACK_FALLBACK * 60 * 60 * 1000);
+    const upper = new Date(now + HOURS_FORWARD_FALLBACK * 60 * 60 * 1000);
+
+    const [rows] = await pool.query(
+      `SELECT a.id, a.inicio, a.reminder_8h_msg_id, a.status, u.telefone
+       FROM agendamentos a
+       JOIN usuarios u ON u.id = a.cliente_id
+       WHERE a.status IN ('confirmado','pendente')
+         AND a.cliente_confirmou_whatsapp_at IS NULL
+         AND a.reminder_8h_sent_at IS NOT NULL
+         AND a.inicio BETWEEN ? AND ?`,
+      [lower, upper]
+    );
+    const candidates = (rows || []).filter((r) => toDigits(r.telefone) === fromDigits);
+    if (!candidates.length) return null;
+
+    // Escolhe o mais proximo/cedo.
+    candidates.sort((a, b) => new Date(a.inicio) - new Date(b.inicio));
+    if (candidates.length > 1) {
+      console.warn('[wa/confirm-btn][fallback] multiplas correspondencias por telefone', {
+        from: fromDigits,
+        ids: candidates.map((c) => c.id),
+        reason,
+      });
+    }
+    const chosen = candidates[0];
+    console.warn('[wa/confirm-btn][fallback] usando match por telefone (sem reminder_8h_msg_id)', {
+      from: fromDigits,
+      agendamentoId: chosen?.id,
+      inicio: chosen?.inicio,
+      reason,
+    });
+    return chosen;
+  } catch (e) {
+    console.warn('[wa/confirm-btn][fallback] erro ao procurar por telefone', e?.message || e);
+    return null;
+  }
+}
+
 async function tryRecordReminderConfirmation({ contextMessageId, fromDigits }) {
-  if (!contextMessageId) return false;
+  if (!contextMessageId) {
+    const fallback = await findAppointmentByPhoneFallback({ fromDigits, reason: 'missing_context_id' });
+    if (fallback?.id) {
+      await pool.query(
+        'UPDATE agendamentos SET cliente_confirmou_whatsapp_at = COALESCE(cliente_confirmou_whatsapp_at, NOW()) WHERE id=? LIMIT 1',
+        [fallback.id]
+      );
+      return true;
+    }
+    return false;
+  }
   try {
     const [[row]] = await pool.query(
       `SELECT a.id, a.cliente_id, u.telefone
@@ -128,7 +183,17 @@ async function tryRecordReminderConfirmation({ contextMessageId, fromDigits }) {
        WHERE a.reminder_8h_msg_id=? LIMIT 1`,
       [contextMessageId]
     );
-    if (!row) return false;
+    if (!row) {
+      const fallback = await findAppointmentByPhoneFallback({ fromDigits, reason: 'context_id_not_found' });
+      if (fallback?.id) {
+        await pool.query(
+          'UPDATE agendamentos SET cliente_confirmou_whatsapp_at = COALESCE(cliente_confirmou_whatsapp_at, NOW()) WHERE id=? LIMIT 1',
+          [fallback.id]
+        );
+        return true;
+      }
+      return false;
+    }
     const tel = toDigits(row.telefone);
     if (tel && tel !== fromDigits) return false;
 

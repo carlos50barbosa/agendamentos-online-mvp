@@ -121,6 +121,15 @@ async function sendReminder(pool, row) {
     hora,
   ];
 
+  const warnMissingMessageId = (reason) => {
+    console.warn('[reminder8h] enviado sem message_id (confirmacao WA pode nao casar automaticamente)', {
+      agendamentoId: row.id,
+      inicio: row.inicio,
+      clienteTelefone: telCli,
+      motivo: reason || 'desconhecido',
+    });
+  };
+
   const sendTemplateWithParams = async (params) => {
     const resp = await sendTemplate({
       to: telCli,
@@ -141,6 +150,9 @@ async function sendReminder(pool, row) {
     } else {
       await notifyWhatsapp(msg, telCli);
     }
+    if (!waMessageId) {
+      warnMissingMessageId('waMessageId vazio na resposta do template');
+    }
     await markReminderSent(pool, row.id, waMessageId);
     return { sent: true };
   } catch (err) {
@@ -149,11 +161,17 @@ async function sendReminder(pool, row) {
     try {
       if (expected === 4 && !/^quad|4|quatro/.test(paramMode)) {
         const waMessageId = await sendTemplateWithParams(quadParams);
+        if (!waMessageId) {
+          warnMissingMessageId('waMessageId vazio na resposta do template (fallback quad)');
+        }
         await markReminderSent(pool, row.id, waMessageId);
         return { sent: true };
       }
       if (expected === 3 && !/^triple|3$/.test(paramMode)) {
         const waMessageId = await sendTemplateWithParams(tripleParams);
+        if (!waMessageId) {
+          warnMissingMessageId('waMessageId vazio na resposta do template (fallback triple)');
+        }
         await markReminderSent(pool, row.id, waMessageId);
         return { sent: true };
       }
@@ -169,6 +187,7 @@ async function sendReminder(pool, row) {
       }
       try {
         await notifyWhatsapp(msg, telCli);
+        warnMissingMessageId('fallback header mismatch -> notifyWhatsapp texto');
         await markReminderSent(pool, row.id, null);
         return { sent: true };
       } catch (fallbackErr) {
