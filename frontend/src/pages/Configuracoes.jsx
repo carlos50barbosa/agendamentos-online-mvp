@@ -1477,14 +1477,14 @@ export default function Configuracoes() {
                   <input className="input" value={profileForm.estado} onChange={(e) => handleProfileChange('estado', e.target.value.toUpperCase().slice(0, 2))} required />
                 </label>
               </div>
-              <div className="row" style={{ gap: 12, flexDirection: 'column' }}>
+              <div className="row" style={{ gap: 12, flexDirection: 'column', alignItems: 'flex-start' }}>
                 <label className="switch">
                   <input
                     type="checkbox"
                     checked={!!profileForm.notifyEmailEstab}
                     onChange={(e) => handleProfileChange('notifyEmailEstab', e.target.checked)}
                   />
-                  <span>Receber notifica??es por email (confirma??es, lembretes e cancelamentos)</span>
+                  <span>Receber notificações por email</span>
                 </label>
                 <label className="switch">
                   <input
@@ -1492,7 +1492,7 @@ export default function Configuracoes() {
                     checked={!!profileForm.notifyWhatsappEstab}
                     onChange={(e) => handleProfileChange('notifyWhatsappEstab', e.target.checked)}
                   />
-                  <span>Receber notifica??es por WhatsApp (confirma??es, lembretes e cancelamentos)</span>
+                  <span>Receber notificações por WhatsApp</span>
                 </label>
               </div>
             </>
