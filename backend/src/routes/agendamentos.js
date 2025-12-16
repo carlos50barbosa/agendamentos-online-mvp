@@ -372,10 +372,11 @@ router.put('/:id/cancel', authRequired, isCliente, async (req, res) => {
     }
 
     // contatos para notificar (opcional)
-    const [[a]]   = await pool.query('SELECT estabelecimento_id, servico_id, inicio FROM agendamentos WHERE id=?', [id]);
+    const [[a]]   = await pool.query('SELECT estabelecimento_id, servico_id, profissional_id, inicio FROM agendamentos WHERE id=?', [id]);
     const [[svc]] = await pool.query('SELECT nome FROM servicos WHERE id=?', [a?.servico_id || 0]);
     const [[cli]] = await pool.query('SELECT nome, telefone FROM usuarios WHERE id=?', [req.user.id]);
-    const [[est]] = await pool.query('SELECT nome, telefone, notify_whatsapp_estab FROM usuarios WHERE id=?', [a?.estabelecimento_id || 0]);
+    const [[est]] = await pool.query('SELECT nome, email, telefone, notify_email_estab, notify_whatsapp_estab FROM usuarios WHERE id=?', [a?.estabelecimento_id || 0]);
+    const [[pro]] = await pool.query('SELECT nome FROM profissionais WHERE id=?', [a?.profissional_id || 0]);
 
     const inicioBR = a?.inicio ? brDateTime(new Date(a.inicio).toISOString()) : '';
 
@@ -384,6 +385,59 @@ router.put('/:id/cancel', authRequired, isCliente, async (req, res) => {
     const blockEstabNotifications = estabNotificationsDisabled();
     const blockClientWhatsapp = clientWhatsappDisabled();
     const blockWhatsappImmediate = whatsappImmediateDisabled();
+    const canEmailEst = boolPref(est?.notify_email_estab, true);
+    const canWhatsappEst = boolPref(est?.notify_whatsapp_estab, true);
+    const estNome = est?.nome || '';
+    const serviceName = svc?.nome || '';
+    const clientName = cli?.nome || 'cliente';
+    const profName = pro?.nome || '';
+    const profLabel = profName ? ` com ${profName}` : '';
+    const whenLabel = inicioBR || '';
+    const cancelText = `[Cancelamento] ${clientName} cancelou ${serviceName || 'o atendimento'}${profLabel} que estava marcado para ${whenLabel}.`;
+
+    // Notificar estabelecimento (email/WhatsApp)
+    fireAndForget(async () => {
+      if (blockEstabNotifications) return;
+
+      if (canEmailEst && est?.email) {
+        try {
+          await notifyEmail(
+            est.email,
+            'Cancelamento de agendamento',
+            `<p>O cliente <b>${clientName}</b> cancelou o agendamento de <b>${serviceName}</b>${profLabel} que estava marcado para <b>${whenLabel}</b>.</p>`
+          );
+        } catch (err) {
+          console.warn('[cancel/estab][email]', err?.message || err);
+        }
+      }
+
+      if (canWhatsappEst && telEst && !blockWhatsappImmediate) {
+        const paramMode = String(
+          process.env.WA_TEMPLATE_PARAM_MODE_ESTAB_CANCEL ||
+          process.env.WA_TEMPLATE_PARAM_MODE_CANCEL ||
+          process.env.WA_TEMPLATE_PARAM_MODE ||
+          'quad'
+        ).toLowerCase();
+        const tplName =
+          process.env.WA_TEMPLATE_NAME_ESTAB_CANCEL ||
+          process.env.WA_TEMPLATE_NAME_CANCEL ||
+          process.env.WA_TEMPLATE_NAME ||
+          'confirmacao_agendamento';
+        const tplLang = process.env.WA_TEMPLATE_LANG || 'pt_BR';
+        const params3 = [serviceName, whenLabel, clientName];
+        const params4 = [serviceName, whenLabel, clientName, profName || '-'];
+        try {
+          if (/^quad|4|quatro/.test(paramMode)) {
+            await sendTemplate({ to: telEst, name: tplName, lang: tplLang, bodyParams: params4 });
+          } else {
+            await sendTemplate({ to: telEst, name: tplName, lang: tplLang, bodyParams: params3 });
+          }
+        } catch (err) {
+          console.warn('[cancel/estab][wa]', err?.message || err);
+          try { await notifyWhatsapp(cancelText, telEst); } catch (err2) { console.warn('[cancel/estab][wa-text]', err2?.message || err2); }
+        }
+      }
+    });
 
     // WhatsApp: não notificar cliente quando ele mesmo cancela e não notificar estabelecimento (somente email configurado permanece).
 

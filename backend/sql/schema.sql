@@ -102,6 +102,9 @@ CREATE TABLE IF NOT EXISTS agendamentos (
   -- (NOVO) marca quando o lembrete de 8h foi enviado (evita duplicidade e permite reprocessar apos reboot)
   reminder_8h_sent_at DATETIME    NULL,
   reminder_8h_msg_id  VARCHAR(191) NULL,
+  -- Lembrete de 5h para o estabelecimento (WhatsApp/email)
+  estab_reminder_5h_sent_at DATETIME NULL,
+  estab_reminder_5h_msg_id  VARCHAR(191) NULL,
   cliente_confirmou_whatsapp_at DATETIME NULL,
   criado_em          TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
@@ -115,7 +118,8 @@ CREATE TABLE IF NOT EXISTS agendamentos (
   INDEX idx_ag_cliente_inicio (cliente_id, inicio),
   INDEX idx_ag_estab_status_inicio (estabelecimento_id, status, inicio),
   INDEX idx_ag_cliente_status_inicio (cliente_id, status, inicio),
-  INDEX idx_ag_confirm_wa (cliente_confirmou_whatsapp_at)
+  INDEX idx_ag_confirm_wa (cliente_confirmou_whatsapp_at),
+  INDEX idx_ag_reminder_estab_5h (estab_reminder_5h_sent_at, inicio)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 -- Bloqueios de horarios (slots indisponiveis)
