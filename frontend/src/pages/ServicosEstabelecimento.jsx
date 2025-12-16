@@ -393,7 +393,18 @@ export default function ServicosEstabelecimento() {
 
           {/* Dica de validacao */}
           {formInvalid && (
-            <small className="muted">
+            <small
+              className="muted"
+              style={{
+                color: "#b42318",
+                fontWeight: 700,
+                background: "#fee4e2",
+                padding: "8px 10px",
+                borderRadius: 6,
+                display: "inline-block",
+                marginTop: 6,
+              }}
+            >
               Preencha todos os campos e escolha pelo menos um profissional para
               cadastrar o serviço.
             </small>

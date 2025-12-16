@@ -1563,6 +1563,66 @@ button.danger:disabled,
   .mobile-nav{ display: none !important; }
 }
 
+/* Painel de agendamentos (/estab) */
+.notif-bell{
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.notif-bell__pill{
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--surface-soft);
+  color: var(--text);
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+.notif-bell__pill--cancel{
+  background: #fef2f2;
+  color: #b42318;
+}
+.notif-bell__number{
+  font-weight: 800;
+}
+.notif-bell__number--ok{ color: #16a34a; }
+.notif-bell__number--cancel{ color: #b42318; }
+@media (max-width: 640px){
+  .notif-bell__pill{
+    font-size: 11px;
+    padding: 4px 8px;
+  }
+}
+@media (max-width: 700px){
+  /* Evita quebrar "Agendamentos" e deixa os chips em uma linha separada */
+  .dashboard-narrow .row.spread{
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+    text-align: left;
+    overflow-wrap: normal;
+    word-break: normal;
+  }
+  .dashboard-narrow .row.spread > *{
+    width: 100%;
+  }
+  .dashboard-narrow h2{
+    margin-bottom: 2px;
+  }
+  .notif-bell{
+    width: 100%;
+    justify-content: flex-start;
+  }
+  .notif-bell__pill{
+    font-size: 11px;
+    padding: 4px 8px;
+  }
+}
+
 /* Dashboard: estilos compactos para tabelas, badges e botões */
 .table--dense thead th{ font-size: 11px; padding: 6px   8px; }
 .table--dense tbody td{ font-size: 13px; padding: 8px 10px; }

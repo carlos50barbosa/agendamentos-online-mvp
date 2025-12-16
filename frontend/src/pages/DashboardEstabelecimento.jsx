@@ -627,9 +627,12 @@ export default function DashboardEstabelecimento() {
             <h2 style={{ margin: 0, fontSize: 16 }}>Agendamentos</h2>
             <div className="notif-bell" title="Notifica??es de agendamentos">
               <IconBell className="notif-bell__icon" aria-hidden="true" />
-              <span className="notif-bell__pill"> Recebidos {totals.recebidos} </span>
+              <span className="notif-bell__pill">
+                Recebidos <span className="notif-bell__number notif-bell__number--ok">{totals.recebidos}</span>
+              </span>
               <span className="notif-bell__pill notif-bell__pill--cancel">
-                Cancelados {totals.cancelados}
+                Cancelados{" "}
+                <span className="notif-bell__number notif-bell__number--cancel">{totals.cancelados}</span>
               </span>
             </div>
           </div>
