@@ -22,6 +22,15 @@ export default function LoginCliente(){
   const [showPass,setShowPass]=useState(false)
   const [err,setErr]=useState('')
   const [loading,setLoading]=useState(false)
+  const handleBack = () => {
+    try {
+      if (window.history.length > 1) {
+        nav(-1)
+        return
+      }
+    } catch {}
+    nav('/')
+  }
 
   async function submit(e){
     e.preventDefault(); setErr(''); setLoading(true)
@@ -121,6 +130,11 @@ export default function LoginCliente(){
       <div className="divider"><span>ou</span></div>
       <div className="auth-alt">
         Novo por aqui? <Link to="/cadastro">Crie uma conta</Link>
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 10 }}>
+        <button type="button" className="btn btn--link" onClick={handleBack}>
+          Voltar
+        </button>
       </div>
         </div>
       </div>
