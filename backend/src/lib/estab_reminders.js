@@ -151,8 +151,8 @@ async function sendEstabReminder(pool, row) {
     try {
       await notifyEmail(
         emailEst,
-        'Lembrete: atendimento em 5h',
-        `<p>Voce tem um atendimento de <b>${service}</b>${profLabel} as <b>${whenLabel}</b> para o cliente <b>${clientName}</b>.</p>`
+        'Lembrete: atendimento',
+        `<p>Você tem um atendimento de <b>${service}</b>${profLabel} às <b>${whenLabel}</b> para o cliente <b>${clientName}</b>.</p>`
       );
     } catch (err) {
       console.warn('[estab-reminder-5h] falha ao enviar email', err?.message || err);

@@ -6,7 +6,7 @@ import { auth as authRequired, isCliente, isEstabelecimento } from '../middlewar
 import { notifyEmail, notifyWhatsapp, sendTemplate } from '../lib/notifications.js';
 import { checkMonthlyAppointmentLimit, notifyAppointmentLimitReached } from '../lib/appointment_limits.js';
 import { estabNotificationsDisabled } from '../lib/estab_notifications.js';
-import { clientWhatsappDisabled, whatsappImmediateDisabled } from '../lib/client_notifications.js';
+import { clientWhatsappDisabled, whatsappImmediateDisabled, whatsappConfirmationDisabled } from '../lib/client_notifications.js';
 
 const router = Router();
 
@@ -271,6 +271,7 @@ router.post('/', authRequired, isCliente, async (req, res) => {
     const blockEstabNotifications = estabNotificationsDisabled();
     const blockClientWhatsapp = clientWhatsappDisabled();
     const blockWhatsappImmediate = whatsappImmediateDisabled();
+    const blockWhatsappConfirmation = whatsappConfirmationDisabled();
     const estNome = est?.nome || '';
     const estNomeFriendly = estNome || 'nosso estabelecimento';
     const profNome = profissionalRow?.nome || '';
@@ -296,7 +297,7 @@ router.post('/', authRequired, isCliente, async (req, res) => {
 
     // (b) WhatsApp imediato
     fireAndForget(async () => {
-      if (blockWhatsappImmediate) return; // WhatsApp imediato desativado via env
+      if (blockWhatsappImmediate || blockWhatsappConfirmation) return; // WhatsApp imediato desativado via env ou confirmacao desativada
       const paramMode = String(process.env.WA_TEMPLATE_PARAM_MODE || 'single').toLowerCase();
       const tplName = process.env.WA_TEMPLATE_NAME_CONFIRM || process.env.WA_TEMPLATE_NAME || 'confirmacao_agendamento';
       const tplLang = process.env.WA_TEMPLATE_LANG || 'pt_BR';

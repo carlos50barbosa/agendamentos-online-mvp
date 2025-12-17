@@ -10,6 +10,10 @@ const rawImmediate = String(
 ).trim().toLowerCase();
 const DISABLE_WHATSAPP_IMMEDIATE = ['1', 'true', 'yes', 'on', 'sim'].includes(rawImmediate);
 
+// Desativa apenas confirmações via WhatsApp (sem afetar lembretes/cancelamentos)
+const rawConfirm = String(process.env.DISABLE_WHATSAPP_CONFIRMATIONS ?? 'false').trim().toLowerCase();
+const DISABLE_WHATSAPP_CONFIRMATIONS = ['1', 'true', 'yes', 'on', 'sim'].includes(rawConfirm);
+
 export function clientWhatsappDisabled() {
   return DISABLE_CLIENT_WHATSAPP;
 }
@@ -24,4 +28,12 @@ export function whatsappImmediateDisabled() {
 
 export function whatsappImmediateEnabled() {
   return !DISABLE_WHATSAPP_IMMEDIATE;
+}
+
+export function whatsappConfirmationDisabled() {
+  return DISABLE_WHATSAPP_CONFIRMATIONS;
+}
+
+export function whatsappConfirmationEnabled() {
+  return !DISABLE_WHATSAPP_CONFIRMATIONS;
 }
