@@ -2237,14 +2237,32 @@ button.danger:disabled,
   left:50%;
   right:auto;
   transform:translateX(-50%);
+  background:var(--surface);
+  border:1px solid var(--border);
+  color:var(--text);
+  box-shadow:0 10px 30px rgba(0,0,0,0.08);
+  z-index:120;
+}
+.novo-agendamento__toast .toast .toast-icon,
+.novo-agendamento__toast .toast .toast-close{color:currentColor;}
+.novo-agendamento__toast .toast.success{
   background:#16a34a;
   border:1px solid #15803d;
   color:#fff;
   box-shadow:0 10px 30px rgba(21,128,61,0.25);
-  z-index:120;
 }
-.novo-agendamento__toast .toast .toast-icon,
-.novo-agendamento__toast .toast .toast-close{color:#fff;}
+.novo-agendamento__toast .toast.error{
+  background:#fee2e2;
+  border:1px solid #fecdd3;
+  color:#7f1d1d;
+  box-shadow:0 10px 30px rgba(220,38,38,0.18);
+}
+.novo-agendamento__toast .toast.info{
+  background:#e0f2fe;
+  border:1px solid #bfdbfe;
+  color:#0f172a;
+  box-shadow:0 10px 30px rgba(37,99,235,0.18);
+}
 .novo-agendamento__intro{display:flex;flex-direction:column;gap:12px;}
 .novo-agendamento__status{margin-top:8px;font-size:.85rem;}
 .novo-agendamento__search{display:flex;align-items:center;gap:12px;flex-wrap:wrap;}

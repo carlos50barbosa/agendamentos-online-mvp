@@ -15,9 +15,10 @@ const TZ = 'America/Sao_Paulo';
 function inBusinessHours(dateISO) {
   const d = new Date(dateISO);
   if (Number.isNaN(d.getTime())) return false;
+  // Janela ampla (00:00-23:59) para não bloquear horários configurados pelo estabelecimento.
   const h = d.getHours(), m = d.getMinutes();
-  const afterStart = h > 7 || (h === 7 && m >= 0);
-  const beforeEnd = h < 22 || (h === 22 && m === 0);
+  const afterStart = h >= 0;
+  const beforeEnd = h < 24 || (h === 23 && m <= 59);
   return afterStart && beforeEnd;
 }
 

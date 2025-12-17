@@ -23,14 +23,14 @@ const boolPref = (value, fallback = true) => {
   return fallback;
 };
 
-/** Horario comercial: 07:00 (inclusive) ate 22:00 (inclusive somente 22:00 em ponto) */
+/** Valida horario do payload (apenas sanity check; regras finas via slots/agenda) */
 function inBusinessHours(dateISO) {
   const d = new Date(dateISO);
   if (Number.isNaN(d.getTime())) return false;
-  // Observacao: usa timezone do servidor. Ideal seria usar TZ do estabelecimento.
+  // Usamos janela ampla (00:00-23:59) para não bloquear horários válidos configurados no estabelecimento.
   const h = d.getHours(), m = d.getMinutes();
-  const afterStart = h > 7 || (h === 7 && m >= 0);
-  const beforeEnd  = h < 22 || (h === 22 && m === 0);
+  const afterStart = h >= 0;
+  const beforeEnd = h < 24 || (h === 23 && m <= 59);
   return afterStart && beforeEnd;
 }
 
@@ -141,7 +141,7 @@ router.post('/', authRequired, isCliente, async (req, res) => {
       return res.status(400).json({ error: 'past_datetime', message: 'Não é possível agendar no passado.' });
     }
     if (!inBusinessHours(inicioDate.toISOString())) {
-      return res.status(400).json({ error: 'outside_business_hours', message: 'Horario fora do expediente (07:00-22:00).' });
+      return res.status(400).json({ error: 'outside_business_hours', message: 'Horário fora do expediente (07:00-22:00).' });
     }
 
     // 2) valida servico e vinculo com estabelecimento
