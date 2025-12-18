@@ -243,8 +243,9 @@ export default function Cadastro() {
                       const target = document.getElementById('cadastro-nome') || document.getElementById('cadastro-form');
                       if (target) {
                         const rect = target.getBoundingClientRect();
-                        const y = rect.top + window.scrollY - 12;
+                        const y = rect.top + window.scrollY - 80;
                         window.scrollTo({ top: y, behavior: 'smooth' });
+                        setTimeout(() => target.focus?.(), 300);
                       }
                     } catch {}
                   }}
@@ -278,8 +279,9 @@ export default function Cadastro() {
                       const target = document.getElementById('cadastro-nome') || document.getElementById('cadastro-form');
                       if (target) {
                         const rect = target.getBoundingClientRect();
-                        const y = rect.top + window.scrollY - 12;
+                        const y = rect.top + window.scrollY - 80;
                         window.scrollTo({ top: y, behavior: 'smooth' });
+                        setTimeout(() => target.focus?.(), 300);
                       }
                     } catch {}
                   }}
