@@ -225,10 +225,10 @@ export default function Cadastro() {
             </div>
           )}
 
-          <form onSubmit={submit} className="grid" style={{ gap: 10, marginTop: 10 }}>
+          <form id="cadastro-form" onSubmit={submit} className="grid" style={{ gap: 10, marginTop: 10 }}>
             <div className="signup-chooser">
               <div className="signup-chooser__label">Como deseja usar?</div>
-              <p className="signup-chooser__hint">Cliente agenda serviços. Estabelecimento recebe e organiza agendamentos.</p>
+              <div className="signup-chooser__hint">Cliente agenda serviços. Estabelecimento recebe e organiza agendamentos.</div>
               <div
                 className={`login-options login-options--cards signup-chooser__options${form.tipo ? ' has-selection' : ''}`}
                 role="group"
@@ -237,7 +237,13 @@ export default function Cadastro() {
                 <button
                   type="button"
                   className={`login-option login-option--client${form.tipo === 'cliente' ? ' is-selected' : ''}`}
-                  onClick={() => updateField('tipo', 'cliente')}
+                  onClick={() => {
+                    updateField('tipo', 'cliente');
+                    try {
+                      const el = document.getElementById('cadastro-form');
+                      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    } catch {}
+                  }}
                 >
                   <div className="login-option__top">
                     <span className="login-option__avatar" aria-hidden>
@@ -262,7 +268,13 @@ export default function Cadastro() {
                 <button
                   type="button"
                   className={`login-option login-option--business${form.tipo === 'estabelecimento' ? ' is-selected' : ''}`}
-                  onClick={() => updateField('tipo', 'estabelecimento')}
+                  onClick={() => {
+                    updateField('tipo', 'estabelecimento');
+                    try {
+                      const el = document.getElementById('cadastro-form');
+                      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    } catch {}
+                  }}
                 >
                   <div className="login-option__top">
                     <span className="login-option__avatar" aria-hidden>
