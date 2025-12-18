@@ -1,7 +1,7 @@
 // src/pages/Login.jsx
 import React, { useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { IconLogout } from '../components/Icons.jsx';
+import { IconChevronRight, IconUser, IconWrench } from '../components/Icons.jsx';
 import LogoAO from '../components/LogoAO.jsx';
 
 export default function Login() {
@@ -42,26 +42,54 @@ export default function Login() {
               {sessionMsg}
             </div>
           )}
-          <div className="login-options">
+          <div className="login-options login-options--cards">
             <Link
-              className="login-option"
+              className="login-option login-option--client"
               to={`/login-cliente${next ? `?next=${encodeURIComponent(next)}` : ''}`}
             >
-              <span className="login-option__label">Para Clientes</span>
-              <span className="login-option__action">
-                <IconLogout className="login-option__icon" aria-hidden />
-                <span>Login</span>
-              </span>
+              <div className="login-option__top">
+                <span className="login-option__avatar" aria-hidden>
+                  <IconUser className="login-option__icon" />
+                </span>
+                <div className="login-option__copy">
+                  <span className="login-option__eyebrow">Sou Cliente</span>
+                  <div className="login-option__title">Agendar um serviço</div>
+                  <p className="login-option__desc">Marque horários e receba confirmações.</p>
+                </div>
+                <span className="login-option__cta">
+                  <span>Entrar</span>
+                  <IconChevronRight aria-hidden className="login-option__icon" />
+                </span>
+              </div>
+              <div className="login-option__tags" aria-hidden>
+                <span className="login-option__tag">Agendar</span>
+                <span className="login-option__tag">Lembretes</span>
+                <span className="login-option__tag">Confirmações</span>
+              </div>
             </Link>
             <Link
-              className="login-option"
+              className="login-option login-option--business"
               to={`/login-estabelecimento${next ? `?next=${encodeURIComponent(next)}` : ''}`}
             >
-              <span className="login-option__label">Para Empresas</span>
-              <span className="login-option__action">
-                <IconLogout className="login-option__icon" aria-hidden />
-                <span>Login</span>
-              </span>
+              <div className="login-option__top">
+                <span className="login-option__avatar" aria-hidden>
+                  <IconWrench className="login-option__icon" />
+                </span>
+                <div className="login-option__copy">
+                  <span className="login-option__eyebrow">Sou Estabelecimento</span>
+                  <div className="login-option__title">Gerenciar minha agenda</div>
+                  <p className="login-option__desc">Confirme clientes e organize a equipe.</p>
+                </div>
+                <span className="login-option__cta">
+                  <span>Entrar</span>
+                  <IconChevronRight aria-hidden className="login-option__icon" />
+                </span>
+              </div>
+              <div className="login-option__tags" aria-hidden>
+                <span className="login-option__tag">Agenda online</span>
+                <span className="login-option__tag">Equipe</span>
+                <span className="login-option__tag">Relatórios</span>
+              </div>
             </Link>
           </div>
           <div className="divider"><span>ou</span></div>

@@ -2,6 +2,7 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import LogoAO from '../components/LogoAO.jsx';
+import { IconChevronRight, IconUser, IconWrench } from '../components/Icons.jsx';
 import { Api } from '../utils/api';
 import { saveToken, saveUser } from '../utils/auth';
 import { LEGAL_METADATA } from '../utils/legal.js';
@@ -51,16 +52,22 @@ export default function Cadastro() {
   const [loading, setLoading] = useState(false);
   const [cepStatus, setCepStatus] = useState({ loading: false, error: '' });
   const [acceptPolicies, setAcceptPolicies] = useState(false);
+  const [confirmEmail, setConfirmEmail] = useState('');
+  const [successMsg, setSuccessMsg] = useState('');
   const legalMeta = useMemo(() => LEGAL_METADATA, []);
 
   const phoneDigits = (form.telefone || '').replace(/\D/g, '');
   const cepDigits = form.cep.replace(/\D/g, '');
   const isEstab = form.tipo === 'estabelecimento';
 
-  const emailOk = useMemo(
-    () => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim()),
-    [form.email]
-  );
+  const emailReady = useMemo(() => {
+    const email = form.email.trim();
+    const confirm = confirmEmail.trim();
+    if (!email || !confirm) return false;
+    const valid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+    if (!valid) return false;
+    return email.toLowerCase() === confirm.toLowerCase();
+  }, [form.email, confirmEmail]);
   const senhaScore = useMemo(() => {
     const s = form.senha || '';
     let pts = 0;
@@ -71,7 +78,7 @@ export default function Cadastro() {
   }, [form.senha]);
   const senhaLabel = ['Fraca', 'Razoavel', 'Boa', 'Forte'][senhaScore];
 
-  const senhaOk = form.senha.length >= 8;
+  const senhaOk = form.senha.length >= 8 && /[^A-Za-z0-9]/.test(form.senha);
   const matchOk = form.senha && confirm && form.senha === confirm;
   const nomeOk = form.nome.trim().length >= 2;
 
@@ -96,7 +103,7 @@ export default function Cadastro() {
   const disabled =
     loading ||
     !nomeOk ||
-    !emailOk ||
+    !emailReady ||
     !senhaOk ||
     !matchOk ||
     !phoneOk ||
@@ -149,6 +156,7 @@ export default function Cadastro() {
   const submit = async (event) => {
     event.preventDefault();
     setErr('');
+    setSuccessMsg('');
     if (disabled) return;
     setLoading(true);
     try {
@@ -176,7 +184,9 @@ export default function Cadastro() {
       const { token, user } = await Api.register(payload);
       saveToken(token);
       saveUser(user);
-      nav(user?.tipo === 'cliente' ? '/cliente' : '/estab');
+      setSuccessMsg('Cadastro realizado com sucesso! Redirecionando...');
+      try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch {}
+      setTimeout(() => nav(user?.tipo === 'cliente' ? '/cliente' : '/estab'), 1200);
     } catch (e) {
       const message = e?.message || '';
       const friendly =
@@ -204,8 +214,80 @@ export default function Cadastro() {
               <small>Leva menos de 2 minutos</small>
             </div>
           </div>
+          {successMsg && (
+            <div
+              className="box"
+              role="status"
+              aria-live="polite"
+              style={{ marginTop: 10, borderColor: 'var(--success-border)', color: 'var(--success-text)', background: 'var(--success-bg)' }}
+            >
+              {successMsg}
+            </div>
+          )}
 
           <form onSubmit={submit} className="grid" style={{ gap: 10, marginTop: 10 }}>
+            <div className="signup-chooser">
+              <div className="signup-chooser__label">Como deseja usar?</div>
+              <p className="signup-chooser__hint">Cliente agenda serviços. Estabelecimento recebe e organiza agendamentos.</p>
+              <div
+                className={`login-options login-options--cards signup-chooser__options${form.tipo ? ' has-selection' : ''}`}
+                role="group"
+                aria-label="Tipo de conta"
+              >
+                <button
+                  type="button"
+                  className={`login-option login-option--client${form.tipo === 'cliente' ? ' is-selected' : ''}`}
+                  onClick={() => updateField('tipo', 'cliente')}
+                >
+                  <div className="login-option__top">
+                    <span className="login-option__avatar" aria-hidden>
+                      <IconUser className="login-option__icon" />
+                    </span>
+                    <div className="login-option__copy">
+                      <span className="login-option__eyebrow">Sou Cliente</span>
+                      <div className="login-option__title">Quero agendar</div>
+                      <p className="login-option__desc">Marcar horarios e receber confirmacoes.</p>
+                    </div>
+                    <span className="login-option__cta">
+                      <span>Escolher</span>
+                      <IconChevronRight aria-hidden className="login-option__icon" />
+                    </span>
+                  </div>
+                  <div className="login-option__tags" aria-hidden>
+                    <span className="login-option__tag">Agendar</span>
+                    <span className="login-option__tag">Lembretes</span>
+                    <span className="login-option__tag">Confirmações</span>
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  className={`login-option login-option--business${form.tipo === 'estabelecimento' ? ' is-selected' : ''}`}
+                  onClick={() => updateField('tipo', 'estabelecimento')}
+                >
+                  <div className="login-option__top">
+                    <span className="login-option__avatar" aria-hidden>
+                      <IconWrench className="login-option__icon" />
+                    </span>
+                    <div className="login-option__copy">
+                      <span className="login-option__eyebrow">Sou Estabelecimento</span>
+                      <div className="login-option__title">Receber agendamentos</div>
+                      <p className="login-option__desc">Organizar equipe, confirmacoes e agenda online.</p>
+                    </div>
+                    <span className="login-option__cta">
+                      <span>Escolher</span>
+                      <IconChevronRight aria-hidden className="login-option__icon" />
+                    </span>
+                  </div>
+                  <div className="login-option__tags" aria-hidden>
+                    <span className="login-option__tag">Agenda online</span>
+                    <span className="login-option__tag">Equipe</span>
+                    <span className="login-option__tag">Relatórios</span>
+                  </div>
+                </button>
+              </div>
+              {!form.tipo && <small className="muted">Selecione uma opcao para continuar.</small>}
+            </div>
+
             <input
               className="input"
               placeholder="Nome"
@@ -221,9 +303,25 @@ export default function Cadastro() {
               value={form.email}
               onChange={(e) => updateField('email', e.target.value)}
               autoComplete="email"
+              onPaste={(e) => e.preventDefault()}
               required
             />
-            {!emailOk && form.email && <small className="muted">Informe um e-mail valido.</small>}
+            {form.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim()) && (
+              <small className="text-error">Informe um e-mail válido.</small>
+            )}
+            <input
+              className="input"
+              type="email"
+              placeholder="Confirmar email"
+              value={confirmEmail}
+              onChange={(e) => setConfirmEmail(e.target.value)}
+              autoComplete="off"
+              onPaste={(e) => e.preventDefault()}
+              required
+            />
+            {!!confirmEmail && form.email && form.email.trim().toLowerCase() !== confirmEmail.trim().toLowerCase() && (
+              <small className="text-error">O email precisa ser igual ao campo anterior.</small>
+            )}
 
             <input
               className="input"
@@ -231,17 +329,22 @@ export default function Cadastro() {
               inputMode="tel"
               placeholder="Telefone WhatsApp - (11) 99999-9999"
               value={formatBRPhone(form.telefone)}
-              onChange={(e) => updateField('telefone', e.target.value)}
+              onChange={(e) => {
+                const digits = e.target.value.replace(/\D/g, '').slice(0, 13);
+                updateField('telefone', digits);
+              }}
               autoComplete="tel"
               required
             />
-            {/* {!phoneOk && <small className="muted">  Ex.: (11) 99999-9999</small>} */}
+            {!phoneOk && phoneDigits && (
+              <small className="text-error">Digite todos os dígitos (DDD + número). Ex.: (11) 99999-9999</small>
+            )}
 
             <div className="row" style={{ gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
               <input
                 className="input"
                 type={showPass ? 'text' : 'password'}
-                placeholder="Senha (min. 8 caracteres)"
+                placeholder="Senha (min. 8 e 1 caractere especial)"
                 value={form.senha}
                 onChange={(e) => updateField('senha', e.target.value)}
                 autoComplete="new-password"
@@ -256,7 +359,14 @@ export default function Cadastro() {
               >
                 {showPass ? 'Ocultar' : 'Mostrar'}
               </button>
-              {form.senha && <small className="muted">Forca: {senhaLabel}</small>}
+              {form.senha && (
+                <small className={`strength strength--${senhaLabel?.toLowerCase() || 'fraca'}`}>
+                  Forca: {senhaLabel}
+                </small>
+              )}
+              {form.senha && !senhaOk && (
+                <small className="text-error">Use pelo menos 8 caracteres e 1 especial.</small>
+              )}
             </div>
 
             <div className="row" style={{ gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -278,22 +388,8 @@ export default function Cadastro() {
               >
                 {showConfirm ? 'Ocultar' : 'Mostrar'}
               </button>
-              {!!confirm && !matchOk && <small className="muted">As senhas nao coincidem.</small>}
+              {!!confirm && !matchOk && <small className="text-error">As senhas não coincidem.</small>}
             </div>
-
-            <label className="label" style={{ maxWidth: 320 }}>
-              <span>Tipo de conta</span>
-              <select
-                className="input"
-                value={form.tipo}
-                onChange={(e) => updateField('tipo', e.target.value)}
-                required
-              >
-                <option value="">Selecionar</option>
-                <option value="cliente">Cliente</option>
-                <option value="estabelecimento">Estabelecimento</option>
-              </select>
-            </label>
 
             {isEstab && (
               <div className="grid" style={{ gap: 8 }}>
@@ -320,7 +416,7 @@ export default function Cadastro() {
                 </label>
                 <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
                   <label className="label" style={{ flex: '1 1 120px' }}>
-                    <span>Numero</span>
+                    <span>Número</span>
                     <input
                       className="input"
                       value={form.numero}

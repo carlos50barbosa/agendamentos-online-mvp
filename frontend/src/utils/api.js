@@ -172,6 +172,7 @@ export const Api = {
 
   // Billing (assinaturas Mercado Pago)
   billingSubscription: () => req('/billing/subscription'),
+  billingPixPending: (params = {}) => req(`/billing/pix/pending${toQuery(params)}`),
   // PIX fallback (primeiro ciclo)
   billingPixCheckout: (payload) => {
     const body = { ...payload };
@@ -282,5 +283,4 @@ export const Api = {
 
 // Exporta para depuraÃ§Ã£o no console do navegador
 export const API_BASE_URL = BASE;
-
 

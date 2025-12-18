@@ -2,7 +2,7 @@ import React, { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import LogoAO from '../components/LogoAO.jsx'
 import { Api } from '../utils/api'
-import { saveToken, saveUser } from '../utils/auth'
+import { saveToken, saveUser, clearPlanCache } from '../utils/auth'
 import { useNavigate, useLocation } from 'react-router-dom'
 
 export default function LoginEstabelecimento(){
@@ -38,6 +38,7 @@ export default function LoginEstabelecimento(){
     try{
       const { token, user } = await Api.login(email.trim(), senha)
       if(user?.tipo!=='estabelecimento') throw new Error('tipo_incorreto')
+      clearPlanCache();
       saveToken(token); saveUser(user);
       try { sessionStorage.removeItem('next_after_login') } catch {}
       nav(`/loading?type=login&next=${encodeURIComponent(nextTarget)}`)

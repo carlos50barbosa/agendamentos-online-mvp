@@ -133,7 +133,7 @@ function BillingStatusBanner({ status, user, planInfo }) {
     const remainingRaw = Number(status?.grace_days_remaining ?? 0);
     const remaining = Number.isNaN(remainingRaw) ? 0 : Math.max(0, remainingRaw);
     const remainingText = remaining
-      ? `Bloqueio em ${remaining} ${remaining === 1 ? 'dia' : 'dias'}${graceDeadline ? ` (ate ${graceDeadline})` : ''}.`
+      ? `Bloqueio em ${remaining} ${remaining === 1 ? 'dia' : 'dias'}${graceDeadline ? ` (até ${graceDeadline})` : ''}.`
       : 'Atualize para evitar o bloqueio.';
     body = `${overdueLabel} ${remainingText}`.trim();
   } else {

@@ -116,6 +116,7 @@ const buildAnalyticsItem = (planKey, cycle, value) => {
   return item;
 };
 const PURCHASE_SIGNATURE_KEY = 'ao_last_plan_purchase_signature';
+const PIX_CACHE_KEY = 'ao_last_pix_checkout';
 
 const DAY_ALIAS_MAP = (() => {
   const map = {};
@@ -529,6 +530,7 @@ export default function Configuracoes() {
   // Billing state
   const [billing, setBilling] = useState({ subscription: null, history: [] });
   const [billingLoading, setBillingLoading] = useState(false);
+  const [billingStatus, setBillingStatus] = useState(null);
   const [checkoutLoading, setCheckoutLoading] = useState(false);
   const [checkoutError, setCheckoutError] = useState('');
   const checkoutIntentRef = useRef(false);
@@ -545,6 +547,16 @@ export default function Configuracoes() {
   // PIX fallback cycle selector
   const [pixCycle, setPixCycle] = useState('mensal');
   const [pixCheckoutModal, setPixCheckoutModal] = useState({ open: false, data: null });
+  const closePixModal = useCallback(() => setPixCheckoutModal({ open: false, data: null }), []);
+  const cachePixCheckout = useCallback((pixPayload) => {
+    if (!pixPayload) return;
+    try {
+      localStorage.setItem(PIX_CACHE_KEY, JSON.stringify({ pix: pixPayload, saved_at: Date.now() }));
+    } catch {}
+  }, []);
+  const clearPixCache = useCallback(() => {
+    try { localStorage.removeItem(PIX_CACHE_KEY); } catch {}
+  }, []);
 
   // Util: mapeia códigos do MP para mensagens amigáveis
   const mapStatusDetailMessage = useCallback((code) => {
@@ -572,11 +584,20 @@ export default function Configuracoes() {
     const noTrialRunning = !planInfo.trialEnd;
     return isStarter && noTrialRunning && !hasPaidHistory;
   }, [planInfo.plan, planInfo.trialEnd, hasPaidHistory]);
+  const billingState = useMemo(() => String(billingStatus?.state || '').toLowerCase(), [billingStatus?.state]);
+  const activeUntilPast = useMemo(() => {
+    if (!planInfo.activeUntil) return false;
+    const end = new Date(planInfo.activeUntil);
+    if (!Number.isFinite(end.getTime())) return false;
+    return end.getTime() < Date.now();
+  }, [planInfo.activeUntil]);
+  const isOverdue = billingState === 'overdue' || billingState === 'blocked' || activeUntilPast;
   const hasActiveSubscription = useMemo(() => {
+    if (isOverdue) return false;
     const statusPlan = String(planInfo.status || '').toLowerCase();
     const statusSub = String(billing?.subscription?.status || '').toLowerCase();
-    return statusPlan === 'active' || statusSub === 'active';
-  }, [planInfo.status, billing?.subscription?.status]);
+    return statusPlan === 'active' || statusSub === 'active' || statusSub === 'authorized';
+  }, [planInfo.status, billing?.subscription?.status, isOverdue]);
   const subStatus = useMemo(() => String(billing?.subscription?.status || '').toLowerCase(), [billing?.subscription?.status]);
   // Assinatura ativa (evita acionar checkout padrão e resultar em 409 "already_active")
 
@@ -718,6 +739,18 @@ export default function Configuracoes() {
     }
   }, [isEstab, user?.id]);
 
+  const fetchBillingStatus = useCallback(async () => {
+    if (!isEstab || !user?.id) return null;
+    try {
+      const data = await Api.billingStatus();
+      setBillingStatus(data || null);
+      return data;
+    } catch (err) {
+      console.error('billingStatus failed', err);
+      throw err;
+    }
+  }, [isEstab, user?.id]);
+
   useEffect(() => {
     (async () => {
       if (!isEstab || !user?.id) return;
@@ -747,6 +780,7 @@ export default function Configuracoes() {
       } catch {}
       // Carrega billing (assinatura + histórico) para preencher o cartão do plano
       try { await fetchBilling(); } catch {}
+      try { await fetchBillingStatus(); } catch {}
       try {
         setPublicProfileLoading(true);
         setPublicProfileStatus({ type: '', message: '' });
@@ -798,7 +832,7 @@ export default function Configuracoes() {
         await fetchBilling();
       } catch {}
     })();
-  }, [isEstab, user?.id, fetchBilling, applyPublicProfile]);
+  }, [isEstab, user?.id, fetchBilling, fetchBillingStatus, applyPublicProfile]);
 
   useEffect(() => {
     const subscription = billing?.subscription;
@@ -842,8 +876,50 @@ export default function Configuracoes() {
     trackMetaEvent('Purchase', metaPayload);
   }, [billing?.subscription, planInfo.plan]);
 
+  useEffect(() => {
+    const status = String(billing?.subscription?.status || '').toLowerCase();
+    if (status === 'active' || status === 'authorized') {
+      clearPixCache();
+    }
+  }, [billing?.subscription?.status, clearPixCache]);
+
   const handleCheckout = useCallback(async (targetPlan, targetCycle = 'mensal') => {
     if (!isEstab || !user?.id) return false;
+    // Reaproveita PIX em cache se válido para o mesmo plano/ciclo
+    try {
+      const raw = localStorage.getItem(PIX_CACHE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        const pix = parsed?.pix;
+        const expiresAt = pix?.expires_at ? new Date(pix.expires_at) : null;
+        const expiresAtMs = expiresAt ? expiresAt.getTime() : null;
+        const samePlan = pix?.plan ? normalizePlanKey(pix.plan) === normalizePlanKey(targetPlan) : true;
+        const sameCycle = pix?.billing_cycle ? normalizeCycle(pix.billing_cycle) === normalizeCycle(targetCycle) : true;
+        const notExpired = expiresAtMs == null || Number.isNaN(expiresAtMs) || expiresAtMs > Date.now();
+        if (pix && samePlan && sameCycle && notExpired) {
+          const enrichedPix = { ...pix, plan: pix.plan || targetPlan, billing_cycle: pix.billing_cycle || targetCycle };
+          if (!pix.plan || !pix.billing_cycle) cachePixCheckout(enrichedPix);
+          setCheckoutNotice({ kind: 'info', message: 'Reabrimos o último PIX gerado.', syncing: false });
+          setPixCheckoutModal({ open: true, data: enrichedPix });
+          return true;
+        }
+      }
+    } catch {}
+    // Tenta reaproveitar preferência pendente no backend
+    try {
+      const pending = await Api.billingPixPending({ plan: targetPlan, billing_cycle: targetCycle });
+      if (pending?.pix && (pending.pix.qr_code || pending.pix.ticket_url)) {
+        const pixPayload = {
+          ...pending.pix,
+          plan: pending.pix.plan || targetPlan,
+          billing_cycle: pending.pix.billing_cycle || targetCycle,
+        };
+        cachePixCheckout(pixPayload);
+        setCheckoutNotice({ kind: 'info', message: 'Reutilizando PIX pendente.', syncing: false });
+        setPixCheckoutModal({ open: true, data: pixPayload });
+        return true;
+      }
+    } catch {}
     setCheckoutError('');
     setCheckoutLoading(true);
     checkoutIntentRef.current = true;
@@ -877,7 +953,9 @@ export default function Configuracoes() {
         trackMetaEvent('InitiateCheckout', metaPayload);
       }
       if (data?.pix && (data.pix.qr_code || data.pix.ticket_url)) {
-        setPixCheckoutModal({ open: true, data: { ...data.pix, init_point: data.init_point } });
+        const pixPayload = { ...data.pix, init_point: data.init_point, plan: targetPlan, billing_cycle: targetCycle };
+        cachePixCheckout(pixPayload);
+        setPixCheckoutModal({ open: true, data: pixPayload });
       } else if (data?.init_point) {
         window.location.href = data.init_point;
         success = true;
@@ -896,9 +974,7 @@ export default function Configuracoes() {
       } catch {}
     }
     return success;
-  }, [fetchBilling, isEstab, user?.id]);
-
-  const closePixModal = useCallback(() => setPixCheckoutModal({ open: false, data: null }), []);
+  }, [fetchBilling, isEstab, user?.id, cachePixCheckout]);
 
   const copyToClipboard = useCallback(async (text) => {
     if (!text) return false;
@@ -929,10 +1005,16 @@ export default function Configuracoes() {
   }, [handleCheckout, pixCycle]);
 
   const handleChangePlan = useCallback((targetPlan) => {
+    const normalizedTarget = normalizePlanKey(targetPlan);
+    const current = normalizePlanKey(planInfo.plan);
+    if (!normalizedTarget || normalizedTarget === current) {
+      setCheckoutNotice({ kind: 'info', message: 'Você já está neste plano.', syncing: false });
+      return;
+    }
     setChangePlanTarget(targetPlan);
     setChangePlanPassword('');
     setChangePlanError('');
-  }, []);
+  }, [planInfo.plan]);
 
   const closeChangePlanModal = useCallback(() => {
     if (changePlanSubmitting) return;
@@ -978,6 +1060,18 @@ export default function Configuracoes() {
     }
   }, [changePlanTarget, changePlanPassword, executePlanChange, user?.email]);
 
+  const changePlanWarning = useMemo(() => {
+    const target = String(changePlanTarget || '').toLowerCase();
+    if (!target) return '';
+    if (target === 'starter') {
+      return 'Downgrade: limites menores de serviços, profissionais e agendamentos. Passa a valer na próxima renovação se estiver dentro dos limites.';
+    }
+    if (target === 'premium') {
+      return 'Upgrade: recursos liberados imediatamente e cobrança do valor do plano Premium a partir do próximo ciclo.';
+    }
+    return 'Confirmação obrigatória com senha. Upgrades liberam na hora; downgrades valem na próxima renovação.';
+  }, [changePlanTarget]);
+
   useEffect(() => {
     if (!isEstab) return;
     let storedPlan = null;
@@ -1009,6 +1103,28 @@ export default function Configuracoes() {
     return Math.max(0, Math.floor(diff / 86400000));
   }, [planInfo.trialDaysLeft, planInfo.trialEnd]);
 
+  const reopenCachedPixIfValid = useCallback(() => {
+    if (!isEstab) return;
+    try {
+      const raw = localStorage.getItem(PIX_CACHE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      const pix = parsed?.pix;
+      if (!pix) {
+        localStorage.removeItem(PIX_CACHE_KEY);
+        return;
+      }
+      const expiresAt = pix.expires_at ? new Date(pix.expires_at) : null;
+      if (expiresAt && Number.isFinite(expiresAt.getTime()) && expiresAt.getTime() < Date.now()) {
+        localStorage.removeItem(PIX_CACHE_KEY);
+        return;
+      }
+      setPixCheckoutModal({ open: true, data: pix });
+    } catch {
+      try { localStorage.removeItem(PIX_CACHE_KEY); } catch {}
+    }
+  }, [isEstab]);
+
   const trialExpired = useMemo(() => {
     if (String(planInfo.status || '').toLowerCase() !== 'trialing') return false;
     if (typeof planInfo.trialDaysLeft === 'number' && planInfo.trialDaysLeft < 0) return true;
@@ -1017,6 +1133,10 @@ export default function Configuracoes() {
     if (!Number.isFinite(endTs)) return false;
     return endTs < Date.now();
   }, [planInfo.status, planInfo.trialDaysLeft, planInfo.trialEnd]);
+
+  useEffect(() => {
+    reopenCachedPixIfValid();
+  }, [reopenCachedPixIfValid]);
 
   const fmtDate = (iso) =>
     iso ? new Date(iso).toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' }) : '';
@@ -1358,7 +1478,9 @@ export default function Configuracoes() {
     // Se a assinatura do MP estiver ativa/autorizada, tratamos como ativo para exibição
     const subStatusRaw = String(billing.subscription?.status || '').toLowerCase();
     const subscriptionIsActive = subStatusRaw === 'active' || subStatusRaw === 'authorized';
-    const effectivePlanStatus = subscriptionIsActive
+    const effectivePlanStatus = isOverdue
+      ? 'delinquent'
+      : subscriptionIsActive
       ? 'active'
       : trialExpired
       ? 'expired'
@@ -1779,7 +1901,9 @@ export default function Configuracoes() {
 
     if (isEstab) {
       const planTierLabel = PLAN_META[planInfo.plan]?.label || planInfo.plan.toUpperCase();
-      const whatsappFeature = planInfo.plan === 'starter' ? 'Lembretes por WhatsApp' : 'WhatsApp com lembretes e campanhas';
+      const whatsappFeature = planInfo.plan === 'starter'
+        ? 'Lembretes por WhatsApp e e-mail'
+        : 'WhatsApp e e-mail com lembretes e campanhas';
       const reportsFeature = planInfo.allowAdvanced ? 'Relatórios avançados' : 'Relatórios básicos';
       const servicesLimit = PLAN_META[planInfo.plan]?.maxServices;
       const professionalsLimit = PLAN_META[planInfo.plan]?.maxProfessionals;
@@ -1796,14 +1920,16 @@ export default function Configuracoes() {
       const pricedAmount = amountLabel ? `${amountLabel}/mês` : null;
       const summarySubscription = subscriptionStatusLabel || statusLabel || 'Em análise';
       const summaryWithPrice = pricedAmount ? `${summarySubscription} · ${pricedAmount}` : summarySubscription;
-      const nextChargeDisplay = nextChargeLabel || (planInfo.activeUntil ? fmtDate(planInfo.activeUntil) : '-');
-      const showSubscriptionChip = subscriptionStatusLabel && subStatus !== effectivePlanStatus;
+      const nextChargeDisplay = billingStatus?.due_at
+        ? fmtDate(billingStatus.due_at)
+        : nextChargeLabel || (planInfo.activeUntil ? fmtDate(planInfo.activeUntil) : '-');
+      const showSubscriptionChip = !isOverdue && subscriptionStatusLabel && subStatus !== effectivePlanStatus;
 
       const planAlerts = [];
       if (billingLoading) {
         planAlerts.push({ key: 'loading', variant: 'info', message: 'Atualizando informações de cobrança...' });
       }
-      if (planInfo.status === 'delinquent') planAlerts.push({ key: 'delinquent', variant: 'error', message: 'Pagamento em atraso. Regularize para manter o acesso aos recursos.' });
+      if (isOverdue || planInfo.status === 'delinquent') planAlerts.push({ key: 'delinquent', variant: 'error', message: 'Pagamento em atraso. Regularize para manter o acesso aos recursos.' });
       if (trialExpired) planAlerts.push({ key: 'trial-expired', variant: 'warn', message: 'Seu teste gratuito terminou. Contrate um plano para manter o acesso aos recursos.' });
       if (effectivePlanStatus === 'pending') planAlerts.push({ key: 'pending', variant: 'warn', message: 'Pagamento pendente. Finalize o checkout para concluir a contratação.' });
       if (planInfo.plan === 'starter' && hasPaidHistory) planAlerts.push({ key: 'trial-blocked', variant: 'muted', message: 'Teste grátis indisponível: já houve uma assinatura contratada nesta conta.' });
@@ -1815,10 +1941,11 @@ export default function Configuracoes() {
           planChangeButtons.push(
             <button
               key="trial"
-              className="btn btn--ghost btn--sm"
+              className="btn btn--outline btn--outline-brand btn--sm"
               type="button"
               onClick={startTrial}
               disabled={planInfo.status === 'delinquent' || checkoutLoading}
+              title="Confirmação será solicitada antes da mudança de plano."
             >
               {checkoutLoading ? <span className="spinner" /> : 'Ativar 7 dias grátis'}
             </button>
@@ -1827,10 +1954,11 @@ export default function Configuracoes() {
         planChangeButtons.push(
           <button
             key="upgrade-pro"
-            className="btn btn--primary btn--sm"
+            className="btn btn--outline btn--outline-brand btn--sm"
             type="button"
             onClick={() => handleChangePlan('pro')}
             disabled={checkoutLoading}
+            title="Confirmação será solicitada antes da mudança de plano."
           >
             {checkoutLoading ? <span className="spinner" /> : 'Alterar para plano Pro'}
           </button>
@@ -1838,19 +1966,22 @@ export default function Configuracoes() {
       } else {
         PLAN_TIERS.filter((p) => p !== planInfo.plan).forEach((p) => {
           const disabled = checkoutLoading || exceedsServices(p) || exceedsProfessionals(p);
+          const isDowngrade = PLAN_TIERS.indexOf(p) < PLAN_TIERS.indexOf(planInfo.plan);
+          let buttonTitle = 'Confirmação será solicitada antes da mudança de plano.';
+          if (exceedsServices(p)) {
+            buttonTitle = 'Reduza seus serviços para até ' + PLAN_META[p].maxServices + ' antes de migrar.';
+          } else if (exceedsProfessionals(p)) {
+            buttonTitle = 'Reduza seus profissionais para até ' + PLAN_META[p].maxProfessionals + ' antes de migrar.';
+          } else if (isDowngrade) {
+            buttonTitle = 'Downgrade: passa a valer na próxima renovação e exige senha de confirmação.';
+          }
           planChangeButtons.push(
             <button
               key={'tier-' + p}
-              className="btn btn--outline btn--sm"
+              className="btn btn--outline btn--outline-brand btn--sm"
               type="button"
               disabled={disabled}
-              title={
-                exceedsServices(p)
-                  ? 'Reduza seus serviços para até ' + PLAN_META[p].maxServices + ' antes de migrar para o plano ' + planLabel(p) + '.'
-                  : exceedsProfessionals(p)
-                  ? 'Reduza seus profissionais para até ' + PLAN_META[p].maxProfessionals + ' antes de migrar para o plano ' + planLabel(p) + '.'
-                  : ''
-              }
+              title={buttonTitle}
               onClick={() => handleChangePlan(p)}
             >
               {'Ir para ' + planLabel(p)}
@@ -1890,6 +2021,8 @@ export default function Configuracoes() {
       }
       const planNotice = hasActiveSubscription
         ? 'Assinatura ativa' + (planInfo.activeUntil ? ' até ' + fmtDate(planInfo.activeUntil) : '') + '.'
+        : isOverdue
+        ? 'Pagamento em atraso. Gere o PIX para regularizar sua assinatura.'
         : 'Finalize o pagamento para ativar sua assinatura.';
 
       list.push({
@@ -2008,6 +2141,7 @@ export default function Configuracoes() {
     avatarPreview,
     avatarError,
     billing,
+    billingStatus,
     billingLoading,
     checkoutLoading,
     checkoutError,
@@ -2016,6 +2150,7 @@ export default function Configuracoes() {
     handleChangePlan,
     hasPaidHistory,
     trialEligible,
+    isOverdue,
     hasActiveSubscription,
     fetchBilling,
     pixCycle,
@@ -2195,6 +2330,11 @@ export default function Configuracoes() {
             Informe sua senha para seguir com a mudança para <strong>{planLabel(changePlanTarget)}</strong>.
             Upgrades liberam recursos imediatamente e a cobrança do novo valor acontece no próximo ciclo. Downgrades passam a valer no ciclo seguinte, desde que os limites sejam atendidos.
           </p>
+          {changePlanWarning && (
+            <p className="notice notice--warn" style={{ marginTop: 8 }}>
+              {changePlanWarning}
+            </p>
+          )}
           <label className="label" style={{ marginTop: 12 }}>
             <span>Senha</span>
             <input

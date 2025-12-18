@@ -44,6 +44,26 @@ async function summarizeReminders(estabelecimentoId) {
   return reminders
 }
 
+function normalizePlanKey(plan) {
+  const p = String(plan || '').toLowerCase().trim()
+  return PLAN_TIERS.includes(p) ? p : ''
+}
+
+async function findPendingPixSubscription(estabelecimentoId, { plan, billingCycle } = {}) {
+  const targetPlan = normalizePlanKey(plan)
+  const targetCycle = billingCycle ? normalizeBillingCycle(billingCycle) : null
+  const subs = await listSubscriptionsForEstabelecimento(estabelecimentoId)
+  for (const sub of subs) {
+    const status = String(sub.status || '').toLowerCase()
+    if (status !== 'pending') continue
+    if (!sub.gatewayPreferenceId) continue
+    if (targetPlan && normalizePlanKey(sub.plan) !== targetPlan) continue
+    if (targetCycle && normalizeBillingCycle(sub.billingCycle) !== targetCycle) continue
+    return sub
+  }
+  return null
+}
+
 function verifyWebhookSignature(req, resourceId) {
   const secretA = (config.billing?.mercadopago?.webhookSecret || '').trim()
   const secretB = (config.billing?.mercadopago?.webhookSecret2 || '').trim()
@@ -576,6 +596,51 @@ router.get('/webhook/health', (req, res) => {
   }
 
   return res.status(200).json(base)
+})
+
+// Recupera a última preferência PIX pendente (mesmo plano/ciclo) se ainda válida
+router.get('/pix/pending', auth, isEstabelecimento, async (req, res) => {
+  try {
+    const plan = normalizePlanKey(req.query.plan || req.user.plan || 'starter')
+    const billingCycle = normalizeBillingCycle(req.query.billing_cycle || req.query.cycle || req.user.plan_cycle || 'mensal')
+
+    const pending = await findPendingPixSubscription(req.user.id, { plan, billingCycle })
+    if (!pending) return res.status(404).json({ error: 'pending_pix_not_found' })
+
+    let payment = null
+    try {
+      const sync = await syncMercadoPagoPayment(pending.gatewayPreferenceId)
+      payment = sync?.payment || null
+    } catch (err) {
+      console.error('[billing/pix/pending] sync failed', err?.message || err)
+    }
+
+    const txData = payment?.point_of_interaction?.transaction_data || {}
+    const pixPayload = {
+      payment_id: pending.gatewayPreferenceId,
+      qr_code: txData.qr_code || null,
+      qr_code_base64: txData.qr_code_base64 || null,
+      ticket_url: txData.ticket_url || null,
+      expires_at: txData.expires_at || payment?.date_of_expiration || null,
+      amount_cents: pending.amountCents,
+      plan: pending.plan,
+      billing_cycle: pending.billingCycle,
+    }
+
+    // Se não tem QR/ticket, provavelmente expirou
+    if (!pixPayload.qr_code && !pixPayload.ticket_url) {
+      return res.status(404).json({ error: 'pending_pix_not_found' })
+    }
+
+    return res.json({
+      ok: true,
+      pix: pixPayload,
+      subscription: serializeSubscription(pending),
+    })
+  } catch (error) {
+    console.error('GET /billing/pix/pending', error)
+    return res.status(500).json({ error: 'pix_pending_failed' })
+  }
 })
 
 // Checkout exclusivo via PIX (link dinâmico do Mercado Pago)
