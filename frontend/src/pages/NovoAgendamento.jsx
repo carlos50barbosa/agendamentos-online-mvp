@@ -1069,10 +1069,23 @@ export default function NovoAgendamento() {
   const selectedProfessionals = selectedEstablishmentId ? professionalsByEstab[selectedEstablishmentId] : null;
   const profileData = selectedExtras?.profile || null;
   const galleryImages = Array.isArray(selectedExtras?.gallery) ? selectedExtras.gallery : [];
-  const horariosList = useMemo(
+  const rawHorarios = useMemo(
     () => (Array.isArray(profileData?.horarios) ? profileData.horarios : []),
     [profileData?.horarios]
   );
+  const horariosList = useMemo(() => {
+    return rawHorarios.filter((item) => {
+      if (!item) return false;
+      const label = String(item.label || '').trim();
+      const value = String(item.value || '').trim();
+      const combined = (label || value || '').trim();
+      if (!combined) return false;
+      if (/^\s*[\[{]/.test(combined)) return false; // ignora linhas JSON cruas
+      const lowered = value.toLowerCase();
+      if (/fechado|sem atendimento|nao atende/.test(lowered)) return false;
+      return true;
+    });
+  }, [rawHorarios]);
   const workingSchedule = useMemo(() => buildWorkingSchedule(horariosList), [horariosList]);
   const reviewsState = selectedExtras?.reviews || { items: [], page: 0, hasNext: true, loading: false, loaded: false, error: '' };
   const reviewsItems = Array.isArray(reviewsState.items) ? reviewsState.items : [];

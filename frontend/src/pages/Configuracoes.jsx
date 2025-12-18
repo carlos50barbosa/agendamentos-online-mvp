@@ -325,26 +325,26 @@ function validateWorkingHours(schedule) {
   for (const day of schedule) {
     if (!day.enabled) continue;
     if (!TIME_VALUE_REGEX.test(day.start || '')) {
-      return `Informe um horario inicial valido para ${day.shortLabel}.`;
+      return `Informe um horário inicial vlido para ${day.shortLabel}.`;
     }
     if (!TIME_VALUE_REGEX.test(day.end || '')) {
-      return `Informe um horario final valido para ${day.shortLabel}.`;
+      return `Informe um horário final vlido para ${day.shortLabel}.`;
     }
     if (day.start >= day.end) {
-      return `O horario inicial deve ser anterior ao final em ${day.shortLabel}.`;
+      return `O horário inicial deve ser anterior ao final em ${day.shortLabel}.`;
     }
     if (day.blockEnabled) {
       if (!TIME_VALUE_REGEX.test(day.blockStart || '')) {
-        return `Informe um inicio valido para a trava em ${day.shortLabel}.`;
+        return `Informe um início válido para a trava em ${day.shortLabel}.`;
       }
       if (!TIME_VALUE_REGEX.test(day.blockEnd || '')) {
-        return `Informe um fim valido para a trava em ${day.shortLabel}.`;
+        return `Informe um fim válido para a trava em ${day.shortLabel}.`;
       }
       if (day.blockStart >= day.blockEnd) {
-        return `A trava precisa ter inicio anterior ao fim em ${day.shortLabel}.`;
+        return `A trava precisa ter início anterior ao fim em ${day.shortLabel}.`;
       }
       if (day.blockStart < day.start || day.blockEnd > day.end) {
-        return `A trava em ${day.shortLabel} deve estar dentro do horario de atendimento.`;
+        return `A trava em ${day.shortLabel} deve estar dentro do horário de atendimento.`;
       }
     }
   }
@@ -362,14 +362,7 @@ function formatTimeDisplay(value) {
 function buildWorkingHoursPayload(schedule, notesText) {
   const payload = [];
   for (const day of schedule) {
-    if (!day.enabled) {
-      payload.push({
-        label: day.shortLabel,
-        value: 'Fechado',
-        day: day.key,
-      });
-      continue;
-    }
+    if (!day.enabled) continue;
     const start = sanitizeTimeInput(day.start) || DEFAULT_WORKING_START;
     const end = sanitizeTimeInput(day.end) || DEFAULT_WORKING_END;
     const label = `${formatTimeDisplay(start)} - ${formatTimeDisplay(end)}`;
@@ -401,7 +394,7 @@ function buildWorkingHoursPayload(schedule, notesText) {
   const notes = String(notesText || '')
     .split(/\r?\n/)
     .map((line) => line.trim())
-    .filter(Boolean)
+    .filter((line) => line && !/^\s*[\[{]/.test(line)) // evita empilhar JSON/objeto como texto
     .slice(0, 6);
   for (const line of notes) {
     payload.push({ label: '', value: line });
@@ -1749,8 +1742,14 @@ export default function Configuracoes() {
                         checked={day.enabled}
                         onChange={(e) => handleWorkingHoursToggle(day.key, e.target.checked)}
                         disabled={publicProfileLoading || publicProfileSaving}
+                        className="working-hours__toggle"
                       />
                       <span>{day.label}</span>
+                      <span
+                        className={`working-hours__status working-hours__status--${day.enabled ? 'open' : 'closed'}`}
+                      >
+                        {day.enabled ? 'Aberto' : 'Fechado'}
+                      </span>
                     </label>
                     <div className="working-hours__time">
                       <input
@@ -1760,7 +1759,7 @@ export default function Configuracoes() {
                         onChange={(e) => handleWorkingHoursTimeChange(day.key, 'start', e.target.value)}
                         disabled={publicProfileLoading || publicProfileSaving || !day.enabled}
                       />
-                      <span className="working-hours__separator">as</span>
+                      <span className="working-hours__separator">às</span>
                       <input
                         type="time"
                         className="input"
@@ -1777,7 +1776,7 @@ export default function Configuracoes() {
                           onChange={(e) => handleWorkingHoursBlockToggle(day.key, e.target.checked)}
                           disabled={publicProfileLoading || publicProfileSaving || !day.enabled}
                         />
-                        <span>Trava de horario</span>
+                        <span>Intervalo de pausa</span>
                       </label>
                       {day.blockEnabled && (
                         <div className="working-hours__break-range">
@@ -1788,7 +1787,7 @@ export default function Configuracoes() {
                             onChange={(e) => handleWorkingHoursBlockChange(day.key, 'blockStart', e.target.value)}
                             disabled={publicProfileLoading || publicProfileSaving || !day.enabled}
                           />
-                          <span className="working-hours__separator">as</span>
+                          <span className="working-hours__separator">às</span>
                           <input
                             type="time"
                             className="input"
