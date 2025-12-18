@@ -240,8 +240,12 @@ export default function Cadastro() {
                   onClick={() => {
                     updateField('tipo', 'cliente');
                     try {
-                      const el = document.getElementById('cadastro-form');
-                      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                      const target = document.getElementById('cadastro-nome') || document.getElementById('cadastro-form');
+                      if (target) {
+                        const rect = target.getBoundingClientRect();
+                        const y = rect.top + window.scrollY - 12;
+                        window.scrollTo({ top: y, behavior: 'smooth' });
+                      }
                     } catch {}
                   }}
                 >
@@ -271,8 +275,12 @@ export default function Cadastro() {
                   onClick={() => {
                     updateField('tipo', 'estabelecimento');
                     try {
-                      const el = document.getElementById('cadastro-form');
-                      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                      const target = document.getElementById('cadastro-nome') || document.getElementById('cadastro-form');
+                      if (target) {
+                        const rect = target.getBoundingClientRect();
+                        const y = rect.top + window.scrollY - 12;
+                        window.scrollTo({ top: y, behavior: 'smooth' });
+                      }
                     } catch {}
                   }}
                 >
@@ -302,6 +310,7 @@ export default function Cadastro() {
 
             <input
               className="input"
+              id="cadastro-nome"
               placeholder="Nome"
               value={form.nome}
               onChange={(e) => updateField('nome', e.target.value)}
