@@ -607,6 +607,15 @@ router.get('/pix/pending', auth, isEstabelecimento, async (req, res) => {
     const pending = await findPendingPixSubscription(req.user.id, { plan, billingCycle })
     if (!pending) return res.status(404).json({ error: 'pending_pix_not_found' })
 
+    console.info('[billing/pix/pending]', {
+      user_id: req.user?.id,
+      user_email: req.user?.email,
+      estab_id: req.user?.id,
+      plan,
+      billing_cycle: billingCycle,
+      preference_id: pending.gatewayPreferenceId,
+    })
+
     let payment = null
     try {
       const sync = await syncMercadoPagoPayment(pending.gatewayPreferenceId)
@@ -669,6 +678,14 @@ router.post('/pix', auth, isEstabelecimento, async (req, res) => {
       estabelecimento: { id: req.user.id, email: req.user.email },
       plan: targetPlan,
       billingCycle,
+    })
+    console.info('[billing/pix/create]', {
+      user_id: req.user?.id,
+      user_email: req.user?.email,
+      estab_id: req.user?.id,
+      plan: targetPlan,
+      billing_cycle: billingCycle,
+      preference_id: result?.pix?.payment_id || result?.subscription?.gatewayPreferenceId || null,
     })
     return res.json({
       ok: true,
