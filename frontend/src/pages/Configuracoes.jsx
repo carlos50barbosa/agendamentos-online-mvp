@@ -2219,6 +2219,27 @@ export default function Configuracoes() {
           ].filter(Boolean)}
         >
           <div className="pix-checkout">
+            {typeof pixCheckoutModal.data?.amount_cents === 'number' && (
+              <div
+                className="pix-checkout__amount"
+                style={{
+                  background: '#0ea5e9',
+                  color: '#f8fafc',
+                  padding: '10px 14px',
+                  borderRadius: 10,
+                  fontSize: 16,
+                  fontWeight: 700,
+                  textAlign: 'center',
+                  marginBottom: 8,
+                }}
+              >
+                Valor a pagar:{' '}
+                {(pixCheckoutModal.data.amount_cents / 100).toLocaleString('pt-BR', {
+                  style: 'currency',
+                  currency: 'BRL',
+                })}
+              </div>
+            )}
             {pixCheckoutModal.data?.qr_code_base64 ? (
               <img
                 src={`data:image/png;base64,${pixCheckoutModal.data.qr_code_base64}`}

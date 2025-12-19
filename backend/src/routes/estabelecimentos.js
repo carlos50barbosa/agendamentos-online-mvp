@@ -35,10 +35,12 @@ import {
   isDowngrade,
 
 } from "../lib/plans.js";
+import { getLatestSubscriptionForEstabelecimento } from "../lib/subscriptions.js";
 
 
 
 const router = Router();
+const PLAN_CHANGE_COOLDOWN_HOURS = Number(process.env.PLAN_CHANGE_COOLDOWN_HOURS || 12);
 
 
 
@@ -1522,6 +1524,28 @@ router.put('/:id/plan', auth, isEstabelecimento, async (req, res) => {
 
       }
 
+    }
+
+
+
+    // Cooldown para evitar alternancias frequentes de plano
+    if (PLAN_CHANGE_COOLDOWN_HOURS > 0 && rawPlan !== currentPlan) {
+      try {
+        const latestSub = await getLatestSubscriptionForEstabelecimento(id);
+        if (latestSub?.createdAt instanceof Date && Number.isFinite(latestSub.createdAt.getTime())) {
+          const diffMs = Date.now() - latestSub.createdAt.getTime();
+          const cooldownMs = PLAN_CHANGE_COOLDOWN_HOURS * 3600 * 1000;
+          if (diffMs < cooldownMs) {
+            const remainingHours = Math.max(1, Math.ceil((cooldownMs - diffMs) / 3600000));
+            return res.status(429).json({
+              error: 'plan_change_cooldown',
+              message: `Aguarde ${remainingHours}h para mudar de plano novamente.`,
+            });
+          }
+        }
+      } catch (err) {
+        console.warn('[plan_change][cooldown_check] failed', err?.message || err);
+      }
     }
 
 
