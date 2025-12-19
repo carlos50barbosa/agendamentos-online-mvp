@@ -6,7 +6,7 @@ import { getUser } from "../utils/auth";
 import Modal from "../components/Modal.jsx";
 import EstablishmentsHero from "../components/EstablishmentsHero.jsx";
 
-import { IconMapPin, IconList } from "../components/Icons.jsx";
+import { IconMapPin, IconList, IconStar } from "../components/Icons.jsx";
 
 const FAVORITES_CACHE_KEY = 'ao:favorites_local';
 
@@ -2721,19 +2721,32 @@ useEffect(() => {
               onClick={() => setFavoritesOnly((prev) => !prev)}
               style={{
                 borderRadius: 9999,
-                padding: '6px 12px',
+                padding: '6px',
                 border: '1px solid var(--border, #e5e7eb)',
-                background: favoritesOnly ? 'var(--primary-50, #f3e8ff)' : 'var(--surface, #fff)',
-                color: 'var(--primary-700, #6c2bd9)',
-                fontWeight: 600,
+                background: favoritesOnly ? '#fef9c3' : 'var(--surface, #fff)',
+                color: favoritesOnly ? '#b45309' : 'var(--primary-700, #6c2bd9)',
+                fontWeight: 700,
                 cursor: 'pointer',
-                boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
-                width: 'fit-content',
-                display: 'block',
-                margin: '12px auto 0 auto',
+                boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
+                width: 32,
+                height: 32,
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                margin: 0,
               }}
+              aria-pressed={favoritesOnly}
+              aria-label={favoritesOnly ? 'Favoritos' : 'Favoritos'}
+              title={favoritesOnly ? 'Favoritos' : 'Favoritos'}
             >
-              {favoritesOnly ? 'Mostrando favoritos' : 'Mostrar favoritos'}
+              <IconStar
+                filled={favoritesOnly}
+                style={{
+                  width: 14,
+                  height: 14,
+                  color: favoritesOnly ? '#d97706' : '#6c2bd9',
+                }}
+              />
             </button>
           </EstablishmentsHero>
         ) : (

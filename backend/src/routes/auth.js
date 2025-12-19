@@ -156,6 +156,40 @@ router.post('/register', async (req, res) => {
       plan_active_until: null,
       plan_subscription_id: null,
     };
+
+    // Emails de boas-vindas/alerta
+    try {
+      const adminEmail = process.env.NEW_USER_ALERT_EMAIL || 'servicos.negocios.digital@gmail.com';
+      const subjectUser = 'Bem-vindo(a) ao Agendamentos Online';
+      const htmlUser = `
+        <p>Oi, ${nomeTrim}!</p>
+        <p>Seu cadastro foi criado com sucesso.</p>
+        <ul>
+          <li>Plano: Starter (teste grátis habilitado para estabelecimentos)</li>
+          <li>Email: ${emailTrim}</li>
+          <li>Telefone: ${telefoneTrim || '-'}</li>
+        </ul>
+        <p>Conte com a gente para agilizar seus agendamentos.</p>
+      `;
+      notifyEmail(emailTrim, subjectUser, htmlUser);
+
+      const subjectAdmin = 'Novo cadastro no Agendamentos Online';
+      const htmlAdmin = `
+        <p>Um novo usuário se cadastrou.</p>
+        <ul>
+          <li>Nome: ${nomeTrim}</li>
+          <li>Email: ${emailTrim}</li>
+          <li>Telefone: ${telefoneTrim || '-'}</li>
+          <li>Tipo: ${tipo}</li>
+          <li>CEP: ${cepDigits || '-'}</li>
+          <li>Cidade/UF: ${cidadeTrim || '-'} / ${estadoTrim || '-'}</li>
+        </ul>
+      `;
+      if (adminEmail) notifyEmail(adminEmail, subjectAdmin, htmlAdmin);
+    } catch (err) {
+      console.warn('[auth/register][welcome_email] falhou', err?.message || err);
+    }
+
     const token = jwt.sign({ id: user.id, nome: nomeTrim, email: emailTrim, tipo }, secret, { expiresIn: '10h' });
     res.json({ token, user });
   } catch (e) {

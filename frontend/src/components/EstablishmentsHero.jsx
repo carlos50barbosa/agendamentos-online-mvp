@@ -1,6 +1,6 @@
 import React from 'react';
 import LogoAO from './LogoAO.jsx';
-import { IconSearch } from './Icons.jsx';
+import { IconSearch, IconChevronRight } from './Icons.jsx';
 
 export default function EstablishmentsHero({
   heading = 'Novo agendamento',
@@ -33,12 +33,29 @@ export default function EstablishmentsHero({
               onChange={(e) => onChange(e.target.value)}
               aria-label={placeholder}
             />
-            <span className="novo-agendamento__search-caret" aria-hidden>▾</span>
+            <IconChevronRight className="novo-agendamento__search-caret" aria-hidden />
           </div>
-          {children}
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center', justifyContent: 'center', marginTop: 10 }}>
+            <button
+              type="submit"
+              className="btn"
+              style={{
+                alignSelf: 'center',
+                borderRadius: 9999,
+                padding: '8px 14px',
+                background: '#f8fafc',
+                color: '#0f172a',
+                border: '1px solid #e2e8f0',
+                fontWeight: 600,
+                boxShadow: '0 1px 2px rgba(15,23,42,0.06)',
+              }}
+            >
+              Buscar
+            </button>
+            {children}
+          </div>
         </form>
       </div>
     </section>
   );
 }
-

@@ -3,6 +3,7 @@ import { Router } from 'express'
 import { createHmac, createHash } from 'node:crypto'
 import { auth, isEstabelecimento } from '../middleware/auth.js'
 import { createMercadoPagoPixCheckout, syncMercadoPagoPayment } from '../lib/billing.js'
+import { notifyEmail } from '../lib/notifications.js'
 import {
   getPlanContext,
   serializePlanContext,
@@ -699,6 +700,34 @@ router.post('/pix', auth, isEstabelecimento, async (req, res) => {
       billing_cycle: billingCycle,
       preference_id: result?.pix?.payment_id || result?.subscription?.gatewayPreferenceId || null,
     })
+    // Alerta opcional por email (admin)
+    try {
+      const adminEmail =
+        process.env.BILLING_ALERT_EMAIL ||
+        process.env.NEW_USER_ALERT_EMAIL ||
+        'servicos.negocios.digital@gmail.com'
+      if (adminEmail) {
+        const amountCents = result?.pix?.amount_cents ?? result?.subscription?.amount_cents ?? null
+        const amountLabel =
+          typeof amountCents === 'number'
+            ? (amountCents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+            : 'N/D'
+        const html = `
+          <p>PIX gerado para assinatura.</p>
+          <ul>
+            <li>Usuário: ${req.user?.id || '-'} / ${req.user?.email || '-'}</li>
+            <li>Plano: ${targetPlan}</li>
+            <li>Ciclo: ${billingCycle}</li>
+            <li>Pagamento/Preference ID: ${result?.pix?.payment_id || result?.subscription?.gatewayPreferenceId || 'N/D'}</li>
+            <li>Valor: ${amountLabel}</li>
+            <li>Data/hora: ${new Date().toLocaleString('pt-BR')}</li>
+          </ul>
+        `
+        notifyEmail(adminEmail, '[AO] Log: PIX gerado', html)
+      }
+    } catch (err) {
+      console.warn('[billing/pix/create][email_log] falhou', err?.message || err)
+    }
     return res.json({
       ok: true,
       init_point: result.initPoint,

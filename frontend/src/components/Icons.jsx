@@ -118,6 +118,17 @@ export function IconChart(props){
   );
 }
 
+export function IconStar({ filled = false, ...props }) {
+  return (
+    <svg {...base} viewBox="0 0 24 24" aria-hidden="true" {...props}>
+      <path
+        d="M12 3l2.6 5.9 6.4.6-4.8 4.2 1.5 6.3L12 17l-5.7 3.1 1.5-6.3L3 9.5l6.4-.6L12 3z"
+        fill={filled ? 'currentColor' : 'none'}
+      />
+    </svg>
+  );
+}
+
 export function IconDownload(props){
   return (
     <svg {...base} viewBox="0 0 24 24" aria-hidden="true" {...props}>
