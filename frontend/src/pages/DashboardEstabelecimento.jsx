@@ -1108,30 +1108,32 @@ function ProfessionalAgendaView({ items, onForceCancel }) {
 
   const timeBounds = useMemo(() => {
     const buildDefaultBounds = (baseDate) => {
-      const base = isValidDate(baseDate) ? baseDate : new Date()
+      const base = isValidDate(baseDate) ? new Date(baseDate) : new Date()
+      base.setHours(0, 0, 0, 0)
       const min = new Date(base); min.setHours(8, 0, 0, 0)
       const max = new Date(base); max.setHours(20, 0, 0, 0)
       return { min, max, scrollToTime: min }
     }
 
     const baseDate = currentDate instanceof Date ? currentDate : new Date()
+    const baseDay = new Date(baseDate); baseDay.setHours(0, 0, 0, 0)
 
     if (!eventsForCurrentDate.length) {
-      return buildDefaultBounds(baseDate)
+      return buildDefaultBounds(baseDay)
     }
 
     const startTimes = eventsForCurrentDate.map((ev) => ev.start)
     const endTimes = eventsForCurrentDate.map((ev) => ev.end)
     const earliest = new Date(Math.min(...startTimes.map((d) => d.getTime())))
     const latest = new Date(Math.max(...endTimes.map((d) => d.getTime())))
-    const min = new Date(baseDate); min.setTime(Math.max(earliest.getTime() - 30 * 60000, min.getTime()))
+    const min = new Date(baseDay); min.setTime(Math.max(earliest.getTime() - 30 * 60000, min.getTime()))
     min.setSeconds(0, 0)
 
-    const maxBase = new Date(baseDate)
-    const max = new Date(baseDate); max.setTime(Math.min(latest.getTime() + 60 * 60000, maxBase.setHours(23, 59, 59, 999)))
+    const maxBase = new Date(baseDay); maxBase.setHours(23, 59, 59, 999)
+    const max = new Date(baseDay); max.setTime(Math.min(latest.getTime() + 60 * 60000, maxBase.getTime()))
 
     if (!isValidDate(min) || !isValidDate(max)) {
-      return buildDefaultBounds(baseDate)
+      return buildDefaultBounds(baseDay)
     }
 
     if (max <= min) {
