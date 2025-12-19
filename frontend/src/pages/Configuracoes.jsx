@@ -1408,8 +1408,22 @@ export default function Configuracoes() {
         });
       }
     } catch (e) {
-      const msg = e?.message || 'Falha ao atualizar perfil.';
+      const errorCode = e?.data?.error || '';
+      const msg = e?.data?.message || e?.message || 'Falha ao atualizar perfil.';
       setProfileStatus({ type: 'error', message: msg });
+
+      // Se a senha estiver errada, reabre o modal e limpa o valor para nova tentativa.
+      const msgLower = typeof msg === 'string' ? msg.toLowerCase() : '';
+      const isPasswordError =
+        ['senha_incorreta', 'senha_atual_obrigatoria', 'senha_indefinida'].includes(String(errorCode)) ||
+        (msgLower.includes('senha atual') || msgLower.includes('senha incorreta'));
+      if (isPasswordError) {
+        handlePasswordChange('atual', '');
+        setConfirmPasswordInput('');
+        setConfirmPasswordError(msg || 'Senha atual incorreta. Tente novamente.');
+        setConfirmPasswordModal(true);
+      }
+
       if (typeof msg === 'string' && msg.toLowerCase().includes('imagem')) {
         setAvatarError(msg);
       }
