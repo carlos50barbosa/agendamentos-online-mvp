@@ -541,12 +541,6 @@ export default function Configuracoes() {
   const [pixCycle, setPixCycle] = useState('mensal');
   const [pixCheckoutModal, setPixCheckoutModal] = useState({ open: false, data: null });
   const closePixModal = useCallback(() => setPixCheckoutModal({ open: false, data: null }), []);
-  const cachePixCheckout = useCallback((pixPayload) => {
-    if (!pixPayload) return;
-    try {
-      localStorage.setItem(PIX_CACHE_KEY, JSON.stringify({ pix: pixPayload, saved_at: Date.now() }));
-    } catch {}
-  }, []);
   const clearPixCache = useCallback(() => {
     try { localStorage.removeItem(PIX_CACHE_KEY); } catch {}
   }, []);
@@ -878,41 +872,9 @@ export default function Configuracoes() {
 
   const handleCheckout = useCallback(async (targetPlan, targetCycle = 'mensal') => {
     if (!isEstab || !user?.id) return false;
-    // Reaproveita PIX em cache se válido para o mesmo plano/ciclo
-    try {
-      const raw = localStorage.getItem(PIX_CACHE_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        const pix = parsed?.pix;
-        const expiresAt = pix?.expires_at ? new Date(pix.expires_at) : null;
-        const expiresAtMs = expiresAt ? expiresAt.getTime() : null;
-        const samePlan = pix?.plan ? normalizePlanKey(pix.plan) === normalizePlanKey(targetPlan) : true;
-        const sameCycle = pix?.billing_cycle ? normalizeCycle(pix.billing_cycle) === normalizeCycle(targetCycle) : true;
-        const notExpired = expiresAtMs == null || Number.isNaN(expiresAtMs) || expiresAtMs > Date.now();
-        if (pix && samePlan && sameCycle && notExpired) {
-          const enrichedPix = { ...pix, plan: pix.plan || targetPlan, billing_cycle: pix.billing_cycle || targetCycle };
-          if (!pix.plan || !pix.billing_cycle) cachePixCheckout(enrichedPix);
-          setCheckoutNotice({ kind: 'info', message: 'Reabrimos o último PIX gerado.', syncing: false });
-          setPixCheckoutModal({ open: true, data: enrichedPix });
-          return true;
-        }
-      }
-    } catch {}
-    // Tenta reaproveitar preferência pendente no backend
-    try {
-      const pending = await Api.billingPixPending({ plan: targetPlan, billing_cycle: targetCycle });
-      if (pending?.pix && (pending.pix.qr_code || pending.pix.ticket_url)) {
-        const pixPayload = {
-          ...pending.pix,
-          plan: pending.pix.plan || targetPlan,
-          billing_cycle: pending.pix.billing_cycle || targetCycle,
-        };
-        cachePixCheckout(pixPayload);
-        setCheckoutNotice({ kind: 'info', message: 'Reutilizando PIX pendente.', syncing: false });
-        setPixCheckoutModal({ open: true, data: pixPayload });
-        return true;
-      }
-    } catch {}
+    // Sempre gerar um PIX novo: limpa qualquer cache e ignora pendentes.
+    clearPixCache();
+    setCheckoutNotice({ kind: '', message: '', syncing: false });
     setCheckoutError('');
     setCheckoutLoading(true);
     checkoutIntentRef.current = true;
@@ -947,7 +909,6 @@ export default function Configuracoes() {
       }
       if (data?.pix && (data.pix.qr_code || data.pix.ticket_url)) {
         const pixPayload = { ...data.pix, init_point: data.init_point, plan: targetPlan, billing_cycle: targetCycle };
-        cachePixCheckout(pixPayload);
         setPixCheckoutModal({ open: true, data: pixPayload });
       } else if (data?.init_point) {
         window.location.href = data.init_point;
@@ -957,7 +918,7 @@ export default function Configuracoes() {
       await fetchBilling();
       success = true;
     } catch (err) {
-      setCheckoutError(err?.data?.message || err?.message || 'Falha ao gerar cobrança PIX.');
+      setCheckoutError(err?.data?.message || err?.message || 'Falha ao gerar cobranca PIX.');
     } finally {
       setCheckoutLoading(false);
       checkoutIntentRef.current = false;
@@ -967,7 +928,7 @@ export default function Configuracoes() {
       } catch {}
     }
     return success;
-  }, [fetchBilling, isEstab, user?.id, cachePixCheckout]);
+  }, [fetchBilling, isEstab, user?.id, clearPixCache]);
 
   const copyToClipboard = useCallback(async (text) => {
     if (!text) return false;
@@ -1097,26 +1058,9 @@ export default function Configuracoes() {
   }, [planInfo.trialDaysLeft, planInfo.trialEnd]);
 
   const reopenCachedPixIfValid = useCallback(() => {
-    if (!isEstab) return;
-    try {
-      const raw = localStorage.getItem(PIX_CACHE_KEY);
-      if (!raw) return;
-      const parsed = JSON.parse(raw);
-      const pix = parsed?.pix;
-      if (!pix) {
-        localStorage.removeItem(PIX_CACHE_KEY);
-        return;
-      }
-      const expiresAt = pix.expires_at ? new Date(pix.expires_at) : null;
-      if (expiresAt && Number.isFinite(expiresAt.getTime()) && expiresAt.getTime() < Date.now()) {
-        localStorage.removeItem(PIX_CACHE_KEY);
-        return;
-      }
-      setPixCheckoutModal({ open: true, data: pix });
-    } catch {
-      try { localStorage.removeItem(PIX_CACHE_KEY); } catch {}
-    }
-  }, [isEstab]);
+    // Sem reutilizar PIX: apenas limpa possíveis restos em cache.
+    clearPixCache();
+  }, [clearPixCache]);
 
   const trialExpired = useMemo(() => {
     if (String(planInfo.status || '').toLowerCase() !== 'trialing') return false;

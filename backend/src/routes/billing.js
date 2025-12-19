@@ -625,12 +625,24 @@ router.get('/pix/pending', auth, isEstabelecimento, async (req, res) => {
     }
 
     const txData = payment?.point_of_interaction?.transaction_data || {}
+    const expiresRaw = txData.expires_at || payment?.date_of_expiration || null
+    const expiresAt = expiresRaw ? new Date(expiresRaw) : null
+    if (expiresAt && Number.isFinite(expiresAt.getTime()) && expiresAt.getTime() <= Date.now()) {
+      console.info('[billing/pix/pending] expired preference', {
+        user_id: req.user?.id,
+        plan,
+        billing_cycle: billingCycle,
+        preference_id: pending.gatewayPreferenceId,
+        expires_at: expiresAt.toISOString(),
+      })
+      return res.status(404).json({ error: 'pending_pix_not_found' })
+    }
     const pixPayload = {
       payment_id: pending.gatewayPreferenceId,
       qr_code: txData.qr_code || null,
       qr_code_base64: txData.qr_code_base64 || null,
       ticket_url: txData.ticket_url || null,
-      expires_at: txData.expires_at || payment?.date_of_expiration || null,
+      expires_at: expiresRaw || null,
       amount_cents: pending.amountCents,
       plan: pending.plan,
       billing_cycle: pending.billingCycle,
