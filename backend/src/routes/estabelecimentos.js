@@ -1527,73 +1527,54 @@ router.put('/:id/plan', auth, isEstabelecimento, async (req, res) => {
 
 
     let planStatus = currentStatus;
-
     if (Object.prototype.hasOwnProperty.call(req.body || {}, 'status')) {
-
       const nextStatus = String(req.body.status || '').toLowerCase();
-
       if (!PLAN_STATUS.includes(nextStatus)) {
-
         return res.status(400).json({ error: 'invalid_status', message: 'Status de plano invalido.' });
-
       }
-
       planStatus = nextStatus;
-
     }
 
+    const trialActive = Boolean(context.trial?.isTrial);
+    const trialEver = Boolean(context.trialEndsAt);
+    const wantsTrial =
+      planStatus === 'trialing' ||
+      Object.prototype.hasOwnProperty.call(req.body || {}, 'trialDays') ||
+      Object.prototype.hasOwnProperty.call(req.body || {}, 'trialEndsAt');
 
+    if (trialEver && !trialActive && wantsTrial) {
+      return res.status(400).json({ error: 'trial_already_used', message: 'O teste gratis ja foi usado nesta conta.' });
+    }
 
     let planTrialEndsAt = context.trialEndsAt;
 
-    if (req.body?.trialEndsAt) {
-
+    if (trialActive) {
+      // Mantem o trial atual sem renovacao/extensao
+      planStatus = 'trialing';
+      planTrialEndsAt = context.trialEndsAt;
+    } else if (req.body?.trialEndsAt) {
       const parsed = new Date(req.body.trialEndsAt);
-
       if (Number.isNaN(parsed.getTime())) {
-
         return res.status(400).json({ error: 'invalid_trial', message: 'trialEndsAt invalido.' });
-
       }
-
       planTrialEndsAt = parsed;
-
     } else if (req.body?.trialDays) {
-
       let days = Number(req.body.trialDays);
-
       if (!Number.isFinite(days) || days <= 0) {
-
-        return res.status(400).json({ error: 'invalid_trial', message: 'trialDays deve ser um número positivo.' });
-
+        return res.status(400).json({ error: 'invalid_trial', message: 'trialDays deve ser um numero positivo.' });
       }
-
-      // Política: teste grátis de 7 dias
-
+      // Politica: teste gratis de 7 dias
       if (days > 7) days = 7;
-
       const dt = new Date();
-
       dt.setDate(dt.getDate() + days);
-
       planTrialEndsAt = dt;
-
     } else if (rawPlan === 'starter') {
-
       planTrialEndsAt = null;
-
     }
-
-
 
     if (planStatus !== 'trialing') {
-
       planTrialEndsAt = null;
-
     }
-
-
-
     let planActiveUntil = context.activeUntil;
 
     if (req.body?.activeUntil) {
@@ -2219,6 +2200,7 @@ router.get('/:id/stats', auth, isEstabelecimento, async (req, res) => {
 
 
 export default router;
+
 
 
 
