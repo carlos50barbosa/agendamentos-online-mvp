@@ -171,8 +171,8 @@ export default function Login() {
               </header>
 
               <div className="login-preview__tabs" role="tablist" aria-label="Escolher perfil">
-                <Tab value="CLIENTE" title="Cliente" hint="Acesse seus agendamentos e historico" />
-                <Tab value="ESTABELECIMENTO" title="Estabelecimento" hint="Gerencie agenda, servicos e clientes" />
+                <Tab value="CLIENTE" title="Cliente" hint="Acesse seus agendamentos e histórico" />
+                <Tab value="ESTABELECIMENTO" title="Estabelecimento" hint="Gerencie agenda, serviços e clientes" />
               </div>
 
               {sessionMsg ? (
