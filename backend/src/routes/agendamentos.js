@@ -22,6 +22,20 @@ const boolPref = (value, fallback = true) => {
   if (['1', 'true', 'on', 'yes', 'sim'].includes(norm)) return true;
   return fallback;
 };
+const CANCEL_MINUTES_CLIENT = (() => {
+  const raw = process.env.CANCEL_MINUTES_CLIENT;
+  if (raw === undefined || raw === null || String(raw).trim() === '') return 120;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? parsed : 120;
+})();
+const formatCancelLimitLabel = (minutes) => {
+  if (!Number.isFinite(minutes) || minutes <= 0) return '';
+  if (minutes % 60 === 0) {
+    const hours = minutes / 60;
+    return `${hours} hora${hours === 1 ? '' : 's'}`;
+  }
+  return `${minutes} minutos`;
+};
 
 /** Valida horario do payload (apenas sanity check; regras finas via slots/agenda) */
 function inBusinessHours(dateISO) {
@@ -354,20 +368,45 @@ router.put('/:id/cancel', authRequired, isCliente, async (req, res) => {
   try {
     const { id } = req.params;
 
+    const cancelLimitMinutes = Number.isFinite(CANCEL_MINUTES_CLIENT) ? CANCEL_MINUTES_CLIENT : 120;
+    const enforceCancelLimit = cancelLimitMinutes > 0;
+    const limitClause = enforceCancelLimit ? ' AND inicio >= DATE_ADD(NOW(), INTERVAL ? MINUTE)' : '';
+    const params = [id, req.user.id];
+    if (enforceCancelLimit) params.push(cancelLimitMinutes);
+
     const [rows] = await pool.query(
       `UPDATE agendamentos
          SET status="cancelado"
-       WHERE id=? AND cliente_id=? AND cliente_confirmou_whatsapp_at IS NULL`,
-      [id, req.user.id]
+       WHERE id=? AND cliente_id=? AND cliente_confirmou_whatsapp_at IS NULL${limitClause}`,
+      params
     );
     if (!rows.affectedRows) {
       // Pode ser porque já confirmou via WhatsApp ou não existe/pertence a outro cliente.
-      const [[ag]] = await pool.query('SELECT cliente_confirmou_whatsapp_at FROM agendamentos WHERE id=? AND cliente_id=?', [id, req.user.id]);
+      const [[ag]] = await pool.query(
+        `SELECT cliente_confirmou_whatsapp_at,
+                TIMESTAMPDIFF(MINUTE, NOW(), inicio) AS minutes_to_start
+           FROM agendamentos
+          WHERE id=? AND cliente_id=?`,
+        [id, req.user.id]
+      );
+      if (!ag) {
+        return res.status(404).json({ error: 'not_found', message: 'Agendamento nao encontrado.' });
+      }
       if (ag?.cliente_confirmou_whatsapp_at) {
         return res.status(409).json({
           error: 'cancel_forbidden_after_confirm',
           message: 'Agendamento já foi confirmado via WhatsApp. Se precisar de ajuda, entre em contato com o estabelecimento.',
         });
+      }
+      if (enforceCancelLimit) {
+        const minutesToStart = Number(ag?.minutes_to_start);
+        if (!Number.isFinite(minutesToStart) || minutesToStart < cancelLimitMinutes) {
+          const limitLabel = formatCancelLimitLabel(cancelLimitMinutes);
+          const message = limitLabel
+            ? `Cancelamento permitido apenas até ${limitLabel} antes do horário. \nEntre em contato com o estabelecimento.`
+            : 'Cancelamento não permitido para este horário.';
+          return res.status(409).json({ error: 'cancel_forbidden_time_limit', message });
+        }
       }
       return res.status(404).json({ error: 'not_found', message: 'Agendamento nao encontrado.' });
     }
@@ -449,14 +488,21 @@ router.put('/:id/cancel', authRequired, isCliente, async (req, res) => {
   }
 });
 
-// Cancelar (forçado pelo estabelecimento) — apenas se ainda não houve confirmação via WhatsApp
+// Cancelar (forcado pelo estabelecimento) - permitido ate a hora do agendamento
 router.put('/:id/cancel-estab', authRequired, isEstabelecimento, async (req, res) => {
   try {
     const { id } = req.params;
     const estId = req.user.id;
 
     const [[ag]] = await pool.query(
-      'SELECT id, cliente_id, servico_id, inicio, status, cliente_confirmou_whatsapp_at FROM agendamentos WHERE id=? AND estabelecimento_id=?',
+      `SELECT id,
+              cliente_id,
+              servico_id,
+              inicio,
+              status,
+              TIMESTAMPDIFF(SECOND, NOW(), inicio) AS seconds_to_start
+         FROM agendamentos
+        WHERE id=? AND estabelecimento_id=?`,
       [id, estId]
     );
     if (!ag) {
@@ -465,20 +511,34 @@ router.put('/:id/cancel-estab', authRequired, isEstabelecimento, async (req, res
 
     const statusNorm = String(ag.status || '').toLowerCase();
     if (statusNorm === 'cancelado') {
-      return res.status(400).json({ error: 'already_cancelled', message: 'Agendamento já está cancelado.' });
+      return res.status(400).json({ error: 'already_cancelled', message: 'Agendamento ja esta cancelado.' });
     }
     if (statusNorm === 'concluido') {
-      return res.status(409).json({ error: 'cancel_forbidden', message: 'Não é possível cancelar um atendimento já concluído.' });
+      return res.status(409).json({ error: 'cancel_forbidden', message: 'Nao e possivel cancelar um atendimento ja concluido.' });
     }
-    if (ag.cliente_confirmou_whatsapp_at) {
-      return res.status(409).json({ error: 'cancel_forbidden', message: 'Cancelamento bloqueado: o cliente já confirmou pelo WhatsApp.' });
+    const secondsToStart = Number(ag?.seconds_to_start);
+    const startTime = ag?.inicio ? new Date(ag.inicio).getTime() : NaN;
+    const started =
+      (Number.isFinite(secondsToStart) && secondsToStart <= 0) ||
+      (Number.isFinite(startTime) && startTime <= Date.now());
+    if (started) {
+      return res.status(409).json({
+        error: 'cancel_forbidden_time_limit', 
+        message: 'Cancelamento indisponível: horário já iniciado.',
+      });
     }
 
     const [rows] = await pool.query(
-      'UPDATE agendamentos SET status="cancelado" WHERE id=? AND estabelecimento_id=?',
+      'UPDATE agendamentos SET status="cancelado" WHERE id=? AND estabelecimento_id=? AND inicio > NOW()',
       [id, estId]
     );
     if (!rows.affectedRows) {
+      if (started) {
+        return res.status(409).json({
+          error: 'cancel_forbidden_time_limit',
+          message: 'Cancelamento indisponível: horário já iniciado.',
+        });
+      }
       return res.status(404).json({ error: 'not_found', message: 'Agendamento nao encontrado.' });
     }
 

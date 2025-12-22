@@ -75,11 +75,11 @@ const WORKING_DAY_TOKENS = Object.freeze({
 
 const WORKING_DAYS = [
   { key: 'monday', label: 'Segunda-feira', shortLabel: 'Segunda' },
-  { key: 'tuesday', label: 'Terca-feira', shortLabel: 'Terca' },
+  { key: 'tuesday', label: 'Terça-feira', shortLabel: 'Terça' },
   { key: 'wednesday', label: 'Quarta-feira', shortLabel: 'Quarta' },
   { key: 'thursday', label: 'Quinta-feira', shortLabel: 'Quinta' },
   { key: 'friday', label: 'Sexta-feira', shortLabel: 'Sexta' },
-  { key: 'saturday', label: 'Sábado', shortLabel: 'Sabado' },
+  { key: 'saturday', label: 'Sábado', shortLabel: 'Sábado' },
   { key: 'sunday', label: 'Domingo', shortLabel: 'Domingo' },
 ];
 

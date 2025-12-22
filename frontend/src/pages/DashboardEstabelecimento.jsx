@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import moment from 'moment'
 import { Calendar as BigCalendar, momentLocalizer, Views } from 'react-big-calendar'
 import { Api } from '../utils/api'
-import { IconBell } from '../components/Icons.jsx'
+import { IconBell, IconHelp } from '../components/Icons.jsx'
 import { getUser, USER_EVENT } from '../utils/auth'
 
 const localizer = momentLocalizer(moment)
@@ -1198,9 +1198,16 @@ function ProfessionalAgendaView({ items, onForceCancel }) {
     const clientLabel = event?.client ? ` - ${event.client}` : ''
     const isConfirmed = Boolean(event?.confirmedAt)
     const isCancelled = String(event?.status || '').toLowerCase() === 'cancelado'
+    const startTime =
+      event?.start instanceof Date
+        ? event.start.getTime()
+        : event?.start
+          ? new Date(event.start).getTime()
+          : NaN
+    const hasStarted = Number.isFinite(startTime) && startTime <= Date.now()
     const confirmationLabel = isConfirmed
-      ? 'Cliente confirmou via WhatsApp'
-      : 'Aguardando confirmação via WhatsApp'
+      ? 'Confirmado no WhatsApp'
+      : 'Aguardando confirmação no WhatsApp'
     const pillStyle = isConfirmed
       ? {
           background: 'rgba(16, 185, 129, 0.12)',
@@ -1211,9 +1218,13 @@ function ProfessionalAgendaView({ items, onForceCancel }) {
           color: '#374151',
         }
     const [cancelling, setCancelling] = useState(false)
+    const [showCancelReason, setShowCancelReason] = useState(false)
+    const cancelReason =
+      'Cancelamento indisponível: horário ja iniciado.'
+    const cancelReasonId = `cancel-reason-${event?.id || 'evt'}`
     const handleForceCancel = async () => {
       if (!onForceCancel || cancelling || isCancelled) return
-      const confirmed = window.confirm('Cancelar este agendamento? O cliente será notificado.')
+      const confirmed = window.confirm('Cancelar este agendamento? O cliente sera notificado.')
       if (!confirmed) return
       try {
         setCancelling(true)
@@ -1258,16 +1269,40 @@ function ProfessionalAgendaView({ items, onForceCancel }) {
           </div>
         </div>
         {!isCancelled && onForceCancel && (
-          <div style={{ marginTop: 8 }}>
+          <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
             <button
               type="button"
               className="btn btn--sm btn--danger"
               onClick={handleForceCancel}
-              disabled={cancelling || isConfirmed}
-              title={isConfirmed ? 'Cancelamento bloqueado: cliente já confirmou via WhatsApp.' : undefined}
+              disabled={cancelling || hasStarted}
             >
-              {cancelling ? 'Cancelando...' : isConfirmed ? 'Cancelamento bloqueado' : 'Cancelar agendamento'}
+              {cancelling ? 'Cancelando...' : hasStarted ? 'Cancelamento indisponível' : 'Cancelar agendamento'}
             </button>
+            {hasStarted ? (
+              <div className="cancel-tooltip">
+                <button
+                  type="button"
+                  className="cancel-tooltip__btn"
+                  aria-label="Ver motivo"
+                  aria-expanded={showCancelReason}
+                  aria-controls={cancelReasonId}
+                  onClick={(eventClick) => {
+                    eventClick.preventDefault()
+                    eventClick.stopPropagation()
+                    setShowCancelReason((open) => !open)
+                  }}
+                >
+                  <IconHelp aria-hidden="true" />
+                </button>
+                <div
+                  id={cancelReasonId}
+                  role="tooltip"
+                  className={`cancel-tooltip__content${showCancelReason ? ' is-open' : ''}`}
+                >
+                  {cancelReason}
+                </div>
+              </div>
+            ) : null}
           </div>
         )}
       </div>

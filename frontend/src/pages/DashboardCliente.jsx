@@ -58,12 +58,15 @@ export default function DashboardCliente() {
       await Api.cancelarAgendamento(id);
       setItens((xs) => xs.map((y) => (y.id === id ? { ...y, status: 'cancelado' } : y)));
     } catch (e) {
-      const errCode = String(e?.response?.data?.error || '');
-      const serverMsg = e?.response?.data?.message || '';
+      const errData = e?.data || e?.response?.data || {};
+      const errCode = String(errData.error || '');
+      const serverMsg = errData.message || '';
       const msg = serverMsg || e?.message || '';
       const blockedMsg = 'Agendamento já foi confirmado via WhatsApp. Se precisar de ajuda, entre em contato com o estabelecimento.';
       if (errCode.includes('cancel_forbidden_after_confirm') || /confirmado via whatsapp/i.test(msg)) {
         alert(serverMsg || blockedMsg);
+      } else if (errCode.includes('cancel_forbidden_time_limit')) {
+        alert(serverMsg || 'Cancelamento não permitido próximo do horário.');
       } else if (/forbidden|bloqueado|blocked/i.test(msg)) {
         alert(msg);
       } else {

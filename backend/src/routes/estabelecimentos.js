@@ -182,11 +182,11 @@ const WEEKDAY_TOKEN_MAP = Object.freeze({
 
 const WEEKDAY_LABEL_MAP = Object.freeze({
   monday: 'Segunda',
-  tuesday: 'Terca',
+  tuesday: 'Terça',
   wednesday: 'Quarta',
   thursday: 'Quinta',
   friday: 'Sexta',
-  saturday: 'Sabado',
+  saturday: 'Sábado',
   sunday: 'Domingo',
 });
 

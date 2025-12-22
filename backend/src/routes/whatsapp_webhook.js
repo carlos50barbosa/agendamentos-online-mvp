@@ -248,7 +248,7 @@ router.post('/', async (req, res) => {
     if (buttonPayload || contextMsgId) {
       const recorded = await tryRecordReminderConfirmation({ contextMessageId: contextMsgId, fromDigits: from });
       if (recorded) {
-        await send(from, 'Confirmado! Vamos te aguardar no horario combinado.');
+        await send(from, 'Confirmado! Vamos te aguardar no horário combinado.');
         return res.sendStatus(200);
       }
     }
