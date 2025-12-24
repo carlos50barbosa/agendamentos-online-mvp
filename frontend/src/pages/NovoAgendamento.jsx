@@ -5,14 +5,10 @@ import { Api, resolveAssetUrl } from "../utils/api";
 import { getUser } from "../utils/auth";
 import Modal from "../components/Modal.jsx";
 import EstablishmentsHero from "../components/EstablishmentsHero.jsx";
-
 import { IconMapPin, IconList, IconStar } from "../components/Icons.jsx";
-
 const FAVORITES_CACHE_KEY = 'ao:favorites_local';
-
 /* =================== Helpers de Data =================== */
 const TZ = Intl.DateTimeFormat().resolvedOptions().timeZone || "America/Sao_Paulo";
-
 const DateHelpers = {
   // Parse de 'YYYY-MM-DD' como data local (evita UTC) ou mantÃ©m Date
   parseLocal: (dateish) => {
@@ -120,32 +116,27 @@ const DateHelpers = {
       year: "numeric",
     }),
 };
-
 const ratingNumberFormatter = new Intl.NumberFormat('pt-BR', {
   minimumFractionDigits: 1,
   maximumFractionDigits: 1,
 });
-
 // Semana [Monday 00:00, next Monday 00:00)
 const weekRangeMs = (isoMonday) => {
   const start = DateHelpers.parseLocal(isoMonday); start.setHours(0,0,0,0);
   const end = new Date(start); end.setDate(end.getDate() + 7);
   return { start: +start, end: +end };
 };
-
 // Chave do overlay persistido por estabelecimento + semana
 const fbKey = (establishmentId, isoMonday) => `fb:${establishmentId}:${isoMonday}`;
-
 /* =================== Helpers de ServiÃ§o =================== */
 const ServiceHelpers = {
-  title: (s) => s?.title || s?.nome || `ServiÃ§o #${s?.id ?? ""}`,
+  title: (s) => s?.title || s?.nome || `Serviço #${s?.id ?? ""}`,
   duration: (s) => Number(s?.duracao_min ?? s?.duration ?? 0),
   price: (s) => Number(s?.preco_centavos ?? s?.preco ?? s?.price_centavos ?? 0),
   description: (s) => (s?.descricao || s?.description || '').trim(),
   formatPrice: (centavos) =>
     (Number(centavos || 0) / 100).toLocaleString("pt-BR", { style: "currency", currency: "BRL" }),
 };
-
 const SOCIAL_LINK_FIELDS = [
   { key: "site_url", label: "Site" },
   { key: "instagram_url", label: "Instagram" },
@@ -154,7 +145,6 @@ const SOCIAL_LINK_FIELDS = [
   { key: "youtube_url", label: "YouTube" },
   { key: "tiktok_url", label: "TikTok" },
 ];
-
 const ensureExternalUrl = (value) => {
   if (!value) return "";
   const trimmed = String(value || "").trim();
@@ -162,7 +152,6 @@ const ensureExternalUrl = (value) => {
   if (/^https?:\/\//i.test(trimmed)) return trimmed;
   return `https://${trimmed.replace(/^https?:\/\//i, "")}`;
 };
-
 const formatPhoneDisplay = (value = "") => {
   const digits = String(value || "").replace(/\D/g, "");
   if (!digits) return "";
@@ -176,20 +165,14 @@ const formatPhoneDisplay = (value = "") => {
   if (rest.length === 9) return `(${ddd}) ${rest.slice(0, 5)}-${rest.slice(5)}`;
   return `(${ddd}) ${rest.slice(0, rest.length - 4)}-${rest.slice(-4)}`;
 };
-
-
-
 /* =================== Janela 07•22 =================== */
 const DEFAULT_BUSINESS_HOURS = { start: 7, end: 22 };
-
 const normalizeText = (value) =>
   String(value || '')
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase();
-
 const normalizeDayToken = (value) => normalizeText(value).replace(/[^a-z0-9]/g, '');
-
 const DAY_TOKEN_MAP = Object.freeze({
   sunday: ['domingo', 'dom', 'domingo-feira', 'sun', 'sunday'],
   monday: ['segunda', 'segunda-feira', 'seg', '2a', 'mon', 'monday'],
@@ -199,7 +182,6 @@ const DAY_TOKEN_MAP = Object.freeze({
   friday: ['sexta', 'sexta-feira', 'sex', 'fri', 'friday'],
   saturday: ['sábado', 'sabado', 'sábado-feira', 'sab', 'sat', 'saturday'],
 });
-
 const DAY_SLUG_TO_INDEX = Object.freeze({
   sunday: 0,
   monday: 1,
@@ -209,7 +191,6 @@ const DAY_SLUG_TO_INDEX = Object.freeze({
   friday: 5,
   saturday: 6,
 });
-
 const DAY_TOKEN_LOOKUP = (() => {
   const map = new Map();
   Object.entries(DAY_TOKEN_MAP).forEach(([slug, tokens]) => {
@@ -220,9 +201,7 @@ const DAY_TOKEN_LOOKUP = (() => {
   });
   return map;
 })();
-
 const TIME_VALUE_REGEX = /^([01]?\d|2[0-3]):([0-5]\d)$/;
-
 const ensureTimeValue = (value) => {
   if (value == null) return '';
   const text = String(value).trim();
@@ -263,14 +242,12 @@ const ensureTimeValue = (value) => {
   }
   return `${String(hoursNum).padStart(2, '0')}:${String(minutesNum).padStart(2, '0')}`;
 };
-
 const toMinutes = (value) => {
   if (!TIME_VALUE_REGEX.test(String(value || ''))) return null;
   const [hours, minutes] = String(value).split(':').map(Number);
   if (!Number.isInteger(hours) || !Number.isInteger(minutes)) return null;
   return hours * 60 + minutes;
 };
-
 const parseTimeRangeHint = (label) => {
   if (!label) return { start: '', end: '' };
   const matches = Array.from(String(label).matchAll(/(\d{1,2})(?:[:h](\d{2}))?/gi));
@@ -282,7 +259,6 @@ const parseTimeRangeHint = (label) => {
   const [start, end] = times;
   return { start: start || '', end: end || '' };
 };
-
 const resolveDayIndex = (entry) => {
   if (!entry) return null;
   const explicitSlug =
@@ -308,7 +284,6 @@ const resolveDayIndex = (entry) => {
   }
   return null;
 };
-
 const buildWorkingSchedule = (entries) => {
   if (!Array.isArray(entries) || !entries.length) return null;
   const rules = Array.from({ length: 7 }, () => ({
@@ -323,12 +298,10 @@ const buildWorkingSchedule = (entries) => {
     blockMinutes: [],
   }));
   const recognized = new Set();
-
   entries.forEach((item) => {
     const dayIndex = resolveDayIndex(item);
     if (dayIndex == null) return;
     recognized.add(dayIndex);
-
     const valueText = normalizeText(item.value || '');
     if (/fechado|sem atendimento|nao atende/.test(valueText)) {
       rules[dayIndex] = {
@@ -344,7 +317,6 @@ const buildWorkingSchedule = (entries) => {
       };
       return;
     }
-
     let start = ensureTimeValue(item.start ?? item.begin ?? item.from ?? '');
     let end = ensureTimeValue(item.end ?? item.finish ?? item.to ?? '');
     if ((!start || !end) && item.value) {
@@ -386,7 +358,6 @@ const buildWorkingSchedule = (entries) => {
       };
       return;
     }
-
     const rawBlocks = Array.isArray(item.blocks)
       ? item.blocks
       : Array.isArray(item.breaks)
@@ -397,7 +368,6 @@ const buildWorkingSchedule = (entries) => {
           end: item.block_end ?? item.blockEnd ?? null,
         }]
       : [];
-
     const sanitizedBlocks = [];
     rawBlocks.forEach((block) => {
       if (!block) return;
@@ -423,7 +393,6 @@ const buildWorkingSchedule = (entries) => {
         endMinutes: blockEndMinutes,
       });
     });
-
     rules[dayIndex] = {
       enabled: true,
       isClosed: false,
@@ -436,11 +405,9 @@ const buildWorkingSchedule = (entries) => {
       blockMinutes: sanitizedBlocks.map(({ startMinutes: bStart, endMinutes: bEnd }) => [bStart, bEnd]),
     };
   });
-
   if (!recognized.size) return null;
   return rules;
 };
-
 const getScheduleRuleForDate = (dateish, schedule) => {
   if (!schedule) return null;
   try {
@@ -452,7 +419,6 @@ const getScheduleRuleForDate = (dateish, schedule) => {
     return null;
   }
 };
-
 const inBusinessHours = (isoDatetime, schedule = null, durationMinutes = 0) => {
   const d = new Date(isoDatetime);
   if (Number.isNaN(d.getTime())) return false;
@@ -464,7 +430,6 @@ const inBusinessHours = (isoDatetime, schedule = null, durationMinutes = 0) => {
     endDate.getDate() === d.getDate();
   const startMinutes = d.getHours() * 60 + d.getMinutes();
   const endMinutes = endDate.getHours() * 60 + endDate.getMinutes();
-
   if (schedule) {
     const rule = schedule[d.getDay()];
     if (!rule || !rule.enabled) return false;
@@ -474,13 +439,11 @@ const inBusinessHours = (isoDatetime, schedule = null, durationMinutes = 0) => {
     if (!isSameDay) return false;
     return startMinutes >= rule.startMinutes && endMinutes <= rule.endMinutes;
   }
-
   if (!isSameDay) return false;
   const openMinutes = DEFAULT_BUSINESS_HOURS.start * 60;
   const closeMinutes = DEFAULT_BUSINESS_HOURS.end * 60;
   return startMinutes >= openMinutes && endMinutes <= closeMinutes;
 };
-
 /* =================== Grade 07•22 =================== */
 const pad2 = (n) => String(n).padStart(2, "0");
 const localKey = (dateish) => {
@@ -489,38 +452,31 @@ const localKey = (dateish) => {
     d.getMinutes()
   )}`;
 };
-
 // Considere como "ativo/ocupado" apenas esses status
 const isActiveStatus = (s) => {
   const v = String(s || "").toLowerCase();
   return v.includes("confirm") || v.includes("book"); // confirmado/confirmed/booked
   // se quiser, adicione outras variantes que seu backend usa, ex. "ativo", "scheduled"
 };
-
 // Normaliza para o minuto (ignora segundos/ms) e padroniza ISO
 const minuteISO = (dt) => {
   const d = new Date(dt);
   d.setSeconds(0, 0);
   return d.toISOString();
 };
-
 function fillBusinessGrid({ currentWeek, slots, stepMinutes = 30, workingSchedule = null }) {
   const { days } = (function getDays(iso) {
     const ds = DateHelpers.weekDays(iso);
     return { days: ds };
   })(currentWeek);
-
   const byKey = new Map();
   (slots || []).forEach((s) => byKey.set(localKey(s.datetime), s));
-
   const filled = [];
   for (const { date } of days) {
     const dayRule = workingSchedule ? workingSchedule[date.getDay()] : null;
     if (workingSchedule && (!dayRule || !dayRule.enabled)) continue;
-
     const start = new Date(date);
     const end = new Date(date);
-
     if (dayRule && dayRule.enabled) {
       const [startHour, startMinute] = dayRule.start.split(':').map(Number);
       const [endHour, endMinute] = dayRule.end.split(':').map(Number);
@@ -530,7 +486,6 @@ function fillBusinessGrid({ currentWeek, slots, stepMinutes = 30, workingSchedul
       start.setHours(DEFAULT_BUSINESS_HOURS.start, 0, 0, 0);
       end.setHours(DEFAULT_BUSINESS_HOURS.end, 0, 0, 0);
     }
-
     for (let t = start.getTime(); t <= end.getTime(); t += stepMinutes * 60_000) {
       const k = localKey(t);
       const existing = byKey.get(k);
@@ -544,21 +499,17 @@ function fillBusinessGrid({ currentWeek, slots, stepMinutes = 30, workingSchedul
       const baseSlot = existing
         ? { ...existing }
         : { datetime: slotDate.toISOString(), label: "disponivel", status: "available" };
-
       if (blockedByRule && normalizedLabel !== 'agendado') {
         baseSlot.label = "bloqueado";
         baseSlot.status = "blocked";
       } else if (!baseSlot.status) {
         baseSlot.status = normalizedLabel === 'agendado' ? 'booked' : 'available';
       }
-
       filled.push(baseSlot);
     }
   }
   return filled;
 }
-
-
 const normalizeSlotLabel = (value) => {
   if (value === null || value === undefined) return '';
   return String(value)
@@ -566,21 +517,17 @@ const normalizeSlotLabel = (value) => {
     .normalize('NFD')
     .replace(/[^a-z0-9:/-]/g, '');
 };
-
 const isAvailableLabel = (value) => {
   const normalized = normalizeSlotLabel(value);
   return normalized === 'disponivel' || normalized === 'available';
 };
-
 const slotStatusClass = (label) => {
   const normalized = normalizeSlotLabel(label);
   if (normalized === 'agendado' || normalized === 'ocupado') return 'busy';
   if (normalized === 'bloqueado') return 'block';
   return 'ok';
 };
-
 const STORAGE_KEY = 'ao:lastLocation';
-
 const buildEstablishmentSearchText = (est) =>
   normalizeText(
     [
@@ -598,7 +545,6 @@ const buildEstablishmentSearchText = (est) =>
       .filter(Boolean)
       .join(' ')
   );
-
 const formatAddress = (est) => {
   const street = [est?.endereco, est?.numero].filter(Boolean).join(', ');
   const district = est?.bairro ? est.bairro : '';
@@ -607,12 +553,10 @@ const formatAddress = (est) => {
   if (est?.cep) parts.push(`CEP ${est.cep}`);
   return parts.join(', ');
 };
-
 const fallbackAvatar = (label) => {
   const name = encodeURIComponent(String(label || 'AO'));
   return `https://ui-avatars.com/api/?name=${name}&size=128&background=1C64F2&color=ffffff&rounded=true`;
 };
-
 const haversineDistance = (origin, point) => {
   if (!origin || !point) return null;
   const toRad = (value) => (value * Math.PI) / 180;
@@ -627,19 +571,16 @@ const haversineDistance = (origin, point) => {
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   return R * c;
 };
-
 const parseCoord = (value) => {
   if (value == null) return null;
   const text = String(value).trim().replace(',', '.');
   const num = Number(text);
   return Number.isFinite(num) ? num : null;
 };
-
 const geocodeEstablishment = async (est) => {
   const lat = parseCoord(est?.latitude ?? est?.lat ?? null);
   const lng = parseCoord(est?.longitude ?? est?.lng ?? null);
   if (Number.isFinite(lat) && Number.isFinite(lng)) return { lat, lng };
-
   const parts = [];
   const street = [est?.endereco, est?.numero].filter(Boolean).join(' ');
   if (street) parts.push(street);
@@ -649,10 +590,8 @@ const geocodeEstablishment = async (est) => {
   if (est?.cep) parts.push(est.cep);
   if (!parts.length) return null;
   parts.push('Brasil');
-
   const query = encodeURIComponent(parts.join(', '));
   const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&addressdetails=0&countrycodes=br&q=${query}&email=contato@agendamentos.app`;
-
   try {
     const response = await fetch(url, {
       headers: { 'Accept-Language': 'pt-BR' },
@@ -669,7 +608,6 @@ const geocodeEstablishment = async (est) => {
     return null;
   }
 };
-
 const professionalInitials = (name) => {
   const parts = String(name || '')
     .trim()
@@ -679,11 +617,9 @@ const professionalInitials = (name) => {
   if (!parts.length) return '??';
   return parts.map((word) => word.charAt(0).toUpperCase()).join('');
 };
-
 const displayEstablishmentName = (est) => {
   return est?.nome || est?.name || est?.fantasia || est?.razao_social || '';
 };
-
 const displayEstablishmentAddress = (est) => {
   if (!est) return '';
   const parts = [
@@ -693,7 +629,6 @@ const displayEstablishmentAddress = (est) => {
   ].filter(Boolean);
   return parts.join(' • ');
 };
-
 /* =================== UI Components =================== */
 const Toast = ({ type, message, onDismiss }) => (
   <div className={`toast ${type}`} role="status" aria-live="polite">
@@ -706,20 +641,16 @@ const Toast = ({ type, message, onDismiss }) => (
     </button>
   </div>
 );
-
 const Chip = ({ active, onClick, children, title }) => (
   <button className={`chip ${active ? "chip--active" : ""}`} onClick={onClick} title={title}>
     {children}
   </button>
 );
-
 const SlotButton = ({ slot, isSelected, onClick, density = "compact" }) => {
   const isPast = DateHelpers.isPastSlot(slot.datetime);
-
   const statusClass = slotStatusClass(slot.label);
   const disabledReason = isPast || !isAvailableLabel(slot.label);
   const tooltipLabel = slot?.label ?? 'disponí­vel';
-
   const className = [
     "slot-btn",
     statusClass,
@@ -727,7 +658,6 @@ const SlotButton = ({ slot, isSelected, onClick, density = "compact" }) => {
     isPast ? "is-past" : "",
     density === "compact" ? "slot-btn--compact" : "slot-btn--comfortable",
   ].join(" ");
-
   return (
     <button
       className={className}
@@ -743,7 +673,6 @@ const SlotButton = ({ slot, isSelected, onClick, density = "compact" }) => {
     </button>
   );
 };
-
 const ServiceCard = ({ service, selected, onSelect }) => {
   const duration = ServiceHelpers.duration(service);
   const price = ServiceHelpers.formatPrice(ServiceHelpers.price(service));
@@ -775,11 +704,9 @@ const ServiceCard = ({ service, selected, onSelect }) => {
     </div>
   );
 };
-
 const ProfessionalTile = ({ professional, selected, onSelect }) => {
   const avatar = resolveAssetUrl(professional?.avatar_url || '');
   const initials = useMemo(() => professionalInitials(professional?.nome), [professional?.nome]);
-
   return (
     <button
       type="button"
@@ -802,7 +729,6 @@ const ProfessionalTile = ({ professional, selected, onSelect }) => {
         <img
           src={avatar}
           alt={`Foto de ${professional?.nome || ''}`}
-
           style={{ width: 36, height: 36, borderRadius: '50%', objectFit: 'cover', border: '1px solid var(--border)' }}
         />
       ) : (
@@ -829,8 +755,6 @@ const ProfessionalTile = ({ professional, selected, onSelect }) => {
     </button>
   );
 };
-
-
 const EstablishmentCard = ({ est, selected, onSelect }) => {
   const name = est?.nome || est?.name || est?.fantasia || est?.razao_social || `Estabelecimento #${est?.id || ''}`;
   const address = formatAddress(est);
@@ -851,14 +775,12 @@ const EstablishmentCard = ({ est, selected, onSelect }) => {
     if (address) return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`;
     return '';
   })();
-
   const handleKeyDown = (event) => {
     if (event.key === 'Enter' || event.key === ' ') {
       event.preventDefault();
       onSelect(est);
     }
   };
-
   return (
     <div
       className={`establishment-card ${selected ? 'establishment-card--selected' : ''}`}
@@ -920,7 +842,6 @@ const EstablishmentCard = ({ est, selected, onSelect }) => {
     </div>
   );
 };
-
 /* =================== PÃ¡gina Principal =================== */
 export default function NovoAgendamento() {
   const user = getUser();
@@ -934,7 +855,6 @@ export default function NovoAgendamento() {
     const path = `${location.pathname}${location.search}` || '/';
     return `/login?next=${encodeURIComponent(path)}`;
   }, [location.pathname, location.search]);
-
   useEffect(() => {
     if (isAuthenticated) return;
     if (typeof window === 'undefined') return;
@@ -943,7 +863,6 @@ export default function NovoAgendamento() {
       sessionStorage.setItem('next_after_login', path);
     } catch {}
   }, [isAuthenticated, location.pathname, location.search]);
-
   // Redireciona estabelecimentos para seu dashboard
   useEffect(() => {
     if (user?.tipo === 'estabelecimento') {
@@ -953,13 +872,11 @@ export default function NovoAgendamento() {
   if (user?.tipo === 'estabelecimento') {
     return <div className="container"><div className="empty">Redirecionandoâ€¦</div></div>;
   }
-
   const [state, setState] = useState({
     establishments: [],
     services: [],
     establishmentId: user?.tipo === "estabelecimento" ? String(user.id) : "",
     serviceId: "",
-
     professionalId: "",
     currentWeek: DateHelpers.weekStartISO(),
     slots: [],
@@ -1002,14 +919,12 @@ export default function NovoAgendamento() {
   const [infoActiveTab, setInfoActiveTab] = useState('about');
   const [ratingModal, setRatingModal] = useState({ open: false, nota: 0, comentario: '', saving: false, error: '' });
   const [planLimitModal, setPlanLimitModal] = useState({ open: false, message: '', details: null });
-
-  // Inicializa estQuery a partir de ?q= da URL e reage a mudanÃ§as no histÃ³rico
+  // Inicializa estQuery a partir de ?q= da URL e reage a mudanças no histórico
   useEffect(() => {
     const q = (searchParams.get('q') || '').trim();
     if (q !== estQuery) setEstQuery(q);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
-
   useEffect(() => {
     try {
       const stored = sessionStorage.getItem(STORAGE_KEY);
@@ -1020,14 +935,12 @@ export default function NovoAgendamento() {
       }
     } catch {}
   }, []);
-
   useEffect(() => {
     try {
       if (userLocation) sessionStorage.setItem(STORAGE_KEY, JSON.stringify(userLocation));
       else sessionStorage.removeItem(STORAGE_KEY);
     } catch {}
   }, [userLocation]);
-
   // Inicializa/normaliza a semana a partir de ?week=YYYY-MM-DD
   // Sempre forÃ§a a segunda-feira correspondente
   useEffect(() => {
@@ -1040,7 +953,6 @@ export default function NovoAgendamento() {
       }
     }
   }, [searchParams, state.currentWeek]);
-
   const [modal, setModal] = useState({ isOpen: false, isSaving: false });
   const [toast, setToast] = useState(null);
   const [viewMode] = useState('month'); // por ora, Mês Ã© o padrÃ£o
@@ -1048,7 +960,6 @@ export default function NovoAgendamento() {
   const [selectedDate, setSelectedDate] = useState(null); // YYYY-MM-DD
   const [professionalMenuOpen, setProfessionalMenuOpen] = useState(false);
   const professionalMenuRef = useRef(null);
-
   useEffect(() => {
     if (!professionalMenuOpen) return;
     const handleOutside = (event) => {
@@ -1060,17 +971,14 @@ export default function NovoAgendamento() {
     document.addEventListener('pointerdown', handleOutside);
     return () => document.removeEventListener('pointerdown', handleOutside);
   }, [professionalMenuOpen]);
-
   const {
     establishments, services, establishmentId, serviceId,
     currentWeek, slots, loading, error, selectedSlot, filters, density, forceBusy,
   } = state;
-
   const selectedSlotNow = useMemo(
     () => slots.find((s) => s.datetime === selectedSlot?.datetime),
     [slots, selectedSlot]
   );
-
   // Derivados
   const selectedService = useMemo(() => services.find((s) => String(s.id) === serviceId), [services, serviceId]);
   const serviceDuration = ServiceHelpers.duration(selectedService);
@@ -1080,7 +988,6 @@ export default function NovoAgendamento() {
   );
   const selectedEstablishmentName = useMemo(() => displayEstablishmentName(selectedEstablishment), [selectedEstablishment]);
   const selectedEstablishmentAddress = useMemo(() => displayEstablishmentAddress(selectedEstablishment), [selectedEstablishment]);
-
   const selectedEstablishmentId = selectedEstablishment ? String(selectedEstablishment.id) : null;
   const selectedExtras = selectedEstablishmentId ? establishmentExtras[selectedEstablishmentId] : null;
   const selectedProfessionals = selectedEstablishmentId ? professionalsByEstab[selectedEstablishmentId] : null;
@@ -1109,7 +1016,6 @@ export default function NovoAgendamento() {
   const reviewsLoading = Boolean(reviewsState.loading);
   const reviewsError = reviewsState.error || '';
   const reviewsHasNext = reviewsState.hasNext !== false;
-
   const establishmentAvatar = useMemo(() => {
     const source = selectedEstablishment?.avatar_url || selectedEstablishment?.logo_url || selectedEstablishment?.foto_url;
     return resolveAssetUrl(source || '');
@@ -1119,9 +1025,7 @@ export default function NovoAgendamento() {
     () => (normalizedQuery ? normalizedQuery.split(/\s+/).filter(Boolean) : []),
     [normalizedQuery]
   );
-
   const [favoritesOnly, setFavoritesOnly] = useState(false);
-
   const filteredEstablishments = useMemo(() => {
     return establishments.filter((est) => {
       const isFavorite = favoriteIds.has(String(est?.id)) || Boolean(est?.is_favorite || est?.isFavorite);
@@ -1132,22 +1036,18 @@ export default function NovoAgendamento() {
       return queryTokens.every((token) => haystack.includes(token));
     });
   }, [establishments, queryTokens, favoritesOnly, favoriteIds]);
-
   const kmFormatter = useMemo(
     () => new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 }),
     []
   );
-
   const ratingFormatter = useMemo(
     () => new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 }),
     []
   );
-
   const reviewDateFormatter = useMemo(
     () => new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' }),
     []
   );
-
   const planContext = selectedExtras?.plan_context || null;
   const planStatus = String(planContext?.status || '').toLowerCase();
   const subscriptionStatus = String(
@@ -1168,7 +1068,6 @@ export default function NovoAgendamento() {
     subscriptionStatus === 'authorized';
   const bookingBlocked = !subscriptionActive && (planExpired || trialExpired);
   const bookingBlockedMessage = 'Agendamentos indisponíveis no momento. Entre em contato com o estabelecimento.';
-
   useEffect(() => {
     const cache = coordsCacheRef.current;
     let changed = false;
@@ -1189,7 +1088,6 @@ export default function NovoAgendamento() {
       setDistanceMap(next);
     }
   }, [establishments, userLocation]);
-
   useEffect(() => {
     if (!userLocation) {
       setDistanceMap({});
@@ -1201,7 +1099,6 @@ export default function NovoAgendamento() {
     });
     setDistanceMap(next);
   }, [userLocation]);
-
   useEffect(() => {
     if (!userLocation) {
       setGeocoding(false);
@@ -1212,10 +1109,8 @@ export default function NovoAgendamento() {
       setGeocoding(false);
       return;
     }
-
     let cancelled = false;
     setGeocoding(true);
-
     (async () => {
       for (const est of pending) {
         if (cancelled) break;
@@ -1231,26 +1126,22 @@ export default function NovoAgendamento() {
       }
       if (!cancelled) setGeocoding(false);
     })();
-
     return () => {
       cancelled = true;
     };
   }, [filteredEstablishments, userLocation]);
-
   const establishmentResults = useMemo(() => {
     const mapped = filteredEstablishments.map((est) => ({ est }));
     const sortKey = (value) =>
       normalizeText(value?.nome || value?.name || value?.fantasia || value?.razao_social || `est-${value?.id || ''}`);
     return [...mapped].sort((a, b) => sortKey(a.est).localeCompare(sortKey(b.est)));
   }, [filteredEstablishments]);
-
   // Passo da grade
   const stepMinutes = useMemo(() => {
     const d = ServiceHelpers.duration(selectedService);
     if (d && d % 5 === 0) return Math.max(15, Math.min(120, d));
     return 30;
   }, [selectedService]);
-
   // PersistÃªncia leve (filtros/densidade)
   useEffect(() => {
     try {
@@ -1267,7 +1158,6 @@ export default function NovoAgendamento() {
       localStorage.setItem("novo-agendamento-ui", JSON.stringify({ filters }));
     } catch {}
   }, [filters]);
-
   // Toast helper
   const showToast = useCallback((type, message, duration = 4500) => {
     setToast({ type, message });
@@ -1277,12 +1167,9 @@ export default function NovoAgendamento() {
       toastTimeoutRef.current = null;
     }, duration);
   }, []);
-
   useEffect(() => () => {
     if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
   }, []);
-
-
   /* ====== Carregar Estabelecimentos ====== */
   useEffect(() => {
     let cancelled = false;
@@ -1308,15 +1195,13 @@ export default function NovoAgendamento() {
       cancelled = true;
     };
   }, [showToast]);
-
-  // Se vier ?estabelecimento= na URL, seleciona automaticamente apÃ³s carregar a lista
+  // Se vier ?estabelecimento= na URL, seleciona automaticamente após carregar a lista
   useEffect(() => {
     const estParam = (searchParams.get('estabelecimento') || '').trim();
     if (establishments.length && estParam && estParam !== state.establishmentId) {
       setState((p) => ({ ...p, establishmentId: estParam, serviceId: "", professionalId: "", slots: [], selectedSlot: null }));
     }
   }, [establishments, searchParams, state.establishmentId]);
-
   /* ====== Carregar ServiÃ§os quando escolher Estabelecimento ====== */
   useEffect(() => {
     (async () => {
@@ -1335,12 +1220,10 @@ export default function NovoAgendamento() {
           ...p,
           services: list || [],
           serviceId: "",
-
     professionalId: "", // aguarda o clique do usuÃ¡rio
           slots: [],
           selectedSlot: null,
         }));
-
         // Se veio ?servico= na URL e existir na lista, seleciona automaticamente
         try{
           const svcParam = (searchParams.get('servico') || '').trim();
@@ -1358,20 +1241,16 @@ export default function NovoAgendamento() {
       }
     })();
   }, [establishmentId, showToast, searchParams, setSearchParams]);
-
   const extrasLoaded = Boolean(selectedExtras?.loaded);
-
   useEffect(() => {
     if (!selectedEstablishmentId || !selectedEstablishment?.id) return;
     if (extrasLoaded) return;
-
     let cancelled = false;
     const estId = selectedEstablishment.id;
     setEstablishmentExtras((prev) => ({
       ...prev,
       [selectedEstablishmentId]: { ...(prev[selectedEstablishmentId] || {}), loading: true, error: '' },
     }));
-
     (async () => {
       try {
         const data = await Api.getEstablishment(estId);
@@ -1408,12 +1287,10 @@ export default function NovoAgendamento() {
         showToast('error', 'Não foi possível carregar detalhes do estabelecimento.');
       }
     })();
-
     return () => {
       cancelled = true;
     };
   }, [selectedEstablishmentId, selectedEstablishment?.id, extrasLoaded]);
-
   useEffect(() => {
     if (!selectedEstablishmentId) return;
     setInfoModalOpen(false);
@@ -1422,13 +1299,11 @@ export default function NovoAgendamento() {
   setInfoActiveTab('about');
   setRatingModal((prev) => (prev.open ? { open: false, nota: 0, comentario: '', saving: false, error: '' } : prev));
 }, [selectedEstablishmentId]);
-
 useEffect(() => {
   if (galleryModalOpen) {
     setGalleryViewIndex(0);
   }
 }, [galleryModalOpen, selectedEstablishmentId]);
-
 useEffect(() => {
   if (!galleryImages.length) {
     setGalleryViewIndex(0);
@@ -1438,7 +1313,6 @@ useEffect(() => {
     setGalleryViewIndex(0);
   }
 }, [galleryImages.length, galleryViewIndex]);
-
   /* ====== NormalizaÃ§Ã£o de slots ====== */
   const normalizeSlots = useCallback((data) => {
     const arr = Array.isArray(data) ? data : data?.slots || [];
@@ -1457,7 +1331,6 @@ useEffect(() => {
       return { ...slot, datetime, label };
     });
   }, []);
-
   /* ====== Hidratar ocupados por agendamentos (contagem por minuto) ====== */
   const getBusyFromAppointments = useCallback(async () => {
     const counts = new Map();
@@ -1466,7 +1339,6 @@ useEffect(() => {
       const key = minuteISO(iso);
       counts.set(key, (counts.get(key) || 0) + 1);
     };
-
     try {
       if (typeof Api.meusAgendamentos === 'function') {
         const mine = await Api.meusAgendamentos();
@@ -1479,7 +1351,6 @@ useEffect(() => {
         });
       }
     } catch {}
-
     try {
       if (user?.tipo === 'estabelecimento' && typeof Api.agendamentosEstabelecimento === 'function') {
         const est = await Api.agendamentosEstabelecimento();
@@ -1492,10 +1363,8 @@ useEffect(() => {
         });
       }
     } catch {}
-
     return counts;
   }, [currentWeek, user?.tipo, serviceId, state.professionalId]);
-
   /* ====== Carregar Slots ====== */
   const loadSlots = useCallback(async () => {
     if (!establishmentId || !serviceId) {
@@ -1504,14 +1373,11 @@ useEffect(() => {
     }
     try {
       setState((p) => ({ ...p, loading: true, error: "" }));
-
       // A) slots reais (pedindo ocupados/bloqueados)
       const slotsData = await Api.getSlots(establishmentId, currentWeek, { includeBusy: true });
       const normalized = normalizeSlots(slotsData);
-
       // B) grade completa
       const grid = fillBusinessGrid({ currentWeek, slots: normalized, stepMinutes, workingSchedule });
-
       // C) conjuntos/contagens de ocupados por fonte
       const busyFromApiCount = new Map();
       const blockedSet = new Set();
@@ -1525,15 +1391,12 @@ useEffect(() => {
           }
         }
       }
-
       let persisted = [];
       try {
         persisted = JSON.parse(localStorage.getItem(fbKey(establishmentId, currentWeek)) || "[]");
         if (!Array.isArray(persisted)) persisted = [];
       } catch {}
-
       const apptCounts = await getBusyFromAppointments();
-
       // D) aplica overlay considerando capacidade por profissional/serviço
       setState((prev) => {
         const rawForced = Array.from(new Set([...prev.forceBusy, ...persisted]));
@@ -1541,11 +1404,9 @@ useEffect(() => {
           (k) => busyFromApiCount.has(k) || (apptCounts && typeof apptCounts.has === 'function' && apptCounts.has(k))
         );
         const forcedSet = new Set(filteredForced);
-
         const capacity = state.professionalId
           ? 1
           : Math.max(1, Array.isArray(selectedService?.professionals) ? selectedService.professionals.length : 1);
-
         const overlayed = grid.map((s) => {
           const k = minuteISO(s.datetime);
           if (normalizeSlotLabel(s.label) === 'bloqueado') {
@@ -1559,18 +1420,15 @@ useEffect(() => {
           if (total >= capacity) return { ...s, label: 'agendado' };
           return { ...s, label: 'disponivel' };
         });
-
         try {
           localStorage.setItem(fbKey(establishmentId, currentWeek), JSON.stringify(filteredForced));
         } catch {}
-
           const firstAvailable = overlayed.find(
             (s) =>
               isAvailableLabel(s.label) &&
               !DateHelpers.isPastSlot(s.datetime) &&
               inBusinessHours(s.datetime, workingSchedule, serviceDuration)
           );
-
         return {
           ...prev,
           slots: overlayed,
@@ -1579,7 +1437,6 @@ useEffect(() => {
           forceBusy: filteredForced,
         };
       });
-
     } catch {
       setState((p) => ({
         ...p,
@@ -1590,22 +1447,18 @@ useEffect(() => {
       }));
     }
   }, [establishmentId, serviceId, currentWeek, normalizeSlots, stepMinutes, getBusyFromAppointments, selectedService, state.professionalId, workingSchedule, serviceDuration]);
-
   useEffect(() => {
     loadSlots();
   }, [loadSlots]);
-
   useEffect(() => {
     if (!selectedSlot) return;
     if (!inBusinessHours(selectedSlot.datetime, workingSchedule, serviceDuration)) {
       setState((p) => ({ ...p, selectedSlot: null }));
     }
   }, [selectedSlot, workingSchedule, serviceDuration]);
-
   useEffect(() => {
     setProfessionalMenuOpen(false);
   }, [serviceId]);
-
   // Teclas semana
   useEffect(() => {
     const onKey = (e) => {
@@ -1615,7 +1468,6 @@ useEffect(() => {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
-
   // Filtros
   const timeRangeCheck = useCallback(
     (dt) => {
@@ -1638,7 +1490,6 @@ useEffect(() => {
     },
     [filters, timeRangeCheck, workingSchedule, serviceDuration]
   );
-
   // Agrupar por dia
   const groupedSlots = useMemo(() => {
     const days = DateHelpers.weekDays(currentWeek);
@@ -1651,12 +1502,10 @@ useEffect(() => {
     Object.values(grouped).forEach((daySlots) => daySlots.sort((a, b) => new Date(a.datetime) - new Date(b.datetime)));
     return { days, grouped };
   }, [currentWeek, slots]);
-
   const selectedDayRule = useMemo(() => {
     if (!selectedDate) return null;
     return getScheduleRuleForDate(selectedDate, workingSchedule);
   }, [selectedDate, workingSchedule]);
-
   // announce seleÃ§Ã£o (a11y)
   useEffect(() => {
     if (!selectedSlot || !liveRef.current) return;
@@ -1665,7 +1514,6 @@ useEffect(() => {
       selectedSlot.datetime
     )}`;
   }, [selectedSlot]);
-
   // WhatsApp (opcional no front)
   const FRONT_SCHEDULE_WHATSAPP = import.meta.env.VITE_FRONT_SCHEDULE_WHATSAPP === "true";
   const scheduleWhatsAppReminders = useCallback(
@@ -1700,23 +1548,19 @@ useEffect(() => {
     },
     [showToast, user]
   );
-
   // Verifica se o agendamento existe mesmo apÃ³s um erro
   const verifyBookingCreated = useCallback(
     async (slotIso) => {
       const sameStart = (a, b) =>
         Math.abs(new Date(a).getTime() - new Date(b).getTime()) < 60_000;
-
       let slotIndisponivel = false;
       let meu = false;
-
       try {
         const slotsData = await Api.getSlots(establishmentId, currentWeek, { includeBusy: true });
         const normalized = normalizeSlots(slotsData);
         const found = normalized.find((s) => sameStart(s.datetime, slotIso));
         slotIndisponivel = !!(found && !isAvailableLabel(found.label));
       } catch {}
-
       try {
         if (typeof Api.meusAgendamentos === "function") {
           const mine = await Api.meusAgendamentos();
@@ -1725,7 +1569,6 @@ useEffect(() => {
             mine.some((a) => isActiveStatus(a.status) && sameStart(a.inicio, slotIso));
         }
       } catch {}
-
       if (!slotIndisponivel && typeof Api.agendamentosEstabelecimento === "function") {
         try {
           const est = await Api.agendamentosEstabelecimento();
@@ -1733,21 +1576,17 @@ useEffect(() => {
             Array.isArray(est) && est.some((a) => isActiveStatus(a.status) && sameStart(a.inicio, slotIso));
         } catch {}
       }
-
       return { slotIndisponivel, meu };
     },
     [establishmentId, currentWeek, normalizeSlots]
   );
-
   // Confirmar
   const confirmBooking = useCallback(async () => {
     if (!selectedSlot || !serviceId || !selectedService) return;
-
     if (bookingBlocked) {
       showToast('error', bookingBlockedMessage);
       return;
     }
-
     if (DateHelpers.isPastSlot(selectedSlot.datetime)) {
       showToast("error", "Não foi possível agendar no passado.");
       return;
@@ -1763,10 +1602,8 @@ useEffect(() => {
       showToast("error", "Selecione um profissional para continuar.");
       return;
     }
-
     setModal((p) => ({ ...p, isSaving: true }));
     let success = false;
-
     try {
       const payload = {
         estabelecimento_id: Number(establishmentId),
@@ -1777,7 +1614,6 @@ useEffect(() => {
         payload.profissional_id = Number(state.professionalId);
       }
       await Api.agendar(payload);
-
       success = true;
       setModal((p) => ({ ...p, isOpen: false }));
       await scheduleWhatsAppReminders({
@@ -1803,9 +1639,7 @@ useEffect(() => {
       } else {
         const code =
           e?.status || e?.data?.status || (/(409|500)/.exec(String(e?.message))?.[1] | 0);
-
         const { slotIndisponivel, meu } = await verifyBookingCreated(selectedSlot.datetime);
-
         if (Number(code) === 409) {
           if (meu) {
             success = true;
@@ -1845,10 +1679,8 @@ useEffect(() => {
     } finally {
       // Sempre recarrega para refletir indisponÃ­veis
       await loadSlots();
-
       // Evita duplo clique se deu certo
       if (success) setState((p) => ({ ...p, selectedSlot: null }));
-
       setModal((p) => ({ ...p, isSaving: false }));
     }
   }, [
@@ -1866,7 +1698,6 @@ useEffect(() => {
     workingSchedule,
     serviceDuration,
   ]);
-
   /* ====== Handlers ====== */
   const handleQueryChange = useCallback(
     (value) => {
@@ -1879,11 +1710,9 @@ useEffect(() => {
     },
     [searchParams, setSearchParams]
   );
-
   const handleSearchSubmit = useCallback((event) => {
     if (event?.preventDefault) event.preventDefault();
   }, []);
-
   const handleUseLocation = useCallback(() => {
     if (!navigator?.geolocation) {
       setGeoError('Geolocalizacao nao esta disponivel neste dispositivo.');
@@ -1907,7 +1736,6 @@ useEffect(() => {
       { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
     );
   }, []);
-
   const handleEstablishmentClick = (est) => {
     setState((p) => ({ ...p, establishmentId: String(est.id), serviceId: "", professionalId: "", slots: [], selectedSlot: null }));
     try{
@@ -1916,7 +1744,6 @@ useEffect(() => {
       setSearchParams(sp, { replace: true });
     }catch{}
   };
-
   const handleChangeService = () => {
     setState((p) => ({ ...p, serviceId: '', professionalId: '', slots: [], selectedSlot: null }));
     setProfessionalMenuOpen(false);
@@ -1930,7 +1757,6 @@ useEffect(() => {
       el.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
   };
-
   const handleServiceClick = (svc) => {
     setState((p) => ({ ...p, serviceId: String(svc.id), professionalId: "", slots: [], selectedSlot: null }));
     setProfessionalMenuOpen(false);
@@ -1940,7 +1766,6 @@ useEffect(() => {
       setSearchParams(sp, { replace: true });
     }catch{}
   };
-
   const handleWeekChange = (newWeek) => {
     let norm = newWeek;
     try { norm = DateHelpers.weekStartISO(new Date(newWeek)); } catch {}
@@ -1951,10 +1776,8 @@ useEffect(() => {
       setSearchParams(sp, { replace: true });
     }catch{}
   };
-
   const handleSlotSelect = (slot) =>
     setState((p) => ({ ...p, selectedSlot: slot }));
-
   const handleConfirmClick = useCallback(() => {
     if (bookingBlocked) {
       showToast('error', bookingBlockedMessage);
@@ -1966,13 +1789,10 @@ useEffect(() => {
     }
     setModal((m) => ({ ...m, isOpen: true }))
   }, [bookingBlocked, bookingBlockedMessage, isAuthenticated, showToast])
-
   const handleFilterToggle = (filter) =>
     setState((p) => ({ ...p, filters: { ...p.filters, [filter]: !p.filters[filter] } }));
-
   const handleTimeRange = (value) =>
     setState((p) => ({ ...p, filters: { ...p.filters, timeRange: value } }));
-
   const ensureProfessionalsLoaded = async (estId) => {
     const key = String(estId);
     const entry = professionalsByEstab[key];
@@ -1993,7 +1813,6 @@ useEffect(() => {
       return payload;
     }
   };
-
   const loadReviews = useCallback(
     async ({ reset = false } = {}) => {
       if (!selectedEstablishment || !selectedEstablishmentId) return null;
@@ -2008,12 +1827,10 @@ useEffect(() => {
             loading: false,
             error: '',
           };
-
       if (!reset) {
         if (currentState.loading) return currentState;
         if (currentState.loaded && currentState.hasNext === false) return currentState;
       }
-
       const nextPage = reset ? 1 : (currentState.page || 0) + 1;
       setEstablishmentExtras((prev) => {
         const base = prev[key] || {};
@@ -2041,7 +1858,6 @@ useEffect(() => {
           },
         };
       });
-
       try {
         const response = await Api.getEstablishmentReviews(selectedEstablishment.id, {
           page: nextPage,
@@ -2087,13 +1903,11 @@ useEffect(() => {
     },
     [selectedEstablishment, selectedEstablishmentId, selectedExtras, setEstablishmentExtras]
   );
-
   useEffect(() => {
     if (infoModalOpen && infoActiveTab === 'reviews') {
       loadReviews({ reset: false });
     }
   }, [infoModalOpen, infoActiveTab, loadReviews]);
-
   const handleOpenInfo = async () => {
     if (!selectedEstablishment || !selectedEstablishmentId) return;
     setInfoModalError('');
@@ -2107,13 +1921,11 @@ useEffect(() => {
       setInfoModalError(entry.error);
     }
   };
-
   const handleCloseInfo = () => {
     setInfoModalOpen(false);
     setInfoModalError('');
     setInfoActiveTab('about');
   };
-
   const handleInfoTabChange = (tab) => {
     if (infoActiveTab === tab) return;
     setInfoActiveTab(tab);
@@ -2121,20 +1933,16 @@ useEffect(() => {
       loadReviews({ reset: false });
     }
   };
-
   const handleReviewsRetry = () => {
     loadReviews({ reset: true });
   };
-
   const handleReviewsLoadMore = () => {
     loadReviews({ reset: false });
   };
-
   const handleOpenGalleryModal = useCallback(() => {
     if (!selectedEstablishment || !selectedEstablishmentId) return;
     setGalleryModalOpen(true);
   }, [selectedEstablishment, selectedEstablishmentId]);
-
   const handleCloseGalleryModal = useCallback(() => {
     setGalleryModalOpen(false);
   }, []);
@@ -2150,7 +1958,6 @@ useEffect(() => {
       return prev === galleryImages.length - 1 ? 0 : prev + 1;
     });
   }, [galleryImages.length]);
-
   const handleToggleFavorite = async () => {
     if (!selectedEstablishment || !selectedEstablishmentId) return;
     if (!user || user.tipo !== 'cliente') {
@@ -2193,7 +2000,6 @@ useEffect(() => {
       showToast('error', msg);
     }
   };
-
   const handleOpenRatingModal = () => {
     if (!selectedEstablishment || !selectedEstablishmentId) return;
     if (!user || user.tipo !== 'cliente') {
@@ -2209,20 +2015,16 @@ useEffect(() => {
       error: '',
     });
   };
-
   const handleCloseRatingModal = () => {
     setRatingModal({ open: false, nota: 0, comentario: '', saving: false, error: '' });
   };
-
   const handleRatingStar = (nota) => {
     setRatingModal((prev) => ({ ...prev, nota, error: '' }));
   };
-
   const handleRatingCommentChange = (event) => {
     const value = event.target.value.slice(0, 600);
     setRatingModal((prev) => ({ ...prev, comentario: value }));
   };
-
   const handleSaveRating = async () => {
     if (!selectedEstablishment || !selectedEstablishmentId) return;
     if (!user || user.tipo !== 'cliente') {
@@ -2263,7 +2065,6 @@ useEffect(() => {
       setRatingModal((prev) => ({ ...prev, saving: false, error: msg }));
     }
   };
-
   const handleDeleteRating = async () => {
     if (!selectedEstablishment || !selectedEstablishmentId) return;
     if (!user || user.tipo !== 'cliente') {
@@ -2295,7 +2096,6 @@ useEffect(() => {
       setRatingModal((prev) => ({ ...prev, saving: false, error: msg }));
     }
   };
-
   const ratingSummary = selectedExtras?.rating || null;
   const ratingCount = Number(ratingSummary?.count || 0);
   const ratingAverageValue = ratingSummary?.average != null ? Number(ratingSummary.average) : null;
@@ -2336,15 +2136,12 @@ useEffect(() => {
       setProfessionalMenuOpen(false);
     }
   }, [serviceProfessionals, state.professionalId]);
-
   const endTimeLabel = useMemo(() => {
     if (!selectedSlot || !serviceDuration) return null;
     const end = DateHelpers.addMinutes(new Date(selectedSlot.datetime), serviceDuration);
     return DateHelpers.formatTime(end.toISOString());
   }, [selectedSlot, serviceDuration]);
-
   const weekLabel = DateHelpers.formatWeekLabel(currentWeek);
-
   // Reordenar colunas da semana para comeÃ§ar pelo dia atual (se pertencer Ã  semana atual)
   const daysToRender = useMemo(() => {
     const list = DateHelpers.weekDays(currentWeek);
@@ -2352,18 +2149,15 @@ useEffect(() => {
     const idx = list.findIndex(({ iso }) => DateHelpers.sameYMD(iso, todayIso));
     return idx > 0 ? [...list.slice(idx), ...list.slice(0, idx)] : list;
   }, [currentWeek]);
-
   /* ====== UI por passos ====== */
   const isOwner = user?.tipo === "estabelecimento";
   const step = !establishmentId && !isOwner ? 1 : !serviceId ? 2 : 3;
-
   // Ao clicar num dia do Mês, define a semana correspondente e marca o dia
   const handlePickDay = useCallback((isoDay) => {
     setSelectedDate(isoDay);
     const wk = DateHelpers.weekStartISO(isoDay);
     if (wk !== currentWeek) setState((p) => ({ ...p, currentWeek: wk }));
   }, [currentWeek]);
-
   // Quando o mês visível contém hoje, pré-seleciona o dia atual se nada estiver selecionado
   useEffect(() => {
     const todayIso = DateHelpers.toISODate(new Date());
@@ -2375,17 +2169,7 @@ useEffect(() => {
       }
     }
   }, [monthStart, selectedDate, currentWeek]);
-
-  const introSubtitle = step === 1
-    ? 'Encontre um estabelecimento para iniciar um novo agendamento.'
-    : selectedEstablishmentName
-    ? (
-      <span>
-        Agendamento em <strong style={{ color: '#6366f1' }}>{selectedEstablishmentName}</strong>.
-      </span>
-    )
-    : 'Selecione um estabelecimento para continuar.';
-
+  const introSubtitle = 'Encontre um estabelecimento para iniciar um novo agendamento.';
   const renderEstablishmentResults = () => {
     if (establishmentsLoading) {
       return (
@@ -2421,29 +2205,8 @@ useEffect(() => {
       </div>
     );
   };
-
   const renderServiceStep = () => (
     <>
-      <div className="row spread" style={{ alignItems: 'center' }}>
-        <div className="muted">
-          <b>Estabelecimento:</b> {selectedEstablishmentName || '-'}
-        </div>
-        <button
-          className="btn btn--outline btn--sm"
-          onClick={() => {
-            setState((p) => ({ ...p, establishmentId: '', services: [], serviceId: '', professionalId: '', slots: [], selectedSlot: null }));
-            try {
-              const sp = new URLSearchParams(searchParams);
-              sp.delete('estabelecimento');
-              sp.delete('servico');
-              setSearchParams(sp, { replace: true });
-            } catch {}
-          }}
-        >
-          Trocar
-        </button>
-      </div>
-      <p className="muted" style={{ marginTop: 8 }}>Escolha um serviço:</p>
       <div ref={servicesSectionRef} className="novo-agendamento__services">
         {services.length === 0 ? (
           <div className="empty small">Sem serviços cadastrados.</div>
@@ -2460,7 +2223,6 @@ useEffect(() => {
       </div>
     </>
   );
-
   const renderScheduleContent = () => {
     const todayIso = DateHelpers.toISODate(new Date());
     return (
@@ -2469,10 +2231,7 @@ useEffect(() => {
         <div className="novo-agendamento__section">
           <div className="grid" style={{ gap: 6 }}>
             <div className="row" style={{ gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-              <strong>Profissional</strong>
-              <span className="muted" style={{ fontSize: 12 }}>
-                {serviceProfessionals.length === 1 ? '1 profissional disponível' : `${serviceProfessionals.length} profissionais disponíveis`}
-              </span>
+              <strong className="novo-agendamento__professional-title">Escolha um profissional</strong>
             </div>
             <div style={{ position: 'relative', maxWidth: 240 }} ref={professionalMenuRef}>
               <button
@@ -2520,17 +2279,10 @@ useEffect(() => {
           </div>
         </div>
       )}
-
       <div className="novo-agendamento__section">
-        <div className="row spread" style={{ alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 6 }}>
+        <div className="row spread novo-agendamento__summary-row" style={{ alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 6 }}>
           <div className="novo-agendamento__inline-summary">
-            <div className="inline-summary__item">
-              <span className="inline-summary__label">Estabelecimento:</span>
-              <span className="inline-summary__value">{selectedEstablishmentName}</span>
-            </div>
-            <span className="inline-summary__dot" aria-hidden />
             <div className="inline-summary__item inline-summary__item--service">
-              <span className="inline-summary__label">Serviço:</span>
               <span className="inline-summary__value">{ServiceHelpers.title(selectedService)}</span>
               {(serviceDuration || servicePrice !== 'R$ 0,00') && (
                 <div className="inline-summary__meta">
@@ -2540,39 +2292,51 @@ useEffect(() => {
               )}
             </div>
           </div>
-          <details className="filters" style={{ marginLeft: 'auto' }}>
-            <summary>Filtros</summary>
-            <div className="filters__content">
-              <label className="label">
-                <span>Início da semana</span>
-                <input
-                  type="date"
-                  value={currentWeek}
-                  onChange={(event) => handleWeekChange(DateHelpers.toISODate(event.target.value))}
-                  className="input"
-                  title="Segunda-feira da semana"
-                />
-              </label>
-              <div className="row" style={{ alignItems: 'center', gap: 10 }}>
-                <label className="checkbox">
-                  <input type="checkbox" checked={filters.onlyAvailable} onChange={() => handleFilterToggle('onlyAvailable')} />
-                  <span>Somente disponíveis</span>
+          <div className="novo-agendamento__summary-actions-row">
+            <button type="button" className="novo-agendamento__change-service" onClick={handleChangeService}>Trocar serviço</button>
+            <details className="filters">
+              <summary className="filters__summary" aria-label="Filtros" title="Filtros">
+                <span className="sr-only">Filtros</span>
+                <svg
+                  className="filters__icon"
+                  viewBox="0 0 24 24"
+                  aria-hidden="true"
+                >
+                  <path d="M4 5h16l-6 7v5l-4 2v-7L4 5z" />
+                </svg>
+                <span className="filters__badge" aria-hidden="true" />
+              </summary>
+              <div className="filters__content">
+                <label className="label">
+                  <span>Início da semana</span>
+                  <input
+                    type="date"
+                    value={currentWeek}
+                    onChange={(event) => handleWeekChange(DateHelpers.toISODate(event.target.value))}
+                    className="input"
+                    title="Segunda-feira da semana"
+                  />
                 </label>
-                <label className="checkbox">
-                  <input type="checkbox" checked={filters.hidePast} onChange={() => handleFilterToggle('hidePast')} />
-                  <span>Ocultar horários passados</span>
-                </label>
+                <div className="row" style={{ alignItems: 'center', gap: 10 }}>
+                  <label className="checkbox">
+                    <input type="checkbox" checked={filters.onlyAvailable} onChange={() => handleFilterToggle('onlyAvailable')} />
+                    <span>Somente disponíveis</span>
+                  </label>
+                  <label className="checkbox">
+                    <input type="checkbox" checked={filters.hidePast} onChange={() => handleFilterToggle('hidePast')} />
+                    <span>Ocultar horários passados</span>
+                  </label>
+                </div>
+                <div className="row" style={{ gap: 6, flexWrap: 'wrap', marginTop: 6 }} role="group" aria-label="Período do dia">
+                  <Chip active={filters.timeRange === 'all'} onClick={() => handleTimeRange('all')} title="Todos os horários">Todos</Chip>
+                  <Chip active={filters.timeRange === 'morning'} onClick={() => handleTimeRange('morning')} title="Manhã (07-12)">Manhã</Chip>
+                  <Chip active={filters.timeRange === 'afternoon'} onClick={() => handleTimeRange('afternoon')} title="Tarde (12-18)">Tarde</Chip>
+                  <Chip active={filters.timeRange === 'evening'} onClick={() => handleTimeRange('evening')} title="Noite (18-22)">Noite</Chip>
+                </div>
               </div>
-              <div className="row" style={{ gap: 6, flexWrap: 'wrap', marginTop: 6 }} role="group" aria-label="Período do dia">
-                <Chip active={filters.timeRange === 'all'} onClick={() => handleTimeRange('all')} title="Todos os horários">Todos</Chip>
-                <Chip active={filters.timeRange === 'morning'} onClick={() => handleTimeRange('morning')} title="Manhã (07-12)">Manhã</Chip>
-                <Chip active={filters.timeRange === 'afternoon'} onClick={() => handleTimeRange('afternoon')} title="Tarde (12-18)">Tarde</Chip>
-                <Chip active={filters.timeRange === 'evening'} onClick={() => handleTimeRange('evening')} title="Noite (18-22)">Noite</Chip>
-              </div>
-            </div>
-          </details>
+            </details>
+          </div>
         </div>
-
         <div className="novo-agendamento__calendar">
           <div className="month card" style={{ padding: 8, marginBottom: 8 }}>
             <div className="row spread" style={{ alignItems: 'center', marginBottom: 6 }}>
@@ -2623,7 +2387,6 @@ useEffect(() => {
               })}
             </div>
           </div>
-
           {error && (
             <div className="box error" style={{ marginTop: 8 }}>
               {error}
@@ -2632,7 +2395,6 @@ useEffect(() => {
               </div>
             </div>
           )}
-
           {selectedSlot && (
             <div className="box box--highlight sticky-bar" aria-live="polite" id="resumo-agendamento">
               <div className="appointment-summary">
@@ -2644,7 +2406,6 @@ useEffect(() => {
               </div>
             </div>
           )}
-
           <div className="card" style={{ marginTop: 8 }}>
             <h3 style={{ marginTop: 0, marginBottom: 8 }}>
               {selectedDate
@@ -2681,13 +2442,11 @@ useEffect(() => {
               <div className="empty">Escolha uma data no calendário acima.</div>
             )}
           </div>
-
           {bookingBlocked && (
             <div className="notice notice--warn" role="alert" style={{ marginTop: 8 }}>
               {bookingBlockedMessage}
             </div>
           )}
-
           <div className="action-bar action-bar--booking">
             <button className="btn" onClick={() => setState((p) => ({ ...p, selectedSlot: null }))} disabled={!selectedSlot}>
               Limpar seleção
@@ -2712,7 +2471,6 @@ useEffect(() => {
     </>
     );
   };
-
   return (
     <div className="novo-agendamento">
       {toast && (
@@ -2768,53 +2526,68 @@ useEffect(() => {
           </EstablishmentsHero>
         ) : (
           <div className="card establishments__intro novo-agendamento__intro">
-            <h1 className="establishments__title">Novo agendamento</h1>
-            <p className="muted establishments__subtitle">{introSubtitle}</p>
-
             <div className="novo-agendamento__summary novo-agendamento__summary--establishment">
-              <div className="novo-agendamento__summary-avatar">
-                {establishmentAvatar ? (
-                  <img src={establishmentAvatar} alt={`Logo de ${selectedEstablishmentName || 'estabelecimento'}`} />
-                ) : (
-                  <span>{(selectedEstablishmentName || 'AO').slice(0, 2).toUpperCase()}</span>
-                )}
+              <div className="novo-agendamento__summary-head">
+                <a
+                  className="novo-agendamento__back"
+                  href="https://agendamentosonline.com/novo"
+                  aria-label="Voltar"
+                  title="Voltar"
+                >
+                  <svg
+                    className="novo-agendamento__back-icon"
+                    viewBox="0 0 24 24"
+                    aria-hidden="true"
+                  >
+                    <path d="M10 19l-7-7 7-7" />
+                    <path d="M3 12h18" />
+                  </svg>
+                </a>
+                <div className="novo-agendamento__summary-avatar">
+                  {establishmentAvatar ? (
+                    <img src={establishmentAvatar} alt={`Logo de ${selectedEstablishmentName || 'estabelecimento'}`} />
+                  ) : (
+                    <span>{(selectedEstablishmentName || 'AO').slice(0, 2).toUpperCase()}</span>
+                  )}
+                </div>
+                <span className="novo-agendamento__summary-head-spacer" aria-hidden="true" />
               </div>
+              
               <div className="novo-agendamento__summary-content">
                 <strong className="novo-agendamento__summary-name">{selectedEstablishmentName || 'Estabelecimento'}</strong>
                 <span className="novo-agendamento__summary-address">{selectedEstablishmentAddress || 'Endereço não informado'}</span>
                 <div className="novo-agendamento__summary-actions">
-                  {!isAuthenticated ? (
-                    <Link to={loginHref} className="summary-action summary-action--cta">
-                      <span aria-hidden>★</span>
-                      Entre para avaliar
-                    </Link>
-                  ) : (
-                    <button
-                      type="button"
-                      className={`summary-action${ratingCount > 0 ? '' : ' summary-action--muted'}`}
-                      onClick={handleOpenRatingModal}
-                      disabled={!isClientUser || selectedExtras?.loading}
-                      title={!isClientUser ? 'Disponível apenas para clientes.' : undefined}
-                    >
-                      <span aria-hidden>★</span>
-                      {ratingButtonLabel}
-                    </button>
-                  )}
-                  <button type="button" className="summary-action" onClick={handleOpenInfo}>
-                    <IconList aria-hidden style={{ width: 14, height: 14, color: '#6c2bd9' }} />
-                    Informações
-                  </button>
                   <button
                     type="button"
                     className={`summary-action${galleryImages.length ? '' : ' summary-action--muted'}`}
                     onClick={handleOpenGalleryModal}
                     title={galleryImages.length ? 'Ver fotos do estabelecimento' : 'Ainda sem imagens enviadas.'}
                   >
-                    Fotos
+                    <svg
+                      aria-hidden="true"
+                      width="14"
+                      height="14"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <rect x="3" y="5" width="18" height="14" rx="2" />
+                      <path d="M7 15l3-3 4 4 3-3 3 3" />
+                      <circle cx="9" cy="9" r="1.5" />
+                    </svg>
+                    Ver fotos
+                  </button>
+                  <button type="button" className="summary-action" onClick={handleOpenInfo}>
+                    <IconList aria-hidden style={{ width: 14, height: 14, color: '#6c2bd9' }} />
+                    Informações
                   </button>
                   {!isAuthenticated ? (
-                    <Link to={loginHref} className="summary-action summary-action--cta">
-                      Entre para favoritar
+                    <Link to={loginHref} className="summary-action">
+                      <span aria-hidden>♡</span>
+                      Favoritar
                     </Link>
                   ) : (
                     <button
@@ -2828,19 +2601,28 @@ useEffect(() => {
                       {selectedExtras?.is_favorite ? 'Favorito' : 'Favoritar'}
                     </button>
                   )}
+                  {!isAuthenticated ? (
+                    <Link to={loginHref} className="summary-action">
+                      <span aria-hidden>★</span>
+                      Avaliar
+                    </Link>
+                  ) : (
+                    <button
+                      type="button"
+                      className={`summary-action${ratingCount > 0 ? '' : ' summary-action--muted'}`}
+                      onClick={handleOpenRatingModal}
+                      disabled={!isClientUser || selectedExtras?.loading}
+                      title={!isClientUser ? 'Disponível apenas para clientes.' : undefined}
+                    >
+                      <span aria-hidden>★</span>
+                      {ratingButtonLabel}
+                    </button>
+                  )}
                 </div>
               </div>
-              {selectedService && (
-                <div className="novo-agendamento__summary-service">
-                  <span className="novo-agendamento__summary-label">Serviço selecionado</span>
-                  <strong>{ServiceHelpers.title(selectedService)}</strong>
-                  <button type="button" className="novo-agendamento__change-service" onClick={handleChangeService}>Trocar serviço</button>
-                </div>
-              )}
             </div>
           </div>
         )}
-
         <div className="establishments__results novo-agendamento__results">
           {step === 1 && renderEstablishmentResults()}
           {step === 2 && (
@@ -2850,19 +2632,11 @@ useEffect(() => {
           )}
           {step === 3 && (
             <div className="card novo-agendamento__panel">
-              <div className="novo-agendamento__toolbar">
-                <h2 className="novo-agendamento__title">Agenda da semana</h2>
-                <small className="novo-agendamento__week-info" title={`Fuso: ${TZ} — Janela: 07:00-22:00`}>
-                  Semana: {weekLabel}
-                </small>
-              </div>
-
               {renderScheduleContent()}
             </div>
           )}
         </div>
       </div>
-
       {infoModalOpen && selectedEstablishment && (
         <Modal
           title={`Informações de ${selectedEstablishmentName || 'Estabelecimento'}`}
@@ -3071,7 +2845,7 @@ useEffect(() => {
                       </button>
                     ) : !isAuthenticated ? (
                       <Link to={loginHref} className="btn btn--outline btn--sm">
-                        Entre para avaliar
+                        Avaliar
                       </Link>
                     ) : null}
                   </div>
@@ -3178,7 +2952,6 @@ useEffect(() => {
           </div>
         </Modal>
       )}
-
       {galleryModalOpen && (
         <Modal
           title={`Fotos de ${selectedEstablishmentName || 'Estabelecimento'}`}
