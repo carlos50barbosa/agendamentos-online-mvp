@@ -1,5 +1,5 @@
 import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { NavLink, Routes, Route, useNavigate, useLocation } from 'react-router-dom';
+import { NavLink, Routes, Route, useNavigate, useLocation, Navigate } from 'react-router-dom';
 import { getUser, logout, USER_EVENT } from './utils/auth';
 import EstabelecimentosList from './pages/EstabelecimentosList.jsx';
 import {
@@ -58,27 +58,62 @@ const APP_ROUTES = [
   { path: '/login-cliente', element: <LoginCliente /> },
   { path: '/login-estabelecimento', element: <LoginEstabelecimento /> },
   { path: '/cadastro', element: <Cadastro /> },
-  { path: '/cliente', element: <DashboardCliente /> },
-  { path: '/estab', element: <DashboardEstabelecimento /> },
-  { path: '/clientes', element: <Clientes /> },
-  { path: '/servicos', element: <ServicosEstabelecimento /> },
-  { path: '/profissionais', element: <ProfissionaisEstabelecimento /> },
+  { path: '/cliente', element: <DashboardCliente />, auth: true, role: 'cliente' },
+  { path: '/estab', element: <DashboardEstabelecimento />, auth: true, role: 'estabelecimento' },
+  { path: '/clientes', element: <Clientes />, auth: true, role: 'estabelecimento' },
+  { path: '/servicos', element: <ServicosEstabelecimento />, auth: true, role: 'estabelecimento' },
+  { path: '/profissionais', element: <ProfissionaisEstabelecimento />, auth: true, role: 'estabelecimento' },
   { path: '/novo/:estabelecimentoSlug', element: <NovoAgendamento /> },
   { path: '/novo', element: <NovoAgendamento /> },
-  { path: '/configuracoes', element: <Configuracoes /> },
+  { path: '/configuracoes', element: <Configuracoes />, auth: true },
   { path: '/loading', element: <Loading /> },
   { path: '/ajuda', element: <Ajuda /> },
-  { path: '/relatorios', element: <Relatorios /> },
+  { path: '/relatorios', element: <Relatorios />, auth: true, role: 'estabelecimento' },
   { path: '/planos', element: <Planos /> },
   { path: '/contato', element: <Contato /> },
   { path: '/termos', element: <Termos /> },
   { path: '/politica-privacidade', element: <PoliticaPrivacidade /> },
-  { path: '/admin-tools', element: <AdminTools /> },
-  { path: '/admin/db', element: <AdminDB /> },
-  { path: '/admin/billing', element: <AdminBilling /> },
+  { path: '/admin-tools', element: <AdminTools />, auth: true },
+  { path: '/admin/db', element: <AdminDB />, auth: true },
+  { path: '/admin/billing', element: <AdminBilling />, auth: true },
 ];
 
 const BILLING_ALERT_STATES = new Set(['due_soon', 'overdue', 'blocked']);
+const DASHBOARD_BY_ROLE = {
+  cliente: '/cliente',
+  estabelecimento: '/estab',
+};
+
+function GuardedRoute({ element, user, requireAuth = false, role = '' }) {
+  const location = useLocation();
+  const normalizedRole = String(role || '').toLowerCase();
+  const userRole = String(user?.tipo || '').toLowerCase();
+
+  if (!requireAuth) return element;
+
+  if (!user) {
+    const nextTarget = `${location.pathname || ''}${location.search || ''}`;
+    const params = new URLSearchParams();
+    if (nextTarget) params.set('next', nextTarget);
+    if (normalizedRole === 'cliente' || normalizedRole === 'estabelecimento') {
+      params.set('tipo', normalizedRole);
+    }
+    try {
+      if (typeof window !== 'undefined') {
+        sessionStorage.setItem('next_after_login', nextTarget);
+      }
+    } catch {}
+    const to = params.toString() ? `/login?${params.toString()}` : '/login';
+    return <Navigate to={to} replace />;
+  }
+
+  if (normalizedRole && userRole && normalizedRole !== userRole) {
+    const fallback = DASHBOARD_BY_ROLE[userRole] || '/';
+    return <Navigate to={fallback} replace />;
+  }
+
+  return element;
+}
 
 function formatBillingDate(value) {
   if (!value) return '';
@@ -614,8 +649,12 @@ const topbarAlert = useMemo(() => {
               }
             >
               <Routes>
-                {APP_ROUTES.map(({ path, element }) => (
-                  <Route key={path} path={path} element={element} />
+                {APP_ROUTES.map(({ path, element, auth, role }) => (
+                  <Route
+                    key={path}
+                    path={path}
+                    element={<GuardedRoute element={element} user={currentUser} requireAuth={auth} role={role} />}
+                  />
                 ))}
               </Routes>
             </Suspense>

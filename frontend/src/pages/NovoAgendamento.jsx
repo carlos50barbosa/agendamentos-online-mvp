@@ -453,23 +453,32 @@ const getScheduleRuleForDate = (dateish, schedule) => {
   }
 };
 
-const inBusinessHours = (isoDatetime, schedule = null) => {
+const inBusinessHours = (isoDatetime, schedule = null, durationMinutes = 0) => {
   const d = new Date(isoDatetime);
   if (Number.isNaN(d.getTime())) return false;
+  const duration = Number(durationMinutes) || 0;
+  const endDate = duration > 0 ? new Date(d.getTime() + duration * 60_000) : d;
+  const isSameDay =
+    endDate.getFullYear() === d.getFullYear() &&
+    endDate.getMonth() === d.getMonth() &&
+    endDate.getDate() === d.getDate();
+  const startMinutes = d.getHours() * 60 + d.getMinutes();
+  const endMinutes = endDate.getHours() * 60 + endDate.getMinutes();
+
   if (schedule) {
     const rule = schedule[d.getDay()];
     if (!rule || !rule.enabled) return false;
-    const minutes = d.getHours() * 60 + d.getMinutes();
-    if (Array.isArray(rule.blockMinutes) && rule.blockMinutes.some(([start, end]) => minutes >= start && minutes < end)) {
+    if (Array.isArray(rule.blockMinutes) && rule.blockMinutes.some(([start, end]) => startMinutes >= start && startMinutes < end)) {
       return false;
     }
-    return minutes >= rule.startMinutes && minutes <= rule.endMinutes;
+    if (!isSameDay) return false;
+    return startMinutes >= rule.startMinutes && endMinutes <= rule.endMinutes;
   }
-  const h = d.getHours();
-  const m = d.getMinutes();
-  const afterStart = h > DEFAULT_BUSINESS_HOURS.start || (h === DEFAULT_BUSINESS_HOURS.start && m >= 0);
-  const beforeEnd = h < DEFAULT_BUSINESS_HOURS.end || (h === DEFAULT_BUSINESS_HOURS.end && m === 0);
-  return afterStart && beforeEnd;
+
+  if (!isSameDay) return false;
+  const openMinutes = DEFAULT_BUSINESS_HOURS.start * 60;
+  const closeMinutes = DEFAULT_BUSINESS_HOURS.end * 60;
+  return startMinutes >= openMinutes && endMinutes <= closeMinutes;
 };
 
 /* =================== Grade 07•22 =================== */
@@ -1064,6 +1073,7 @@ export default function NovoAgendamento() {
 
   // Derivados
   const selectedService = useMemo(() => services.find((s) => String(s.id) === serviceId), [services, serviceId]);
+  const serviceDuration = ServiceHelpers.duration(selectedService);
   const selectedEstablishment = useMemo(
     () => establishments.find((e) => String(e.id) === establishmentId),
     [establishments, establishmentId]
@@ -1554,12 +1564,12 @@ useEffect(() => {
           localStorage.setItem(fbKey(establishmentId, currentWeek), JSON.stringify(filteredForced));
         } catch {}
 
-        const firstAvailable = overlayed.find(
-          (s) =>
-            isAvailableLabel(s.label) &&
-            !DateHelpers.isPastSlot(s.datetime) &&
-            inBusinessHours(s.datetime, workingSchedule)
-        );
+          const firstAvailable = overlayed.find(
+            (s) =>
+              isAvailableLabel(s.label) &&
+              !DateHelpers.isPastSlot(s.datetime) &&
+              inBusinessHours(s.datetime, workingSchedule, serviceDuration)
+          );
 
         return {
           ...prev,
@@ -1579,7 +1589,7 @@ useEffect(() => {
         error: "Não foi possível carregar os horários.",
       }));
     }
-  }, [establishmentId, serviceId, currentWeek, normalizeSlots, stepMinutes, getBusyFromAppointments, selectedService, state.professionalId, workingSchedule]);
+  }, [establishmentId, serviceId, currentWeek, normalizeSlots, stepMinutes, getBusyFromAppointments, selectedService, state.professionalId, workingSchedule, serviceDuration]);
 
   useEffect(() => {
     loadSlots();
@@ -1587,10 +1597,10 @@ useEffect(() => {
 
   useEffect(() => {
     if (!selectedSlot) return;
-    if (!inBusinessHours(selectedSlot.datetime, workingSchedule)) {
+    if (!inBusinessHours(selectedSlot.datetime, workingSchedule, serviceDuration)) {
       setState((p) => ({ ...p, selectedSlot: null }));
     }
-  }, [selectedSlot, workingSchedule]);
+  }, [selectedSlot, workingSchedule, serviceDuration]);
 
   useEffect(() => {
     setProfessionalMenuOpen(false);
@@ -1620,13 +1630,13 @@ useEffect(() => {
   );
   const isSlotVisible = useCallback(
     (slot) => {
-      if (!inBusinessHours(slot.datetime, workingSchedule)) return false;
+      if (!inBusinessHours(slot.datetime, workingSchedule, serviceDuration)) return false;
       if (filters.onlyAvailable && !isAvailableLabel(slot.label)) return false;
       if (filters.hidePast && DateHelpers.isPastSlot(slot.datetime)) return false;
       if (!timeRangeCheck(slot.datetime)) return false;
       return true;
     },
-    [filters, timeRangeCheck, workingSchedule]
+    [filters, timeRangeCheck, workingSchedule, serviceDuration]
   );
 
   // Agrupar por dia
@@ -1742,7 +1752,7 @@ useEffect(() => {
       showToast("error", "Não foi possível agendar no passado.");
       return;
     }
-    if (!inBusinessHours(selectedSlot.datetime, workingSchedule)) {
+    if (!inBusinessHours(selectedSlot.datetime, workingSchedule, serviceDuration)) {
       const outOfHoursMessage = workingSchedule
         ? "Este horário está fora do horário de atendimento do estabelecimento."
         : "Este horário está fora do período de 07:00-22:00.";
@@ -1854,6 +1864,7 @@ useEffect(() => {
     showToast,
     verifyBookingCreated,
     workingSchedule,
+    serviceDuration,
   ]);
 
   /* ====== Handlers ====== */
@@ -2310,7 +2321,6 @@ useEffect(() => {
   const contactPhone = profileData?.contato_telefone || selectedEstablishment?.telefone || null;
   const infoLoading = Boolean(selectedExtras?.loading);
   const professionalsError = selectedProfessionals?.error || infoModalError || '';
-  const serviceDuration = ServiceHelpers.duration(selectedService);
   const servicePrice = ServiceHelpers.formatPrice(ServiceHelpers.price(selectedService));
   const serviceProfessionals = Array.isArray(selectedService?.professionals) ? selectedService.professionals : [];
   const selectedProfessional = useMemo(() => {
@@ -2690,7 +2700,7 @@ useEffect(() => {
                 (serviceProfessionals.length && !state.professionalId) ||
                 (selectedSlotNow && !isAvailableLabel(selectedSlotNow.label)) ||
                 DateHelpers.isPastSlot(selectedSlot.datetime) ||
-                !inBusinessHours(selectedSlot.datetime, workingSchedule) ||
+                !inBusinessHours(selectedSlot.datetime, workingSchedule, serviceDuration) ||
                 bookingBlocked
               }
             >

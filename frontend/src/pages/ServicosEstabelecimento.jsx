@@ -581,37 +581,34 @@ export default function ServicosEstabelecimento() {
               Exibindo <b>{filtered.length}</b>{" "}
               {filtered.length === 1 ? "servico" : "servicos"}.
             </div>
-            <table className="services-table-plain">
-              <thead>
-                <tr>
-                  <th>Imagem</th>
-                  <th>Nome</th>
-                  <th>Descrição</th>
-                  <th>Duração</th>
-                  <th>Preço</th>
-                  <th className="service-status__header">Status</th>
-                  <th className="service-actions__header">Ações</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((s) => (
-                  <tr key={s.id} className={s._updating ? "updating" : ""}>
-                    <td style={{ width: 70 }}>
-                      {s.imagem_url ? (
-                        <img
-                          src={resolveAssetUrl(s.imagem_url)}
-                          alt={`Imagem do serviço ${s.nome}`}
-                          style={{ width: 48, height: 48, borderRadius: 8, objectFit: 'cover', border: '1px solid var(--border)' }}
-                        />
+            <div className="services-list">
+              {filtered.map((s) => {
+                const imageUrl = resolveAssetUrl(s.imagem_url || '');
+                const description = String(s.descricao || '').trim();
+                return (
+                  <div key={s.id} className={`mini-card service-card ${s._updating ? "is-updating" : ""}`}>
+                    <div className="mini-card__content">
+                      {imageUrl ? (
+                        <div className="mini-card__media">
+                          <img src={imageUrl} alt={`Imagem do servico ${s.nome}`} />
+                        </div>
                       ) : (
-                        <span className="muted" style={{ fontSize: 12 }}>Sem imagem</span>
+                        <div className="mini-card__media service-card__media--empty">
+                          <span>Sem imagem</span>
+                        </div>
                       )}
-                    </td>
-                    <td>{s.nome}</td>
-                    <td>{s.descricao || '-'}</td>
-                    <td>{s.duracao_min} min</td>
-                    <td>{formatBRL(s.preco_centavos ?? 0)}</td>
-                    <td className="service-status-cell">
+                      <div className="mini-card__main">
+                        <div className="mini-card__title">{s.nome}</div>
+                        {description && (
+                          <div className="mini-card__description">{description}</div>
+                        )}
+                        <div className="service-card__meta">
+                          <div className="service-card__price">{formatBRL(s.preco_centavos ?? 0)}</div>
+                          <div className="service-card__duration">{s.duracao_min} min</div>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="service-card__footer">
                       <button
                         className={`badge service-status ${s.ativo ? "ok" : "out"}`}
                         title="Clique para alternar"
@@ -620,27 +617,27 @@ export default function ServicosEstabelecimento() {
                       >
                         {s.ativo ? "Ativo" : "Inativo"}
                       </button>
-                    </td>
-                    <td className="service-actions">
-                      <button
-                        className="btn btn--outline"
-                        onClick={() => openEdit(s)}
-                        disabled={!!s._updating}
-                      >
-                        Editar
-                      </button>
-                      <button
-                        className="btn btn--danger btn--sm"
+                      <div className="service-card__actions">
+                        <button
+                          className="btn btn--outline btn--sm"
+                          onClick={() => openEdit(s)}
+                          disabled={!!s._updating}
+                        >
+                          Editar
+                        </button>
+                        <button
+                          className="btn btn--danger btn--sm"
                           onClick={() => askDelete(s)}
                           disabled={!!s._updating}
                         >
                           Excluir
                         </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
 
           </>
         )}
@@ -794,46 +791,29 @@ export default function ServicosEstabelecimento() {
 
 function SkeletonTable() {
   return (
-    <table className="skeleton">
-      <thead>
-        <tr>
-          <th>Imagem</th>
-          <th>Nome</th>
-          <th>Descricao</th>
-          <th>Duracao</th>
-          <th>Preco</th>
-          <th>Status</th>
-          <th></th>
-        </tr>
-      </thead>
-      <tbody>
-        {[...Array(4)].map((_, i) => (
-          <tr key={i}>
-            <td>
-              <div className="shimmer" style={{ width: "48px", height: "48px", borderRadius: 8 }} />
-            </td>
-            <td>
-              <div className="shimmer" style={{ width: "60%" }} />
-            </td>
-            <td>
-              <div className="shimmer" style={{ width: "80%" }} />
-            </td>
-            <td>
-              <div className="shimmer" style={{ width: "40%" }} />
-            </td>
-            <td>
-              <div className="shimmer" style={{ width: "50%" }} />
-            </td>
-            <td>
-              <div className="shimmer" style={{ width: "50%" }} />
-            </td>
-            <td>
-              <div className="shimmer" style={{ width: "30%" }} />
-            </td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
+    <div className="services-list">
+      {[...Array(4)].map((_, i) => (
+        <div key={i} className="mini-card service-card">
+          <div className="mini-card__content">
+            <div className="mini-card__media">
+              <div className="shimmer" style={{ width: "100%", height: "100%" }} />
+            </div>
+            <div className="mini-card__main">
+              <div className="shimmer" style={{ width: "50%", height: 14 }} />
+              <div className="shimmer" style={{ width: "80%", height: 12 }} />
+              <div className="shimmer" style={{ width: "40%", height: 12 }} />
+            </div>
+          </div>
+          <div className="service-card__footer">
+            <div className="shimmer pill" style={{ width: 80 }} />
+            <div className="service-card__actions">
+              <div className="shimmer" style={{ width: 70, height: 28, borderRadius: 10 }} />
+              <div className="shimmer" style={{ width: 70, height: 28, borderRadius: 10 }} />
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
   );
 }
 

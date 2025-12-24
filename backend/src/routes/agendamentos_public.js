@@ -22,6 +22,243 @@ function inBusinessHours(dateISO) {
   return afterStart && beforeEnd;
 }
 
+const DAY_SLUG_TO_INDEX = Object.freeze({
+  sunday: 0,
+  sundayfeira: 0,
+  sun: 0,
+  domingo: 0,
+  domingofeira: 0,
+  dom: 0,
+  monday: 1,
+  mondayfeira: 1,
+  mon: 1,
+  segunda: 1,
+  segundafeira: 1,
+  seg: 1,
+  tuesday: 2,
+  tuesdayfeira: 2,
+  tue: 2,
+  terca: 2,
+  tercafeira: 2,
+  ter: 2,
+  wednesday: 3,
+  wednesdayfeira: 3,
+  wed: 3,
+  quarta: 3,
+  quartafeira: 3,
+  qua: 3,
+  thursday: 4,
+  thursdayfeira: 4,
+  thu: 4,
+  quinta: 4,
+  quintafeira: 4,
+  qui: 4,
+  friday: 5,
+  fridayfeira: 5,
+  fri: 5,
+  sexta: 5,
+  sextafeira: 5,
+  sex: 5,
+  saturday: 6,
+  saturdayfeira: 6,
+  sat: 6,
+  sabado: 6,
+  sabadofeira: 6,
+  sab: 6,
+});
+
+const normalizeDayKey = (value) => {
+  if (!value && value !== 0) return '';
+  return String(value)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z]/g, '');
+};
+
+const resolveDayIndex = (item) => {
+  if (!item || typeof item !== 'object') return null;
+  const candidates = [
+    item.day,
+    item.key,
+    item.weekday,
+    item.week_day,
+    item.dia,
+    item.label,
+  ];
+  if (item.value) {
+    candidates.push(item.value);
+    const firstChunk = String(item.value).split(/[\s,;-]+/)[0];
+    candidates.push(firstChunk);
+  }
+
+  for (const candidate of candidates) {
+    const normalized = normalizeDayKey(candidate);
+    if (!normalized) continue;
+    if (Object.prototype.hasOwnProperty.call(DAY_SLUG_TO_INDEX, normalized)) {
+      return DAY_SLUG_TO_INDEX[normalized];
+    }
+  }
+  return null;
+};
+
+const ensureTimeValue = (value) => {
+  if (!value && value !== 0) return null;
+  const text = String(value).trim();
+  if (!text) return null;
+  const direct = text.match(/^([01]?\d|2[0-3]):([0-5]\d)$/);
+  if (direct) return `${direct[1].padStart(2, '0')}:${direct[2]}`;
+  const digits = text.replace(/\D/g, '');
+  if (!digits) return null;
+  if (digits.length <= 2) {
+    const hours = Number(digits);
+    if (!Number.isInteger(hours) || hours < 0 || hours > 23) return null;
+    return `${String(hours).padStart(2, '0')}:00`;
+  }
+  const hoursDigits = digits.slice(0, -2);
+  const minutesDigits = digits.slice(-2);
+  const hoursNum = Number(hoursDigits);
+  const minutesNum = Number(minutesDigits);
+  if (
+    !Number.isInteger(hoursNum) ||
+    hoursNum < 0 ||
+    hoursNum > 23 ||
+    !Number.isInteger(minutesNum) ||
+    minutesNum < 0 ||
+    minutesNum > 59
+  ) {
+    return null;
+  }
+  return `${String(hoursNum).padStart(2, '0')}:${String(minutesNum).padStart(2, '0')}`;
+};
+
+const toMinutes = (time) => {
+  if (!time) return null;
+  const parts = time.split(':');
+  if (parts.length !== 2) return null;
+  const hours = Number(parts[0]);
+  const minutes = Number(parts[1]);
+  if (!Number.isInteger(hours) || !Number.isInteger(minutes)) return null;
+  return hours * 60 + minutes;
+};
+
+const buildWorkingRules = (horariosJson) => {
+  if (!horariosJson) return null;
+  let entries;
+  try {
+    entries = JSON.parse(horariosJson);
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(entries) || !entries.length) return null;
+  const rules = Array.from({ length: 7 }, () => ({
+    enabled: false,
+    startMinutes: null,
+    endMinutes: null,
+    breaks: [],
+  }));
+  let recognized = false;
+
+  entries.forEach((item) => {
+    if (!item || typeof item !== 'object') return;
+    const idx = resolveDayIndex(item);
+    if (idx == null) return;
+    if (rules[idx].processed) return;
+
+    const valueText = String(item.value ?? '').toLowerCase();
+    if (
+      valueText.includes('fechado') ||
+      valueText.includes('sem atendimento') ||
+      valueText.includes('nao atende')
+    ) {
+      rules[idx] = { enabled: false, startMinutes: null, endMinutes: null, breaks: [], processed: true };
+      recognized = true;
+      return;
+    }
+
+    const start = ensureTimeValue(item.start ?? item.begin ?? item.from ?? null);
+    const end = ensureTimeValue(item.end ?? item.finish ?? item.to ?? null);
+    if (!start || !end) {
+      rules[idx] = { enabled: false, startMinutes: null, endMinutes: null, breaks: [], processed: true };
+      recognized = true;
+      return;
+    }
+    const startMinutes = toMinutes(start);
+    const endMinutes = toMinutes(end);
+    if (
+      startMinutes == null ||
+      endMinutes == null ||
+      startMinutes >= endMinutes
+    ) {
+      rules[idx] = { enabled: false, startMinutes: null, endMinutes: null, breaks: [], processed: true };
+      recognized = true;
+      return;
+    }
+
+    const rawBlocks = Array.isArray(item.blocks)
+      ? item.blocks
+      : Array.isArray(item.breaks)
+      ? item.breaks
+      : [];
+
+    const breaks = [];
+    rawBlocks.forEach((block) => {
+      if (!block) return;
+      const blockStart = ensureTimeValue(block.start ?? block.begin ?? block.from ?? null);
+      const blockEnd = ensureTimeValue(block.end ?? block.finish ?? block.to ?? null);
+      const blockStartMinutes = toMinutes(blockStart);
+      const blockEndMinutes = toMinutes(blockEnd);
+      if (
+        blockStartMinutes == null ||
+        blockEndMinutes == null ||
+        blockStartMinutes >= blockEndMinutes ||
+        blockStartMinutes < startMinutes ||
+        blockEndMinutes > endMinutes
+      ) {
+        return;
+      }
+      breaks.push([blockStartMinutes, blockEndMinutes]);
+    });
+
+    rules[idx] = {
+      enabled: true,
+      startMinutes,
+      endMinutes,
+      breaks,
+      processed: true,
+    };
+    recognized = true;
+  });
+
+  if (!recognized) return null;
+  return rules.map((rule) => {
+    if (!rule.processed) {
+      return { enabled: false, startMinutes: null, endMinutes: null, breaks: [] };
+    }
+    const { processed, ...rest } = rule;
+    return rest;
+  });
+};
+
+const isWithinWorkingHours = (startDate, endDate, workingRules) => {
+  if (!workingRules) return true;
+  const rule = workingRules[startDate.getDay()];
+  if (!rule || !rule.enabled) return false;
+  const sameDay =
+    startDate.getFullYear() === endDate.getFullYear() &&
+    startDate.getMonth() === endDate.getMonth() &&
+    startDate.getDate() === endDate.getDate();
+  if (!sameDay) return false;
+  const startMinutes = startDate.getHours() * 60 + startDate.getMinutes();
+  const endMinutes = endDate.getHours() * 60 + endDate.getMinutes();
+  if (startMinutes < rule.startMinutes) return false;
+  if (endMinutes > rule.endMinutes) return false;
+  if (Array.isArray(rule.breaks) && rule.breaks.some(([start, end]) => startMinutes >= start && startMinutes < end)) {
+    return false;
+  }
+  return true;
+};
+
 function brDateTime(iso) {
   return new Date(iso).toLocaleString('pt-BR', {
     hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit', year: 'numeric', timeZone: TZ,
@@ -117,6 +354,17 @@ router.post('/', async (req, res) => {
     const dur = Number(svc.duracao_min || 0);
     if (!Number.isFinite(dur) || dur <= 0) return res.status(400).json({ error: 'duracao_invalida' });
     const fimDate = new Date(inicioDate.getTime() + dur * 60_000);
+    let workingRules = null;
+    try {
+      const [[profile]] = await pool.query(
+        'SELECT horarios_json FROM estabelecimento_perfis WHERE estabelecimento_id=? LIMIT 1',
+        [estabelecimento_id]
+      );
+      workingRules = buildWorkingRules(profile?.horarios_json || null);
+    } catch {}
+    if (!isWithinWorkingHours(inicioDate, fimDate, workingRules)) {
+      return res.status(400).json({ error: 'outside_business_hours', message: 'Horario fora do expediente do estabelecimento.' });
+    }
     const planConfig = planContext?.config;
     const limitCheck = await checkMonthlyAppointmentLimit({
       estabelecimentoId: estabelecimento_id,
