@@ -114,7 +114,15 @@ app.use('/api/billing', billingRouter);
 app.use('/api/webhooks/whatsapp', waWebhookRouter);
 
 // Middleware final de erro
-app.use((err, _req, res, _next) => {
+app.use((err, req, res, _next) => {
+  if (err?.type === 'entity.too.large' || err?.status === 413) {
+    const path = req?.path || '';
+    const isServiceRoute = path.startsWith('/servicos') || path.startsWith('/api/servicos');
+    if (isServiceRoute) {
+      return res.status(413).json({ error: 'imagem_grande', message: 'Imagem maior que 2MB.' });
+    }
+    return res.status(413).json({ error: 'payload_too_large', message: 'Payload muito grande.' });
+  }
   console.error('[UNHANDLED]', err);
   res.status(err.status || 500).json({ error: 'internal_error', detail: err.message });
 });

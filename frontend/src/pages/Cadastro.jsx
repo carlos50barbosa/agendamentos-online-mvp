@@ -328,7 +328,7 @@ export default function Cadastro() {
                   <input
                     className="login-preview__input"
                     id="cadastro-nome"
-                    placeholder="Seu nome"
+                    placeholder="Seu nome | Estabelecimento"
                     value={form.nome}
                     onChange={(e) => updateField('nome', e.target.value)}
                     required

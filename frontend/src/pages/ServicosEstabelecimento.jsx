@@ -1,6 +1,17 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { Api } from "../utils/api";
+import { Api, resolveAssetUrl } from "../utils/api";
+
+const MAX_SERVICE_IMAGE_SIZE = 2 * 1024 * 1024; // 2MB
+
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error || new Error("file_read_error"));
+    reader.readAsDataURL(file);
+  });
+}
 
 export default function ServicosEstabelecimento() {
   // Lista
@@ -19,6 +30,9 @@ export default function ServicosEstabelecimento() {
   const [precoStr, setPrecoStr] = useState("R$ 0,00");
   const [saving, setSaving] = useState(false);
   const [selectedProsNew, setSelectedProsNew] = useState([]);
+  const [newImage, setNewImage] = useState({ preview: null, dataUrl: null });
+  const [newImageError, setNewImageError] = useState('');
+  const newImageInputRef = useRef(null);
 
   // UI extras
   const [query, setQuery] = useState("");
@@ -36,6 +50,9 @@ export default function ServicosEstabelecimento() {
   const [editPrecoStr, setEditPrecoStr] = useState('R$ 0,00');
   const [editSaving, setEditSaving] = useState(false);
   const [selectedProsEdit, setSelectedProsEdit] = useState([]);
+  const [editImage, setEditImage] = useState({ preview: null, dataUrl: null, remove: false });
+  const [editImageError, setEditImageError] = useState('');
+  const editImageInputRef = useRef(null);
 
   // Toast
   const [toast, setToast] = useState(null); // {type:'success'|'error'|'info', msg:string}
@@ -124,18 +141,74 @@ export default function ServicosEstabelecimento() {
     setEditPrecoStr(formatBRL(centavos));
   }
 
+  async function handleImageSelection(file, onSuccess, setError) {
+    if (!file) return false;
+    if (!file.type.startsWith('image/')) {
+      showToast('error', 'Envie uma imagem PNG, JPG ou WEBP.');
+      if (setError) setError('');
+      return false;
+    }
+    if (file.size > MAX_SERVICE_IMAGE_SIZE) {
+      if (setError) setError('Imagem maior que 2MB.');
+      return false;
+    }
+    try {
+      const dataUrl = await readFileAsDataUrl(file);
+      onSuccess(dataUrl);
+      if (setError) setError('');
+      return true;
+    } catch {
+      showToast('error', 'Nao foi possivel ler a imagem.');
+      if (setError) setError('');
+      return false;
+    }
+  }
+
+  async function handleNewImageChange(event) {
+    const file = event.target.files?.[0];
+    const ok = await handleImageSelection(file, (dataUrl) => {
+      setNewImage({ preview: dataUrl, dataUrl });
+    }, setNewImageError);
+    if (!ok && newImageInputRef.current) newImageInputRef.current.value = '';
+  }
+
+  function clearNewImage() {
+    setNewImage({ preview: null, dataUrl: null });
+    setNewImageError('');
+    if (newImageInputRef.current) newImageInputRef.current.value = '';
+  }
+
+  async function handleEditImageChange(event) {
+    const file = event.target.files?.[0];
+    const ok = await handleImageSelection(file, (dataUrl) => {
+      setEditImage({ preview: dataUrl, dataUrl, remove: false });
+    }, setEditImageError);
+    if (!ok && editImageInputRef.current) editImageInputRef.current.value = '';
+  }
+
+  function clearEditImage() {
+    setEditImage({ preview: null, dataUrl: null, remove: true });
+    setEditImageError('');
+    if (editImageInputRef.current) editImageInputRef.current.value = '';
+  }
+
   // Validacao simples
-  const formInvalid =
+  const formMissingFields =
     !form.nome.trim() ||
     form.duracao_min <= 0 ||
     form.preco_centavos <= 0 ||
     !Array.isArray(selectedProsNew) ||
     !selectedProsNew.length;
+  const formInvalid = formMissingFields || !!newImageError;
 
   async function add(e) {
     e.preventDefault();
     if (formInvalid) {
-      showToast("error", "Preencha nome, duração, preço e selecione pelo menos um profissional.");
+      if (newImageError) {
+        showToast('error', newImageError);
+      } else {
+        showToast("error", "Preencha nome, duração, preço e selecione pelo menos um profissional.");
+      }
       return;
     }
     setSaving(true);
@@ -147,12 +220,14 @@ export default function ServicosEstabelecimento() {
         preco_centavos: form.preco_centavos,
         ativo: form.ativo,
       };
+      if (newImage.dataUrl) payload.imagem = newImage.dataUrl;
       payload.professionalIds = selectedProsNew;
       const novo = await Api.servicosCreate(payload);
       setList((curr) => [novo, ...curr]);
       setForm({ nome: "", descricao: "", duracao_min: 30, preco_centavos: 0, ativo: true });
       setPrecoStr("R$ 0,00");
       setSelectedProsNew([]);
+      clearNewImage();
       showToast("success", "Serviço cadastrado!");
     } catch (err) {
       if (err?.data?.error === 'plan_limit') {
@@ -160,6 +235,10 @@ export default function ServicosEstabelecimento() {
         setPlanLimitOpen(true);
       } else if (err?.data?.error === 'missing_professionals') {
         showToast('error', err?.data?.message || 'Selecione pelo menos um profissional.');
+      } else if (err?.data?.error === 'imagem_invalida') {
+        showToast('error', 'Envie uma imagem PNG, JPG ou WEBP.');
+      } else if (err?.data?.error === 'imagem_grande' || err?.status === 413) {
+        setNewImageError('Imagem maior que 2MB.');
       } else if (err?.data?.message) {
         showToast('error', err.data.message);
       } else {
@@ -188,11 +267,26 @@ export default function ServicosEstabelecimento() {
     setEditPrecoStr(formatBRL(svc.preco_centavos || 0));
     const profIds = Array.isArray(svc.professionals) ? svc.professionals.map(p => p.id) : [];
     setSelectedProsEdit(profIds);
+    setEditImage({ preview: resolveAssetUrl(svc.imagem_url || ''), dataUrl: null, remove: false });
+    setEditImageError('');
+    if (editImageInputRef.current) editImageInputRef.current.value = '';
     setEditOpen(true);
   }
 
+  const editInvalid =
+    !editForm.nome.trim() ||
+    !editForm.duracao_min ||
+    !editForm.preco_centavos ||
+    !Array.isArray(selectedProsEdit) ||
+    !selectedProsEdit.length ||
+    !!editImageError;
+
   async function saveEdit(){
     if (!editItem) return;
+    if (editImageError) {
+      showToast('error', editImageError);
+      return;
+    }
     if (
       !editForm.nome.trim() ||
       !editForm.duracao_min ||
@@ -211,6 +305,8 @@ export default function ServicosEstabelecimento() {
         duracao_min: editForm.duracao_min,
         preco_centavos: editForm.preco_centavos,
       };
+      if (editImage.dataUrl) payload.imagem = editImage.dataUrl;
+      if (editImage.remove && !editImage.dataUrl) payload.imagemRemove = true;
       if (Array.isArray(selectedProsEdit)) payload.professionalIds = selectedProsEdit;
       const updated = await Api.servicosUpdate(editItem.id, payload);
       setList(curr => curr.map(x => x.id === editItem.id ? { ...x, ...updated } : x));
@@ -218,7 +314,13 @@ export default function ServicosEstabelecimento() {
       setEditItem(null);
       showToast('success', 'Serviço atualizado.');
     }catch(e){
-      showToast('error', 'Falha ao atualizar o serviço.');
+      if (e?.data?.error === 'imagem_invalida') {
+        showToast('error', 'Envie uma imagem PNG, JPG ou WEBP.');
+      } else if (e?.data?.error === 'imagem_grande' || e?.status === 413) {
+        setEditImageError('Imagem maior que 2MB.');
+      } else {
+        showToast('error', 'Falha ao atualizar o serviço.');
+      }
     }finally{
       setEditSaving(false);
     }
@@ -322,6 +424,38 @@ export default function ServicosEstabelecimento() {
               maxLength={200}
             />
 
+            <div className="service-form__image">
+              <span className="service-form__label">Imagem (opcional)</span>
+              <div className="service-form__image-row">
+                {newImage.preview ? (
+                  <img
+                    src={newImage.preview}
+                    alt="Pre-visualizacao"
+                    className="service-form__image-preview"
+                  />
+                ) : (
+                  <div className="service-form__image-fallback">Sem imagem</div>
+                )}
+                <label className="btn btn--outline btn--sm" style={{ cursor: 'pointer' }}>
+                  Selecionar imagem
+                  <input
+                    ref={newImageInputRef}
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp"
+                    style={{ display: 'none' }}
+                    onChange={handleNewImageChange}
+                  />
+                </label>
+                {newImage.preview && (
+                  <button type="button" className="btn btn--sm" onClick={clearNewImage}>
+                    Remover
+                  </button>
+                )}
+              </div>
+              <small className="muted" style={{ fontSize: 11 }}>Formatos aceitos: PNG, JPG ou WEBP (ate 2MB).</small>
+              {newImageError && <div className="service-form__error">{newImageError}</div>}
+            </div>
+
             <div className="service-form__meta">
               <div className="service-form__field">
                 <label className="service-form__label">Preço</label>
@@ -392,7 +526,7 @@ export default function ServicosEstabelecimento() {
           </form>
 
           {/* Dica de validacao */}
-          {formInvalid && (
+          {formMissingFields && (
             <small
               className="muted"
               style={{
@@ -450,6 +584,7 @@ export default function ServicosEstabelecimento() {
             <table className="services-table-plain">
               <thead>
                 <tr>
+                  <th>Imagem</th>
                   <th>Nome</th>
                   <th>Descrição</th>
                   <th>Duração</th>
@@ -461,6 +596,17 @@ export default function ServicosEstabelecimento() {
               <tbody>
                 {filtered.map((s) => (
                   <tr key={s.id} className={s._updating ? "updating" : ""}>
+                    <td style={{ width: 70 }}>
+                      {s.imagem_url ? (
+                        <img
+                          src={resolveAssetUrl(s.imagem_url)}
+                          alt={`Imagem do serviço ${s.nome}`}
+                          style={{ width: 48, height: 48, borderRadius: 8, objectFit: 'cover', border: '1px solid var(--border)' }}
+                        />
+                      ) : (
+                        <span className="muted" style={{ fontSize: 12 }}>Sem imagem</span>
+                      )}
+                    </td>
                     <td>{s.nome}</td>
                     <td>{s.descricao || '-'}</td>
                     <td>{s.duracao_min} min</td>
@@ -579,6 +725,37 @@ export default function ServicosEstabelecimento() {
               maxLength={200}
               style={{ minHeight: 64 }}
             />
+            <div className="service-form__image service-form__image--modal">
+              <span className="service-form__label">Imagem (opcional)</span>
+              <div className="service-form__image-row">
+                {editImage.preview ? (
+                  <img
+                    src={editImage.preview}
+                    alt="Pre-visualizacao"
+                    className="service-form__image-preview"
+                  />
+                ) : (
+                  <div className="service-form__image-fallback">Sem imagem</div>
+                )}
+                <label className="btn btn--outline btn--sm" style={{ cursor: 'pointer' }}>
+                  Selecionar imagem
+                  <input
+                    ref={editImageInputRef}
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp"
+                    style={{ display: 'none' }}
+                    onChange={handleEditImageChange}
+                  />
+                </label>
+                {(editImage.preview || editItem?.imagem_url) && (
+                  <button type="button" className="btn btn--sm" onClick={clearEditImage}>
+                    Remover
+                  </button>
+                )}
+              </div>
+              <small className="muted" style={{ fontSize: 11 }}>Formatos aceitos: PNG, JPG ou WEBP (ate 2MB).</small>
+              {editImageError && <div className="service-form__error">{editImageError}</div>}
+            </div>
             {pros.length > 0 && (
               <div className="grid" style={{ gap: 4 }}>
                 <div className="muted" style={{ fontSize: 12 }}>Vincular profissionais</div>
@@ -603,7 +780,7 @@ export default function ServicosEstabelecimento() {
           </div>
           <div className="row" style={{ gap: 8, justifyContent: 'flex-end', marginTop: 12 }}>
             <button className="btn btn--outline" onClick={()=>setEditOpen(false)}>Cancelar</button>
-            <button className="btn btn--primary" onClick={saveEdit} disabled={editSaving}>
+            <button className="btn btn--primary" onClick={saveEdit} disabled={editSaving || editInvalid}>
               {editSaving ? <span className="spinner"/> : 'Salvar alteracoes'}
             </button>
           </div>
@@ -620,6 +797,7 @@ function SkeletonTable() {
     <table className="skeleton">
       <thead>
         <tr>
+          <th>Imagem</th>
           <th>Nome</th>
           <th>Descricao</th>
           <th>Duracao</th>
@@ -631,6 +809,9 @@ function SkeletonTable() {
       <tbody>
         {[...Array(4)].map((_, i) => (
           <tr key={i}>
+            <td>
+              <div className="shimmer" style={{ width: "48px", height: "48px", borderRadius: 8 }} />
+            </td>
             <td>
               <div className="shimmer" style={{ width: "60%" }} />
             </td>

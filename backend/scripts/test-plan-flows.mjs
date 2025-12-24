@@ -344,12 +344,21 @@ pool.query = async (sql, params = []) => {
   }
 
   if (norm.startsWith("INSERT INTO servicos")) {
-    const [estId, nome, duracaoMin, precoCentavos, ativoFlag] = params
+    const estId = params[0]
+    const nome = params[1]
+    const descricao = params.length >= 6 ? params[2] : null
+    const hasImage = params.length >= 7
+    const imagemUrl = hasImage ? params[3] : null
+    const duracaoMin = hasImage ? params[4] : params[3]
+    const precoCentavos = hasImage ? params[5] : params[4]
+    const ativoFlag = hasImage ? params[6] : params[5]
     const nextId = state.servicos.reduce((max, svc) => Math.max(max, svc.id), 0) + 1
     const newSvc = {
       id: nextId,
       estabelecimento_id: estId,
       nome,
+      descricao: descricao || null,
+      imagem_url: imagemUrl || null,
       duracao_min: duracaoMin,
       preco_centavos: precoCentavos,
       ativo: ativoFlag

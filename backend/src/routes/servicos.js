@@ -7,6 +7,7 @@ import {
   formatPlanLimitExceeded,
   isDelinquentStatus,
 } from '../lib/plans.js';
+import { saveServiceImageFromDataUrl, removeServiceImageFile } from '../lib/service_images.js';
 
 const router = Router();
 
@@ -112,7 +113,7 @@ router.get('/', async (req, res, next) => {
 
   try {
     const [rows] = await pool.query(
-      `SELECT id, nome AS title, nome, descricao, duracao_min, preco_centavos, ativo
+      `SELECT id, nome AS title, nome, descricao, imagem_url, duracao_min, preco_centavos, ativo
          FROM servicos
         WHERE estabelecimento_id=?
           AND (ativo IS NULL OR ativo=1)
@@ -153,7 +154,7 @@ router.post('/', auth, isEstabelecimento, async (req, res) => {
   let conn;
   try {
     const estId = req.user.id;
-    const { nome, descricao, duracao_min, preco_centavos, ativo = 1, professionalIds } = req.body || {};
+    const { nome, descricao, duracao_min, preco_centavos, ativo = 1, professionalIds, imagem } = req.body || {};
     const nomeTrim = String(nome || '').trim();
     const descricaoTrim = descricao != null ? String(descricao).trim() : null;
     const duracao = Number(duracao_min);
@@ -209,12 +210,34 @@ router.post('/', auth, isEstabelecimento, async (req, res) => {
       });
     }
 
+    let imagemUrl = null;
+    if (imagem) {
+      const rawImage = String(imagem || '').trim();
+      if (rawImage && !rawImage.startsWith('data:')) {
+        return res.status(400).json({ error: 'imagem_invalida', message: 'Envie uma imagem PNG, JPG ou WEBP.' });
+      }
+      if (rawImage) {
+        try {
+          imagemUrl = await saveServiceImageFromDataUrl(rawImage, estId, null);
+        } catch (err) {
+          if (err?.code === 'SERVICE_IMAGE_TOO_LARGE') {
+            return res.status(400).json({ error: 'imagem_grande', message: 'Imagem maior que 2MB.' });
+          }
+          if (err?.code === 'SERVICE_IMAGE_INVALID') {
+            return res.status(400).json({ error: 'imagem_invalida', message: 'Envie uma imagem PNG, JPG ou WEBP.' });
+          }
+          console.error('[servicos][create] imagem', err);
+          return res.status(500).json({ error: 'imagem_falhou', message: 'Nao foi possivel salvar a imagem.' });
+        }
+      }
+    }
+
     conn = await pool.getConnection();
     await conn.beginTransaction();
 
     const [insert] = await conn.query(
-      'INSERT INTO servicos (estabelecimento_id, nome, descricao, duracao_min, preco_centavos, ativo) VALUES (?,?,?,?,?,?)',
-      [estId, nomeTrim, descricaoTrim || null, Number.isFinite(duracao) ? Math.max(0, Math.round(duracao)) : 0, Number.isFinite(preco) ? Math.max(0, Math.round(preco)) : 0, isActive ? 1 : 0]
+      'INSERT INTO servicos (estabelecimento_id, nome, descricao, imagem_url, duracao_min, preco_centavos, ativo) VALUES (?,?,?,?,?,?,?)',
+      [estId, nomeTrim, descricaoTrim || null, imagemUrl, Number.isFinite(duracao) ? Math.max(0, Math.round(duracao)) : 0, Number.isFinite(preco) ? Math.max(0, Math.round(preco)) : 0, isActive ? 1 : 0]
     );
     const serviceId = insert.insertId;
 
@@ -303,12 +326,39 @@ router.put('/:id', auth, isEstabelecimento, async (req, res) => {
       });
     }
 
+    const rawImage = typeof req.body?.imagem === 'string' ? req.body.imagem.trim() : '';
+    const wantsRemoveImage = req.body?.imagemRemove === true || req.body?.imagemRemove === 'true';
+    const hasImageData = !!rawImage && rawImage.startsWith('data:');
+
+    let nextImageUrl = current.imagem_url || null;
+    if (wantsRemoveImage && nextImageUrl) {
+      try { await removeServiceImageFile(nextImageUrl); } catch (err) { if (err?.code !== 'ENOENT') console.warn('[servicos][imagem remove]', err?.message || err); }
+      nextImageUrl = null;
+    }
+    if (rawImage && !hasImageData) {
+      return res.status(400).json({ error: 'imagem_invalida', message: 'Envie uma imagem PNG, JPG ou WEBP.' });
+    }
+    if (hasImageData) {
+      try {
+        nextImageUrl = await saveServiceImageFromDataUrl(rawImage, estId, wantsRemoveImage ? null : current.imagem_url);
+      } catch (err) {
+        if (err?.code === 'SERVICE_IMAGE_TOO_LARGE') {
+          return res.status(400).json({ error: 'imagem_grande', message: 'Imagem maior que 2MB.' });
+        }
+        if (err?.code === 'SERVICE_IMAGE_INVALID') {
+          return res.status(400).json({ error: 'imagem_invalida', message: 'Envie uma imagem PNG, JPG ou WEBP.' });
+        }
+        console.error('[servicos][update] imagem', err);
+        return res.status(500).json({ error: 'imagem_falhou', message: 'Nao foi possivel salvar a imagem.' });
+      }
+    }
+
     conn = await pool.getConnection();
     await conn.beginTransaction();
 
     await conn.query(
-      'UPDATE servicos SET nome=?, descricao=?, duracao_min=?, preco_centavos=?, ativo=? WHERE id=? AND estabelecimento_id=?',
-      [updates.nome, updates.descricao, updates.duracao_min, updates.preco_centavos, updates.ativo ? 1 : 0, serviceId, estId]
+      'UPDATE servicos SET nome=?, descricao=?, imagem_url=?, duracao_min=?, preco_centavos=?, ativo=? WHERE id=? AND estabelecimento_id=?',
+      [updates.nome, updates.descricao, nextImageUrl, updates.duracao_min, updates.preco_centavos, updates.ativo ? 1 : 0, serviceId, estId]
     );
 
     if (professionalIdsToLink !== null) {
@@ -362,6 +412,11 @@ router.delete('/:id', auth, isEstabelecimento, async (req, res) => {
       });
     }
 
+    const [[row]] = await pool.query(
+      'SELECT id, imagem_url FROM servicos WHERE id=? AND estabelecimento_id=?',
+      [serviceId, estId]
+    );
+
     const [result] = await pool.query(
       'DELETE FROM servicos WHERE id=? AND estabelecimento_id=?',
       [serviceId, estId]
@@ -369,6 +424,9 @@ router.delete('/:id', auth, isEstabelecimento, async (req, res) => {
 
     if (result.affectedRows) {
       await pool.query('DELETE FROM servico_profissionais WHERE servico_id=?', [serviceId]);
+      if (row?.imagem_url) {
+        await removeServiceImageFile(row.imagem_url).catch(() => {});
+      }
     }
 
     res.json({ ok: true, affectedRows: result.affectedRows });

@@ -14,7 +14,7 @@ export default function AdminDB(){
   const [limit,setLimit] = useState(50)
   const [offset,setOffset] = useState(0)
   const [order,setOrder] = useState('id DESC')
-  const [sql,setSql] = useState('SELECT id, nome, email, tipo FROM usuarios ORDER BY id DESC LIMIT 20')
+  const [sql,setSql] = useState('SELECT id, nome, telefone, email, tipo, plan, plan_status FROM usuarios ORDER BY id DESC LIMIT 50')
   const [execResult,setExecResult] = useState(null)
   const [error,setError] = useState('')
   const [write,setWrite] = useState(false)

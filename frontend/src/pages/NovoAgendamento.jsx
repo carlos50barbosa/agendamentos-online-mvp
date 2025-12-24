@@ -739,12 +739,19 @@ const ServiceCard = ({ service, selected, onSelect }) => {
   const duration = ServiceHelpers.duration(service);
   const price = ServiceHelpers.formatPrice(ServiceHelpers.price(service));
   const description = ServiceHelpers.description(service);
+  const imageRaw = service?.imagem_url || service?.image_url || service?.imagem || service?.image || service?.foto_url || '';
+  const imageUrl = resolveAssetUrl(imageRaw);
   const showPrice = price !== 'R$ 0,00';
   const showDuration = duration > 0;
   const cardClass = ['mini-card', selected ? 'mini-card--selected' : ''].filter(Boolean).join(' ');
   return (
     <div className={cardClass} onClick={() => onSelect(service)}>
       <div className="mini-card__content">
+        {imageUrl && (
+          <div className="mini-card__media">
+            <img src={imageUrl} alt={`Imagem do servico ${ServiceHelpers.title(service)}`} />
+          </div>
+        )}
         <div className="mini-card__main">
           <div className="mini-card__title">{ServiceHelpers.title(service)}</div>
           {description && <div className="mini-card__description">{description}</div>}

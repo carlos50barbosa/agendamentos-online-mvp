@@ -6,12 +6,12 @@ export const router = express.Router();
 function rawSaver(req, res, buf) { req.rawBody = buf; }
 
 export function mountWebhooks(app, withApiPrefix = false) {
-  app.use(express.json({ verify: rawSaver }));
-  app.use(express.urlencoded({ extended: true, verify: rawSaver }));
-
   const paths = withApiPrefix
     ? ['/api/webhook/mercadopago', '/webhook/mercadopago'] // aceita ambos
     : ['/webhook/mercadopago', '/api/webhook/mercadopago'];
+
+  app.use(paths, express.json({ verify: rawSaver, limit: '5mb' }));
+  app.use(paths, express.urlencoded({ extended: true, verify: rawSaver, limit: '5mb' }));
 
   app.post(paths, async (req, res) => {
     try {

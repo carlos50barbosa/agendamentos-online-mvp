@@ -55,6 +55,7 @@ CREATE TABLE IF NOT EXISTS servicos (
   estabelecimento_id INT              NOT NULL,
   nome               VARCHAR(120)     NOT NULL,
   descricao          TEXT             NULL,
+  imagem_url         VARCHAR(255)     NULL,
   duracao_min        INT              NOT NULL,
   preco_centavos     INT              DEFAULT 0,
   ativo              TINYINT(1)       DEFAULT 1,
