@@ -1065,13 +1065,19 @@ export default function NovoAgendamento() {
       return intervals.filter(([start, end]) => end > start);
     };
 
+    const resolveCloseMinutes = (rule, fallback) => {
+      const endMinutes = Number.isFinite(rule?.endMinutes) ? rule.endMinutes : toMinutes(rule?.end);
+      return Number.isFinite(endMinutes) ? endMinutes : fallback;
+    };
+
     const todayRule = getRuleForDay(todayIndex);
     const todayIntervals = buildIntervals(todayRule);
     const currentInterval = todayIntervals.find(([start, end]) => nowMinutes >= start && nowMinutes < end);
 
     if (currentInterval) {
       const [start, end] = currentInterval;
-      const minutesLeft = end - nowMinutes;
+      const closeMinutes = resolveCloseMinutes(todayRule, end);
+      const minutesLeft = closeMinutes - nowMinutes;
       return {
         prefix: minutesLeft <= closeSoonThreshold ? 'Fecha em breve' : 'Aberto',
         detail: formatRange(start, end),
