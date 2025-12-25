@@ -3033,7 +3033,11 @@ button.danger:disabled,
 .novo-agendamento__summary-head .novo-agendamento__back{justify-self:start;}
 .novo-agendamento__summary-head .novo-agendamento__summary-avatar{justify-self:center;}
 .novo-agendamento__summary-head-spacer{width:40px;height:40px;justify-self:end;}
-.novo-agendamento__summary-avatar{width:72px;height:72px;border-radius:18px;overflow:hidden;display:flex;align-items:center;justify-content:center;background:var(--surface-soft);border:1px solid var(--border);color:var(--brand);font-weight:700;font-size:22px;}
+.novo-agendamento__summary-avatar{width:96px;height:96px;border-radius:24px;overflow:hidden;display:flex;align-items:center;justify-content:center;background:var(--surface-soft);border:1px solid var(--border);color:var(--brand);font-weight:700;font-size:26px;padding:0;appearance:none;}
+.novo-agendamento__summary-avatar.is-clickable{cursor:pointer;transition:box-shadow .18s ease,transform .18s ease;}
+.novo-agendamento__summary-avatar.is-clickable:hover,
+.novo-agendamento__summary-avatar.is-clickable:focus-visible{box-shadow:0 12px 20px rgba(15,23,42,0.12);transform:translateY(-1px);outline:none;}
+.novo-agendamento__summary-avatar:disabled{cursor:default;opacity:.9;}
 .novo-agendamento__summary-avatar img{width:100%;height:100%;object-fit:cover;}
 .novo-agendamento__summary-content{flex:1;min-width:0;display:flex;flex-direction:column;gap:4px;}
 .novo-agendamento__summary-name{font-size:1.25rem;font-weight:600;line-height:1.2;}
@@ -3046,6 +3050,8 @@ button.danger:disabled,
 .summary-status--open .summary-status__prefix{color:#16a34a;}
 .summary-status--soon .summary-status__prefix{color:#d97706;}
 .summary-status--closed .summary-status__prefix{color:#b42318;}
+.profile-image-modal{display:flex;justify-content:center;align-items:center;padding:4px;}
+.profile-image-modal__img{max-width:100%;max-height:70vh;border-radius:12px;object-fit:contain;background:#f6f6f6;}
 .novo-agendamento__summary--establishment .novo-agendamento__summary-content{align-items:center;width:100%;}
 .novo-agendamento__summary--establishment .novo-agendamento__summary-actions{justify-content:center;}
 .summary-action{display:inline-flex;align-items:center;gap:4px;padding:4px 8px;font-size:.75rem;color:var(--primary-600);background:var(--surface-soft);border:1px solid var(--border);border-radius:999px;cursor:pointer;transition:background .15s ease,color .15s ease,border-color .15s ease;text-decoration:none;}

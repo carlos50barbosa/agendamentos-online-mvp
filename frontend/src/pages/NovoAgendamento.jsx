@@ -914,6 +914,7 @@ export default function NovoAgendamento() {
   const [professionalsByEstab, setProfessionalsByEstab] = useState({});
   const [infoModalOpen, setInfoModalOpen] = useState(false);
   const [galleryModalOpen, setGalleryModalOpen] = useState(false);
+  const [profileImageModalOpen, setProfileImageModalOpen] = useState(false);
   const [galleryViewIndex, setGalleryViewIndex] = useState(0);
   const [infoModalError, setInfoModalError] = useState('');
   const [infoActiveTab, setInfoActiveTab] = useState('about');
@@ -1393,6 +1394,7 @@ export default function NovoAgendamento() {
     if (!selectedEstablishmentId) return;
     setInfoModalOpen(false);
   setGalleryModalOpen(false);
+  setProfileImageModalOpen(false);
   setInfoModalError('');
   setInfoActiveTab('about');
   setRatingModal((prev) => (prev.open ? { open: false, nota: 0, comentario: '', saving: false, error: '' } : prev));
@@ -2044,6 +2046,13 @@ useEffect(() => {
   const handleCloseGalleryModal = useCallback(() => {
     setGalleryModalOpen(false);
   }, []);
+  const handleOpenProfileImage = useCallback(() => {
+    if (!establishmentAvatar) return;
+    setProfileImageModalOpen(true);
+  }, [establishmentAvatar]);
+  const handleCloseProfileImage = useCallback(() => {
+    setProfileImageModalOpen(false);
+  }, []);
   const handleGalleryPrev = useCallback(() => {
     setGalleryViewIndex((prev) => {
       if (!galleryImages.length) return 0;
@@ -2641,13 +2650,20 @@ useEffect(() => {
                     <path d="M3 12h18" />
                   </svg>
                 </a>
-                <div className="novo-agendamento__summary-avatar">
+                <button
+                  type="button"
+                  className={`novo-agendamento__summary-avatar${establishmentAvatar ? ' is-clickable' : ''}`}
+                  onClick={handleOpenProfileImage}
+                  aria-label={establishmentAvatar ? 'Abrir foto do estabelecimento' : undefined}
+                  title={establishmentAvatar ? 'Abrir foto do estabelecimento' : undefined}
+                  disabled={!establishmentAvatar}
+                >
                   {establishmentAvatar ? (
                     <img src={establishmentAvatar} alt={`Logo de ${selectedEstablishmentName || 'estabelecimento'}`} />
                   ) : (
                     <span>{(selectedEstablishmentName || 'AO').slice(0, 2).toUpperCase()}</span>
                   )}
-                </div>
+                </button>
                 <span className="novo-agendamento__summary-head-spacer" aria-hidden="true" />
               </div>
               
@@ -3195,6 +3211,22 @@ useEffect(() => {
           ) : (
             <p className="muted">Nenhuma imagem cadastrada ainda.</p>
           )}
+        </Modal>
+      )}
+      {profileImageModalOpen && establishmentAvatar && (
+        <Modal
+          title={`Foto de ${selectedEstablishmentName || 'Estabelecimento'}`}
+          onClose={handleCloseProfileImage}
+          closeButton
+          bodyClassName="modal__body--scroll"
+        >
+          <div className="profile-image-modal">
+            <img
+              className="profile-image-modal__img"
+              src={establishmentAvatar}
+              alt={`Foto do estabelecimento ${selectedEstablishmentName || ''}`}
+            />
+          </div>
         </Modal>
       )}
       {ratingModal.open && (
