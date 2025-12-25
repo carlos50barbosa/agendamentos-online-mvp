@@ -1016,6 +1016,104 @@ export default function NovoAgendamento() {
   const reviewsLoading = Boolean(reviewsState.loading);
   const reviewsError = reviewsState.error || '';
   const reviewsHasNext = reviewsState.hasNext !== false;
+  const todayScheduleInfo = useMemo(() => {
+    const closeSoonThreshold = 120;
+    const now = new Date();
+    const nowMinutes = now.getHours() * 60 + now.getMinutes();
+    const todayIndex = now.getDay();
+    const defaultStartMinutes = DEFAULT_BUSINESS_HOURS.start * 60;
+    const defaultEndMinutes = DEFAULT_BUSINESS_HOURS.end * 60;
+    const formatMinutes = (value) => `${pad2(Math.floor(value / 60))}:${pad2(value % 60)}`;
+    const formatRange = (start, end) => `${formatMinutes(start)} - ${formatMinutes(end)}`;
+    const weekdayFormatter = new Intl.DateTimeFormat('pt-BR', { weekday: 'short' });
+
+    const getRuleForDay = (dayIndex) => {
+      if (workingSchedule) return workingSchedule[dayIndex] || null;
+      return {
+        enabled: true,
+        isClosed: false,
+        startMinutes: defaultStartMinutes,
+        endMinutes: defaultEndMinutes,
+        blockMinutes: [],
+      };
+    };
+
+    const buildIntervals = (rule) => {
+      if (!rule || rule.isClosed || !rule.enabled) return [];
+      const startMinutes = Number.isFinite(rule.startMinutes) ? rule.startMinutes : toMinutes(rule.start);
+      const endMinutes = Number.isFinite(rule.endMinutes) ? rule.endMinutes : toMinutes(rule.end);
+      if (!Number.isFinite(startMinutes) || !Number.isFinite(endMinutes) || startMinutes >= endMinutes) {
+        return [];
+      }
+      let intervals = [[startMinutes, endMinutes]];
+      const blocks = Array.isArray(rule.blockMinutes) ? [...rule.blockMinutes] : [];
+      blocks.sort((a, b) => (a?.[0] ?? 0) - (b?.[0] ?? 0));
+      blocks.forEach(([blockStart, blockEnd]) => {
+        if (!Number.isFinite(blockStart) || !Number.isFinite(blockEnd) || blockStart >= blockEnd) return;
+        const next = [];
+        intervals.forEach(([start, end]) => {
+          if (blockEnd <= start || blockStart >= end) {
+            next.push([start, end]);
+            return;
+          }
+          if (blockStart > start) next.push([start, blockStart]);
+          if (blockEnd < end) next.push([blockEnd, end]);
+        });
+        intervals = next;
+      });
+      return intervals.filter(([start, end]) => end > start);
+    };
+
+    const todayRule = getRuleForDay(todayIndex);
+    const todayIntervals = buildIntervals(todayRule);
+    const currentInterval = todayIntervals.find(([start, end]) => nowMinutes >= start && nowMinutes < end);
+
+    if (currentInterval) {
+      const [start, end] = currentInterval;
+      const minutesLeft = end - nowMinutes;
+      return {
+        prefix: minutesLeft <= closeSoonThreshold ? 'Fecha em breve' : 'Aberto',
+        detail: formatRange(start, end),
+        status: minutesLeft <= closeSoonThreshold ? 'soon' : 'open',
+      };
+    }
+
+    const laterToday = todayIntervals.find(([start]) => start > nowMinutes);
+    if (laterToday) {
+      const [start] = laterToday;
+      return {
+        prefix: 'Fechado',
+        detail: `Abre hoje às ${formatMinutes(start)}`,
+        status: 'closed',
+      };
+    }
+
+    for (let offset = 1; offset <= 7; offset += 1) {
+      const dayIndex = (todayIndex + offset) % 7;
+      const rule = getRuleForDay(dayIndex);
+      const intervals = buildIntervals(rule);
+      if (!intervals.length) continue;
+      const [start] = intervals[0];
+      const openTime = formatMinutes(start);
+      if (offset === 1) {
+        return {
+          prefix: 'Fechado',
+          detail: `Abre amanhã às ${openTime}`,
+          status: 'closed',
+        };
+      }
+      const nextDate = new Date(now);
+      nextDate.setDate(now.getDate() + offset);
+      const weekday = weekdayFormatter.format(nextDate);
+      return {
+        prefix: 'Fechado',
+        detail: `Abre ${weekday} às ${openTime}`,
+        status: 'closed',
+      };
+    }
+
+    return { prefix: 'Fechado', detail: '', status: 'closed' };
+  }, [workingSchedule]);
   const establishmentAvatar = useMemo(() => {
     const source = selectedEstablishment?.avatar_url || selectedEstablishment?.logo_url || selectedEstablishment?.foto_url;
     return resolveAssetUrl(source || '');
@@ -2619,6 +2717,18 @@ useEffect(() => {
                     </button>
                   )}
                 </div>
+                {todayScheduleInfo && (
+                  <div className="novo-agendamento__summary-hours">
+                    <span
+                      className={`summary-status${todayScheduleInfo.status === 'open' ? ' summary-status--open' : todayScheduleInfo.status === 'soon' ? ' summary-status--soon' : todayScheduleInfo.status === 'closed' ? ' summary-status--closed' : ''}`}
+                    >
+                      <span className="summary-status__prefix">{todayScheduleInfo.prefix}</span>
+                      {todayScheduleInfo.detail ? (
+                        <span className="summary-status__detail">: {todayScheduleInfo.detail}</span>
+                      ) : null}
+                    </span>
+                  </div>
+                )}
               </div>
             </div>
           </div>

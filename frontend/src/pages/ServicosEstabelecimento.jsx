@@ -579,7 +579,7 @@ export default function ServicosEstabelecimento() {
           <>
             <div className="count" style={{ marginBottom: 8 }}>
               Exibindo <b>{filtered.length}</b>{" "}
-              {filtered.length === 1 ? "servico" : "servicos"}.
+              {filtered.length === 1 ? "servico" : "serviços"}.
             </div>
             <div className="services-list">
               {filtered.map((s) => {

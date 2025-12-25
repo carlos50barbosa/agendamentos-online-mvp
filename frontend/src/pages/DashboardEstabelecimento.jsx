@@ -622,24 +622,25 @@ export default function DashboardEstabelecimento() {
   return (
     <div className="dashboard-narrow">
       <div className="card">
-        <div className="row spread" style={{ marginBottom: 8 }}>
-          <div className="row" style={{ alignItems: "center", gap: 12 }}>
-            <h2 style={{ margin: 0, fontSize: 16 }}>Agendamentos</h2>
-            <div className="notif-bell" title="Notifica??es de agendamentos">
-              <IconBell className="notif-bell__icon" aria-hidden="true" />
-              <span className="notif-bell__pill">
+        <div className="dashboard-appointments__header">
+          <div className="dashboard-appointments__summary">
+            <h2 className="dashboard-appointments__title">Agendamentos</h2>
+            <div
+              className="notif-bell dashboard-appointments__pills"
+              title="Notificacoes de agendamentos"
+            >
+              <span className="dashboard-appointments__bell" aria-hidden="true">
+                <IconBell className="notif-bell__icon" aria-hidden="true" />
+              </span>
+              <span className="notif-bell__pill notif-bell__pill--ok">
                 Recebidos <span className="notif-bell__number notif-bell__number--ok">{totals.recebidos}</span>
               </span>
               <span className="notif-bell__pill notif-bell__pill--cancel">
-                Cancelados{" "}
-                <span className="notif-bell__number notif-bell__number--cancel">{totals.cancelados}</span>
+                Cancelados <span className="notif-bell__number notif-bell__number--cancel">{totals.cancelados}</span>
               </span>
             </div>
           </div>
-          <div
-            className="row"
-            style={{ gap: 8, flexWrap: "wrap", alignItems: "center", justifyContent: "flex-end" }}
-          >
+          <div className="dashboard-appointments__actions">
             <button
               type="button"
               className={`btn btn--outline btn--outline-brand ${showCalendar ? 'btn--active' : ''}`}
