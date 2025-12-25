@@ -3070,6 +3070,26 @@ button.danger:disabled,
   .novo-agendamento__summary--establishment .novo-agendamento__summary-service{margin-left:0;text-align:center;width:100%;flex:1 0 100%;align-items:center;gap:6px;}
   .novo-agendamento__summary--establishment .novo-agendamento__change-service{align-self:center;}
 }
+@media (max-width:520px){
+  .novo-agendamento__summary-actions{
+    width:100%;
+    justify-content:center;
+    gap:4px;
+    flex-wrap:nowrap;
+  }
+  .summary-action{
+    font-size:.65rem;
+    padding:3px 6px;
+    gap:3px;
+  }
+  .summary-action svg{
+    width:12px;
+    height:12px;
+  }
+  .summary-action>span[aria-hidden]{
+    font-size:.85rem;
+  }
+}
 .novo-agendamento__inline-summary{display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px;font-size:.9rem;line-height:1.4;color:var(--text);}
 .inline-summary__item{display:flex;flex-wrap:wrap;align-items:center;gap:6px;}
 .inline-summary__item--service{row-gap:4px;}
