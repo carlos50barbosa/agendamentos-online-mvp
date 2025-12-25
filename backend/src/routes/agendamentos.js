@@ -349,6 +349,7 @@ router.get('/estabelecimento', authRequired, isEstabelecimento, async (req, res)
     `SELECT a.*,
             s.nome AS servico_nome,
             u.nome AS cliente_nome,
+            u.telefone AS cliente_telefone,
             p.nome AS profissional_nome,
             p.avatar_url AS profissional_avatar_url
      FROM agendamentos a

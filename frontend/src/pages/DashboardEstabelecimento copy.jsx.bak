@@ -1,13 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import moment from 'moment'
-import 'moment/locale/pt-br'
-import 'react-big-calendar/lib/css/react-big-calendar.css'
 import { Calendar as BigCalendar, momentLocalizer, Views } from 'react-big-calendar'
-import { Api } from '../utils/api'
-import { IconBell } from '../components/Icons.jsx'
-import { getUser, USER_EVENT } from '../utils/auth'
+import { Api } from '../utils/api.js'
+import { IconBell, IconHelp } from '../components/Icons.jsx'
+import { getUser, USER_EVENT } from '../utils/auth.js'
 
-moment.locale('pt-br')
 const localizer = momentLocalizer(moment)
 
 const DateHelpers = {
@@ -113,7 +110,9 @@ const DateHelpers = {
     }),
 }
 
-const DEFAULT_BUSINESS_HOURS = { start: 9, end: 22 }
+const DEFAULT_BUSINESS_HOURS = { start: 7, end: 22 }
+
+const isValidDate = (d) => d instanceof Date && Number.isFinite(d.getTime())
 
 const normalizeText = (value) =>
   String(value || '')
@@ -621,58 +620,60 @@ export default function DashboardEstabelecimento() {
   }, [])
 
   return (
-    <div className="dashboard-narrow dashboard-pro">
-      <div className="agenda-panel">
-        <div className="agenda-hdr">
-          <div className="agenda-hdr-left">
-            <div className="agenda-title">
-              <h2>Agendamentos</h2>
-              <div className="agenda-bell" title="Notificacoes" aria-hidden="true">
-                <IconBell className="agenda-bell__icon" aria-hidden="true" />
-              </div>
-            </div>
-            <div className="agenda-chips">
-              <div className="agenda-chip agenda-chip--ok">
-                Recebidos <b>{totals.recebidos}</b>
-              </div>
-              <div className="agenda-chip agenda-chip--danger">
-                Cancelados <b>{totals.cancelados}</b>
-              </div>
+    <div className="dashboard-narrow">
+      <div className="card">
+        <div className="dashboard-appointments__header">
+          <div className="dashboard-appointments__summary">
+            <h2 className="dashboard-appointments__title">Agendamentos</h2>
+            <div
+              className="notif-bell dashboard-appointments__pills"
+              title="Notificacoes de agendamentos"
+            >
+              <span className="dashboard-appointments__bell" aria-hidden="true">
+                <IconBell className="notif-bell__icon" aria-hidden="true" />
+              </span>
+              <span className="notif-bell__pill notif-bell__pill--ok">
+                Recebidos <span className="notif-bell__number notif-bell__number--ok">{totals.recebidos}</span>
+              </span>
+              <span className="notif-bell__pill notif-bell__pill--cancel">
+                Cancelados <span className="notif-bell__number notif-bell__number--cancel">{totals.cancelados}</span>
+              </span>
             </div>
           </div>
-          <div className="agenda-hdr-right">
+          <div className="dashboard-appointments__actions">
             <button
               type="button"
-              className="agenda-btn agenda-btn--primary"
+              className={`btn btn--outline btn--outline-brand ${showCalendar ? 'btn--active' : ''}`}
               onClick={() => setShowCalendar((open) => !open)}
             >
-              {showCalendar ? 'Ocultar calendario' : 'Ver calendario'}
+              {showCalendar ? "Ocultar calendário" : "Ver calendário"}
             </button>
             <select
-              className="agenda-select"
+              className="input"
               value={status}
               onChange={(e) => setStatus(e.target.value)}
               title="Status"
             >
               <option value="todos">Todos</option>
               <option value="confirmado">Confirmados</option>
-              <option value="concluido">Concluidos</option>
+              <option value="concluido">Concluídos</option>
               <option value="cancelado">Cancelados</option>
             </select>
           </div>
         </div>
-        <div className="pro-agenda__wrap">
-          <ProfessionalAgendaView items={filtered} onForceCancel={handleForceCancel} />
-        </div>
+
+        {/* calendar-grid removido em favor da agenda de profissionais */}
       </div>
       {showCalendar && (
-        <div className="agenda-calendar">
+        <div style={{ marginTop: 16 }}>
           <CalendarAvailability establishmentId={establishmentId} />
         </div>
       )}
+      <div style={{ marginTop: 16 }}>
+        <ProfessionalAgendaView items={filtered} onForceCancel={handleForceCancel} />
+      </div>
     </div>
   )
-
 }
 
 function CalendarAvailability({ establishmentId }) {
@@ -999,19 +1000,9 @@ function ProfessionalAgendaView({ items, onForceCancel }) {
     return themes
   }, [resources])
 
-  const resourceLookup = useMemo(() => {
-    const lookup = new Map()
-    resources.forEach((res) => {
-      lookup.set(res.id, res)
-    })
-    return lookup
-  }, [resources])
-
   const [resourceFilter, setResourceFilter] = useState('all')
   const [filterOpen, setFilterOpen] = useState(false)
   const filterRef = React.useRef(null)
-  const [selectedEvent, setSelectedEvent] = useState(null)
-  const [cancelling, setCancelling] = useState(false)
 
   useEffect(() => {
     setResourceFilter('all')
@@ -1036,30 +1027,6 @@ function ProfessionalAgendaView({ items, onForceCancel }) {
           'sem-id'
         const service = item?.servico_nome || item?.service_name || 'Servico'
         const client = item?.cliente_nome || item?.client_name || ''
-        const clientPhone =
-          item?.cliente_whatsapp ||
-          item?.cliente_telefone ||
-          item?.cliente_celular ||
-          item?.client_phone ||
-          item?.client_phone_number ||
-          item?.telefone_cliente ||
-          item?.telefone ||
-          item?.phone ||
-          item?.celular ||
-          item?.whatsapp ||
-          item?.cliente?.whatsapp ||
-          item?.cliente?.telefone ||
-          item?.cliente?.celular ||
-          item?.cliente?.phone ||
-          item?.cliente?.contato_telefone ||
-          item?.cliente?.contatoTelefone ||
-          item?.client?.whatsapp ||
-          item?.client?.telefone ||
-          item?.client?.celular ||
-          item?.client?.phone ||
-          item?.user?.telefone ||
-          item?.usuario?.telefone ||
-          ''
         const confirmedAt =
           item?.cliente_confirmou_whatsapp_at ||
           item?.cliente_confirmou_whatsapp_em ||
@@ -1097,7 +1064,6 @@ function ProfessionalAgendaView({ items, onForceCancel }) {
           status,
           service,
           client,
-          clientPhone,
           statusLabel: theme.label,
           confirmedAt,
           _theme: theme,
@@ -1109,68 +1075,6 @@ function ProfessionalAgendaView({ items, onForceCancel }) {
         return new Date(a.start) - new Date(b.start)
       })
   }, [items])
-
-  const getStatusPresentation = (eventItem) => {
-    const status = String(eventItem?.status || '').toLowerCase()
-    const isCancelled = status === 'cancelado'
-    const isDone = status === 'concluido'
-    const hasWhatsappConfirm = Boolean(eventItem?.confirmedAt) || status === 'confirmado_wa'
-    const isConfirmed = hasWhatsappConfirm || status === 'confirmado'
-    const label = isCancelled
-      ? 'Status: cancelado'
-      : isDone
-        ? 'Status: concluído'
-        : hasWhatsappConfirm
-          ? 'Status: confirmado no WhatsApp'
-          : isConfirmed
-            ? 'Status: confirmado'
-            : 'Status: aguardando confirmação no WhatsApp'
-    const badgeClass = isCancelled
-      ? 'pro-agenda__badge pro-agenda__badge--danger'
-      : isDone
-        ? 'pro-agenda__badge pro-agenda__badge--muted'
-        : isConfirmed
-          ? 'pro-agenda__badge'
-          : 'pro-agenda__badge pro-agenda__badge--muted'
-    return { label, badgeClass, isCancelled, isDone, isConfirmed }
-  }
-
-  const toDigits = (value) => String(value || '').replace(/\D/g, '')
-  const buildWhatsappLink = (eventItem) => {
-    const digits = toDigits(eventItem?.clientPhone)
-    if (!digits) return null
-    const name = eventItem?.client || ''
-    const msg = encodeURIComponent(`Olá ${name}, tudo bem?`.trim())
-    return `https://wa.me/${digits}?text=${msg}`
-  }
-
-  useEffect(() => {
-    if (!selectedEvent?.id) return
-    const updated = events.find((ev) => ev.id === selectedEvent.id)
-    if (!updated) {
-      setSelectedEvent(null)
-      return
-    }
-    if (updated !== selectedEvent) {
-      setSelectedEvent(updated)
-    }
-  }, [events, selectedEvent?.id])
-
-  useEffect(() => {
-    if (!selectedEvent?.id) return
-    setCancelling(false)
-  }, [selectedEvent?.id])
-
-  useEffect(() => {
-    if (!selectedEvent) return
-    const handleKeyDown = (eventKey) => {
-      if (eventKey.key === 'Escape') {
-        setSelectedEvent(null)
-      }
-    }
-    document.addEventListener('keydown', handleKeyDown)
-    return () => document.removeEventListener('keydown', handleKeyDown)
-  }, [selectedEvent])
 
   const filteredResources = useMemo(
     () => (resourceFilter === 'all' ? resources : resources.filter((r) => r.id === resourceFilter)),
@@ -1204,29 +1108,57 @@ function ProfessionalAgendaView({ items, onForceCancel }) {
   )
 
   const timeBounds = useMemo(() => {
+    const buildDefaultBounds = (baseDate) => {
+      const base = isValidDate(baseDate) ? new Date(baseDate) : new Date()
+      base.setHours(0, 0, 0, 0)
+      const min = new Date(base); min.setHours(8, 0, 0, 0)
+      const max = new Date(base); max.setHours(20, 0, 0, 0)
+      return { min, max, scrollToTime: min }
+    }
+
     const baseDate = currentDate instanceof Date ? currentDate : new Date()
-    const baseDay = new Date(baseDate)
-    baseDay.setHours(0, 0, 0, 0)
-    const min = new Date(baseDay)
-    min.setHours(DEFAULT_BUSINESS_HOURS.start, 0, 0, 0)
-    const max = new Date(baseDay)
-    max.setHours(DEFAULT_BUSINESS_HOURS.end, 0, 0, 0)
-    return { min, max, scrollToTime: min }
-  }, [currentDate])
+    const baseDay = new Date(baseDate); baseDay.setHours(0, 0, 0, 0)
+
+    if (!eventsForCurrentDate.length) {
+      return buildDefaultBounds(baseDay)
+    }
+
+    const startTimes = eventsForCurrentDate.map((ev) => ev.start)
+    const endTimes = eventsForCurrentDate.map((ev) => ev.end)
+    const earliest = new Date(Math.min(...startTimes.map((d) => d.getTime())))
+    const latest = new Date(Math.max(...endTimes.map((d) => d.getTime())))
+    const min = new Date(baseDay); min.setTime(Math.max(earliest.getTime() - 30 * 60000, min.getTime()))
+    min.setSeconds(0, 0)
+
+    const maxBase = new Date(baseDay); maxBase.setHours(23, 59, 59, 999)
+    const max = new Date(baseDay); max.setTime(Math.min(latest.getTime() + 60 * 60000, maxBase.getTime()))
+
+    if (!isValidDate(min) || !isValidDate(max)) {
+      return buildDefaultBounds(baseDay)
+    }
+
+    if (max <= min) {
+      const adjustedMax = new Date(min.getTime() + 60 * 60000)
+      return { min, max: adjustedMax, scrollToTime: min }
+    }
+
+    const scrollCandidate = new Date(Math.max(earliest.getTime() - 15 * 60000, min.getTime()))
+    const scrollToTime = scrollCandidate > max ? max : scrollCandidate
+    return { min, max, scrollToTime }
+  }, [eventsForCurrentDate, currentDate])
 
   const eventStyleGetter = useCallback((event) => {
     const theme = event?._theme || getAgendaTheme(event?.status)
-    const status = String(event?.status || '').toLowerCase()
-    const isCancelled = status === 'cancelado'
-    const isConfirmed = Boolean(event?.confirmedAt) || status === 'confirmado_wa'
-    const statusClass = isCancelled ? 'is-cancelled' : isConfirmed ? 'is-confirmed' : 'is-pending'
     return {
-      className: `pro-agenda__event ${statusClass}`,
+      className: 'pro-agenda__event',
       style: {
-        '--event-bg': theme.bg,
-        '--event-border': theme.border,
-        '--event-dot': theme.dot || theme.border,
-        '--event-text': theme.text,
+        backgroundColor: theme.bg,
+        border: `1px solid ${theme.border}`,
+        color: theme.text,
+        borderRadius: 12,
+        padding: '10px 12px',
+        boxShadow: '0 10px 18px rgba(15,23,42,0.08)',
+        borderLeft: `6px solid ${theme.dot || theme.border}`,
       },
     }
   }, [])
@@ -1244,11 +1176,19 @@ function ProfessionalAgendaView({ items, onForceCancel }) {
     ({ resource }) => {
       const theme = resourceThemes.get(resource?.id) || RESOURCE_COLORS[0]
       return (
-        <div className="pro-agenda__resource-header" title={resource?.title || ''}>
+        <div className="pro-agenda__resource-header">
           <span className="pro-agenda__resource-dot" style={{ backgroundColor: theme.dot || theme.border }} />
-          <span className="pro-agenda__resource-name">{resource?.title || ''}</span>
+          {resource?.avatar ? (
+            <img src={resource.avatar} alt={resource.title} className="pro-agenda__avatar" />
+          ) : (
+            <div className="pro-agenda__avatar pro-agenda__avatar--fallback">
+              {(resource?.title || 'PR').slice(0, 2).toUpperCase()}
+            </div>
+          )}
+          <span>{resource?.title || ''}</span>
         </div>
       )
+
     },
     [resourceThemes]
   )
@@ -1257,31 +1197,115 @@ function ProfessionalAgendaView({ items, onForceCancel }) {
     const theme = event?._theme || getAgendaTheme(event?.status)
     const serviceLabel = event?.service || event?.title || 'Servico'
     const clientLabel = event?.client ? ` - ${event.client}` : ''
-    const handleOpenDetails = () => setSelectedEvent(event)
-    const handleKeyDown = (eventKey) => {
-      if (eventKey.key === 'Enter' || eventKey.key === ' ') {
-        eventKey.preventDefault()
-        handleOpenDetails()
+    const isConfirmed = Boolean(event?.confirmedAt)
+    const isCancelled = String(event?.status || '').toLowerCase() === 'cancelado'
+    const startTime =
+      event?.start instanceof Date
+        ? event.start.getTime()
+        : event?.start
+          ? new Date(event.start).getTime()
+          : NaN
+    const hasStarted = Number.isFinite(startTime) && startTime <= Date.now()
+    const confirmationLabel = isConfirmed
+      ? 'Confirmado no WhatsApp'
+      : 'Aguardando confirmação no WhatsApp'
+    const pillStyle = isConfirmed
+      ? {
+          background: 'rgba(16, 185, 129, 0.12)',
+          color: '#0f9d58',
+        }
+      : {
+          background: 'rgba(107, 114, 128, 0.14)',
+          color: '#374151',
+        }
+    const [cancelling, setCancelling] = useState(false)
+    const [showCancelReason, setShowCancelReason] = useState(false)
+    const cancelReason =
+      'Cancelamento indisponível: horário ja iniciado.'
+    const cancelReasonId = `cancel-reason-${event?.id || 'evt'}`
+    const handleForceCancel = async () => {
+      if (!onForceCancel || cancelling || isCancelled) return
+      const confirmed = window.confirm('Cancelar este agendamento? O cliente sera notificado.')
+      if (!confirmed) return
+      try {
+        setCancelling(true)
+        await onForceCancel(event?.id)
+      } catch (err) {
+        const msg = err?.data?.message || err?.message || 'Não foi possível cancelar.'
+        window.alert(msg)
+      } finally {
+        setCancelling(false)
       }
     }
 
     return (
-      <div
-        className="pro-agenda__event-card"
-        role="button"
-        tabIndex={0}
-        onClick={handleOpenDetails}
-        onKeyDown={handleKeyDown}
-      >
-        <div className="pro-agenda__event-top">
-          <span className="pro-agenda__event-bar" style={{ backgroundColor: theme.dot }} />
+      <div className="pro-agenda__event-card">
+        <div className="pro-agenda__event-title">
+          <span className="pro-agenda__status-dot" style={{ backgroundColor: theme.dot }} />
           <div className="pro-agenda__event-lines">
-            <div className="pro-agenda__event-title" title={`${serviceLabel}${clientLabel}`}>
-              {serviceLabel}{clientLabel}
-            </div>
-            <div className="pro-agenda__event-sub">{formatHourRange(event?.start, event?.end)}</div>
+            <strong>{serviceLabel}{clientLabel}</strong>
+            <span className="pro-agenda__time">{formatHourRange(event?.start, event?.end)}</span>
+            {isCancelled ? (
+              <span className="badge badge--pro" style={{ background: '#fee2e2', color: '#7f1d1d', borderColor: '#fecdd3' }}>
+                Cancelado
+              </span>
+            ) : (
+              <span
+                className="pro-agenda__pill"
+                title={confirmationLabel}
+                aria-label={confirmationLabel}
+                style={{
+                  display: 'inline-block',
+                  marginTop: 4,
+                  padding: '3px 8px',
+                  borderRadius: 999,
+                  fontSize: 12,
+                  fontWeight: 600,
+                  ...pillStyle,
+                }}
+              >
+                {confirmationLabel}
+              </span>
+            )}
           </div>
         </div>
+        {!isCancelled && onForceCancel && (
+          <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              className="btn btn--sm btn--danger"
+              onClick={handleForceCancel}
+              disabled={cancelling || hasStarted}
+            >
+              {cancelling ? 'Cancelando...' : hasStarted ? 'Cancelamento indisponível' : 'Cancelar agendamento'}
+            </button>
+            {hasStarted ? (
+              <div className="cancel-tooltip">
+                <button
+                  type="button"
+                  className="cancel-tooltip__btn"
+                  aria-label="Ver motivo"
+                  aria-expanded={showCancelReason}
+                  aria-controls={cancelReasonId}
+                  onClick={(eventClick) => {
+                    eventClick.preventDefault()
+                    eventClick.stopPropagation()
+                    setShowCancelReason((open) => !open)
+                  }}
+                >
+                  <IconHelp aria-hidden="true" />
+                </button>
+                <div
+                  id={cancelReasonId}
+                  role="tooltip"
+                  className={`cancel-tooltip__content${showCancelReason ? ' is-open' : ''}`}
+                >
+                  {cancelReason}
+                </div>
+              </div>
+            ) : null}
+          </div>
+        )}
       </div>
     )
   }
@@ -1316,67 +1340,24 @@ function ProfessionalAgendaView({ items, onForceCancel }) {
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [filterOpen])
 
-  const selectedEventResource = selectedEvent ? resourceLookup.get(selectedEvent.resourceId) : null
-  const selectedEventStatus = selectedEvent ? getStatusPresentation(selectedEvent) : null
-  const selectedEventTitle = selectedEvent
-    ? `${selectedEvent.service || selectedEvent.title || 'Servico'}${selectedEvent.client ? ` - ${selectedEvent.client}` : ''}`
-    : ''
-  const selectedEventDate = selectedEvent ? DateHelpers.formatDateFull(selectedEvent.start) : ''
-  const selectedEventTime = selectedEvent ? formatHourRange(selectedEvent.start, selectedEvent.end) : ''
-  const selectedEventStartMs = selectedEvent
-    ? selectedEvent.start instanceof Date
-      ? selectedEvent.start.getTime()
-      : new Date(selectedEvent.start).getTime()
-    : NaN
-  const selectedEventHasStarted = Number.isFinite(selectedEventStartMs) && selectedEventStartMs <= Date.now()
-  const modalTitleId = selectedEvent?.id ? `agenda-modal-title-${selectedEvent.id}` : 'agenda-modal-title'
-  const whatsappLink = selectedEvent ? buildWhatsappLink(selectedEvent) : null
-  const whatsappLabel = whatsappLink ? 'WhatsApp' : 'Telefone nao informado'
-
-  const handleCloseDetails = () => setSelectedEvent(null)
-  const handleWhatsapp = () => {
-    if (!whatsappLink) return
-    window.open(whatsappLink, '_blank', 'noopener,noreferrer')
-  }
-  const handleCancelSelected = async () => {
-    if (!selectedEvent || !onForceCancel || cancelling) return
-    if (selectedEventHasStarted) return
-    if (selectedEventStatus?.isCancelled) return
-    const confirmed = window.confirm('Cancelar este agendamento? O cliente sera notificado.')
-    if (!confirmed) return
-    try {
-      setCancelling(true)
-      await onForceCancel(selectedEvent.id)
-      setSelectedEvent((prev) => (prev ? { ...prev, status: 'cancelado' } : prev))
-    } catch (err) {
-      const msg = err?.data?.message || err?.message || 'Nao foi possivel cancelar.'
-      window.alert(msg)
-    } finally {
-      setCancelling(false)
-    }
-  }
-
   return (
     <div className="pro-agenda">
       <div className="pro-agenda__toolbar">
-        <div className="pro-agenda__toolbar-row pro-agenda__toolbar-row--top">
-          <div className="pro-agenda__kpis">
-            <div className="pro-agenda__kpi">
-              <span>Profissionais</span>
-              <b>{professionalCount}</b>
-            </div>
-            <div className="pro-agenda__kpi">
-              <span>Hoje</span>
-              <b>{dayTotal} agend.</b>
-            </div>
+        <div className="pro-agenda__toolbar-left">
+          <div className="pro-agenda__toolbar-arrows">
+            <button className="btn btn--sm" type="button" aria-label="Dia anterior" onClick={handlePrevDay}>{'<'}</button>
+            <button className="btn btn--sm" type="button" onClick={handleToday}>Hoje</button>
+            <button className="btn btn--sm" type="button" aria-label="Proximo dia" onClick={handleNextDay}>{'>'}</button>
           </div>
+          <span className="pro-agenda__current-date pro-agenda__current-date--blue">{currentDateLabel}</span>
+        </div>
+        <div className="pro-agenda__toolbar-right">
           <div className="pro-agenda__filter" ref={filterRef}>
             <button
               type="button"
               className="pro-agenda__filter-btn"
               onClick={() => setFilterOpen((open) => !open)}
               title="Filtrar por profissional"
-              aria-expanded={filterOpen}
             >
               {selectedResource?.avatar ? (
                 <img src={selectedResource.avatar} alt={selectedResource.title} className="pro-agenda__filter-avatar" />
@@ -1386,7 +1367,7 @@ function ProfessionalAgendaView({ items, onForceCancel }) {
                 </div>
               )}
               <span>{selectedResource?.title || 'Todos profissionais'}</span>
-              <span className="pro-agenda__caret" aria-hidden="true">v</span>
+              <span className="pro-agenda__caret">▾</span>
             </button>
             {filterOpen && (
               <div className="pro-agenda__filter-menu">
@@ -1419,146 +1400,32 @@ function ProfessionalAgendaView({ items, onForceCancel }) {
             )}
           </div>
         </div>
-        <div className="pro-agenda__toolbar-row pro-agenda__toolbar-row--bottom">
-          <div className="pro-agenda__nav">
-            <button
-              className="pro-agenda__mini"
-              type="button"
-              aria-label="Dia anterior"
-              onClick={handlePrevDay}
-            >
-              {'<'}
-            </button>
-            <button className="pro-agenda__btn" type="button" onClick={handleToday}>
-              Hoje
-            </button>
-            <button
-              className="pro-agenda__mini"
-              type="button"
-              aria-label="Proximo dia"
-              onClick={handleNextDay}
-            >
-              {'>'}
-            </button>
-          </div>
-          <div className="pro-agenda__date-pill">{currentDateLabel}</div>
-        </div>
       </div>
 
-      <div className="pro-agenda__calendar">
-        <BigCalendar
-          localizer={localizer}
-          events={filteredEvents}
-          resources={filteredResources}
-          resourceIdAccessor="id"
-          resourceAccessor="resourceId"
-          resourceTitleAccessor="title"
-          startAccessor="start"
-          endAccessor="end"
-          defaultView={Views.DAY}
-          views={[Views.DAY]}
-          step={60}
-          timeslots={1}
-          style={{ height: 720 }}
-          eventPropGetter={eventStyleGetter}
-          selectable={false}
-          toolbar={false}
-          formats={formats}
-          dayLayoutAlgorithm="no-overlap"
-          components={{
-            header: () => null,
-            resourceHeader: ResourceHeader,
-            timeGutterHeader: () => <span className="pro-agenda__gutter-head">Hora</span>,
-            event: AgendaEvent,
-          }}
-          min={timeBounds.min}
-          max={timeBounds.max}
-          scrollToTime={timeBounds.scrollToTime}
-          date={currentDate}
-          onNavigate={(date) => setCurrentDate(date instanceof Date ? date : new Date(date))}
-        />
-      </div>
-      {selectedEvent && (
-        <div className="modal-backdrop" role="presentation" onClick={handleCloseDetails}>
-          <div
-            className="modal"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby={modalTitleId}
-            onClick={(eventClick) => eventClick.stopPropagation()}
-          >
-            <div className="modal__header">
-              <h3 className="modal__title" id={modalTitleId}>Detalhes do agendamento</h3>
-              <button type="button" className="modal__close" onClick={handleCloseDetails} aria-label="Fechar">
-                ×
-              </button>
-            </div>
-            <div className="modal__body">
-              <div className="pro-agenda__modal-title">{selectedEventTitle}</div>
-              {selectedEventStatus && (
-                <div className="pro-agenda__modal-status">
-                  <span className={selectedEventStatus.badgeClass} aria-label={selectedEventStatus.label}>
-                    {selectedEventStatus.label}
-                  </span>
-                </div>
-              )}
-              <div className="pro-agenda__modal-grid">
-                <div>
-                  <div className="pro-agenda__modal-label">Data</div>
-                  <div className="pro-agenda__modal-value">{selectedEventDate}</div>
-                </div>
-                <div>
-                  <div className="pro-agenda__modal-label">Horário</div>
-                  <div className="pro-agenda__modal-value">{selectedEventTime}</div>
-                </div>
-                <div>
-                  <div className="pro-agenda__modal-label">Profissional</div>
-                  <div className="pro-agenda__modal-value">{selectedEventResource?.title || 'Profissional'}</div>
-                </div>
-                <div>
-                  <div className="pro-agenda__modal-label">Cliente</div>
-                  <div className="pro-agenda__modal-value">{selectedEvent?.client || 'Nao informado'}</div>
-                </div>
-                <div>
-                  <div className="pro-agenda__modal-label">Serviço</div>
-                  <div className="pro-agenda__modal-value">{selectedEvent?.service || 'Servico'}</div>
-                </div>
-              </div>
-              {selectedEventHasStarted && !selectedEventStatus?.isCancelled && (
-                <div className="pro-agenda__modal-note">
-                  Cancelamento indisponível: horário já iniciado.
-                </div>
-              )}
-            </div>
-            <div className="modal__actions">
-              {!selectedEventStatus?.isCancelled && (
-                <button
-                  type="button"
-                  className="btn pro-agenda__modal-cancel"
-                  onClick={handleCancelSelected}
-                  disabled={cancelling || selectedEventHasStarted}
-                >
-                  {cancelling ? 'Cancelando...' : 'Cancelar agendamento'}
-                </button>
-              )}
-              <button
-                type="button"
-                className="btn pro-agenda__modal-whatsapp"
-                onClick={handleWhatsapp}
-                disabled={!whatsappLink}
-                title={whatsappLabel}
-                aria-label={whatsappLabel}
-              >
-                WhatsApp
-              </button>
-              <button type="button" className="btn btn--outline" onClick={handleCloseDetails}>
-                Fechar
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <BigCalendar
+        localizer={localizer}
+        events={filteredEvents}
+        resources={filteredResources}
+        resourceIdAccessor="id"
+        resourceTitleAccessor="title"
+        startAccessor="start"
+        endAccessor="end"
+        defaultView={Views.DAY}
+        views={[Views.DAY]}
+        step={60}
+        timeslots={1}
+        style={{ height: 720 }}
+        eventPropGetter={eventStyleGetter}
+        selectable={false}
+        toolbar={false}
+        formats={formats}
+        components={{ header: () => null, resourceHeader: ResourceHeader, event: AgendaEvent }}
+        min={timeBounds.min}
+        max={timeBounds.max}
+        scrollToTime={timeBounds.scrollToTime}
+        date={currentDate}
+        onNavigate={(date) => setCurrentDate(date instanceof Date ? date : new Date(date))}
+      />
     </div>
   )
-
 }
