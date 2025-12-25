@@ -11,6 +11,8 @@ export default function Modal({
   bodyClassName = '',
 }) {
   const bodyClass = bodyClassName ? `modal__body ${bodyClassName}` : 'modal__body';
+  const hasTitle = Boolean(title);
+  const headerClass = hasTitle ? 'modal__header' : 'modal__header modal__header--compact';
 
   const handleBackdropClick = (event) => {
     if (disableOutsideClick) {
@@ -30,7 +32,7 @@ export default function Modal({
         onClick={(e) => e.stopPropagation()}
       >
         {(title || closeButton) && (
-          <div className="modal__header">
+          <div className={headerClass}>
             {title ? <h3 className="modal__title">{title}</h3> : <span aria-hidden="true" />}
             {closeButton && (
               <button type="button" className="modal__close" onClick={onClose} aria-label="Fechar">

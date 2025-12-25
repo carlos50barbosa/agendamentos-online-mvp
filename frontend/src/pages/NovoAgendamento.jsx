@@ -3215,7 +3215,6 @@ useEffect(() => {
       )}
       {profileImageModalOpen && establishmentAvatar && (
         <Modal
-          title={`Foto de ${selectedEstablishmentName || 'Estabelecimento'}`}
           onClose={handleCloseProfileImage}
           closeButton
           bodyClassName="modal__body--scroll"

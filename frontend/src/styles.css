@@ -442,6 +442,8 @@ body{
 }
 .modal{background:var(--surface);border:1px solid var(--border);border-radius:12px;width:min(560px,95vw);max-height:92vh;box-shadow:0 10px 30px rgba(0,0,0,.12);display:flex;flex-direction:column;overflow:hidden;}
 .modal__header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 16px 12px;border-bottom:1px solid var(--border);}
+.modal__header--compact{padding:6px 8px;border-bottom:none;}
+.modal__header--compact .modal__close{width:22px;height:22px;font-size:16px;}
 .modal__title{margin:0;font-size:18px;font-weight:600;color:var(--text);}
 .modal__close{background:transparent;border:0;width:32px;height:32px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:22px;color:var(--muted);cursor:pointer;transition:background .18s ease,color .18s ease;}
 .modal__close:hover,.modal__close:focus-visible{background:var(--surface-soft);color:var(--text);outline:none;}
