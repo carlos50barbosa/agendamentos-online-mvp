@@ -1,0 +1,17 @@
+REGRAS DE LEMBRETES (AGENDAMENTOS)
+
+CLIENTE (WhatsApp)
+- Rotina: backend/src/lib/appointment_reminders.js
+- Frequencia: a cada 1 minuto (REMINDER_8H_INTERVAL_MS, padrao 60000 ms)
+- Condicoes: agendamento confirmado, inicio no futuro, reminder_8h_sent_at vazio
+- Janela: TIMESTAMPDIFF(MINUTE, NOW(), a.inicio) <= 480
+- Guarda adicional: so envia quando agora >= inicio - 8h (aprox. 8 horas antes)
+- Template: WA_TEMPLATE_NAME_REMINDER (no .env: lembrete_agendamento_v2)
+
+ESTABELECIMENTO (WhatsApp/Email)
+- Rotina: backend/src/lib/estab_reminders.js
+- Frequencia: a cada 1 minuto (ESTAB_REMINDER_5H_INTERVAL_MS, padrao 60000 ms)
+- Condicoes: agendamento confirmado, inicio no futuro, estab_reminder_5h_sent_at vazio
+- Janela: TIMESTAMPDIFF(MINUTE, NOW(), a.inicio) <= 300
+- Texto do lembrete: "Faltam 5h ..."
+- Template: WA_TEMPLATE_NAME_ESTAB_REMINDER (no .env: lembrete_agendamento_estab_v1)

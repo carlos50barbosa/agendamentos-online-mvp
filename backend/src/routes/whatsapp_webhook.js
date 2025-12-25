@@ -171,13 +171,13 @@ async function tryRecordReminderConfirmation({ contextMessageId, fromDigits }) {
         'UPDATE agendamentos SET cliente_confirmou_whatsapp_at = COALESCE(cliente_confirmou_whatsapp_at, NOW()) WHERE id=? LIMIT 1',
         [fallback.id]
       );
-      return true;
+      return { ok: true };
     }
-    return false;
+    return { ok: false, reason: 'not_found' };
   }
   try {
     const [[row]] = await pool.query(
-      `SELECT a.id, a.cliente_id, u.telefone
+      `SELECT a.id, a.status, u.telefone
        FROM agendamentos a
        JOIN usuarios u ON u.id = a.cliente_id
        WHERE a.reminder_8h_msg_id=? LIMIT 1`,
@@ -190,21 +190,27 @@ async function tryRecordReminderConfirmation({ contextMessageId, fromDigits }) {
           'UPDATE agendamentos SET cliente_confirmou_whatsapp_at = COALESCE(cliente_confirmou_whatsapp_at, NOW()) WHERE id=? LIMIT 1',
           [fallback.id]
         );
-        return true;
+        return { ok: true };
       }
-      return false;
+      return { ok: false, reason: 'not_found' };
     }
     const tel = toDigits(row.telefone);
-    if (tel && tel !== fromDigits) return false;
+    if (tel && tel !== fromDigits) return { ok: false, reason: 'phone_mismatch' };
+
+    const statusNorm = String(row.status || '').toLowerCase();
+    if (!['confirmado', 'pendente'].includes(statusNorm)) {
+      if (statusNorm === 'cancelado') return { ok: false, reason: 'cancelled' };
+      return { ok: false, reason: 'not_confirmable', status: statusNorm };
+    }
 
     await pool.query(
       'UPDATE agendamentos SET cliente_confirmou_whatsapp_at = COALESCE(cliente_confirmou_whatsapp_at, NOW()) WHERE id=? LIMIT 1',
       [row.id]
     );
-    return true;
+    return { ok: true };
   } catch (e) {
     console.warn('[wa/confirm-btn] erro ao registrar confirmacao', e?.message || e);
-    return false;
+    return { ok: false, reason: 'error' };
   }
 }
 
@@ -247,8 +253,16 @@ router.post('/', async (req, res) => {
     const contextMsgId = msg?.context?.id || null;
     if (buttonPayload || contextMsgId) {
       const recorded = await tryRecordReminderConfirmation({ contextMessageId: contextMsgId, fromDigits: from });
-      if (recorded) {
+      if (recorded?.ok) {
         await send(from, 'Confirmado! Vamos te aguardar no horário combinado.');
+        return res.sendStatus(200);
+      }
+      if (recorded?.reason === 'cancelled') {
+        await send(from, 'Esse agendamento foi cancelado e não pode ser confirmado. Entre em contato com o estabelecimento se tiver dúvidas.');
+        return res.sendStatus(200);
+      }
+      if (recorded?.reason === 'not_confirmable') {
+        await send(from, 'Esse agendamento nao esta disponível para confirmacao.');
         return res.sendStatus(200);
       }
     }
