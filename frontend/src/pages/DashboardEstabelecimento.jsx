@@ -1,9 +1,9 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import moment from 'moment'
 import 'moment/locale/pt-br'
 import 'react-big-calendar/lib/css/react-big-calendar.css'
 import { Calendar as BigCalendar, momentLocalizer, Views } from 'react-big-calendar'
-import { Api } from '../utils/api'
+import { Api, resolveAssetUrl } from '../utils/api'
 import { IconBell } from '../components/Icons.jsx'
 import { getUser, USER_EVENT } from '../utils/auth'
 
@@ -529,6 +529,8 @@ export default function DashboardEstabelecimento() {
   const [currentUser, setCurrentUser] = useState(() => getUser())
   const [showCalendar, setShowCalendar] = useState(false)
   const [showProAgenda, setShowProAgenda] = useState(true)
+  const [professionals, setProfessionals] = useState([])
+  const calendarRef = useRef(null)
   const establishmentId =
     currentUser && currentUser.tipo === 'estabelecimento' ? currentUser.id : null
 
@@ -555,6 +557,24 @@ export default function DashboardEstabelecimento() {
   }, [])
 
   useEffect(() => {
+    if (!establishmentId) {
+      setProfessionals([])
+      return
+    }
+    let mounted = true
+    Api.profissionaisList()
+      .then((data) => {
+        if (mounted) setProfessionals(Array.isArray(data) ? data : [])
+      })
+      .catch(() => {
+        if (mounted) setProfessionals([])
+      })
+    return () => {
+      mounted = false
+    }
+  }, [establishmentId])
+
+  useEffect(() => {
     let mounted = true
     setLoading(true)
     const reqStatus = status || 'todos'
@@ -572,6 +592,20 @@ export default function DashboardEstabelecimento() {
       mounted = false
     }
   }, [status])
+
+  useEffect(() => {
+    if (!showCalendar) return
+    const node = calendarRef.current
+    if (!node) return
+    const timer = window.setTimeout(() => {
+      node.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [showCalendar])
+
+  const handleToggleCalendar = () => {
+    setShowCalendar((open) => !open)
+  }
 
   const totals = useMemo(() => {
     const acc = { recebidos: 0, cancelados: 0 }
@@ -644,7 +678,7 @@ export default function DashboardEstabelecimento() {
             <button
               type="button"
               className="agenda-btn agenda-btn--primary"
-              onClick={() => setShowCalendar((open) => !open)}
+              onClick={handleToggleCalendar}
             >
               {showCalendar ? 'Ocultar calendario' : 'Ver calendario'}
             </button>
@@ -662,11 +696,11 @@ export default function DashboardEstabelecimento() {
           </div>
         </div>
         <div className="pro-agenda__wrap">
-          <ProfessionalAgendaView items={filtered} onForceCancel={handleForceCancel} />
+          <ProfessionalAgendaView items={filtered} professionals={professionals} onForceCancel={handleForceCancel} />
         </div>
       </div>
       {showCalendar && (
-        <div className="agenda-calendar">
+        <div className="agenda-calendar" ref={calendarRef}>
           <CalendarAvailability establishmentId={establishmentId} />
         </div>
       )}
@@ -965,30 +999,56 @@ const RESOURCE_COLORS = [
 ]
 
 
-function ProfessionalAgendaView({ items, onForceCancel }) {
+function ProfessionalAgendaView({ items, onForceCancel, professionals }) {
+  const getResourceId = (item) =>
+    item?.profissional_id ??
+    item?.professional_id ??
+    item?.profissional ??
+    item?.professional ??
+    item?.profissional_nome ??
+    item?.professional_name ??
+    'sem-id'
+
+  const getResourceName = (item) =>
+    item?.profissional_nome ||
+    item?.profissional ||
+    item?.professional_name ||
+    item?.professional ||
+    'Profissional'
+
+  const getResourceAvatar = (value) => {
+    const resolved = resolveAssetUrl(value || '')
+    return resolved || null
+  }
+
   const resources = useMemo(() => {
     const map = new Map()
-    ;(items || []).forEach((item) => {
+    ;(professionals || []).forEach((prof) => {
       const id =
-        item?.profissional_id ||
-        item?.professional_id ||
-        item?.profissional ||
-        item?.professional ||
-        item?.profissional_nome ||
-        item?.professional_name ||
-        'sem-id'
+        prof?.id ??
+        prof?.profissional_id ??
+        prof?.professional_id ??
+        prof?.profissional ??
+        prof?.professional
+      if (id == null) return
       const name =
-        item?.profissional_nome ||
-        item?.profissional ||
-        item?.professional_name ||
-        item?.professional ||
+        prof?.nome ||
+        prof?.name ||
+        prof?.profissional_nome ||
+        prof?.professional_name ||
         'Profissional'
-      const avatar = item?.profissional_avatar_url || item?.professional_avatar || null
+      const avatar = getResourceAvatar(prof?.avatar_url || prof?.avatar || '')
+      map.set(id, { id, title: name, avatar })
+    })
+    ;(items || []).forEach((item) => {
+      const id = getResourceId(item)
+      const name = getResourceName(item)
+      const avatar = getResourceAvatar(item?.profissional_avatar_url || item?.professional_avatar || '')
       if (!map.has(id)) map.set(id, { id, title: name, avatar })
     })
     if (!map.size) map.set('sem-id', { id: 'sem-id', title: 'Profissional', avatar: null })
     return Array.from(map.values()).sort((a, b) => String(a.title || '').localeCompare(String(b.title || '')))
-  }, [items])
+  }, [items, professionals])
 
   const resourceThemes = useMemo(() => {
     const themes = new Map()
@@ -1026,14 +1086,7 @@ function ProfessionalAgendaView({ items, onForceCancel }) {
         if (!Number.isFinite(end.getTime()) || end <= start) {
           end = new Date(start.getTime() + 30 * 60000)
         }
-        const resourceId =
-          item?.profissional_id ||
-          item?.professional_id ||
-          item?.profissional ||
-          item?.professional ||
-          item?.profissional_nome ||
-          item?.professional_name ||
-          'sem-id'
+        const resourceId = getResourceId(item)
         const service = item?.servico_nome || item?.service_name || 'Servico'
         const client = item?.cliente_nome || item?.client_name || ''
         const clientPhone =
