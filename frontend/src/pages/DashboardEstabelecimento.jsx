@@ -680,7 +680,7 @@ export default function DashboardEstabelecimento() {
               className="agenda-btn agenda-btn--primary"
               onClick={handleToggleCalendar}
             >
-              {showCalendar ? 'Ocultar calendario' : 'Ver calendario'}
+              {showCalendar ? 'Ocultar calendario' : 'Ver calendário'}
             </button>
             <select
               className="agenda-select"
@@ -690,7 +690,7 @@ export default function DashboardEstabelecimento() {
             >
               <option value="todos">Todos</option>
               <option value="confirmado">Confirmados</option>
-              <option value="concluido">Concluidos</option>
+              <option value="concluido">Concluídos</option>
               <option value="cancelado">Cancelados</option>
             </select>
           </div>
