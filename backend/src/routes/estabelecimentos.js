@@ -1941,9 +1941,9 @@ router.post('/:id/images', auth, isEstabelecimento, async (req, res) => {
 
         limit === 0
 
-          ? 'Seu plano atual nao permite adicionar imagens.'
+          ? 'Seu plano atual não permite adicionar imagens.'
 
-          : `Seu plano atual permite cadastrar ate ${limit} imagens.`;
+          : `Seu plano atual permite cadastrar até ${limit} imagens.`;
 
       return res.status(409).json({ error: 'gallery_limit_reached', message, details: { limit } });
 

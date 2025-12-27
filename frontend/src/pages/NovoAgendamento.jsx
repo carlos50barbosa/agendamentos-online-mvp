@@ -1264,7 +1264,7 @@ export default function NovoAgendamento() {
     } catch {}
   }, [filters]);
   // Toast helper
-  const showToast = useCallback((type, message, duration = 4500) => {
+  const showToast = useCallback((type, message, duration = 5000) => {
     setToast({ type, message });
     if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
     toastTimeoutRef.current = setTimeout(() => {

@@ -29,6 +29,8 @@ export default function ServicosEstabelecimento() {
   });
   const [precoStr, setPrecoStr] = useState("R$ 0,00");
   const [saving, setSaving] = useState(false);
+  const [addOpen, setAddOpen] = useState(false);
+  const [showAddValidation, setShowAddValidation] = useState(false);
   const [selectedProsNew, setSelectedProsNew] = useState([]);
   const [newImage, setNewImage] = useState({ preview: null, dataUrl: null });
   const [newImageError, setNewImageError] = useState('');
@@ -49,6 +51,7 @@ export default function ServicosEstabelecimento() {
   const [editForm, setEditForm] = useState({ nome: '', descricao: '', duracao_min: 30, preco_centavos: 0 });
   const [editPrecoStr, setEditPrecoStr] = useState('R$ 0,00');
   const [editSaving, setEditSaving] = useState(false);
+  const [editToggling, setEditToggling] = useState(false);
   const [selectedProsEdit, setSelectedProsEdit] = useState([]);
   const [editImage, setEditImage] = useState({ preview: null, dataUrl: null, remove: false });
   const [editImageError, setEditImageError] = useState('');
@@ -58,7 +61,7 @@ export default function ServicosEstabelecimento() {
   const [toast, setToast] = useState(null); // {type:'success'|'error'|'info', msg:string}
   const [planLimitOpen, setPlanLimitOpen] = useState(false);
   const [planLimitMessage, setPlanLimitMessage] = useState('');
-  function showToast(type, msg, ms = 2500) {
+  function showToast(type, msg, ms = 5000) {
     setToast({ type, msg });
     window.clearTimeout(showToast._t);
     showToast._t = window.setTimeout(() => setToast(null), ms);
@@ -178,6 +181,24 @@ export default function ServicosEstabelecimento() {
     if (newImageInputRef.current) newImageInputRef.current.value = '';
   }
 
+  function resetNewServiceForm() {
+    setForm({ nome: "", descricao: "", duracao_min: 30, preco_centavos: 0, ativo: true });
+    setPrecoStr("R$ 0,00");
+    setSelectedProsNew([]);
+    clearNewImage();
+    setShowAddValidation(false);
+  }
+
+  function openAdd() {
+    setShowAddValidation(false);
+    setAddOpen(true);
+  }
+
+  function closeAdd() {
+    resetNewServiceForm();
+    setAddOpen(false);
+  }
+
   async function handleEditImageChange(event) {
     const file = event.target.files?.[0];
     const ok = await handleImageSelection(file, (dataUrl) => {
@@ -204,6 +225,7 @@ export default function ServicosEstabelecimento() {
   async function add(e) {
     e.preventDefault();
     if (formInvalid) {
+      setShowAddValidation(true);
       if (newImageError) {
         showToast('error', newImageError);
       } else {
@@ -224,10 +246,8 @@ export default function ServicosEstabelecimento() {
       payload.professionalIds = selectedProsNew;
       const novo = await Api.servicosCreate(payload);
       setList((curr) => [novo, ...curr]);
-      setForm({ nome: "", descricao: "", duracao_min: 30, preco_centavos: 0, ativo: true });
-      setPrecoStr("R$ 0,00");
-      setSelectedProsNew([]);
-      clearNewImage();
+      resetNewServiceForm();
+      setAddOpen(false);
       showToast("success", "Serviço cadastrado!");
     } catch (err) {
       if (err?.data?.error === 'plan_limit') {
@@ -326,6 +346,22 @@ export default function ServicosEstabelecimento() {
     }
   }
 
+  async function handleToggleEditStatus() {
+    if (!editItem || editToggling) return;
+    setEditToggling(true);
+    const ok = await toggleAtivo(editItem);
+    if (ok) {
+      setEditItem((prev) => (prev ? { ...prev, ativo: !prev.ativo } : prev));
+    }
+    setEditToggling(false);
+  }
+
+  function handleDeleteFromEdit() {
+    if (!editItem) return;
+    setEditOpen(false);
+    askDelete(editItem);
+  }
+
   async function confirmDelete() {
     if (!toDelete) return;
     const id = toDelete.id;
@@ -364,9 +400,11 @@ export default function ServicosEstabelecimento() {
         curr.map((x) => (x.id === svc.id ? { ...x, _updating: false } : x))
       );
       showToast("success", `Serviço ${novoAtivo ? "ativado" : "inativado"}.`);
+      return true;
     } catch (e) {
       setList(prev);
       showToast("error", "Não foi possível atualizar o status.");
+      return false;
     }
   }
 
@@ -404,10 +442,99 @@ export default function ServicosEstabelecimento() {
       {/* Toast */}
       {toast && <div className={`toast ${toast.type}`}>{toast.msg}</div>}
 
-      {/* Novo Serviço */}
-        <div className="card">
-          <h2 style={{ marginBottom: 8 }}>Novo Serviço</h2>
-          <form onSubmit={add} className="service-form">
+      {/* Meus Serviços */}
+      <div className="card">
+        <div className="header-row" style={{ display: "flex", gap: 10, alignItems: "flex-start", flexDirection: "column", marginBottom: 12 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap", width: "100%" }}>
+            <h2 style={{ margin: 0, fontSize: 20 }}>Meus Serviços</h2>
+            <button className="btn btn--primary btn--sm" type="button" onClick={openAdd}>
+              Adicionar serviço
+            </button>
+          </div>
+          <div className="filters" style={{ display: "flex", gap: 8, flexWrap: 'wrap' }}>
+            <input
+              className="input"
+              placeholder="Buscar por nome..."
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+            <select
+              className="input"
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+            >
+              <option value="todos">Todos</option>
+              <option value="ativos">Ativos</option>
+              <option value="inativos">Inativos</option>
+            </select>
+          </div>
+        </div>
+
+        {loadingList ? (
+          <SkeletonTable />
+        ) : filtered.length === 0 ? (
+          <div className="empty">
+            <p>Nenhum serviço encontrado.</p>
+            <small>Dica: ajuste a busca ou clique em "Adicionar serviço".</small>
+          </div>
+        ) : (
+          <>
+            <div className="count" style={{ marginBottom: 8 }}>
+              Exibindo <b>{filtered.length}</b>{" "}
+              {filtered.length === 1 ? "servico" : "serviços"}.
+            </div>
+            <div className="services-list">
+              {filtered.map((s) => {
+                const imageUrl = resolveAssetUrl(s.imagem_url || '');
+                const description = String(s.descricao || '').trim();
+                return (
+                  <div key={s.id} className={`mini-card service-card ${s._updating ? "is-updating" : ""}`}>
+                    <div className="mini-card__content">
+                      {imageUrl ? (
+                        <div className="mini-card__media">
+                          <img src={imageUrl} alt={`Imagem do servico ${s.nome}`} />
+                        </div>
+                      ) : (
+                        <div className="mini-card__media service-card__media--empty">
+                          <span>Sem imagem</span>
+                        </div>
+                      )}
+                      <div className="mini-card__main">
+                        <div className="mini-card__title">{s.nome}</div>
+                        {description && (
+                          <div className="mini-card__description">{description}</div>
+                        )}
+                        <div className="service-card__meta">
+                          <div className="service-card__price">{formatBRL(s.preco_centavos ?? 0)}</div>
+                          <div className="service-card__duration">{s.duracao_min} min</div>
+                        </div>
+                        <div className="service-card__footer">
+                          <div className="service-card__actions">
+                            <button
+                              className="btn btn--outline btn--sm"
+                              onClick={() => openEdit(s)}
+                              disabled={!!s._updating}
+                            >
+                              Editar
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+          </>
+        )}
+      </div>
+
+
+      {addOpen && (
+        <Modal onClose={saving ? null : closeAdd}>
+          <h3>Novo serviço</h3>
+          <form onSubmit={add} className="service-form" style={{ marginTop: 8 }}>
             <input
               className="input"
               placeholder="Nome do serviço"
@@ -430,7 +557,7 @@ export default function ServicosEstabelecimento() {
                 {newImage.preview ? (
                   <img
                     src={newImage.preview}
-                    alt="Pre-visualizacao"
+                    alt="Pré-visualização"
                     className="service-form__image-preview"
                   />
                 ) : (
@@ -520,13 +647,17 @@ export default function ServicosEstabelecimento() {
               </div>
             )}
 
-            <button className="btn btn--primary" disabled={saving || formInvalid}>
-              {saving ? <span className="spinner" /> : "Salvar"}
-            </button>
+            <div className="row" style={{ justifyContent: "flex-end", gap: 8 }}>
+              <button type="button" className="btn btn--outline" onClick={closeAdd} disabled={saving}>
+                Cancelar
+              </button>
+              <button className="btn btn--primary" disabled={saving}>
+                {saving ? <span className="spinner" /> : "Salvar"}
+              </button>
+            </div>
           </form>
 
-          {/* Dica de validacao */}
-          {formMissingFields && (
+          {showAddValidation && formMissingFields && (
             <small
               className="muted"
               style={{
@@ -543,106 +674,8 @@ export default function ServicosEstabelecimento() {
               cadastrar o serviço.
             </small>
           )}
-        </div>
-
-      {/* Meus Serviços */}
-      <div className="card">
-        <div className="header-row" style={{ display: "flex", gap: 8, alignItems: "flex-start", flexDirection: "column", marginBottom: 12 }}>
-          <h2 style={{ margin: 0, fontSize: 20 }}>Meus Serviços</h2>
-          <div className="filters" style={{ display: "flex", gap: 8, flexWrap: 'wrap' }}>
-            <input
-              className="input"
-              placeholder="Buscar por nome..."
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-            />
-            <select
-              className="input"
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-            >
-              <option value="todos">Todos</option>
-              <option value="ativos">Ativos</option>
-              <option value="inativos">Inativos</option>
-            </select>
-          </div>
-        </div>
-
-        {loadingList ? (
-          <SkeletonTable />
-        ) : filtered.length === 0 ? (
-          <div className="empty">
-            <p>Nenhum serviço encontrado.</p>
-            <small>Dica: ajuste a busca ou cadastre um novo serviço acima.</small>
-          </div>
-        ) : (
-          <>
-            <div className="count" style={{ marginBottom: 8 }}>
-              Exibindo <b>{filtered.length}</b>{" "}
-              {filtered.length === 1 ? "servico" : "serviços"}.
-            </div>
-            <div className="services-list">
-              {filtered.map((s) => {
-                const imageUrl = resolveAssetUrl(s.imagem_url || '');
-                const description = String(s.descricao || '').trim();
-                return (
-                  <div key={s.id} className={`mini-card service-card ${s._updating ? "is-updating" : ""}`}>
-                    <div className="mini-card__content">
-                      {imageUrl ? (
-                        <div className="mini-card__media">
-                          <img src={imageUrl} alt={`Imagem do servico ${s.nome}`} />
-                        </div>
-                      ) : (
-                        <div className="mini-card__media service-card__media--empty">
-                          <span>Sem imagem</span>
-                        </div>
-                      )}
-                      <div className="mini-card__main">
-                        <div className="mini-card__title">{s.nome}</div>
-                        {description && (
-                          <div className="mini-card__description">{description}</div>
-                        )}
-                        <div className="service-card__meta">
-                          <div className="service-card__price">{formatBRL(s.preco_centavos ?? 0)}</div>
-                          <div className="service-card__duration">{s.duracao_min} min</div>
-                        </div>
-                      </div>
-                    </div>
-                    <div className="service-card__footer">
-                      <button
-                        className={`badge service-status ${s.ativo ? "ok" : "out"}`}
-                        title="Clique para alternar"
-                        onClick={() => toggleAtivo(s)}
-                        disabled={!!s._updating}
-                      >
-                        {s.ativo ? "Ativo" : "Inativo"}
-                      </button>
-                      <div className="service-card__actions">
-                        <button
-                          className="btn btn--outline btn--sm"
-                          onClick={() => openEdit(s)}
-                          disabled={!!s._updating}
-                        >
-                          Editar
-                        </button>
-                        <button
-                          className="btn btn--danger btn--sm"
-                          onClick={() => askDelete(s)}
-                          disabled={!!s._updating}
-                        >
-                          Excluir
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-
-          </>
-        )}
-      </div>
-
+        </Modal>
+      )}
       {/* Modal de confirmacao */}
       {confirmOpen && (
         <Modal onClose={() => setConfirmOpen(false)}>
@@ -669,7 +702,7 @@ export default function ServicosEstabelecimento() {
         <Modal onClose={() => setPlanLimitOpen(false)}>
           <h3>Atualize seu plano</h3>
           <p>
-            {planLimitMessage || 'Seu plano atual (Starter) permite cadastrar ate 10 serviços. Para adicionar novos serviços, migre para o plano Pro ou Premium.'}
+            {planLimitMessage || 'Seu plano atual (Starter) permite cadastrar até 10 serviços. Para adicionar novos serviços, migre para o plano Pro ou Premium.'}
           </p>
           <p className="muted">
             Acesse <strong>Configurações &gt; Planos</strong> ou utilize os botões abaixo para mudar de plano.
@@ -728,7 +761,7 @@ export default function ServicosEstabelecimento() {
                 {editImage.preview ? (
                   <img
                     src={editImage.preview}
-                    alt="Pre-visualizacao"
+                    alt="Pré-visualização"
                     className="service-form__image-preview"
                   />
                 ) : (
@@ -775,10 +808,29 @@ export default function ServicosEstabelecimento() {
               </div>
             )}
           </div>
+          <div className="row" style={{ gap: 8, flexWrap: "wrap", marginTop: 12 }}>
+            <label className="switch switch--status" style={{ margin: 0 }}>
+              <input
+                type="checkbox"
+                checked={!!editItem?.ativo}
+                onChange={handleToggleEditStatus}
+                disabled={editSaving || editToggling}
+              />
+              <span>{editItem?.ativo ? "Ativo" : "Inativo"}</span>
+            </label>
+          </div>
           <div className="row" style={{ gap: 8, justifyContent: 'flex-end', marginTop: 12 }}>
+            <button
+              type="button"
+              className="btn btn--danger"
+              onClick={handleDeleteFromEdit}
+              disabled={editSaving}
+            >
+              Excluir
+            </button>
             <button className="btn btn--outline" onClick={()=>setEditOpen(false)}>Cancelar</button>
             <button className="btn btn--primary" onClick={saveEdit} disabled={editSaving || editInvalid}>
-              {editSaving ? <span className="spinner"/> : 'Salvar alteracoes'}
+              {editSaving ? <span className="spinner"/> : 'Salvar alterações'}
             </button>
           </div>
         </Modal>
@@ -802,13 +854,11 @@ function SkeletonTable() {
               <div className="shimmer" style={{ width: "50%", height: 14 }} />
               <div className="shimmer" style={{ width: "80%", height: 12 }} />
               <div className="shimmer" style={{ width: "40%", height: 12 }} />
-            </div>
-          </div>
-          <div className="service-card__footer">
-            <div className="shimmer pill" style={{ width: 80 }} />
-            <div className="service-card__actions">
-              <div className="shimmer" style={{ width: 70, height: 28, borderRadius: 10 }} />
-              <div className="shimmer" style={{ width: 70, height: 28, borderRadius: 10 }} />
+              <div className="service-card__footer">
+                <div className="service-card__actions">
+                  <div className="shimmer" style={{ width: 120, height: 28, borderRadius: 10 }} />
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -821,7 +871,9 @@ function Modal({ children, onClose }) {
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
-        {children}
+        <div className="modal__body">
+          {children}
+        </div>
       </div>
     </div>
   );

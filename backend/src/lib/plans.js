@@ -156,17 +156,17 @@ export function formatPlanLimitExceeded(planConfig, type) {
   if (type === 'appointments') {
     if (planConfig.maxMonthlyAppointments === null) return null;
     const nextPlan = planConfig.code === 'starter' ? 'Pro' : 'Premium';
-    return `Seu plano atual (${planConfig.label}) permite receber ate ${planConfig.maxMonthlyAppointments} agendamentos por mes. Atualize para o plano ${nextPlan} para continuar confirmando novos horarios.`;
+    return `Limite do plano (${planConfig.label}) atingido: ${planConfig.maxMonthlyAppointments} agendamentos/mês. Atualize para ${nextPlan}.`;
   }
   if (type === 'services') {
     if (planConfig.maxServices === null) return null;
     const nextPlan = planConfig.code === 'starter' ? 'Pro' : 'Premium';
-    return `Seu plano atual (${planConfig.label}) permite cadastrar ate ${planConfig.maxServices} servicos. Atualize para o plano ${nextPlan} para continuar.`;
+    return `Limite do plano (${planConfig.label}) atingido: ${planConfig.maxServices} serviços. Atualize para ${nextPlan}.`;
   }
   if (type === 'professionals') {
     if (planConfig.maxProfessionals === null) return null;
     const nextPlan = planConfig.code === 'starter' ? 'Pro' : 'Premium';
-    return `Seu plano atual (${planConfig.label}) permite cadastrar ate ${planConfig.maxProfessionals} profissionais. Reduza a equipe ou faca upgrade para o plano ${nextPlan}.`;
+    return `Limite do plano (${planConfig.label}) atingido: ${planConfig.maxProfessionals} profissionais. Atualize para ${nextPlan}.`;
   }
   return null;
 }

@@ -17,6 +17,7 @@ export default function ProfissionaisEstabelecimento() {
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState({ nome: '', descricao: '', ativo: true });
   const [saving, setSaving] = useState(false);
+  const [addOpen, setAddOpen] = useState(false);
   const [newAvatar, setNewAvatar] = useState({ preview: null, dataUrl: null });
   const newAvatarInputRef = useRef(null);
 
@@ -30,7 +31,7 @@ export default function ProfissionaisEstabelecimento() {
   const editAvatarInputRef = useRef(null);
   const [editSaving, setEditSaving] = useState(false);
 
-  function showToast(type, msg, ms = 2500) {
+  function showToast(type, msg, ms = 5000) {
     setToast({ type, msg });
     window.clearTimeout(showToast._t);
     showToast._t = window.setTimeout(() => setToast(null), ms);
@@ -90,6 +91,20 @@ export default function ProfissionaisEstabelecimento() {
     if (newAvatarInputRef.current) newAvatarInputRef.current.value = '';
   }
 
+  function resetAddForm() {
+    setForm({ nome: '', descricao: '', ativo: true });
+    clearNewAvatar();
+  }
+
+  function openAdd() {
+    setAddOpen(true);
+  }
+
+  function closeAdd() {
+    resetAddForm();
+    setAddOpen(false);
+  }
+
   async function add(e) {
     e.preventDefault();
     if (formInvalid) {
@@ -107,8 +122,8 @@ export default function ProfissionaisEstabelecimento() {
 
       const novo = await Api.profissionaisCreate(payload);
       setList((curr) => [novo, ...curr]);
-      setForm({ nome: '', descricao: '', ativo: true });
-      clearNewAvatar();
+      resetAddForm();
+      setAddOpen(false);
       showToast('success', 'Profissional cadastrado!');
     } catch (err) {
       if (err?.status === 403 && err?.data?.error === 'plan_limit') {
@@ -219,83 +234,13 @@ export default function ProfissionaisEstabelecimento() {
       {toast && <div className={`toast ${toast.type}`}>{toast.msg}</div>}
 
       <div className="card">
-        <h2 style={{ marginBottom: 12 }}>Novo Profissional</h2>
-        <form onSubmit={add} className="pro-form">
-          <label className="label">
-            <span>Nome</span>
-            <input
-              className="input"
-              placeholder="Nome"
-              value={form.nome}
-              onChange={(e) => setForm((f) => ({ ...f, nome: e.target.value }))}
-              maxLength={120}
-              required
-            />
-          </label>
-          <label className="label">
-            <span>Descrição (opcional)</span>
-            <textarea
-              className="input"
-              placeholder="Descrição (opcional)"
-              value={form.descricao}
-              onChange={(e) => setForm((f) => ({ ...f, descricao: e.target.value }))}
-              rows={3}
-              maxLength={200}
-            />
-          </label>
-
-          <div className="pro-form__meta">
-            <label className="pro-form__toggle">
-              <span>Ativo</span>
-              <label className="switch" style={{ margin: 0 }}>
-                <input type="checkbox" checked={form.ativo} onChange={(e) => setForm((f) => ({ ...f, ativo: e.target.checked }))} />
-                <span />
-              </label>
-            </label>
-          </div>
-
-          <div className="pro-form__avatar">
-            <span className="pro-form__hint">Foto (opcional)</span>
-            <div className="pro-form__avatar-row">
-              {newAvatar.preview ? (
-                <img
-                  src={newAvatar.preview}
-                  alt="Pré-visualização"
-                  className="pro-form__avatar-preview"
-                />
-              ) : (
-                <div className="pro-form__avatar-fallback">Sem foto</div>
-              )}
-              <label className="btn btn--outline btn--sm" style={{ cursor: 'pointer' }}>
-                Selecionar imagem
-                <input
-                  ref={newAvatarInputRef}
-                  type="file"
-                  accept="image/png,image/jpeg,image/webp"
-                  style={{ display: 'none' }}
-                  onChange={handleNewAvatarChange}
-                />
-              </label>
-              {newAvatar.preview && (
-                <button type="button" className="btn btn--sm" onClick={clearNewAvatar}>
-                  Remover
-                </button>
-              )}
-            </div>
-            <small className="muted" style={{ fontSize: 11 }}>Formatos aceitos: PNG, JPG ou WEBP (até 2MB).</small>
-          </div>
-
-          <div className="pro-form__actions">
-            <button className="btn btn--primary" disabled={saving || formInvalid}>
-              {saving ? <span className="spinner" /> : 'Salvar'}
+        <div className="header-row" style={{ display: 'flex', flexDirection: 'column', gap: 10, alignItems: 'flex-start', marginBottom: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap', width: '100%' }}>
+            <h2 style={{ margin: 0, fontSize: 20 }}>Meus Profissionais</h2>
+            <button className="btn btn--primary btn--sm" type="button" onClick={openAdd}>
+              Adicionar profissional
             </button>
           </div>
-        </form>
-      </div>
-
-      <div className="card">
-        <div className="header-row" style={{ display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'flex-start', marginBottom: 12 }}>
-          <h2 style={{ margin: 0, fontSize: 20 }}>Meus Profissionais</h2>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', width: '100%' }}>
             <input className="input" style={{ flex: '1 1 220px' }} placeholder="Buscar por nome..." value={query} onChange={(e) => setQuery(e.target.value)} />
           </div>
@@ -350,6 +295,86 @@ export default function ProfissionaisEstabelecimento() {
           </table>
         )}
       </div>
+
+      {addOpen && (
+        <Modal onClose={saving ? null : closeAdd}>
+          <h3>Novo profissional</h3>
+          <form onSubmit={add} className="pro-form" style={{ marginTop: 12 }}>
+            <label className="label">
+              <span>Nome</span>
+              <input
+                className="input"
+                placeholder="Nome"
+                value={form.nome}
+                onChange={(e) => setForm((f) => ({ ...f, nome: e.target.value }))}
+                maxLength={120}
+                required
+              />
+            </label>
+            <label className="label">
+              <span>Descrição (opcional)</span>
+              <textarea
+                className="input"
+                placeholder="Descrição (opcional)"
+                value={form.descricao}
+                onChange={(e) => setForm((f) => ({ ...f, descricao: e.target.value }))}
+                rows={3}
+                maxLength={200}
+              />
+            </label>
+
+            <div className="pro-form__meta">
+              <label className="pro-form__toggle">
+                <span>Ativo</span>
+                <label className="switch" style={{ margin: 0 }}>
+                  <input type="checkbox" checked={form.ativo} onChange={(e) => setForm((f) => ({ ...f, ativo: e.target.checked }))} />
+                  <span />
+                </label>
+              </label>
+            </div>
+
+            <div className="pro-form__avatar">
+              <span className="pro-form__hint">Foto (opcional)</span>
+              <div className="pro-form__avatar-row">
+                {newAvatar.preview ? (
+                  <img
+                    src={newAvatar.preview}
+                    alt="Pré-visualização"
+                    className="pro-form__avatar-preview"
+                  />
+                ) : (
+                  <div className="pro-form__avatar-fallback">Sem foto</div>
+                )}
+                <label className="btn btn--outline btn--sm" style={{ cursor: 'pointer' }}>
+                  Selecionar imagem
+                  <input
+                    ref={newAvatarInputRef}
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp"
+                    style={{ display: 'none' }}
+                    onChange={handleNewAvatarChange}
+                  />
+                </label>
+                {newAvatar.preview && (
+                  <button type="button" className="btn btn--sm" onClick={clearNewAvatar}>
+                    Remover
+                  </button>
+                )}
+              </div>
+              <small className="muted" style={{ fontSize: 11 }}>Formatos aceitos: PNG, JPG ou WEBP (até 2MB).</small>
+            </div>
+
+            <div className="pro-form__actions" style={{ gap: 8 }}>
+              <button type="button" className="btn btn--outline" onClick={closeAdd} disabled={saving}>
+                Cancelar
+              </button>
+              <button className="btn btn--primary" disabled={saving || formInvalid}>
+                {saving ? <span className="spinner" /> : 'Salvar'}
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
 
       {editOpen && (
         <Modal onClose={editSaving ? null : closeEdit}>
@@ -444,7 +469,9 @@ function Modal({ children, onClose }) {
   return (
     <div className="modal-backdrop" onClick={handleBackdrop}>
       <div className="modal" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true">
-        {children}
+        <div className="modal__body">
+          {children}
+        </div>
       </div>
     </div>
   );
