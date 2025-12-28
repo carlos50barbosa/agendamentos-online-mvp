@@ -38,6 +38,7 @@ export function buildNavigation(user) {
 
   const mainItems = [
     { key: 'dashboard', label: 'Agendamentos', to: isEstab ? '/estab' : '/cliente', icon: IconHome, type: 'link' },
+    { key: 'new', label: 'Novo Agendamento', to: '/novo', icon: IconPlus, type: 'link' },
   ];
 
   if (isEstab) {
@@ -47,8 +48,6 @@ export function buildNavigation(user) {
       { key: 'professionals', label: 'Profissionais', to: '/profissionais', icon: IconUser, type: 'link' },
       { key: 'reports', label: 'Relatórios', to: '/relatorios', icon: IconChart, type: 'link' },
     );
-  } else {
-    mainItems.push({ key: 'new', label: 'Novo Agendamento', to: '/novo', icon: IconPlus, type: 'link' });
   }
 
   const accountItems = [

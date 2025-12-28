@@ -1,6 +1,6 @@
 // src/pages/NovoAgendamento.jsx
 import React, { useEffect, useMemo, useState, useCallback, useRef } from "react";
-import { Link, useNavigate, useSearchParams, useLocation } from "react-router-dom";
+import { Link, useSearchParams, useLocation } from "react-router-dom";
 import { Api, resolveAssetUrl } from "../utils/api";
 import { getUser } from "../utils/auth";
 import Modal from "../components/Modal.jsx";
@@ -849,7 +849,6 @@ export default function NovoAgendamento() {
   const isClientUser = user?.tipo === 'cliente';
   const liveRef = useRef(null);
   const toastTimeoutRef = useRef(null);
-  const nav = useNavigate();
   const location = useLocation();
   const loginHref = useMemo(() => {
     const path = `${location.pathname}${location.search}` || '/';
@@ -863,19 +862,10 @@ export default function NovoAgendamento() {
       sessionStorage.setItem('next_after_login', path);
     } catch {}
   }, [isAuthenticated, location.pathname, location.search]);
-  // Redireciona estabelecimentos para seu dashboard
-  useEffect(() => {
-    if (user?.tipo === 'estabelecimento') {
-      nav('/estab', { replace: true });
-    }
-  }, [user?.tipo, nav]);
-  if (user?.tipo === 'estabelecimento') {
-    return <div className="container"><div className="empty">Redirecionandoâ€¦</div></div>;
-  }
   const [state, setState] = useState({
     establishments: [],
     services: [],
-    establishmentId: user?.tipo === "estabelecimento" ? String(user.id) : "",
+    establishmentId: "",
     serviceId: "",
     professionalId: "",
     currentWeek: DateHelpers.weekStartISO(),
@@ -976,6 +966,11 @@ export default function NovoAgendamento() {
     establishments, services, establishmentId, serviceId,
     currentWeek, slots, loading, error, selectedSlot, filters, density, forceBusy,
   } = state;
+  const isOwnerViewing = Boolean(
+    user?.tipo === 'estabelecimento' &&
+    establishmentId &&
+    String(user?.id) === String(establishmentId)
+  );
   const selectedSlotNow = useMemo(
     () => slots.find((s) => s.datetime === selectedSlot?.datetime),
     [slots, selectedSlot]
@@ -1458,7 +1453,7 @@ useEffect(() => {
       }
     } catch {}
     try {
-      if (user?.tipo === 'estabelecimento' && typeof Api.agendamentosEstabelecimento === 'function') {
+      if (isOwnerViewing && typeof Api.agendamentosEstabelecimento === 'function') {
         const est = await Api.agendamentosEstabelecimento();
         (est || []).forEach((a) => {
           if (!isActiveStatus(a.status)) return;
@@ -1470,7 +1465,7 @@ useEffect(() => {
       }
     } catch {}
     return counts;
-  }, [currentWeek, user?.tipo, serviceId, state.professionalId]);
+  }, [currentWeek, isOwnerViewing, serviceId, state.professionalId]);
   /* ====== Carregar Slots ====== */
   const loadSlots = useCallback(async () => {
     if (!establishmentId || !serviceId) {
@@ -1675,7 +1670,7 @@ useEffect(() => {
             mine.some((a) => isActiveStatus(a.status) && sameStart(a.inicio, slotIso));
         }
       } catch {}
-      if (!slotIndisponivel && typeof Api.agendamentosEstabelecimento === "function") {
+      if (!slotIndisponivel && isOwnerViewing && typeof Api.agendamentosEstabelecimento === "function") {
         try {
           const est = await Api.agendamentosEstabelecimento();
           slotIndisponivel =
@@ -1684,7 +1679,7 @@ useEffect(() => {
       }
       return { slotIndisponivel, meu };
     },
-    [establishmentId, currentWeek, normalizeSlots]
+    [establishmentId, currentWeek, isOwnerViewing, normalizeSlots]
   );
   // Confirmar
   const confirmBooking = useCallback(async () => {
@@ -2263,8 +2258,7 @@ useEffect(() => {
     return idx > 0 ? [...list.slice(idx), ...list.slice(0, idx)] : list;
   }, [currentWeek]);
   /* ====== UI por passos ====== */
-  const isOwner = user?.tipo === "estabelecimento";
-  const step = !establishmentId && !isOwner ? 1 : !serviceId ? 2 : 3;
+  const step = !establishmentId ? 1 : !serviceId ? 2 : 3;
   // Ao clicar num dia do Mês, define a semana correspondente e marca o dia
   const handlePickDay = useCallback((isoDay) => {
     setSelectedDate(isoDay);
@@ -2647,14 +2641,7 @@ useEffect(() => {
                   aria-label="Voltar"
                   title="Voltar"
                 >
-                  <svg
-                    className="novo-agendamento__back-icon"
-                    viewBox="0 0 24 24"
-                    aria-hidden="true"
-                  >
-                    <path d="M10 19l-7-7 7-7" />
-                    <path d="M3 12h18" />
-                  </svg>
+                  <span className="novo-agendamento__back-icon" aria-hidden="true">&lt;</span>
                 </a>
                 <button
                   type="button"
