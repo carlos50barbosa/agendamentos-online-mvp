@@ -666,12 +666,26 @@ export default function DashboardEstabelecimento() {
               </div>
             </div>
             <div className="agenda-chips">
-              <div className="agenda-chip agenda-chip--ok">
-                Recebidos <b>{totals.recebidos}</b>
-              </div>
-              <div className="agenda-chip agenda-chip--danger">
-                Cancelados <b>{totals.cancelados}</b>
-              </div>
+              <button
+                type="button"
+                className="agenda-chip agenda-chip--ok"
+                aria-label={`Agendamentos recebidos: ${totals.recebidos}`}
+              >
+                <b>{totals.recebidos}</b>
+                <span className="agenda-chip__tooltip" aria-hidden="true">
+                  Agendamentos recebidos
+                </span>
+              </button>
+              <button
+                type="button"
+                className="agenda-chip agenda-chip--danger"
+                aria-label={`Agendamentos cancelados: ${totals.cancelados}`}
+              >
+                <b>{totals.cancelados}</b>
+                <span className="agenda-chip__tooltip" aria-hidden="true">
+                  Agendamentos cancelados
+                </span>
+              </button>
             </div>
           </div>
           <div className="agenda-hdr-right">
@@ -696,7 +710,12 @@ export default function DashboardEstabelecimento() {
           </div>
         </div>
         <div className="pro-agenda__wrap">
-          <ProfessionalAgendaView items={filtered} professionals={professionals} onForceCancel={handleForceCancel} />
+          <ProfessionalAgendaView
+            items={filtered}
+            professionals={professionals}
+            onForceCancel={handleForceCancel}
+            establishmentId={establishmentId}
+          />
         </div>
       </div>
       {showCalendar && (
@@ -999,7 +1018,7 @@ const RESOURCE_COLORS = [
 ]
 
 
-function ProfessionalAgendaView({ items, onForceCancel, professionals }) {
+function ProfessionalAgendaView({ items, onForceCancel, professionals, establishmentId }) {
   const getResourceId = (item) =>
     item?.profissional_id ??
     item?.professional_id ??
@@ -1072,10 +1091,32 @@ function ProfessionalAgendaView({ items, onForceCancel, professionals }) {
   const filterRef = React.useRef(null)
   const [selectedEvent, setSelectedEvent] = useState(null)
   const [cancelling, setCancelling] = useState(false)
+  const [workingSchedule, setWorkingSchedule] = useState(null)
 
   useEffect(() => {
     setResourceFilter('all')
   }, [])
+
+  useEffect(() => {
+    if (!establishmentId) {
+      setWorkingSchedule(null)
+      return
+    }
+    let cancelled = false
+    ;(async () => {
+      try {
+        const data = await Api.getEstablishment(establishmentId)
+        if (cancelled) return
+        const list = Array.isArray(data?.profile?.horarios) ? data.profile.horarios : []
+        setWorkingSchedule(buildWorkingSchedule(list))
+      } catch {
+        if (!cancelled) setWorkingSchedule(null)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [establishmentId])
 
   const events = useMemo(() => {
     return (items || [])
@@ -1261,11 +1302,35 @@ function ProfessionalAgendaView({ items, onForceCancel, professionals }) {
     const baseDay = new Date(baseDate)
     baseDay.setHours(0, 0, 0, 0)
     const min = new Date(baseDay)
-    min.setHours(DEFAULT_BUSINESS_HOURS.start, 0, 0, 0)
     const max = new Date(baseDay)
-    max.setHours(DEFAULT_BUSINESS_HOURS.end, 0, 0, 0)
+    const dayRule = getScheduleRuleForDate(baseDay, workingSchedule)
+    let startHour = DEFAULT_BUSINESS_HOURS.start
+    let startMinute = 0
+    let endHour = DEFAULT_BUSINESS_HOURS.end
+    let endMinute = 0
+    if (dayRule && dayRule.enabled && dayRule.start && dayRule.end) {
+      const [ruleStartHour, ruleStartMinute] = dayRule.start.split(':').map(Number)
+      const [ruleEndHour, ruleEndMinute] = dayRule.end.split(':').map(Number)
+      if (
+        Number.isFinite(ruleStartHour) &&
+        Number.isFinite(ruleStartMinute) &&
+        Number.isFinite(ruleEndHour) &&
+        Number.isFinite(ruleEndMinute)
+      ) {
+        startHour = ruleStartHour
+        startMinute = ruleStartMinute
+        endHour = ruleEndHour
+        endMinute = ruleEndMinute
+      }
+    }
+    min.setHours(startHour, startMinute, 0, 0)
+    max.setHours(endHour, endMinute, 0, 0)
+    if (max <= min) {
+      min.setHours(DEFAULT_BUSINESS_HOURS.start, 0, 0, 0)
+      max.setHours(DEFAULT_BUSINESS_HOURS.end, 0, 0, 0)
+    }
     return { min, max, scrollToTime: min }
-  }, [currentDate])
+  }, [currentDate, workingSchedule])
 
   const eventStyleGetter = useCallback((event) => {
     const theme = event?._theme || getAgendaTheme(event?.status)

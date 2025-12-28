@@ -54,6 +54,14 @@ export function IconBell(props){
   );
 }
 
+export function IconFilter(props){
+  return (
+    <svg {...base} viewBox="0 0 24 24" aria-hidden="true" {...props}>
+      <path d="M4 6h16l-6 7v5l-4 2v-7L4 6z"/>
+    </svg>
+  );
+}
+
 export function IconGear(props){
   return (
     <svg {...base} viewBox="0 0 24 24" aria-hidden="true" {...props}>
@@ -200,6 +208,7 @@ export default {
   IconPlus,
   IconGear,
   IconBell,
+  IconFilter,
   IconHelp,
   IconLogout,
   IconSun,

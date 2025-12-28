@@ -2247,6 +2247,7 @@ button.danger:disabled,
 }
 
 .dashboard-pro .agenda-chip{
+  appearance:none;
   display:inline-flex;
   align-items:center;
   gap:8px;
@@ -2257,9 +2258,44 @@ button.danger:disabled,
   border:1px solid var(--pro-border);
   background: rgba(2,6,23,.02);
   white-space:nowrap;
+  position:relative;
+  cursor:pointer;
+  font-family:inherit;
+  color:inherit;
 }
 
 .dashboard-pro .agenda-chip b{ font-weight:900; }
+
+.dashboard-pro .agenda-chip:focus{
+  outline:none;
+  box-shadow: var(--pro-focus);
+}
+
+.dashboard-pro .agenda-chip__tooltip{
+  position:absolute;
+  left:50%;
+  top:calc(100% + 6px);
+  transform:translateX(-50%) translateY(-4px);
+  padding:6px 8px;
+  border-radius:10px;
+  border:1px solid var(--pro-border);
+  background: var(--pro-surface);
+  color: var(--pro-text);
+  font-size:11px;
+  font-weight:900;
+  white-space:nowrap;
+  box-shadow: var(--pro-shadow-2);
+  opacity:0;
+  pointer-events:none;
+  transition:opacity .18s ease,transform .18s ease;
+  z-index:3;
+}
+
+.dashboard-pro .agenda-chip:focus .agenda-chip__tooltip,
+.dashboard-pro .agenda-chip:focus-visible .agenda-chip__tooltip{
+  opacity:1;
+  transform:translateX(-50%) translateY(0);
+}
 
 .dashboard-pro .agenda-chip--ok{
   border-color: rgba(22,163,74,.25);
@@ -2288,8 +2324,9 @@ button.danger:disabled,
   color: var(--pro-text);
   border-radius:12px;
   padding:8px 10px;
-  font-weight:900;
-  font-size:12px;
+  font-family:inherit;
+  font-weight:600;
+  font-size:14px;
   cursor:pointer;
   display:inline-flex;
   align-items:center;
@@ -2306,14 +2343,14 @@ button.danger:disabled,
 
 .dashboard-pro .agenda-btn--primary{
   border-color: var(--brand);
-  background: var(--brand);
-  color:#fff;
+  background: #fff;
+  color: var(--brand);
   box-shadow: var(--pro-shadow-2);
 }
 .dashboard-pro .agenda-btn--primary:hover{
-  background: var(--brand);
+  background: var(--brand-100);
   border-color: var(--brand);
-  filter: brightness(0.96);
+  filter:none;
 }
 
 .dashboard-pro .agenda-select{
@@ -2321,8 +2358,9 @@ button.danger:disabled,
   background: rgba(255,255,255,.92);
   padding:8px 10px;
   border-radius:12px;
-  font-weight:900;
-  font-size:12px;
+  font-family:inherit;
+  font-weight:600;
+  font-size:14px;
   cursor:pointer;
 }
 
@@ -2346,6 +2384,7 @@ button.danger:disabled,
   background: linear-gradient(180deg, rgba(255,255,255,.86), rgba(255,255,255,.74));
   border-radius: calc(var(--pro-radius) + 6px);
   overflow:hidden;
+  --pro-agenda-header-height: 40px;
 }
 
 .dashboard-pro .pro-agenda__toolbar{
@@ -2458,8 +2497,9 @@ button.danger:disabled,
   border-radius:999px;
   border:1px solid var(--pro-border);
   background: rgba(2,6,23,.02);
-  font-weight:900;
-  font-size:12px;
+  font-family:inherit;
+  font-weight:600;
+  font-size:14px;
   cursor:pointer;
   white-space:nowrap;
 }
@@ -2571,6 +2611,29 @@ button.danger:disabled,
   z-index:2;
   background: rgba(255,255,255,.95);
   border-bottom:1px solid var(--pro-border);
+  box-sizing:border-box;
+}
+
+.dashboard-pro .pro-agenda .rbc-label.rbc-time-header-gutter,
+.dashboard-pro .pro-agenda .rbc-time-header-content,
+.dashboard-pro .pro-agenda .rbc-row.rbc-row-resource{
+  height: var(--pro-agenda-header-height);
+  min-height: var(--pro-agenda-header-height);
+}
+
+.dashboard-pro .pro-agenda .rbc-label.rbc-time-header-gutter{
+  display:flex;
+  align-items:center;
+  justify-content:flex-end;
+  padding:0;
+}
+
+.dashboard-pro .pro-agenda .rbc-time-header-content{
+  overflow:hidden;
+}
+
+.dashboard-pro .pro-agenda .rbc-allday-cell{
+  display:none;
 }
 
 .dashboard-pro .pro-agenda__gutter-head{
@@ -2603,6 +2666,27 @@ button.danger:disabled,
   border-top:1px solid var(--pro-border);
   background: transparent;
   overflow-y:auto;
+  scrollbar-gutter:stable;
+}
+
+.dashboard-pro .pro-agenda .rbc-time-header.rbc-overflowing{
+  padding-right:0;
+}
+
+.dashboard-pro .pro-agenda .rbc-time-view-resources .rbc-time-header-content,
+.dashboard-pro .pro-agenda .rbc-time-view-resources .rbc-day-slot{
+  min-width:140px;
+  flex:1 1 0;
+}
+
+.dashboard-pro .pro-agenda .rbc-day-slot .rbc-events-container{
+  margin-right:0;
+}
+
+.dashboard-pro .pro-agenda .rbc-day-slot .rbc-events-container.rbc-rtl{
+  margin-left:0;
+  left:0;
+  right:0;
 }
 
 .dashboard-pro .pro-agenda .rbc-time-gutter .rbc-timeslot-group{
