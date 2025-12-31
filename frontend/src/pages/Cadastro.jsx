@@ -28,6 +28,21 @@ const formatCep = (value = '') => {
   return `${digits.slice(0, 5)}-${digits.slice(5)}`;
 };
 
+const formatCpfCnpj = (value = '') => {
+  const digits = value.replace(/\D/g, '').slice(0, 14);
+  if (digits.length <= 11) {
+    if (digits.length <= 3) return digits;
+    if (digits.length <= 6) return `${digits.slice(0, 3)}.${digits.slice(3)}`;
+    if (digits.length <= 9) return `${digits.slice(0, 3)}.${digits.slice(3, 6)}.${digits.slice(6)}`;
+    return `${digits.slice(0, 3)}.${digits.slice(3, 6)}.${digits.slice(6, 9)}-${digits.slice(9)}`;
+  }
+  if (digits.length <= 2) return digits;
+  if (digits.length <= 5) return `${digits.slice(0, 2)}.${digits.slice(2)}`;
+  if (digits.length <= 8) return `${digits.slice(0, 2)}.${digits.slice(2, 5)}.${digits.slice(5)}`;
+  if (digits.length <= 12) return `${digits.slice(0, 2)}.${digits.slice(2, 5)}.${digits.slice(5, 8)}/${digits.slice(8)}`;
+  return `${digits.slice(0, 2)}.${digits.slice(2, 5)}.${digits.slice(5, 8)}/${digits.slice(8, 12)}-${digits.slice(12)}`;
+};
+
 export default function Cadastro() {
   const nav = useNavigate();
   const [form, setForm] = useState({
@@ -36,6 +51,8 @@ export default function Cadastro() {
     senha: '',
     tipo: '',
     telefone: '',
+    data_nascimento: '',
+    cpf_cnpj: '',
     cep: '',
     endereco: '',
     numero: '',
@@ -53,11 +70,13 @@ export default function Cadastro() {
   const [acceptPolicies, setAcceptPolicies] = useState(false);
   const [confirmEmail, setConfirmEmail] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
+  const [showOptionalFields, setShowOptionalFields] = useState(false);
   const legalMeta = useMemo(() => LEGAL_METADATA, []);
 
   const phoneDigits = (form.telefone || '').replace(/\D/g, '');
   const cepDigits = form.cep.replace(/\D/g, '');
   const isEstab = form.tipo === 'estabelecimento';
+  const isCliente = form.tipo === 'cliente';
 
   const emailReady = useMemo(() => {
     const email = form.email.trim();
@@ -87,6 +106,12 @@ export default function Cadastro() {
     return phoneDigits.length === 10 || phoneDigits.length === 11;
   }, [phoneDigits]);
 
+  const cpfCnpjDigits = useMemo(
+    () => (form.cpf_cnpj || '').replace(/\D/g, '').slice(0, 14),
+    [form.cpf_cnpj]
+  );
+  const cpfCnpjOk = !cpfCnpjDigits || cpfCnpjDigits.length === 11 || cpfCnpjDigits.length === 14;
+
   const addressOk = useMemo(() => {
     if (!isEstab) return true;
     return (
@@ -106,9 +131,16 @@ export default function Cadastro() {
     !senhaOk ||
     !matchOk ||
     !phoneOk ||
+    !cpfCnpjOk ||
     !form.tipo ||
     !addressOk ||
     !acceptPolicies;
+
+  useEffect(() => {
+    if (!isCliente) {
+      setShowOptionalFields(false);
+    }
+  }, [isCliente]);
 
   useEffect(() => {
     const digits = cepDigits;
@@ -160,6 +192,7 @@ export default function Cadastro() {
     setLoading(true);
     try {
       const telefoneNorm = normalizeToE164BR(form.telefone.trim());
+      const cpfCnpjValue = cpfCnpjDigits || undefined;
       const acceptanceTimestamp = new Date().toISOString();
       const payload = {
         nome: form.nome.trim(),
@@ -167,6 +200,8 @@ export default function Cadastro() {
         senha: form.senha,
         tipo: form.tipo,
         telefone: telefoneNorm,
+        data_nascimento: form.data_nascimento || undefined,
+        cpf_cnpj: cpfCnpjValue,
         cep: cepDigits || undefined,
         endereco: form.endereco.trim() || undefined,
         numero: form.numero.trim() || undefined,
@@ -236,11 +271,6 @@ export default function Cadastro() {
             </aside>
 
             <div className="login-preview__panel">
-              <div className="login-preview__mobile-brand">
-                <LogoAO size={36} className="login-preview__logo-mark" />
-                <span>Agendamentos Online</span>
-              </div>
-
               <header className="login-preview__header">
                 <h1>Criar conta</h1>
                 <p>Escolha o perfil e preencha os dados abaixo.</p>
@@ -462,17 +492,59 @@ export default function Cadastro() {
                   ) : null}
                 </div>
 
-                {isEstab && (
-                  <div className="login-preview__field-group">
+                {isCliente && (
+                  <div style={{ marginTop: 6 }}>
+                    <button
+                      type="button"
+                      className="login-preview__ghost"
+                      onClick={() => setShowOptionalFields((v) => !v)}
+                      aria-expanded={showOptionalFields}
+                      aria-controls="cadastro-campos-opcionais"
+                    >
+                      {showOptionalFields ? 'Ocultar campos opcionais' : 'Ver campos opcionais'}
+                    </button>
+                  </div>
+                )}
+
+                {(isEstab || (isCliente && showOptionalFields)) && (
+                  <div className="login-preview__field-group" id="cadastro-campos-opcionais">
+                    {isCliente && (
+                      <div className="login-preview__field">
+                        <label className="login-preview__label" htmlFor="cadastro-data-nascimento">Data de nascimento (opcional)</label>
+                        <input
+                          className="login-preview__input"
+                          id="cadastro-data-nascimento"
+                          type="date"
+                          value={form.data_nascimento}
+                          onChange={(e) => updateField("data_nascimento", e.target.value)}
+                        />
+                      </div>
+                    )}
                     <div className="login-preview__field">
-                      <label className="login-preview__label" htmlFor="cadastro-cep">CEP</label>
+                      <label className="login-preview__label" htmlFor="cadastro-cpf-cnpj">CPF/CNPJ (opcional)</label>
+                      <input
+                        className="login-preview__input"
+                        id="cadastro-cpf-cnpj"
+                        placeholder="000.000.000-00 ou 00.000.000/0000-00"
+                        value={formatCpfCnpj(form.cpf_cnpj)}
+                        onChange={(e) => updateField("cpf_cnpj", e.target.value.replace(/\D/g, '').slice(0, 14))}
+                        inputMode="numeric"
+                      />
+                      <div className={`login-preview__hint${!cpfCnpjOk && cpfCnpjDigits ? ' is-error' : ''}`}>
+                        {!cpfCnpjOk && cpfCnpjDigits
+                          ? 'Informe 11 ou 14 digitos.'
+                          : 'Opcional para identificacao fiscal.'}
+                      </div>
+                    </div>
+                    <div className="login-preview__field">
+                      <label className="login-preview__label" htmlFor="cadastro-cep">{isEstab ? "CEP" : "CEP (opcional)"}</label>
                       <input
                         className="login-preview__input"
                         id="cadastro-cep"
                         placeholder="00000-000"
                         value={form.cep}
-                        onChange={(e) => updateField('cep', formatCep(e.target.value))}
-                        required
+                        onChange={(e) => updateField("cep", formatCep(e.target.value))}
+                        required={isEstab}
                         inputMode="numeric"
                       />
                       {cepStatus.error ? (
@@ -480,24 +552,24 @@ export default function Cadastro() {
                       ) : null}
                     </div>
                     <div className="login-preview__field">
-                      <label className="login-preview__label" htmlFor="cadastro-endereco">Endereço</label>
+                      <label className="login-preview__label" htmlFor="cadastro-endereco">Endereco</label>
                       <input
                         className="login-preview__input"
                         id="cadastro-endereco"
                         value={form.endereco}
-                        onChange={(e) => updateField('endereco', e.target.value)}
-                        required
+                        onChange={(e) => updateField("endereco", e.target.value)}
+                        required={isEstab}
                       />
                     </div>
                     <div className="login-preview__field-row">
                       <div className="login-preview__field">
-                        <label className="login-preview__label" htmlFor="cadastro-numero">Número</label>
+                        <label className="login-preview__label" htmlFor="cadastro-numero">Numero</label>
                         <input
                           className="login-preview__input"
                           id="cadastro-numero"
                           value={form.numero}
-                          onChange={(e) => updateField('numero', e.target.value)}
-                          required
+                          onChange={(e) => updateField("numero", e.target.value)}
+                          required={isEstab}
                         />
                       </div>
                       <div className="login-preview__field">
@@ -506,7 +578,7 @@ export default function Cadastro() {
                           className="login-preview__input"
                           id="cadastro-complemento"
                           value={form.complemento}
-                          onChange={(e) => updateField('complemento', e.target.value)}
+                          onChange={(e) => updateField("complemento", e.target.value)}
                         />
                       </div>
                     </div>
@@ -516,8 +588,8 @@ export default function Cadastro() {
                         className="login-preview__input"
                         id="cadastro-bairro"
                         value={form.bairro}
-                        onChange={(e) => updateField('bairro', e.target.value)}
-                        required
+                        onChange={(e) => updateField("bairro", e.target.value)}
+                        required={isEstab}
                       />
                     </div>
                     <div className="login-preview__field-row">
@@ -527,8 +599,8 @@ export default function Cadastro() {
                           className="login-preview__input"
                           id="cadastro-cidade"
                           value={form.cidade}
-                          onChange={(e) => updateField('cidade', e.target.value)}
-                          required
+                          onChange={(e) => updateField("cidade", e.target.value)}
+                          required={isEstab}
                         />
                       </div>
                       <div className="login-preview__field login-preview__field--compact">
@@ -537,14 +609,13 @@ export default function Cadastro() {
                           className="login-preview__input"
                           id="cadastro-estado"
                           value={form.estado}
-                          onChange={(e) => updateField('estado', e.target.value.toUpperCase().slice(0, 2))}
-                          required
+                          onChange={(e) => updateField("estado", e.target.value.toUpperCase().slice(0, 2))}
+                          required={isEstab}
                         />
                       </div>
                     </div>
                   </div>
                 )}
-
                 <label className="terms-check">
                   <input
                     type="checkbox"

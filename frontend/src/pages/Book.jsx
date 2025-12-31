@@ -148,7 +148,7 @@ export default function Book(){
   async function sendOtp(){
     const emailTrim = email.trim();
     if (!emailTrim) {
-      setError('Informe um email valido para receber o Código.');
+      setError('Informe um email válido para receber o Código.');
       return;
     }
     try {
@@ -295,7 +295,7 @@ export default function Book(){
 
           {done && (
             <div className="chatpanel" style={{ marginTop: 8 }}>
-              <div className="chatmsg chatmsg--bot">Prontinho! Seu agendamento foi criado.</div>
+              <div className="chatmsg chatmsg--bot">Prontinho! Seu agendamento foi criado. Confirme por email em ate 10 minutos.</div>
               <div className="chatrow" style={{ marginTop: 8 }}>
                 <button className="chatbtn" onClick={() => nav('/', { replace: true })}>Fechar</button>
                 <button className="chatbtn chatbtn--muted" onClick={() => {

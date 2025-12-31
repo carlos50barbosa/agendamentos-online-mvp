@@ -161,10 +161,6 @@ export default function Login() {
             </aside>
 
             <div className="login-preview__panel">
-              <div className="login-preview__mobile-brand">
-                <LogoAO size={36} className="login-preview__logo-mark" />
-                <span>Agendamentos Online</span>
-              </div>
               <header className="login-preview__header">
                 <h1>Entrar</h1>
                 <p>Escolha o perfil e acesse sua conta.</p>

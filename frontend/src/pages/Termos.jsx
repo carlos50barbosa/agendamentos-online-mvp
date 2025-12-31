@@ -28,7 +28,7 @@ const sections = [
     title: '3. Elegibilidade e cadastro',
     paragraphs: [
       'Para criar uma conta, você deve ter capacidade civil plena ou estar devidamente representado por responsável legal.',
-      'Estabelecimentos devem possuir CNPJ válido ou atuação profissional formalizada, responsabilizando-se pela veracidade das informações fornecidas.',
+      'Estabelecimentos devem manter dados cadastrais corretos e, quando aplicável, informar CNPJ ou outra forma de identificação profissional, responsabilizando-se pela veracidade das informações fornecidas.',
       'Ao concluir o cadastro, você declara que os dados informados são verdadeiros, completos e atualizados.',
     ],
   },
@@ -38,14 +38,14 @@ const sections = [
     paragraphs: [
       'O login é pessoal e intransferível. Você deve manter a confidencialidade das credenciais e notificar a plataforma em caso de uso não autorizado.',
       'Atividades realizadas com as credenciais do usuário serão consideradas como executadas pelo próprio usuário.',
-      'A plataforma pode adotar mecanismos adicionais de verificação, como autenticação por e-mail, SMS ou WhatsApp.',
+      'A plataforma pode adotar mecanismos adicionais de verificação, como autenticação por e-mail ou WhatsApp.',
     ],
   },
   {
     id: 'planos',
     title: '5. Planos, cobranças e cancelamentos',
     paragraphs: [
-      'A plataforma disponibiliza planos gratuitos, testes temporários e planos pagos com recursos adicionais.',
+      'A plataforma disponibiliza testes temporários e planos pagos com recursos adicionais.',
       'Valores, prazos e formas de cobrança são apresentados no fluxo de contratação. Qualquer alteração será comunicada com antecedência razoável.',
       'O não pagamento pode implicar suspensão do acesso, restrição de funcionalidades ou cancelamento da assinatura.',
       'Cancelamentos podem ser realizados a qualquer tempo. Planos pagos seguem as regras informadas no momento da adesão.',
@@ -84,8 +84,8 @@ const sections = [
     title: '9. Gestão de agendamentos e comunicações',
     paragraphs: [
       'A plataforma disponibiliza ferramentas de notificação por e-mail e/ou WhatsApp. O envio depende da infraestrutura do provedor e dos dados fornecidos pelo usuário.',
-      'Mensagens automáticas podem incluir lembretes, confirmações, atualizações de status e solicitações de avaliação.',
-      'O usuário pode ajustar as preferências de notificação nas configurações da conta, respeitando limites técnicos e obrigações legais.',
+      'Mensagens automáticas podem incluir lembretes, confirmações e atualizações de status.',
+      'O estabelecimento pode ajustar as preferências de notificação nas configurações da conta, respeitando limites técnicos e obrigações legais.',
     ],
   },
   {

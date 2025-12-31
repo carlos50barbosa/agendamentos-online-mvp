@@ -44,7 +44,7 @@ const PLAN_CHANGE_COOLDOWN_HOURS = Number(process.env.PLAN_CHANGE_COOLDOWN_HOURS
 
 
 
-const LIST_QUERY = `
+const LIST_SELECT = `
 SELECT
   u.id,
   u.nome,
@@ -66,9 +66,10 @@ LEFT JOIN (
   FROM estabelecimento_reviews
   GROUP BY estabelecimento_id
 ) r ON r.estabelecimento_id = u.id
-WHERE u.tipo = 'estabelecimento'
-ORDER BY u.nome
 `;
+const LIST_ORDER = 'ORDER BY u.nome';
+const DEFAULT_PAGE_SIZE = 5;
+const MAX_PAGE_SIZE = 100;
 
 
 const toFiniteOrNull = (value) => {
@@ -132,15 +133,6 @@ function sanitizePlainText(value, { maxLength = 800, allowNewLines = true } = {}
     text = text.slice(0, maxLength);
   }
   return text;
-}
-
-function sanitizeEmail(value) {
-  if (value == null) return null;
-  const text = String(value).trim().toLowerCase();
-  if (!text) return null;
-  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  if (!emailRegex.test(text)) return null;
-  return text.slice(0, 160);
 }
 
 function sanitizePhone(value) {
@@ -381,11 +373,6 @@ function buildProfileUpdatePayload(body = {}) {
   const errors = [];
 
   const sobre = sanitizePlainText(body.sobre, { maxLength: 1200, allowNewLines: true });
-  const contato_email =
-    body.contato_email != null ? sanitizeEmail(body.contato_email) : null;
-  if (body.contato_email && !contato_email) {
-    errors.push({ field: 'contato_email', code: 'invalid_email' });
-  }
 
   const contato_telefone =
     body.contato_telefone != null ? sanitizePhone(body.contato_telefone) : null;
@@ -433,7 +420,6 @@ function buildProfileUpdatePayload(body = {}) {
   return {
     values: {
       sobre,
-      contato_email,
       contato_telefone,
       site_url,
       instagram_url,
@@ -632,8 +618,6 @@ function parseHorarios(value) {
 
 function normalizeProfile(establishmentRow, profileRow) {
 
-  const fallbackEmail = establishmentRow?.email || null;
-
   const fallbackPhone = establishmentRow?.telefone || null;
 
   if (!profileRow) {
@@ -641,8 +625,6 @@ function normalizeProfile(establishmentRow, profileRow) {
     return {
 
       sobre: null,
-
-      contato_email: fallbackEmail,
 
       contato_telefone: fallbackPhone,
 
@@ -673,8 +655,6 @@ function normalizeProfile(establishmentRow, profileRow) {
   return {
 
     sobre: profileRow.sobre || null,
-
-    contato_email: profileRow.contato_email || fallbackEmail,
 
     contato_telefone: profileRow.contato_telefone || fallbackPhone,
 
@@ -936,13 +916,54 @@ async function listEstablishmentsHandler(req, res) {
 
   try {
 
-    const [rows] = await pool.query(LIST_QUERY);
+    const queryRaw = String(req.query?.q || '').trim().toLowerCase();
+    const idsRaw = String(req.query?.ids || '').trim();
+    const pageRaw = Number(req.query?.page);
+    const limitRaw = Number(req.query?.limit);
+
+    const page = Number.isFinite(pageRaw) && pageRaw > 0 ? Math.floor(pageRaw) : 1;
+    const limit = Number.isFinite(limitRaw) && limitRaw > 0
+      ? Math.min(Math.floor(limitRaw), MAX_PAGE_SIZE)
+      : DEFAULT_PAGE_SIZE;
+    const offset = (page - 1) * limit;
+
+    const where = ["u.tipo = 'estabelecimento'"];
+    const params = [];
+
+    if (idsRaw) {
+      const ids = idsRaw
+        .split(',')
+        .map((id) => Number(id))
+        .filter((id) => Number.isFinite(id))
+        .slice(0, 50);
+      if (ids.length) {
+        where.push(`u.id IN (${ids.map(() => '?').join(',')})`);
+        params.push(...ids);
+      }
+    }
+
+    if (queryRaw) {
+      const tokens = queryRaw.split(/\s+/).filter(Boolean).slice(0, 6);
+      tokens.forEach((token) => {
+        const like = `%${token}%`;
+        where.push(
+          '(LOWER(u.nome) LIKE ? OR LOWER(u.bairro) LIKE ? OR LOWER(u.cidade) LIKE ? OR LOWER(u.estado) LIKE ? OR LOWER(u.cep) LIKE ? OR LOWER(u.endereco) LIKE ? OR LOWER(u.numero) LIKE ? OR LOWER(u.email) LIKE ?)'
+        );
+        params.push(like, like, like, like, like, like, like, like);
+      });
+    }
+
+    const whereSql = `WHERE ${where.join(' AND ')}`;
+    const sql = `${LIST_SELECT} ${whereSql} ${LIST_ORDER} LIMIT ? OFFSET ?`;
+
+    const [rows] = await pool.query(sql, [...params, limit + 1, offset]);
+    const hasMore = rows.length > limit;
+    const pageRows = rows.slice(0, limit);
 
     const includeCoords = String((req.query?.coords ?? '1')).toLowerCase() !== '0';
+    const payload = await attachCoordinates(pageRows, includeCoords);
 
-    const payload = await attachCoordinates(rows, includeCoords);
-
-    res.json(payload);
+    res.json({ items: payload, page, limit, has_more: hasMore });
 
   } catch (e) {
 
@@ -1014,7 +1035,7 @@ router.get('/:idOrSlug', async (req, res) => {
 
       pool.query(
 
-        "SELECT estabelecimento_id, sobre, contato_email, contato_telefone, site_url, instagram_url, facebook_url, linkedin_url, youtube_url, tiktok_url, horarios_json, updated_at FROM estabelecimento_perfis WHERE estabelecimento_id=? LIMIT 1",
+        "SELECT estabelecimento_id, sobre, contato_telefone, site_url, instagram_url, facebook_url, linkedin_url, youtube_url, tiktok_url, horarios_json, updated_at FROM estabelecimento_perfis WHERE estabelecimento_id=? LIMIT 1",
 
         [est.id]
 
@@ -1211,13 +1232,12 @@ router.put('/:id/profile', auth, isEstabelecimento, async (req, res) => {
 
     await pool.query(
       `INSERT INTO estabelecimento_perfis (
-         estabelecimento_id, sobre, contato_email, contato_telefone,
+         estabelecimento_id, sobre, contato_telefone,
          site_url, instagram_url, facebook_url, linkedin_url,
          youtube_url, tiktok_url, horarios_json
-       ) VALUES (?,?,?,?,?,?,?,?,?,?,?)
+       ) VALUES (?,?,?,?,?,?,?,?,?,?)
        ON DUPLICATE KEY UPDATE
          sobre=VALUES(sobre),
-         contato_email=VALUES(contato_email),
          contato_telefone=VALUES(contato_telefone),
          site_url=VALUES(site_url),
          instagram_url=VALUES(instagram_url),
@@ -1229,7 +1249,6 @@ router.put('/:id/profile', auth, isEstabelecimento, async (req, res) => {
       [
         estabelecimentoId,
         values.sobre,
-        values.contato_email,
         values.contato_telefone,
         values.site_url,
         values.instagram_url,
@@ -1242,7 +1261,7 @@ router.put('/:id/profile', auth, isEstabelecimento, async (req, res) => {
     );
 
     const [profileRows] = await pool.query(
-      `SELECT estabelecimento_id, sobre, contato_email, contato_telefone,
+      `SELECT estabelecimento_id, sobre, contato_telefone,
               site_url, instagram_url, facebook_url, linkedin_url,
               youtube_url, tiktok_url, horarios_json, updated_at
          FROM estabelecimento_perfis
@@ -1330,6 +1349,14 @@ router.get('/:id/clients', auth, isEstabelecimento, async (req, res) => {
         u.nome,
         u.email,
         u.telefone,
+        u.data_nascimento,
+        u.cep,
+        u.endereco,
+        u.numero,
+        u.complemento,
+        u.bairro,
+        u.cidade,
+        u.estado,
         stats.total_appointments,
         stats.total_cancelled,
         stats.last_appointment_at,
@@ -2224,13 +2251,6 @@ router.get('/:id/stats', auth, isEstabelecimento, async (req, res) => {
 
 
 export default router;
-
-
-
-
-
-
-
 
 
 

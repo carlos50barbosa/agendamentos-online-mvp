@@ -1,13 +1,15 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import moment from 'moment'
 import 'moment/locale/pt-br'
 import 'react-big-calendar/lib/css/react-big-calendar.css'
 import { Calendar as BigCalendar, momentLocalizer, Views } from 'react-big-calendar'
 import { Api, resolveAssetUrl } from '../utils/api'
-import { IconBell } from '../components/Icons.jsx'
 import { getUser, USER_EVENT } from '../utils/auth'
 
 moment.locale('pt-br')
+moment.updateLocale('pt-br', {
+  week: { dow: 1 },
+})
 const localizer = momentLocalizer(moment)
 
 const DateHelpers = {
@@ -113,7 +115,118 @@ const DateHelpers = {
     }),
 }
 
+const formatPhoneDisplay = (value = '') => {
+  let digits = String(value || '').replace(/\D/g, '')
+  if (!digits) return ''
+  if (digits.length > 11 && digits.startsWith('55')) {
+    digits = digits.slice(2)
+  }
+  if (digits.length > 11) {
+    digits = digits.slice(-11)
+  }
+  if (digits.length <= 2) return digits
+  const ddd = digits.slice(0, 2)
+  const rest = digits.slice(2)
+  if (!rest) return `(${ddd})`
+  if (rest.length <= 4) return `(${ddd}) ${rest}`
+  if (rest.length === 7) return `(${ddd}) ${rest.slice(0, 3)}-${rest.slice(3)}`
+  if (rest.length === 8) return `(${ddd}) ${rest.slice(0, 4)}-${rest.slice(4)}`
+  if (rest.length === 9) return `(${ddd}) ${rest.slice(0, 6)}-${rest.slice(6)}`
+  return `(${ddd}) ${rest.slice(0, rest.length - 4)}-${rest.slice(-4)}`
+}
+
+const normalizePhoneDigits = (value = '') => {
+  let digits = String(value || '').replace(/\D/g, '')
+  if (digits.length > 11 && digits.startsWith('55')) {
+    digits = digits.slice(2)
+  }
+  if (digits.length > 11) {
+    digits = digits.slice(-11)
+  }
+  return digits
+}
+
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+const isValidEmail = (value = '') => EMAIL_REGEX.test(String(value || '').trim().toLowerCase())
+
+const WEEKDAY_SHORT_LABELS = Object.freeze(['DOM', 'SEG', 'TER', 'QUA', 'QUI', 'SEX', 'SÁB'])
+
 const DEFAULT_BUSINESS_HOURS = { start: 9, end: 22 }
+const CALENDAR_STEP_MINUTES = 60
+
+const normalizeSlotLabel = (value) => {
+  if (value === null || value === undefined) return ''
+  return String(value)
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[^a-z0-9:/-]/g, '')
+}
+
+const isAvailableLabel = (value) => {
+  const normalized = normalizeSlotLabel(value)
+  return normalized === 'disponivel' || normalized === 'available'
+}
+
+const slotStatusClass = (label) => {
+  const normalized = normalizeSlotLabel(label)
+  if (normalized === 'agendado' || normalized === 'ocupado') return 'busy'
+  if (normalized === 'bloqueado') return 'block'
+  return 'ok'
+}
+
+const inBusinessHours = (isoDatetime, schedule = null, durationMinutes = 0) => {
+  const d = new Date(isoDatetime)
+  if (Number.isNaN(d.getTime())) return false
+  const duration = Number(durationMinutes) || 0
+  const endDate = duration > 0 ? new Date(d.getTime() + duration * 60000) : d
+  const isSameDay =
+    endDate.getFullYear() === d.getFullYear() &&
+    endDate.getMonth() === d.getMonth() &&
+    endDate.getDate() === d.getDate()
+  const startMinutes = d.getHours() * 60 + d.getMinutes()
+  const endMinutes = endDate.getHours() * 60 + endDate.getMinutes()
+  if (schedule) {
+    const rule = schedule[d.getDay()]
+    if (!rule || !rule.enabled) return false
+    if (Array.isArray(rule.blockMinutes) && rule.blockMinutes.some(([start, end]) => startMinutes >= start && startMinutes < end)) {
+      return false
+    }
+    if (!isSameDay) return false
+    return startMinutes >= rule.startMinutes && endMinutes <= rule.endMinutes
+  }
+  if (!isSameDay) return false
+  const openMinutes = DEFAULT_BUSINESS_HOURS.start * 60
+  const closeMinutes = DEFAULT_BUSINESS_HOURS.end * 60
+  return startMinutes >= openMinutes && endMinutes <= closeMinutes
+}
+
+const SlotButton = ({ slot, isSelected, onClick, density = 'compact', disabled = false }) => {
+  const isPast = DateHelpers.isPastSlot(slot.datetime)
+  const statusClass = slotStatusClass(slot.label)
+  const disabledReason = disabled || isPast || !isAvailableLabel(slot.label)
+  const tooltipLabel = slot?.label ?? 'disponivel'
+  const className = [
+    'slot-btn',
+    statusClass,
+    isSelected ? 'is-selected' : '',
+    isPast ? 'is-past' : '',
+    density === 'compact' ? 'slot-btn--compact' : 'slot-btn--comfortable',
+  ].join(' ')
+  return (
+    <button
+      className={className}
+      title={`${new Date(slot.datetime).toLocaleString('pt-BR')} - ${tooltipLabel}${isPast ? ' (passado)' : ''}`}
+      onClick={onClick}
+      disabled={disabledReason}
+      aria-disabled={disabledReason}
+      tabIndex={disabledReason ? -1 : 0}
+      aria-pressed={isSelected}
+      data-datetime={slot.datetime}
+    >
+      {DateHelpers.formatTime(slot.datetime)}
+    </button>
+  )
+}
 
 const normalizeText = (value) =>
   String(value || '')
@@ -383,154 +496,13 @@ const getScheduleRuleForDate = (dateish, schedule) => {
   }
 }
 
-const pad2 = (n) => String(n).padStart(2, '0')
-const localKey = (dateish) => {
-  const d = new Date(dateish)
-  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(
-    d.getMinutes()
-  )}`
-}
-
-const normalizeSlotLabel = (value) => {
-  if (value === null || value === undefined) return ''
-  return String(value)
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[^a-z0-9:/-]/g, '')
-}
-
-const isAvailableLabel = (value) => {
-  const normalized = normalizeSlotLabel(value)
-  return normalized === 'disponivel' || normalized === 'available'
-}
-
-const slotStatusClass = (label) => {
-  const normalized = normalizeSlotLabel(label)
-  if (normalized === 'agendado' || normalized === 'ocupado') return 'busy'
-  if (normalized === 'bloqueado') return 'block'
-  return 'ok'
-}
-
-const fillBusinessGrid = ({ currentWeek, slots, stepMinutes = 30, workingSchedule = null }) => {
-  const { days } = (function getDays(iso) {
-    const ds = DateHelpers.weekDays(iso)
-    return { days: ds }
-  })(currentWeek)
-
-  const byKey = new Map()
-  if (Array.isArray(slots)) {
-    slots.forEach((s) => byKey.set(localKey(s.datetime), s))
-  }
-
-  const filled = []
-  for (const { date } of days) {
-    const dayRule = workingSchedule ? workingSchedule[date.getDay()] : null
-    if (workingSchedule && (!dayRule || !dayRule.enabled)) continue
-
-    const start = new Date(date)
-    const end = new Date(date)
-
-    if (dayRule && dayRule.enabled) {
-      const [startHour, startMinute] = dayRule.start.split(':').map(Number)
-      const [endHour, endMinute] = dayRule.end.split(':').map(Number)
-      start.setHours(startHour, startMinute, 0, 0)
-      end.setHours(endHour, endMinute, 0, 0)
-    } else {
-      start.setHours(DEFAULT_BUSINESS_HOURS.start, 0, 0, 0)
-      end.setHours(DEFAULT_BUSINESS_HOURS.end, 0, 0, 0)
-    }
-
-    for (let t = start.getTime(); t <= end.getTime(); t += stepMinutes * 60000) {
-      const k = localKey(t)
-      const existing = byKey.get(k)
-      const slotDate = new Date(t)
-      const minutesOfDay = slotDate.getHours() * 60 + slotDate.getMinutes()
-      const blockedByRule =
-        dayRule &&
-        Array.isArray(dayRule.blockMinutes) &&
-        dayRule.blockMinutes.some(([startMin, endMin]) => minutesOfDay >= startMin && minutesOfDay < endMin)
-      const normalizedLabel = existing ? normalizeSlotLabel(existing.label) : ''
-      const baseSlot = existing
-        ? { ...existing }
-        : { datetime: slotDate.toISOString(), label: 'disponivel', status: 'available' }
-
-      if (blockedByRule && normalizedLabel !== 'agendado') {
-        baseSlot.label = 'bloqueado'
-        baseSlot.status = 'blocked'
-      } else if (!baseSlot.status) {
-        baseSlot.status = normalizedLabel === 'agendado' ? 'booked' : 'available'
-      }
-
-      filled.push(baseSlot)
-    }
-  }
-  return filled
-}
-
-const normalizeSlotsList = (data) => {
-  const arr = Array.isArray(data) ? data : data?.slots || []
-  return arr.map((slot) => {
-    const datetime =
-      slot.datetime ||
-      slot.data ||
-      slot.start_time ||
-      slot.start ||
-      slot.time ||
-      slot.hora ||
-      slot.date ||
-      slot.startDate ||
-      slot.startDateTime ||
-      slot.slot ||
-      slot.at ||
-      slot.when ||
-      ''
-    let label =
-      slot.label ||
-      slot.status ||
-      slot.disponibilidade ||
-      slot.disponivel ||
-      slot.situacao ||
-      slot.nome ||
-      slot.tipo ||
-      slot.kind ||
-      ''
-    const raw = String(label || '').toLowerCase()
-    label =
-      raw.includes('agen') || raw.includes('ocup') || raw.includes('book')
-        ? 'agendado'
-        : raw.includes('bloq') || raw.includes('block') || raw.includes('indisp') || raw.includes('close')
-        ? 'bloqueado'
-        : raw.includes('disp') || raw.includes('avail')
-        ? 'disponivel'
-        : raw.includes('manut')
-        ? 'bloqueado'
-        : slot.status === 'busy'
-        ? 'agendado'
-        : slot.status === 'blocked'
-        ? 'bloqueado'
-        : slot.status === 'available'
-        ? 'disponivel'
-        : raw.includes('book')
-        ? 'agendado'
-        : raw.includes('unavail') || raw.includes('block') || raw.includes('bloq')
-        ? 'bloqueado'
-        : 'disponivel'
-    if (['agendado', 'bloqueado'].includes(normalizeSlotLabel(slot.label)) || isAvailableLabel(slot.label)) {
-      label = String(slot.label).toLowerCase()
-    }
-    return { ...slot, datetime, label }
-  })
-}
-
 export default function DashboardEstabelecimento() {
   const [itens, setItens] = useState([])
   const [loading, setLoading] = useState(true)
   const [status, setStatus] = useState('todos')
   const [currentUser, setCurrentUser] = useState(() => getUser())
-  const [showCalendar, setShowCalendar] = useState(false)
   const [showProAgenda, setShowProAgenda] = useState(true)
   const [professionals, setProfessionals] = useState([])
-  const calendarRef = useRef(null)
   const establishmentId =
     currentUser && currentUser.tipo === 'estabelecimento' ? currentUser.id : null
 
@@ -593,20 +565,6 @@ export default function DashboardEstabelecimento() {
     }
   }, [status])
 
-  useEffect(() => {
-    if (!showCalendar) return
-    const node = calendarRef.current
-    if (!node) return
-    const timer = window.setTimeout(() => {
-      node.scrollIntoView({ behavior: 'smooth', block: 'start' })
-    }, 0)
-    return () => window.clearTimeout(timer)
-  }, [showCalendar])
-
-  const handleToggleCalendar = () => {
-    setShowCalendar((open) => !open)
-  }
-
   const totals = useMemo(() => {
     const acc = { recebidos: 0, cancelados: 0 }
     for (const item of itens) {
@@ -654,6 +612,22 @@ export default function DashboardEstabelecimento() {
     setItens((prev) => prev.map((item) => (item.id === id ? { ...item, status: 'cancelado' } : item)))
   }, [])
 
+  const handleUpdateAppointment = useCallback((id, updates) => {
+    if (!id || !updates) return
+    setItens((prev) => prev.map((item) => (item.id === id ? { ...item, ...updates } : item)))
+  }, [])
+
+  const handleAddAppointment = useCallback((appointment) => {
+    if (!appointment) return
+    setItens((prev) => {
+      const exists = prev.some((item) => item.id === appointment.id)
+      if (exists) {
+        return prev.map((item) => (item.id === appointment.id ? { ...item, ...appointment } : item))
+      }
+      return [appointment, ...prev]
+    })
+  }, [])
+
   return (
     <div className="dashboard-narrow dashboard-pro">
       <div className="agenda-panel">
@@ -661,9 +635,6 @@ export default function DashboardEstabelecimento() {
           <div className="agenda-hdr-left">
             <div className="agenda-title">
               <h2>Agendamentos</h2>
-              <div className="agenda-bell" title="Notificacoes" aria-hidden="true">
-                <IconBell className="agenda-bell__icon" aria-hidden="true" />
-              </div>
             </div>
             <div className="agenda-chips">
               <button
@@ -671,42 +642,54 @@ export default function DashboardEstabelecimento() {
                 className="agenda-chip agenda-chip--ok"
                 aria-label={`Agendamentos recebidos: ${totals.recebidos}`}
               >
-                <b>{totals.recebidos}</b>
-                <span className="agenda-chip__tooltip" aria-hidden="true">
-                  Agendamentos recebidos
-                </span>
+                <span className="agenda-chip__value">{totals.recebidos}</span>
+                <span className="agenda-chip__label">Recebidos</span>
               </button>
               <button
                 type="button"
                 className="agenda-chip agenda-chip--danger"
                 aria-label={`Agendamentos cancelados: ${totals.cancelados}`}
               >
-                <b>{totals.cancelados}</b>
-                <span className="agenda-chip__tooltip" aria-hidden="true">
-                  Agendamentos cancelados
-                </span>
+                <span className="agenda-chip__value">{totals.cancelados}</span>
+                <span className="agenda-chip__label">Cancelados</span>
               </button>
             </div>
           </div>
           <div className="agenda-hdr-right">
-            <button
-              type="button"
-              className="agenda-btn agenda-btn--primary"
-              onClick={handleToggleCalendar}
-            >
-              {showCalendar ? 'Ocultar calendario' : 'Ver calendário'}
-            </button>
-            <select
-              className="agenda-select"
-              value={status}
-              onChange={(e) => setStatus(e.target.value)}
-              title="Status"
-            >
-              <option value="todos">Todos</option>
-              <option value="confirmado">Confirmados</option>
-              <option value="concluido">Concluídos</option>
-              <option value="cancelado">Cancelados</option>
-            </select>
+            <div className="agenda-segmented" role="group" aria-label="Filtrar por status">
+              <button
+                type="button"
+                className={`agenda-segmented__btn ${status === 'todos' ? 'is-active' : ''}`}
+                aria-pressed={status === 'todos'}
+                onClick={() => setStatus('todos')}
+              >
+                Todos
+              </button>
+              <button
+                type="button"
+                className={`agenda-segmented__btn ${status === 'confirmado' ? 'is-active' : ''}`}
+                aria-pressed={status === 'confirmado'}
+                onClick={() => setStatus('confirmado')}
+              >
+                Confirmados
+              </button>
+              <button
+                type="button"
+                className={`agenda-segmented__btn ${status === 'concluido' ? 'is-active' : ''}`}
+                aria-pressed={status === 'concluido'}
+                onClick={() => setStatus('concluido')}
+              >
+                Concluidos
+              </button>
+              <button
+                type="button"
+                className={`agenda-segmented__btn ${status === 'cancelado' ? 'is-active' : ''}`}
+                aria-pressed={status === 'cancelado'}
+                onClick={() => setStatus('cancelado')}
+              >
+                Cancelados
+              </button>
+            </div>
           </div>
         </div>
         <div className="pro-agenda__wrap">
@@ -714,269 +697,67 @@ export default function DashboardEstabelecimento() {
             items={filtered}
             professionals={professionals}
             onForceCancel={handleForceCancel}
+            onUpdateAppointment={handleUpdateAppointment}
+            onAddAppointment={handleAddAppointment}
             establishmentId={establishmentId}
+            currentUser={currentUser}
           />
         </div>
       </div>
-      {showCalendar && (
-        <div className="agenda-calendar" ref={calendarRef}>
-          <CalendarAvailability establishmentId={establishmentId} />
-        </div>
-      )}
     </div>
   )
 
-}
-
-function CalendarAvailability({ establishmentId }) {
-  const todayIso = DateHelpers.toISODate(new Date())
-  const [selectedDate, setSelectedDate] = useState(todayIso)
-  const [monthStart, setMonthStart] = useState(DateHelpers.firstOfMonthISO(new Date()))
-  const currentWeek = useMemo(() => DateHelpers.weekStartISO(selectedDate || todayIso), [selectedDate, todayIso])
-  const [slotState, setSlotState] = useState({ week: '', slots: [] })
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
-  const [workingSchedule, setWorkingSchedule] = useState(null)
-  const [scheduleLoading, setScheduleLoading] = useState(false)
-  const [reloadCounter, setReloadCounter] = useState(0)
-
-  useEffect(() => {
-    if (!establishmentId) {
-      setWorkingSchedule(null)
-      setScheduleLoading(false)
-      return
-    }
-    let cancelled = false
-    setScheduleLoading(true)
-    ;(async () => {
-      try {
-        const data = await Api.getEstablishment(establishmentId)
-        if (cancelled) return
-        const list = Array.isArray(data?.profile?.horarios) ? data.profile.horarios : []
-        setWorkingSchedule(buildWorkingSchedule(list))
-      } catch {
-        if (cancelled) return
-        setWorkingSchedule(null)
-      } finally {
-        if (!cancelled) setScheduleLoading(false)
-      }
-    })()
-    return () => {
-      cancelled = true
-    }
-  }, [establishmentId])
-
-  useEffect(() => {
-    if (!establishmentId) {
-      setSlotState({ week: '', slots: [] })
-      setError('')
-      setLoading(false)
-      return
-    }
-    let cancelled = false
-    setLoading(true)
-    setError('')
-    ;(async () => {
-      try {
-        const slotsData = await Api.getSlots(establishmentId, currentWeek, { includeBusy: true })
-        if (cancelled) return
-        const normalized = normalizeSlotsList(slotsData)
-        setSlotState({ week: currentWeek, slots: normalized })
-      } catch {
-        if (cancelled) return
-        setSlotState({ week: currentWeek, slots: [] })
-        setError('Não foi possível carregar os horários.')
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
-    })()
-    return () => {
-      cancelled = true
-    }
-  }, [establishmentId, currentWeek, reloadCounter])
-
-  const handleReload = useCallback(() => {
-    setReloadCounter((prev) => prev + 1)
-  }, [])
-
-  const filledSlots = useMemo(() => {
-    if (slotState.week !== currentWeek) return []
-    return fillBusinessGrid({ currentWeek, slots: slotState.slots, stepMinutes: 30, workingSchedule })
-  }, [slotState, currentWeek, workingSchedule])
-
-  const groupedSlots = useMemo(() => {
-    const map = new Map()
-    filledSlots.forEach((slot) => {
-      const key = DateHelpers.toISODate(slot.datetime)
-      if (!map.has(key)) map.set(key, [])
-      map.get(key).push(slot)
-    })
-    map.forEach((entries) => entries.sort((a, b) => new Date(a.datetime) - new Date(b.datetime)))
-    return map
-  }, [filledSlots])
-
-  const selectedSlots = selectedDate ? groupedSlots.get(selectedDate) || [] : []
-  const selectedDayRule = useMemo(
-    () => getScheduleRuleForDate(selectedDate, workingSchedule),
-    [selectedDate, workingSchedule]
-  )
-  const isStaleWeek = slotState.week !== currentWeek
-
-  const handlePickDay = (iso) => {
-    if (!iso) return
-    setSelectedDate(iso)
-    setMonthStart((prev) =>
-      DateHelpers.isSameMonth(prev, iso) ? prev : DateHelpers.firstOfMonthISO(iso)
-    )
-  }
-
-  const handleMonthChange = (delta) => {
-    setMonthStart(DateHelpers.formatLocalISO(DateHelpers.addMonths(monthStart, delta)))
-  }
-
-  if (!establishmentId) {
-    return (
-      <div className="card">
-        <h3 style={{ marginTop: 0 }}>Calendário de disponibilidade</h3>
-        <div className="empty">Disponível apenas para contas de estabelecimento.</div>
-      </div>
-    )
-  }
-
-  return (
-    <div className="card">
-      <div className="row spread" style={{ alignItems: 'center', gap: 8, marginBottom: 8 }}>
-        <div>
-          <h3 style={{ margin: 0 }}>Calendário de disponibilidade</h3>
-          <small className="muted">Visualização de horários igual ao fluxo do cliente.</small>
-        </div>
-        <div className="row" style={{ gap: 6, alignItems: 'center' }}>
-          {scheduleLoading && <span className="muted" style={{ fontSize: 12 }}>Atualizando horários…</span>}
-          <button type="button" className="btn btn--sm" onClick={handleReload} disabled={loading}>
-            {loading ? 'Atualizando…' : 'Atualizar'}
-          </button>
-        </div>
-      </div>
-
-      <div className="novo-agendamento__calendar">
-        <div className="month card" style={{ padding: 8, marginBottom: 8 }}>
-          <div className="row spread" style={{ alignItems: 'center', marginBottom: 6 }}>
-            <div className="row" style={{ gap: 6, alignItems: 'center' }}>
-              <button className="btn btn--sm" type="button" aria-label="Mês anterior" onClick={() => handleMonthChange(-1)}>
-                ‹
-              </button>
-              <strong>
-                {new Date(monthStart + 'T00:00:00').toLocaleDateString('pt-BR', {
-                  month: 'long',
-                  year: 'numeric',
-                })}
-              </strong>
-              <button className="btn btn--sm" type="button" aria-label="Próximo mês" onClick={() => handleMonthChange(1)}>
-                ›
-              </button>
-            </div>
-          </div>
-          <div className="month__grid">
-            {['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'].map((d, index) => (
-              <div key={`${d}-${index}`} className="month__dow muted">
-                {d}
-              </div>
-            ))}
-            {DateHelpers.monthGrid(monthStart).map(({ iso, inMonth, date }) => {
-              const isToday = DateHelpers.sameYMD(iso, todayIso)
-              const isPastDay = iso < todayIso
-              const isSelected = selectedDate && DateHelpers.sameYMD(selectedDate, iso)
-              const classNameParts = ['month__day']
-              if (!inMonth) classNameParts.push('is-dim')
-              if (isToday) classNameParts.push('is-today')
-              if (isSelected) classNameParts.push('is-selected')
-              if (isPastDay) classNameParts.push('is-past')
-              return (
-                <button
-                  key={iso}
-                  type="button"
-                  className={classNameParts.join(' ')}
-                  onClick={isPastDay ? undefined : () => handlePickDay(iso)}
-                  title={date.toLocaleDateString('pt-BR')}
-                  disabled={isPastDay}
-                >
-                  {date.getDate()}
-                </button>
-              )
-            })}
-          </div>
-        </div>
-
-        {error && (
-          <div className="box error" style={{ marginTop: 8 }}>
-            {error}
-            <div className="row" style={{ marginTop: 6 }}>
-              <button className="btn btn--sm" onClick={handleReload}>
-                Tentar novamente
-              </button>
-            </div>
-          </div>
-        )}
-
-        <div className="card" style={{ marginTop: 8 }}>
-          <h4 style={{ marginTop: 0, marginBottom: 8 }}>
-            {selectedDate
-              ? new Date(selectedDate + 'T00:00:00').toLocaleDateString('pt-BR', {
-                  weekday: 'long',
-                  day: '2-digit',
-                  month: 'long',
-                })
-              : 'Selecione uma data'}
-          </h4>
-          {!selectedDate ? (
-            <div className="empty">Escolha uma data no calendário.</div>
-          ) : selectedDayRule && !selectedDayRule.enabled ? (
-            <div className="empty">Estabelecimento não atende neste dia.</div>
-          ) : (
-            <div className="slots--grid">
-              {loading || isStaleWeek ? (
-                Array.from({ length: 8 }).map((_, index) => <div key={index} className="shimmer pill" />)
-              ) : selectedSlots.length === 0 ? (
-                <div className="empty">Sem horários cadastrados para este dia.</div>
-              ) : (
-                selectedSlots.map((slot) => <SlotPreview key={slot.datetime} slot={slot} />)
-              )}
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  )
-}
-
-function SlotPreview({ slot }) {
-  const statusClass = slotStatusClass(slot.label)
-  const isPast = DateHelpers.isPastSlot(slot.datetime)
-  const className = [
-    'slot-btn',
-    'slot-btn--compact',
-    statusClass,
-    isPast ? 'is-past' : '',
-  ]
-  return (
-    <button
-      type="button"
-      className={className.join(' ')}
-      title={`${DateHelpers.formatTime(slot.datetime)} • ${slot.label || ''}`}
-      disabled
-    >
-      {DateHelpers.formatTime(slot.datetime)}
-    </button>
-  )
 }
 
 const AGENDA_STATUS_THEME = Object.freeze({
-  confirmado_wa: { label: 'Confirmado (WhatsApp)', bg: '#dcfce7', border: '#86efac', dot: '#16a34a', text: '#064e3b', badge: 'rgba(22,163,74,0.14)' },
-  confirmado: { label: 'Confirmado', bg: '#e5e7eb', border: '#d1d5db', dot: '#6b7280', text: '#374151', badge: 'rgba(107,114,128,0.16)' }, // aguardando confirmacao
-  concluido: { label: 'Concluido', bg: '#e0f2fe', border: '#bfdbfe', dot: '#2563eb', text: '#0f172a', badge: 'rgba(37,99,235,0.12)' },
-  cancelado: { label: 'Cancelado', bg: '#fee2e2', border: '#fecdd3', dot: '#dc2626', text: '#7f1d1d', badge: 'rgba(220,38,38,0.14)' },
-  pendente: { label: 'Pendente', bg: '#e5e7eb', border: '#d1d5db', dot: '#6b7280', text: '#374151', badge: 'rgba(107,114,128,0.16)' },
-  default: { label: 'Agendamento', bg: '#e5e7eb', border: '#d1d5db', dot: '#6b7280', text: '#374151', badge: 'rgba(107,114,128,0.16)' },
+  confirmado_wa: {
+    label: 'Confirmado (WhatsApp)',
+    bg: '#dcfce7',
+    border: '#86efac',
+    dot: '#16a34a',
+    text: '#064e3b',
+    badge: 'rgba(22,163,74,0.14)',
+  },
+  confirmado: {
+    label: 'Confirmado',
+    bg: '#e5e7eb',
+    border: '#d1d5db',
+    dot: '#6b7280',
+    text: '#374151',
+    badge: 'rgba(107,114,128,0.16)',
+  },
+  concluido: {
+    label: 'Concluido',
+    bg: '#e0f2fe',
+    border: '#bfdbfe',
+    dot: '#2563eb',
+    text: '#0f172a',
+    badge: 'rgba(37,99,235,0.12)',
+  },
+  cancelado: {
+    label: 'Cancelado',
+    bg: '#fee2e2',
+    border: '#fecdd3',
+    dot: '#dc2626',
+    text: '#7f1d1d',
+    badge: 'rgba(220,38,38,0.14)',
+  },
+  pendente: {
+    label: 'Pendente',
+    bg: '#FFE699',
+    border: '#E5C65A',
+    dot: '#B08900',
+    text: '#3B2F00',
+    badge: 'rgba(176,137,0,0.18)',
+  },
+  default: {
+    label: 'Agendamento',
+    bg: '#e5e7eb',
+    border: '#d1d5db',
+    dot: '#6b7280',
+    text: '#374151',
+    badge: 'rgba(107,114,128,0.16)',
+  },
 })
 
 const getAgendaTheme = (status) => AGENDA_STATUS_THEME[status] || AGENDA_STATUS_THEME.default
@@ -987,6 +768,12 @@ const formatTime24h = (date) => {
   const minutes = String(dt.getMinutes()).padStart(2, '0')
   return `${hours}:${minutes}`
 }
+const formatDateShort = (date) => {
+  const d = date instanceof Date ? date : new Date(date)
+  if (!Number.isFinite(d?.getTime?.())) return ''
+  return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })
+}
+
 const formatTime12h = (date, { showMinutes = false, compact = false, lowercase = false } = {}) => {
   const dt = date instanceof Date ? date : new Date(date)
   if (!Number.isFinite(dt?.getTime?.())) return ''
@@ -1018,7 +805,15 @@ const RESOURCE_COLORS = [
 ]
 
 
-function ProfessionalAgendaView({ items, onForceCancel, professionals, establishmentId }) {
+function ProfessionalAgendaView({
+  items,
+  onForceCancel,
+  onUpdateAppointment,
+  onAddAppointment,
+  professionals,
+  establishmentId,
+  currentUser,
+}) {
   const getResourceId = (item) =>
     item?.profissional_id ??
     item?.professional_id ??
@@ -1091,11 +886,61 @@ function ProfessionalAgendaView({ items, onForceCancel, professionals, establish
   const filterRef = React.useRef(null)
   const [selectedEvent, setSelectedEvent] = useState(null)
   const [cancelling, setCancelling] = useState(false)
+  const [rescheduleOpen, setRescheduleOpen] = useState(false)
+  const [rescheduleDate, setRescheduleDate] = useState('')
+  const [rescheduleTime, setRescheduleTime] = useState('')
+  const [rescheduleSaving, setRescheduleSaving] = useState(false)
+  const [rescheduleError, setRescheduleError] = useState('')
   const [workingSchedule, setWorkingSchedule] = useState(null)
+  const [services, setServices] = useState([])
+  const [servicesLoading, setServicesLoading] = useState(false)
+  const [servicesError, setServicesError] = useState('')
+  const [selfBookingOpen, setSelfBookingOpen] = useState(false)
+  const [selfBookingServiceId, setSelfBookingServiceId] = useState('')
+  const [selfBookingProfessionalId, setSelfBookingProfessionalId] = useState('')
+  const [selfBookingDate, setSelfBookingDate] = useState('')
+  const [selfBookingTime, setSelfBookingTime] = useState('')
+  const [selfBookingName, setSelfBookingName] = useState('')
+  const [selfBookingEmail, setSelfBookingEmail] = useState('')
+  const [selfBookingPhone, setSelfBookingPhone] = useState('')
+  const [selfBookingBirthdate, setSelfBookingBirthdate] = useState('')
+  const [selfBookingCep, setSelfBookingCep] = useState('')
+  const [selfBookingEndereco, setSelfBookingEndereco] = useState('')
+  const [selfBookingNumero, setSelfBookingNumero] = useState('')
+  const [selfBookingComplemento, setSelfBookingComplemento] = useState('')
+  const [selfBookingBairro, setSelfBookingBairro] = useState('')
+  const [selfBookingCidade, setSelfBookingCidade] = useState('')
+  const [selfBookingEstado, setSelfBookingEstado] = useState('')
+  const [showSelfBookingOptional, setShowSelfBookingOptional] = useState(false)
+  const [selfBookingSaving, setSelfBookingSaving] = useState(false)
+  const [selfBookingError, setSelfBookingError] = useState('')
+  const [selfBookingWeekStart, setSelfBookingWeekStart] = useState('')
+  const [selfBookingMonthStart, setSelfBookingMonthStart] = useState('')
+  const [selfBookingSelectedDate, setSelfBookingSelectedDate] = useState('')
+  const [selfBookingSelectedSlot, setSelfBookingSelectedSlot] = useState(null)
+  const [selfBookingSlots, setSelfBookingSlots] = useState([])
+  const [selfBookingSlotsLoading, setSelfBookingSlotsLoading] = useState(false)
+  const [selfBookingSlotsError, setSelfBookingSlotsError] = useState('')
+  const [toast, setToast] = useState(null)
+
+  function showToast(type, msg, ms = 5000) {
+    setToast({ type, msg })
+    window.clearTimeout(showToast._t)
+    showToast._t = window.setTimeout(() => setToast(null), ms)
+  }
 
   useEffect(() => {
     setResourceFilter('all')
   }, [])
+
+  useEffect(() => {
+    if (!resources.length) return
+    if (resourceFilter === 'all') return
+    const hasResource = resources.some((res) => String(res.id) === String(resourceFilter))
+    if (!hasResource) {
+      setResourceFilter('all')
+    }
+  }, [resourceFilter, resources])
 
   useEffect(() => {
     if (!establishmentId) {
@@ -1113,6 +958,37 @@ function ProfessionalAgendaView({ items, onForceCancel, professionals, establish
         if (!cancelled) setWorkingSchedule(null)
       }
     })()
+    return () => {
+      cancelled = true
+    }
+  }, [establishmentId])
+
+  useEffect(() => {
+    if (!establishmentId) {
+      setServices([])
+      setServicesError('')
+      return
+    }
+    let cancelled = false
+    setServicesLoading(true)
+    setServicesError('')
+    Api.servicosList()
+      .then((data) => {
+        if (cancelled) return
+        const list = Array.isArray(data) ? data : []
+        const active = list.filter((svc) => svc?.ativo == null || Number(svc.ativo) !== 0)
+        active.sort((a, b) => String(a?.nome || a?.title || '').localeCompare(String(b?.nome || b?.title || '')))
+        setServices(active)
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setServices([])
+          setServicesError('Nao foi possivel carregar os servicos.')
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setServicesLoading(false)
+      })
     return () => {
       cancelled = true
     }
@@ -1256,20 +1132,43 @@ function ProfessionalAgendaView({ items, onForceCancel, professionals, establish
   }, [selectedEvent?.id])
 
   useEffect(() => {
-    if (!selectedEvent) return
+    if (!selectedEvent?.id) {
+      setRescheduleOpen(false)
+      setRescheduleDate('')
+      setRescheduleTime('')
+      setRescheduleSaving(false)
+      setRescheduleError('')
+      return
+    }
+    const startDate = selectedEvent.start instanceof Date
+      ? selectedEvent.start
+      : new Date(selectedEvent.start)
+    if (!Number.isFinite(startDate.getTime())) {
+      setRescheduleDate('')
+      setRescheduleTime('')
+      setRescheduleOpen(false)
+      setRescheduleSaving(false)
+      setRescheduleError('')
+      return
+    }
+    setRescheduleDate(DateHelpers.formatLocalISO(startDate))
+    setRescheduleTime(formatTime24h(startDate))
+    setRescheduleOpen(false)
+    setRescheduleSaving(false)
+    setRescheduleError('')
+  }, [selectedEvent?.id])
+
+  useEffect(() => {
+    if (!selectedEvent && !selfBookingOpen) return
     const handleKeyDown = (eventKey) => {
       if (eventKey.key === 'Escape') {
         setSelectedEvent(null)
+        setSelfBookingOpen(false)
       }
     }
     document.addEventListener('keydown', handleKeyDown)
     return () => document.removeEventListener('keydown', handleKeyDown)
-  }, [selectedEvent])
-
-  const filteredResources = useMemo(
-    () => (resourceFilter === 'all' ? resources : resources.filter((r) => r.id === resourceFilter)),
-    [resources, resourceFilter]
-  )
+  }, [selectedEvent, selfBookingOpen])
 
   const selectedResource = useMemo(
     () => (resourceFilter === 'all' ? null : resources.find((r) => r.id === resourceFilter)),
@@ -1287,27 +1186,171 @@ function ProfessionalAgendaView({ items, onForceCancel, professionals, establish
   )
   const [currentDate, setCurrentDate] = useState(() => initialDate)
 
-  const currentDateIso = useMemo(
-    () => DateHelpers.toISODate(currentDate instanceof Date ? currentDate : new Date()),
-    [currentDate]
+  const weekStartIso = useMemo(() => DateHelpers.weekStartISO(currentDate), [currentDate])
+  const weekDays = useMemo(() => DateHelpers.weekDays(weekStartIso), [weekStartIso])
+  const weekStartDate = useMemo(() => DateHelpers.parseLocal(weekStartIso), [weekStartIso])
+  const weekEndDate = useMemo(() => DateHelpers.addDays(weekStartDate, 7), [weekStartDate])
+
+  const weekLabel = useMemo(() => DateHelpers.formatWeekLabel(weekStartIso), [weekStartIso])
+
+  const nextAppointment = useMemo(() => {
+    const now = Date.now()
+    return (filteredEvents || [])
+      .filter((ev) => {
+        const status = String(ev?.status || '').toLowerCase()
+        if (status === 'cancelado') return false
+        const start = ev?.start instanceof Date ? ev.start : new Date(ev?.start)
+        const startMs = start?.getTime?.()
+        return Number.isFinite(startMs) && startMs >= now
+      })
+      .sort((a, b) => a.start - b.start)[0] || null
+  }, [filteredEvents])
+
+  const nextAppointmentInfo = useMemo(() => {
+    if (!nextAppointment) {
+      return { label: 'Sem agendamentos', title: 'Sem agendamentos futuros' }
+    }
+    const start = nextAppointment.start instanceof Date
+      ? nextAppointment.start
+      : new Date(nextAppointment.start)
+    if (!Number.isFinite(start?.getTime?.())) {
+      return { label: 'Sem agendamentos', title: 'Sem agendamentos futuros' }
+    }
+    const dateLabel = formatDateShort(start)
+    const timeLabel = formatTime24h(start)
+    const whenLabel = [dateLabel, timeLabel].filter(Boolean).join(' ')
+    const serviceLabel = nextAppointment.service || nextAppointment.title || 'Servico'
+    const clientLabel = nextAppointment.client ? ` - ${nextAppointment.client}` : ''
+    const labelParts = []
+    if (whenLabel) labelParts.push(whenLabel)
+    if (serviceLabel) labelParts.push(serviceLabel)
+    const label = labelParts.join(' - ') || 'Sem agendamentos'
+    return { label, title: `${label}${clientLabel}`.trim() }
+  }, [nextAppointment])
+
+  const selectedService = useMemo(
+    () => services.find((svc) => String(svc?.id || '') === String(selfBookingServiceId)) || null,
+    [services, selfBookingServiceId]
   )
 
-  const eventsForCurrentDate = useMemo(
-    () => filteredEvents.filter((ev) => DateHelpers.sameYMD(DateHelpers.toISODate(ev.start), currentDateIso)),
-    [filteredEvents, currentDateIso]
+  const serviceProfessionals = useMemo(() => {
+    if (!selectedService) return []
+    if (Array.isArray(selectedService.professionals)) return selectedService.professionals
+    if (Array.isArray(selectedService.profissionais)) return selectedService.profissionais
+    return []
+  }, [selectedService])
+
+  const selfBookingServiceDuration = useMemo(
+    () => Number(selectedService?.duracao_min || selectedService?.duration || 0),
+    [selectedService]
   )
+
+  const selfBookingSlotsByDate = useMemo(() => {
+    const grouped = {}
+    ;(selfBookingSlots || []).forEach((slot) => {
+      const iso = DateHelpers.toISODate(new Date(slot.datetime))
+      if (!grouped[iso]) grouped[iso] = []
+      grouped[iso].push(slot)
+    })
+    Object.values(grouped).forEach((list) => {
+      list.sort((a, b) => new Date(a.datetime) - new Date(b.datetime))
+    })
+    return grouped
+  }, [selfBookingSlots])
+
+  const selfBookingSlotsForDay = selfBookingSelectedDate
+    ? (selfBookingSlotsByDate[selfBookingSelectedDate] || [])
+    : []
+
+  useEffect(() => {
+    if (!selfBookingOpen) return
+    if (!selfBookingServiceId && services.length === 1) {
+      const only = String(services[0]?.id || '')
+      if (only) setSelfBookingServiceId(only)
+    }
+  }, [selfBookingOpen, selfBookingServiceId, services])
+
+  useEffect(() => {
+    if (!selfBookingOpen) return
+    if (!serviceProfessionals.length) {
+      if (selfBookingProfessionalId) setSelfBookingProfessionalId('')
+      return
+    }
+    if (serviceProfessionals.length === 1) {
+      const only = String(serviceProfessionals[0]?.id || '')
+      if (only && selfBookingProfessionalId !== only) {
+        setSelfBookingProfessionalId(only)
+      }
+      return
+    }
+    const hasCurrent = serviceProfessionals.some(
+      (prof) => String(prof?.id || '') === String(selfBookingProfessionalId)
+    )
+    if (!hasCurrent) setSelfBookingProfessionalId('')
+  }, [selfBookingOpen, serviceProfessionals, selfBookingProfessionalId])
+
+  useEffect(() => {
+    if (!selfBookingOpen) return
+    setSelfBookingSelectedSlot(null)
+    setSelfBookingTime('')
+  }, [selfBookingOpen, selfBookingServiceId, selfBookingProfessionalId])
+
+  useEffect(() => {
+    if (!selfBookingOpen || !establishmentId || !selfBookingWeekStart) return
+    let cancelled = false
+    setSelfBookingSlotsLoading(true)
+    setSelfBookingSlotsError('')
+    Api.getSlots(establishmentId, selfBookingWeekStart, { includeBusy: true })
+      .then((data) => {
+        if (cancelled) return
+        const list = Array.isArray(data?.slots) ? data.slots : []
+        setSelfBookingSlots(list)
+        setSelfBookingSlotsLoading(false)
+      })
+      .catch(() => {
+        if (cancelled) return
+        setSelfBookingSlots([])
+        setSelfBookingSlotsLoading(false)
+        setSelfBookingSlotsError('Nao foi possivel carregar os horarios.')
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [selfBookingOpen, establishmentId, selfBookingWeekStart])
+
+
+  const breakBackgroundEvents = useMemo(() => {
+    if (!workingSchedule) return []
+    const events = []
+    weekDays.forEach(({ date }) => {
+      const rule = workingSchedule[date.getDay()]
+      if (!rule || !rule.enabled || !Array.isArray(rule.blockMinutes)) return
+      rule.blockMinutes.forEach(([startMin, endMin], idx) => {
+        const start = new Date(date)
+        const end = new Date(date)
+        start.setHours(Math.floor(startMin / 60), startMin % 60, 0, 0)
+        end.setHours(Math.floor(endMin / 60), endMin % 60, 0, 0)
+        if (end <= start) return
+        events.push({
+          id: `break-${DateHelpers.toISODate(date)}-${idx}`,
+          title: 'Pausa',
+          start,
+          end,
+          type: 'break',
+        })
+      })
+    })
+    return events
+  }, [workingSchedule, weekDays])
 
   const timeBounds = useMemo(() => {
     const baseDate = currentDate instanceof Date ? currentDate : new Date()
     const baseDay = new Date(baseDate)
     baseDay.setHours(0, 0, 0, 0)
-    const min = new Date(baseDay)
-    const max = new Date(baseDay)
     const dayRule = getScheduleRuleForDate(baseDay, workingSchedule)
-    let startHour = DEFAULT_BUSINESS_HOURS.start
-    let startMinute = 0
-    let endHour = DEFAULT_BUSINESS_HOURS.end
-    let endMinute = 0
+    let minMinutes = DEFAULT_BUSINESS_HOURS.start * 60
+    let maxMinutes = DEFAULT_BUSINESS_HOURS.end * 60
+
     if (dayRule && dayRule.enabled && dayRule.start && dayRule.end) {
       const [ruleStartHour, ruleStartMinute] = dayRule.start.split(':').map(Number)
       const [ruleEndHour, ruleEndMinute] = dayRule.end.split(':').map(Number)
@@ -1317,20 +1360,58 @@ function ProfessionalAgendaView({ items, onForceCancel, professionals, establish
         Number.isFinite(ruleEndHour) &&
         Number.isFinite(ruleEndMinute)
       ) {
-        startHour = ruleStartHour
-        startMinute = ruleStartMinute
-        endHour = ruleEndHour
-        endMinute = ruleEndMinute
+        minMinutes = ruleStartHour * 60 + ruleStartMinute
+        maxMinutes = ruleEndHour * 60 + ruleEndMinute
       }
     }
-    min.setHours(startHour, startMinute, 0, 0)
-    max.setHours(endHour, endMinute, 0, 0)
-    if (max <= min) {
-      min.setHours(DEFAULT_BUSINESS_HOURS.start, 0, 0, 0)
-      max.setHours(DEFAULT_BUSINESS_HOURS.end, 0, 0, 0)
+
+    let eventMin = null
+    let eventMax = null
+    const weekStart = weekStartDate ? new Date(weekStartDate) : null
+    const weekEnd = weekEndDate ? new Date(weekEndDate) : null
+    if (weekStart) weekStart.setHours(0, 0, 0, 0)
+    if (weekEnd) weekEnd.setHours(0, 0, 0, 0)
+
+    ;(filteredEvents || []).forEach((ev) => {
+      const start = ev?.start instanceof Date ? ev.start : new Date(ev?.start)
+      const end = ev?.end instanceof Date ? ev.end : new Date(ev?.end)
+      if (!Number.isFinite(start?.getTime?.()) || !Number.isFinite(end?.getTime?.())) return
+      if (weekStart && end < weekStart) return
+      if (weekEnd && start >= weekEnd) return
+      const startMinutes = start.getHours() * 60 + start.getMinutes()
+      const endMinutes = end.getHours() * 60 + end.getMinutes()
+      if (eventMin == null || startMinutes < eventMin) eventMin = startMinutes
+      if (eventMax == null || endMinutes > eventMax) eventMax = endMinutes
+    })
+
+    if (eventMin != null) minMinutes = Math.min(minMinutes, eventMin)
+    if (eventMax != null) maxMinutes = Math.max(maxMinutes, eventMax)
+
+    const stepMinutes = CALENDAR_STEP_MINUTES
+    const roundDownToStep = (value) => Math.floor(value / stepMinutes) * stepMinutes
+    const roundUpToStep = (value) => Math.ceil(value / stepMinutes) * stepMinutes
+
+    minMinutes = roundDownToStep(minMinutes)
+    maxMinutes = roundUpToStep(maxMinutes + stepMinutes)
+
+    minMinutes = Math.max(0, minMinutes)
+    maxMinutes = Math.min(24 * 60, maxMinutes)
+
+    if (maxMinutes <= minMinutes) {
+      minMinutes = DEFAULT_BUSINESS_HOURS.start * 60
+      maxMinutes = DEFAULT_BUSINESS_HOURS.end * 60
+    }
+
+    const min = new Date(baseDay)
+    const max = new Date(baseDay)
+    min.setHours(Math.floor(minMinutes / 60), minMinutes % 60, 0, 0)
+    if (maxMinutes >= 24 * 60) {
+      max.setHours(23, 59, 0, 0)
+    } else {
+      max.setHours(Math.floor(maxMinutes / 60), maxMinutes % 60, 0, 0)
     }
     return { min, max, scrollToTime: min }
-  }, [currentDate, workingSchedule])
+  }, [currentDate, filteredEvents, weekEndDate, weekStartDate, workingSchedule])
 
   const eventStyleGetter = useCallback((event) => {
     const theme = event?._theme || getAgendaTheme(event?.status)
@@ -1349,26 +1430,24 @@ function ProfessionalAgendaView({ items, onForceCancel, professionals, establish
     }
   }, [])
 
+  const backgroundEventPropGetter = useCallback((event) => {
+    if (event?.type !== 'break') return {}
+    return { className: 'pro-agenda__break' }
+  }, [])
+
   const formats = useMemo(
     () => ({
       timeGutterFormat: (date) => formatTime24h(date),
       eventTimeRangeFormat: ({ start, end }) => formatHourRange(start, end),
-      dayHeaderFormat: () => '',
+      dayFormat: (date) => {
+        const dt = date instanceof Date ? date : new Date(date)
+        const label = WEEKDAY_SHORT_LABELS[dt.getDay()] || ''
+        const day = String(dt.getDate()).padStart(2, '0')
+        const month = String(dt.getMonth() + 1).padStart(2, '0')
+        return `${label} ${day}/${month}`
+      },
     }),
     []
-  )
-
-  const ResourceHeader = useCallback(
-    ({ resource }) => {
-      const theme = resourceThemes.get(resource?.id) || RESOURCE_COLORS[0]
-      return (
-        <div className="pro-agenda__resource-header" title={resource?.title || ''}>
-          <span className="pro-agenda__resource-dot" style={{ backgroundColor: theme.dot || theme.border }} />
-          <span className="pro-agenda__resource-name">{resource?.title || ''}</span>
-        </div>
-      )
-    },
-    [resourceThemes]
   )
 
   const AgendaEvent = ({ event }) => {
@@ -1404,20 +1483,11 @@ function ProfessionalAgendaView({ items, onForceCancel, professionals, establish
     )
   }
 
-  const handlePrevDay = () => setCurrentDate((d) => new Date(d.getFullYear(), d.getMonth(), d.getDate() - 1))
-  const handleNextDay = () => setCurrentDate((d) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1))
+  const handlePrevWeek = () =>
+    setCurrentDate((d) => new Date(d.getFullYear(), d.getMonth(), d.getDate() - 7))
+  const handleNextWeek = () =>
+    setCurrentDate((d) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + 7))
   const handleToday = () => setCurrentDate(new Date())
-  const currentDateLabel = useMemo(
-    () =>
-      (currentDate instanceof Date ? currentDate : new Date()).toLocaleDateString('pt-BR', {
-        weekday: 'long',
-        day: '2-digit',
-        month: 'short',
-      }),
-    [currentDate]
-  )
-  const professionalCount = resources.length
-  const dayTotal = eventsForCurrentDate.length
   const handleSelectResource = (id) => {
     setResourceFilter(id)
     setFilterOpen(false)
@@ -1448,13 +1518,94 @@ function ProfessionalAgendaView({ items, onForceCancel, professionals, establish
     : NaN
   const selectedEventHasStarted = Number.isFinite(selectedEventStartMs) && selectedEventStartMs <= Date.now()
   const modalTitleId = selectedEvent?.id ? `agenda-modal-title-${selectedEvent.id}` : 'agenda-modal-title'
+  const selfBookingTitleId = 'agenda-self-booking-title'
   const whatsappLink = selectedEvent ? buildWhatsappLink(selectedEvent) : null
   const whatsappLabel = whatsappLink ? 'WhatsApp' : 'Telefone nao informado'
+  const canReschedule =
+    Boolean(selectedEvent) &&
+    !selectedEventStatus?.isCancelled &&
+    !selectedEventStatus?.isDone
+  const rescheduleDisabled = rescheduleSaving || selectedEventHasStarted || !canReschedule
 
   const handleCloseDetails = () => setSelectedEvent(null)
   const handleWhatsapp = () => {
     if (!whatsappLink) return
     window.open(whatsappLink, '_blank', 'noopener,noreferrer')
+  }
+  const handleToggleReschedule = () => {
+    if (rescheduleDisabled) return
+    setRescheduleOpen((open) => !open)
+    setRescheduleError('')
+  }
+  const handleRescheduleSelected = async () => {
+    if (!selectedEvent || rescheduleSaving || !canReschedule) return
+    if (selectedEventHasStarted) {
+      setRescheduleError('Reagendamento indisponivel: horario ja iniciado.')
+      return
+    }
+    if (!rescheduleDate || !rescheduleTime) {
+      setRescheduleError('Informe data e horario.')
+      return
+    }
+    const localDateTime = new Date(`${rescheduleDate}T${rescheduleTime}:00`)
+    if (!Number.isFinite(localDateTime.getTime())) {
+      setRescheduleError('Data/hora invalida.')
+      return
+    }
+    if (localDateTime.getTime() <= Date.now()) {
+      setRescheduleError('Nao e possivel reagendar no passado.')
+      return
+    }
+    const payload = { inicio: localDateTime.toISOString() }
+    const prevStart = selectedEvent.start instanceof Date
+      ? selectedEvent.start
+      : new Date(selectedEvent.start)
+    const prevEnd = selectedEvent.end instanceof Date
+      ? selectedEvent.end
+      : new Date(selectedEvent.end)
+    const durationMs = Number.isFinite(prevEnd.getTime()) && Number.isFinite(prevStart.getTime())
+      ? prevEnd.getTime() - prevStart.getTime()
+      : 0
+    try {
+      setRescheduleSaving(true)
+      setRescheduleError('')
+      const updated = await Api.reagendarAgendamentoEstab(selectedEvent.id, payload)
+      const nextInicioRaw = updated?.inicio || payload.inicio
+      const nextFimRaw = updated?.fim || null
+      const nextStartDate = new Date(nextInicioRaw)
+      let nextEndDate = nextFimRaw ? new Date(nextFimRaw) : null
+      if (!nextEndDate || !Number.isFinite(nextEndDate.getTime())) {
+        if (Number.isFinite(durationMs) && durationMs > 0 && Number.isFinite(nextStartDate.getTime())) {
+          nextEndDate = new Date(nextStartDate.getTime() + durationMs)
+        } else {
+          nextEndDate = prevEnd
+        }
+      }
+      const prevEndIso = Number.isFinite(prevEnd.getTime()) ? prevEnd.toISOString() : null
+      const nextEndIso =
+        nextFimRaw ||
+        (nextEndDate && Number.isFinite(nextEndDate.getTime()) ? nextEndDate.toISOString() : null) ||
+        prevEndIso
+      if (onUpdateAppointment) {
+        onUpdateAppointment(selectedEvent.id, {
+          inicio: nextInicioRaw,
+          fim: nextEndIso || payload.inicio,
+        })
+      }
+      setSelectedEvent((prev) =>
+        prev ? { ...prev, start: nextStartDate, end: nextEndDate } : prev
+      )
+      if (Number.isFinite(nextStartDate.getTime())) {
+        setRescheduleDate(DateHelpers.formatLocalISO(nextStartDate))
+        setRescheduleTime(formatTime24h(nextStartDate))
+      }
+      setRescheduleOpen(false)
+    } catch (err) {
+      const msg = err?.data?.message || err?.message || 'Nao foi possivel reagendar.'
+      setRescheduleError(msg)
+    } finally {
+      setRescheduleSaving(false)
+    }
   }
   const handleCancelSelected = async () => {
     if (!selectedEvent || !onForceCancel || cancelling) return
@@ -1474,67 +1625,237 @@ function ProfessionalAgendaView({ items, onForceCancel, professionals, establish
     }
   }
 
+  const handleOpenSelfBooking = () => {
+    if (!establishmentId) return
+    const baseDate = currentDate instanceof Date ? currentDate : new Date()
+    const baseIso = DateHelpers.formatLocalISO(baseDate)
+    setSelectedEvent(null)
+    setSelfBookingServiceId('')
+    setSelfBookingProfessionalId('')
+    setSelfBookingDate(baseIso)
+    setSelfBookingTime('')
+    setSelfBookingName('')
+    setSelfBookingEmail('')
+    setSelfBookingPhone('')
+    setSelfBookingBirthdate('')
+    setSelfBookingCep('')
+    setSelfBookingEndereco('')
+    setSelfBookingNumero('')
+    setSelfBookingComplemento('')
+    setSelfBookingBairro('')
+    setSelfBookingCidade('')
+    setSelfBookingEstado('')
+    setSelfBookingWeekStart(DateHelpers.weekStartISO(baseDate))
+    setSelfBookingMonthStart(DateHelpers.firstOfMonthISO(baseDate))
+    setSelfBookingSelectedDate(baseIso)
+    setSelfBookingSelectedSlot(null)
+    setSelfBookingSlots([])
+    setSelfBookingSlotsError('')
+    setSelfBookingError('')
+    setShowSelfBookingOptional(false)
+    setSelfBookingOpen(true)
+  }
+
+  const handleCloseSelfBooking = () => {
+    setSelfBookingOpen(false)
+    setSelfBookingError('')
+    setShowSelfBookingOptional(false)
+    setSelfBookingSelectedSlot(null)
+  }
+
+  const handleCreateSelfBooking = async () => {
+    if (selfBookingSaving || !establishmentId) return
+    const nome = String(selfBookingName || '').trim()
+    const email = String(selfBookingEmail || '').trim()
+    const telefone = normalizePhoneDigits(selfBookingPhone)
+    const servicoIdNum = Number(selfBookingServiceId)
+    if (!servicoIdNum) {
+      setSelfBookingError('Selecione um servico.')
+      return
+    }
+    const selectedSlotIso =
+      selfBookingSelectedSlot?.datetime ||
+      (selfBookingDate && selfBookingTime ? new Date(`${selfBookingDate}T${selfBookingTime}:00`).toISOString() : '')
+    if (!selectedSlotIso) {
+      setSelfBookingError('Selecione uma data e horário.')
+      return
+    }
+    if (!nome || !email || !telefone) {
+      setSelfBookingError('Informe nome, email e telefone.')
+      return
+    }
+    if (!isValidEmail(email)) {
+      setSelfBookingError('Informe um email válido.')
+      return
+    }
+    if (telefone.length < 10) {
+      setSelfBookingError('Informe um telefone com DDD para contato.')
+      return
+    }
+    const cepDigitsRaw = String(selfBookingCep || '').replace(/\D/g, '')
+    if (cepDigitsRaw && cepDigitsRaw.length !== 8) {
+      setSelfBookingError('Informe um CEP válido com 8 dígitos.')
+      return
+    }
+    const estadoTrim = String(selfBookingEstado || '').trim().toUpperCase()
+    if (estadoTrim && estadoTrim.length !== 2) {
+      setSelfBookingError('Informe a UF com 2 letras.')
+      return
+    }
+    if (serviceProfessionals.length && !selfBookingProfessionalId) {
+      setSelfBookingError('Selecione um profissional.')
+      return
+    }
+    const localDateTime = new Date(selectedSlotIso)
+    if (!Number.isFinite(localDateTime.getTime())) {
+      setSelfBookingError('Data/hora inválida.')
+      return
+    }
+    if (localDateTime.getTime() <= Date.now()) {
+      setSelfBookingError('Não e possível agendar no passado.')
+      return
+    }
+
+    const profId =
+      serviceProfessionals.length && selfBookingProfessionalId
+        ? Number(selfBookingProfessionalId)
+        : null
+    const payload = {
+      estabelecimento_id: establishmentId,
+      servico_id: servicoIdNum,
+      inicio: localDateTime.toISOString(),
+      nome,
+      email,
+      telefone,
+      ...(profId ? { profissional_id: profId } : {}),
+    }
+    const dataNascimento = String(selfBookingBirthdate || '').trim()
+    if (dataNascimento) payload.data_nascimento = dataNascimento
+    const cepDigits = cepDigitsRaw.slice(0, 8)
+    if (cepDigits) payload.cep = cepDigits
+    const enderecoTrim = String(selfBookingEndereco || '').trim()
+    if (enderecoTrim) payload.endereco = enderecoTrim
+    const numeroTrim = String(selfBookingNumero || '').trim()
+    if (numeroTrim) payload.numero = numeroTrim
+    const complementoTrim = String(selfBookingComplemento || '').trim()
+    if (complementoTrim) payload.complemento = complementoTrim
+    const bairroTrim = String(selfBookingBairro || '').trim()
+    if (bairroTrim) payload.bairro = bairroTrim
+    const cidadeTrim = String(selfBookingCidade || '').trim()
+    if (cidadeTrim) payload.cidade = cidadeTrim
+    if (estadoTrim) payload.estado = estadoTrim
+
+    try {
+      setSelfBookingSaving(true)
+      setSelfBookingError('')
+      const created = await Api.agendarEstabelecimento(payload)
+      const serviceName =
+        selectedService?.nome ||
+        selectedService?.title ||
+        'Servico'
+      const profName = profId
+        ? (serviceProfessionals.find((prof) => String(prof.id) === String(profId))?.nome ||
+          professionals.find((prof) => String(prof.id) === String(profId))?.nome ||
+          '')
+        : ''
+      const startIso = created?.inicio || payload.inicio
+      const endIso = created?.fim || (() => {
+        const dur = Number(selectedService?.duracao_min || 0)
+        if (!Number.isFinite(dur) || dur <= 0) return null
+        const startDate = new Date(startIso)
+        if (!Number.isFinite(startDate.getTime())) return null
+        return new Date(startDate.getTime() + dur * 60000).toISOString()
+      })()
+      const newItem = {
+        id: created?.id || `public-${Date.now()}`,
+        inicio: startIso,
+        fim: endIso || startIso,
+        status: created?.status || 'confirmado',
+        servico_id: servicoIdNum,
+        servico_nome: serviceName,
+        profissional_id: profId,
+        profissional_nome: profName,
+        cliente_nome: nome,
+        cliente_telefone: telefone,
+        cliente_whatsapp: telefone,
+        cliente_email: email,
+      }
+      if (onAddAppointment) {
+        onAddAppointment(newItem)
+      }
+      showToast('success', 'Agendamento realizado com sucesso.')
+      setSelfBookingOpen(false)
+    } catch (err) {
+      const msg =
+        err?.data?.message ||
+        err?.message ||
+        'Nao foi possivel criar o agendamento.'
+      setSelfBookingError(msg)
+    } finally {
+      setSelfBookingSaving(false)
+    }
+  }
+
   return (
     <div className="pro-agenda">
+      {toast && <div className={`toast ${toast.type}`}>{toast.msg}</div>}
       <div className="pro-agenda__toolbar">
         <div className="pro-agenda__toolbar-row pro-agenda__toolbar-row--top">
           <div className="pro-agenda__kpis">
             <div className="pro-agenda__kpi">
-              <span>Profissionais</span>
-              <b>{professionalCount}</b>
+              <span>Proximo agendamento</span>
+              <b title={nextAppointmentInfo.title}>{nextAppointmentInfo.label}</b>
             </div>
-            <div className="pro-agenda__kpi">
-              <span>Hoje</span>
-              <b>{dayTotal} agend.</b>
-            </div>
-          </div>
-          <div className="pro-agenda__filter" ref={filterRef}>
-            <button
-              type="button"
-              className="pro-agenda__filter-btn"
-              onClick={() => setFilterOpen((open) => !open)}
-              title="Filtrar por profissional"
-              aria-expanded={filterOpen}
-            >
-              {selectedResource?.avatar ? (
-                <img src={selectedResource.avatar} alt={selectedResource.title} className="pro-agenda__filter-avatar" />
-              ) : (
-                <div className="pro-agenda__filter-avatar pro-agenda__filter-avatar--fallback">
-                  {(selectedResource?.title || 'Todos').slice(0, 2).toUpperCase()}
+            <div className="pro-agenda__filter" ref={filterRef}>
+              <button
+                type="button"
+                className="pro-agenda__filter-btn"
+                onClick={() => setFilterOpen((open) => !open)}
+                title="Filtrar por profissional"
+                aria-expanded={filterOpen}
+                aria-label="Selecionar profissional"
+                aria-haspopup="listbox"
+              >
+                {selectedResource?.avatar ? (
+                  <img src={selectedResource.avatar} alt={selectedResource.title} className="pro-agenda__filter-avatar" />
+                ) : (
+                  <div className="pro-agenda__filter-avatar pro-agenda__filter-avatar--fallback">
+                    {(selectedResource?.title || 'Todos').slice(0, 2).toUpperCase()}
+                  </div>
+                )}
+                <span>{selectedResource?.title || 'Todos profissionais'}</span>
+                <span className="pro-agenda__caret" aria-hidden="true">v</span>
+              </button>
+              {filterOpen && (
+                <div className="pro-agenda__filter-menu">
+                  <button
+                    type="button"
+                    className={`pro-agenda__filter-option ${resourceFilter === 'all' ? 'is-active' : ''}`}
+                    onClick={() => handleSelectResource('all')}
+                  >
+                    <div className="pro-agenda__filter-avatar pro-agenda__filter-avatar--fallback">TO</div>
+                    <span>Todos profissionais</span>
+                  </button>
+                  {resources.map((res) => (
+                    <button
+                      key={res.id}
+                      type="button"
+                      className={`pro-agenda__filter-option ${resourceFilter === res.id ? 'is-active' : ''}`}
+                      onClick={() => handleSelectResource(res.id)}
+                    >
+                      {res.avatar ? (
+                        <img src={res.avatar} alt={res.title} className="pro-agenda__filter-avatar" />
+                      ) : (
+                        <div className="pro-agenda__filter-avatar pro-agenda__filter-avatar--fallback">
+                          {(res.title || 'PR').slice(0, 2).toUpperCase()}
+                        </div>
+                      )}
+                      <span>{res.title}</span>
+                    </button>
+                  ))}
                 </div>
               )}
-              <span>{selectedResource?.title || 'Todos profissionais'}</span>
-              <span className="pro-agenda__caret" aria-hidden="true">v</span>
-            </button>
-            {filterOpen && (
-              <div className="pro-agenda__filter-menu">
-                <button
-                  type="button"
-                  className={`pro-agenda__filter-option ${resourceFilter === 'all' ? 'is-active' : ''}`}
-                  onClick={() => handleSelectResource('all')}
-                >
-                  <div className="pro-agenda__filter-avatar pro-agenda__filter-avatar--fallback">TO</div>
-                  <span>Todos profissionais</span>
-                </button>
-                {resources.map((res) => (
-                  <button
-                    key={res.id}
-                    type="button"
-                    className={`pro-agenda__filter-option ${resourceFilter === res.id ? 'is-active' : ''}`}
-                    onClick={() => handleSelectResource(res.id)}
-                  >
-                    {res.avatar ? (
-                      <img src={res.avatar} alt={res.title} className="pro-agenda__filter-avatar" />
-                    ) : (
-                      <div className="pro-agenda__filter-avatar pro-agenda__filter-avatar--fallback">
-                        {(res.title || 'PR').slice(0, 2).toUpperCase()}
-                      </div>
-                    )}
-                    <span>{res.title}</span>
-                  </button>
-                ))}
-              </div>
-            )}
+            </div>
           </div>
         </div>
         <div className="pro-agenda__toolbar-row pro-agenda__toolbar-row--bottom">
@@ -1542,8 +1863,8 @@ function ProfessionalAgendaView({ items, onForceCancel, professionals, establish
             <button
               className="pro-agenda__mini"
               type="button"
-              aria-label="Dia anterior"
-              onClick={handlePrevDay}
+              aria-label="Semana anterior"
+              onClick={handlePrevWeek}
             >
               {'<'}
             </button>
@@ -1553,41 +1874,47 @@ function ProfessionalAgendaView({ items, onForceCancel, professionals, establish
             <button
               className="pro-agenda__mini"
               type="button"
-              aria-label="Proximo dia"
-              onClick={handleNextDay}
+              aria-label="Proxima semana"
+              onClick={handleNextWeek}
             >
               {'>'}
             </button>
           </div>
-          <div className="pro-agenda__date-pill">{currentDateLabel}</div>
+          <div className="pro-agenda__date-pill">{weekLabel}</div>
+          <button
+            type="button"
+            className="pro-agenda__add"
+            onClick={handleOpenSelfBooking}
+            title="Novo agendamento"
+            aria-label="Novo agendamento"
+          >
+            +
+          </button>
         </div>
       </div>
 
       <div className="pro-agenda__calendar">
         <BigCalendar
           localizer={localizer}
+          culture="pt-br"
           events={filteredEvents}
-          resources={filteredResources}
-          resourceIdAccessor="id"
-          resourceAccessor="resourceId"
-          resourceTitleAccessor="title"
+          backgroundEvents={breakBackgroundEvents}
           startAccessor="start"
           endAccessor="end"
-          defaultView={Views.DAY}
-          views={[Views.DAY]}
-          step={60}
+          defaultView={Views.WEEK}
+          views={[Views.WEEK]}
+          step={CALENDAR_STEP_MINUTES}
           timeslots={1}
           style={{ height: 720 }}
           eventPropGetter={eventStyleGetter}
+          backgroundEventPropGetter={backgroundEventPropGetter}
           selectable={false}
           toolbar={false}
           formats={formats}
           dayLayoutAlgorithm="no-overlap"
           components={{
-            header: () => null,
-            resourceHeader: ResourceHeader,
-            timeGutterHeader: () => <span className="pro-agenda__gutter-head">Hora</span>,
             event: AgendaEvent,
+            timeGutterHeader: () => <span className="pro-agenda__gutter-head">Hora</span>,
           }}
           min={timeBounds.min}
           max={timeBounds.max}
@@ -1596,6 +1923,373 @@ function ProfessionalAgendaView({ items, onForceCancel, professionals, establish
           onNavigate={(date) => setCurrentDate(date instanceof Date ? date : new Date(date))}
         />
       </div>
+      {selfBookingOpen && (
+        <div className="modal-backdrop" role="presentation" onClick={handleCloseSelfBooking}>
+          <div
+            className="modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={selfBookingTitleId}
+            onClick={(eventClick) => eventClick.stopPropagation()}
+          >
+            <div className="modal__header">
+              <h3 className="modal__title" id={selfBookingTitleId}>Novo agendamento</h3>
+              <button type="button" className="modal__close" onClick={handleCloseSelfBooking} aria-label="Fechar">
+                x
+              </button>
+            </div>
+            <div className="modal__body">
+              <div className="pro-agenda__modal-label">Dados do agendamento</div>
+              <div className="pro-agenda__modal-reschedule-grid">
+                <label className="label">
+                  <span>Servico</span>
+                  <select
+                    className="input"
+                    value={selfBookingServiceId}
+                    onChange={(eventChange) => {
+                      setSelfBookingServiceId(eventChange.target.value)
+                      if (selfBookingError) setSelfBookingError('')
+                    }}
+                  >
+                    <option value="">
+                      {servicesLoading
+                        ? 'Carregando...'
+                        : services.length
+                        ? 'Selecione um servico'
+                        : 'Nenhum servico cadastrado'}
+                    </option>
+                    {services.map((svc) => (
+                      <option key={svc.id} value={svc.id}>
+                        {svc?.nome || svc?.title || 'Servico'}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {serviceProfessionals.length > 0 && (
+                  <label className="label">
+                    <span>Profissional</span>
+                    <select
+                      className="input"
+                      value={selfBookingProfessionalId}
+                      onChange={(eventChange) => {
+                        setSelfBookingProfessionalId(eventChange.target.value)
+                        if (selfBookingError) setSelfBookingError('')
+                      }}
+                    >
+                      <option value="">Selecione um profissional</option>
+                      {serviceProfessionals.map((prof) => (
+                        <option key={prof.id} value={prof.id}>
+                          {prof?.nome || prof?.name || 'Profissional'}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+              </div>
+              <div className="pro-agenda__modal-label" style={{ marginTop: 12 }}>Data e horario</div>
+              <div className="novo-agendamento__calendar">
+                <div className="month card" style={{ padding: 8, marginBottom: 8 }}>
+                  <div className="row spread" style={{ alignItems: 'center', marginBottom: 6 }}>
+                    <div className="row" style={{ gap: 6, alignItems: 'center' }}>
+                      <button
+                        className="btn btn--sm"
+                        aria-label="Mes anterior"
+                        onClick={() =>
+                          setSelfBookingMonthStart(
+                            DateHelpers.formatLocalISO(
+                              DateHelpers.addMonths(selfBookingMonthStart || DateHelpers.formatLocalISO(new Date()), -1)
+                            )
+                          )
+                        }
+                      >
+                        &lt;
+                      </button>
+                      <strong>
+                        {selfBookingMonthStart
+                          ? new Date(`${selfBookingMonthStart}T00:00:00`).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })
+                          : ''}
+                      </strong>
+                      <button
+                        className="btn btn--sm"
+                        aria-label="Proximo mes"
+                        onClick={() =>
+                          setSelfBookingMonthStart(
+                            DateHelpers.formatLocalISO(
+                              DateHelpers.addMonths(selfBookingMonthStart || DateHelpers.formatLocalISO(new Date()), 1)
+                            )
+                          )
+                        }
+                      >
+                        &gt;
+                      </button>
+                    </div>
+                  </div>
+                  <div className="month__grid">
+                    {['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sab', 'Dom'].map((d, index) => (
+                      <div key={`${d}-${index}`} className="month__dow muted">{d}</div>
+                    ))}
+                    {DateHelpers.monthGrid(selfBookingMonthStart || DateHelpers.formatLocalISO(new Date())).map(({ iso, inMonth, date }) => {
+                      const todayIso = DateHelpers.toISODate(new Date())
+                      const isToday = DateHelpers.sameYMD(iso, todayIso)
+                      const isPastDay = iso < todayIso
+                      const isSelected = selfBookingSelectedDate && DateHelpers.sameYMD(selfBookingSelectedDate, iso)
+                      const classNameParts = ['month__day']
+                      if (!inMonth) classNameParts.push('is-dim')
+                      if (isToday) classNameParts.push('is-today')
+                      if (isSelected) classNameParts.push('is-selected')
+                      if (isPastDay) classNameParts.push('is-past')
+                      const className = classNameParts.join(' ')
+                      return (
+                        <button
+                          key={iso}
+                          type="button"
+                          className={className}
+                          onClick={isPastDay ? undefined : () => {
+                            setSelfBookingSelectedDate(iso)
+                            setSelfBookingDate(iso)
+                            setSelfBookingSelectedSlot(null)
+                            setSelfBookingTime('')
+                            const nextWeek = DateHelpers.weekStartISO(iso)
+                            if (nextWeek !== selfBookingWeekStart) setSelfBookingWeekStart(nextWeek)
+                          }}
+                          title={date.toLocaleDateString('pt-BR')}
+                          disabled={isPastDay}
+                        >
+                          {date.getDate()}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+                {selfBookingSlotsError && (
+                  <div className="box error" style={{ marginTop: 8 }}>
+                    {selfBookingSlotsError}
+                  </div>
+                )}
+                <div className="card" style={{ marginTop: 8 }}>
+                  <h3 style={{ marginTop: 0, marginBottom: 8 }}>
+                    {selfBookingSelectedDate
+                      ? new Date(`${selfBookingSelectedDate}T00:00:00`).toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' })
+                      : 'Selecione uma data'}
+                  </h3>
+                  {selfBookingSelectedDate ? (
+                    serviceProfessionals.length > 0 && !selfBookingProfessionalId ? (
+                      <div className="empty">Selecione um profissional para ver os horarios.</div>
+                    ) : (
+                      <div className="slots--grid">
+                        {selfBookingSlotsLoading ? (
+                          Array.from({ length: 8 }).map((_, i) => <div key={i} className="shimmer pill" />)
+                        ) : selfBookingSlotsForDay.length === 0 ? (
+                          <div className="empty">Sem horarios para este dia.</div>
+                        ) : (
+                          selfBookingSlotsForDay.map((slot) => {
+                            const slotDisabled = !inBusinessHours(slot.datetime, workingSchedule, selfBookingServiceDuration)
+                            return (
+                              <SlotButton
+                                key={slot.datetime}
+                                slot={slot}
+                                isSelected={selfBookingSelectedSlot?.datetime === slot.datetime}
+                                onClick={() => {
+                                  if (slotDisabled || !isAvailableLabel(slot.label) || DateHelpers.isPastSlot(slot.datetime)) return
+                                  setSelfBookingSelectedSlot(slot)
+                                  const slotDate = new Date(slot.datetime)
+                                  const isoDate = DateHelpers.toISODate(slotDate)
+                                  setSelfBookingDate(isoDate)
+                                  setSelfBookingSelectedDate(isoDate)
+                                  setSelfBookingTime(DateHelpers.formatTime(slot.datetime))
+                                }}
+                                disabled={slotDisabled}
+                              />
+                            )
+                          })
+                        )}
+                      </div>
+                    )
+                  ) : (
+                    <div className="empty">Escolha uma data no calendario acima.</div>
+                  )}
+                </div>
+              </div>
+              <div className="pro-agenda__modal-label" style={{ marginTop: 12 }}>Dados do cliente</div>
+              <div className="pro-agenda__modal-reschedule-grid">
+                <label className="label">
+                  <span>Nome</span>
+                  <input
+                    type="text"
+                    className="input"
+                    value={selfBookingName}
+                    onChange={(eventChange) => {
+                      setSelfBookingName(eventChange.target.value)
+                      if (selfBookingError) setSelfBookingError('')
+                    }}
+                  />
+                </label>
+                <label className="label">
+                  <span>Email</span>
+                  <input
+                    type="email"
+                    className="input"
+                    value={selfBookingEmail}
+                    onChange={(eventChange) => {
+                      setSelfBookingEmail(eventChange.target.value)
+                      if (selfBookingError) setSelfBookingError('')
+                    }}
+                  />
+                </label>
+                <label className="label">
+                  <span>Telefone</span>
+                  <input
+                    type="tel"
+                    className="input"
+                    inputMode="tel"
+                    value={formatPhoneDisplay(selfBookingPhone)}
+                    onChange={(eventChange) => {
+                      setSelfBookingPhone(normalizePhoneDigits(eventChange.target.value))
+                      if (selfBookingError) setSelfBookingError('')
+                    }}
+                  />
+                </label>
+              </div>
+              <div className="row" style={{ marginTop: 6 }}>
+                <button
+                  type="button"
+                  className="btn btn--ghost btn--sm"
+                  onClick={() => setShowSelfBookingOptional((prev) => !prev)}
+                  disabled={selfBookingSaving}
+                >
+                  {showSelfBookingOptional ? 'Ocultar dados opcionais' : 'Ver dados opcionais'}
+                </button>
+              </div>
+              {showSelfBookingOptional && (
+                <div className="pro-agenda__modal-reschedule-grid" style={{ marginTop: 8 }}>
+                  <label className="label">
+                    <span>Data de nascimento (opcional)</span>
+                    <input
+                      type="date"
+                      className="input"
+                      value={selfBookingBirthdate}
+                      onChange={(eventChange) => {
+                        setSelfBookingBirthdate(eventChange.target.value)
+                        if (selfBookingError) setSelfBookingError('')
+                      }}
+                    />
+                  </label>
+                  <label className="label">
+                    <span>CEP (opcional)</span>
+                    <input
+                      type="text"
+                      className="input"
+                      inputMode="numeric"
+                      value={selfBookingCep}
+                      onChange={(eventChange) => {
+                        setSelfBookingCep(eventChange.target.value)
+                        if (selfBookingError) setSelfBookingError('')
+                      }}
+                      placeholder="00000-000"
+                    />
+                  </label>
+                  <label className="label">
+                    <span>Endereço (opcional)</span>
+                    <input
+                      type="text"
+                      className="input"
+                      value={selfBookingEndereco}
+                      onChange={(eventChange) => {
+                        setSelfBookingEndereco(eventChange.target.value)
+                        if (selfBookingError) setSelfBookingError('')
+                      }}
+                    />
+                  </label>
+                  <label className="label">
+                    <span>Número (opcional)</span>
+                    <input
+                      type="text"
+                      className="input"
+                      value={selfBookingNumero}
+                      onChange={(eventChange) => {
+                        setSelfBookingNumero(eventChange.target.value)
+                        if (selfBookingError) setSelfBookingError('')
+                      }}
+                    />
+                  </label>
+                  <label className="label">
+                    <span>Complemento (opcional)</span>
+                    <input
+                      type="text"
+                      className="input"
+                      value={selfBookingComplemento}
+                      onChange={(eventChange) => {
+                        setSelfBookingComplemento(eventChange.target.value)
+                        if (selfBookingError) setSelfBookingError('')
+                      }}
+                    />
+                  </label>
+                  <label className="label">
+                    <span>Bairro (opcional)</span>
+                    <input
+                      type="text"
+                      className="input"
+                      value={selfBookingBairro}
+                      onChange={(eventChange) => {
+                        setSelfBookingBairro(eventChange.target.value)
+                        if (selfBookingError) setSelfBookingError('')
+                      }}
+                    />
+                  </label>
+                  <label className="label">
+                    <span>Cidade (opcional)</span>
+                    <input
+                      type="text"
+                      className="input"
+                      value={selfBookingCidade}
+                      onChange={(eventChange) => {
+                        setSelfBookingCidade(eventChange.target.value)
+                        if (selfBookingError) setSelfBookingError('')
+                      }}
+                    />
+                  </label>
+                  <label className="label">
+                    <span>Estado (opcional)</span>
+                    <input
+                      type="text"
+                      className="input"
+                      value={selfBookingEstado}
+                      onChange={(eventChange) => {
+                        setSelfBookingEstado(eventChange.target.value.toUpperCase().slice(0, 2))
+                        if (selfBookingError) setSelfBookingError('')
+                      }}
+                      placeholder="SP"
+                    />
+                  </label>
+                </div>
+              )}
+              {servicesError && (
+                <div className="pro-agenda__modal-note pro-agenda__modal-note--warn">
+                  {servicesError}
+                </div>
+              )}
+              {selfBookingError && (
+                <div className="pro-agenda__modal-note pro-agenda__modal-note--warn">
+                  {selfBookingError}
+                </div>
+              )}
+            </div>
+            <div className="modal__actions">
+              <button
+                type="button"
+                className="btn btn--primary"
+                onClick={handleCreateSelfBooking}
+                disabled={selfBookingSaving || servicesLoading || !services.length}
+              >
+                {selfBookingSaving ? 'Salvando...' : 'Criar agendamento'}
+              </button>
+              <button type="button" className="btn btn--outline" onClick={handleCloseSelfBooking}>
+                Fechar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {selectedEvent && (
         <div className="modal-backdrop" role="presentation" onClick={handleCloseDetails}>
           <div
@@ -1642,6 +2336,54 @@ function ProfessionalAgendaView({ items, onForceCancel, professionals, establish
                   <div className="pro-agenda__modal-value">{selectedEvent?.service || 'Servico'}</div>
                 </div>
               </div>
+              {canReschedule && (
+                <div className="pro-agenda__modal-reschedule">
+                  <div className="pro-agenda__modal-reschedule-head">
+                    <div className="pro-agenda__modal-label">Alterar data/hora</div>
+                    <button
+                      type="button"
+                      className="btn btn--outline"
+                      onClick={handleToggleReschedule}
+                      disabled={rescheduleDisabled}
+                    >
+                      {rescheduleOpen ? 'Cancelar alteracao' : 'Alterar data/hora'}
+                    </button>
+                  </div>
+                  {rescheduleOpen && (
+                    <div className="pro-agenda__modal-reschedule-grid">
+                      <label className="label">
+                        <span>Nova data</span>
+                        <input
+                          type="date"
+                          className="input"
+                          value={rescheduleDate}
+                          onChange={(eventChange) => {
+                            setRescheduleDate(eventChange.target.value)
+                            if (rescheduleError) setRescheduleError('')
+                          }}
+                        />
+                      </label>
+                      <label className="label">
+                        <span>Novo horário</span>
+                        <input
+                          type="time"
+                          className="input"
+                          value={rescheduleTime}
+                          onChange={(eventChange) => {
+                            setRescheduleTime(eventChange.target.value)
+                            if (rescheduleError) setRescheduleError('')
+                          }}
+                        />
+                      </label>
+                    </div>
+                  )}
+                  {rescheduleError && (
+                    <div className="pro-agenda__modal-note pro-agenda__modal-note--warn">
+                      {rescheduleError}
+                    </div>
+                  )}
+                </div>
+              )}
               {selectedEventHasStarted && !selectedEventStatus?.isCancelled && (
                 <div className="pro-agenda__modal-note">
                   Cancelamento indisponível: horário já iniciado.
@@ -1649,6 +2391,16 @@ function ProfessionalAgendaView({ items, onForceCancel, professionals, establish
               )}
             </div>
             <div className="modal__actions">
+              {rescheduleOpen && (
+                <button
+                  type="button"
+                  className="btn btn--primary"
+                  onClick={handleRescheduleSelected}
+                  disabled={rescheduleSaving}
+                >
+                  {rescheduleSaving ? 'Salvando...' : 'Salvar novo horário'}
+                </button>
+              )}
               {!selectedEventStatus?.isCancelled && (
                 <button
                   type="button"

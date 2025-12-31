@@ -25,6 +25,35 @@ const toBool = (value) => {
   return false;
 };
 
+const normalizeBirthdate = (value) => {
+  if (value === undefined || value === null) return null;
+  const raw = String(value).trim();
+  if (!raw) return null;
+  const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const dt = new Date(year, month - 1, day);
+  if (
+    Number.isNaN(dt.getTime()) ||
+    dt.getFullYear() !== year ||
+    dt.getMonth() + 1 !== month ||
+    dt.getDate() !== day
+  ) {
+    return null;
+  }
+  return `${match[1]}-${match[2]}-${match[3]}`;
+};
+
+const normalizeCpfCnpj = (value) => {
+  if (value === undefined || value === null) return { digits: null, provided: false };
+  const raw = String(value).trim();
+  if (!raw) return { digits: '', provided: true };
+  const digits = raw.replace(/\D/g, '');
+  return { digits, provided: true };
+};
+
 router.post('/register', async (req, res) => {
   try {
     const {
@@ -40,6 +69,8 @@ router.post('/register', async (req, res) => {
       bairro,
       cidade,
       estado,
+      data_nascimento,
+      dataNascimento,
       notifyEmailEstab,
       notifyWhatsappEstab,
     } = req.body || {};
@@ -66,19 +97,31 @@ router.post('/register', async (req, res) => {
     const bairroTrim = bairro ? String(bairro).trim() : '';
     const cidadeTrim = cidade ? String(cidade).trim() : '';
     const estadoTrim = estado ? String(estado).trim().toUpperCase() : '';
+    const dataNascimentoRaw = data_nascimento ?? dataNascimento;
+    const dataNascimentoValue = normalizeBirthdate(dataNascimentoRaw);
+    if (dataNascimentoRaw && String(dataNascimentoRaw).trim() && !dataNascimentoValue) {
+      return res.status(400).json({ error: 'data_nascimento_invalida', message: 'Informe uma data de nascimento valida.' });
+    }
+
+    const cpfCnpjRaw = req.body?.cpf_cnpj ?? req.body?.cpfCnpj;
+    const { digits: cpfCnpjDigits } = normalizeCpfCnpj(cpfCnpjRaw);
+    if (cpfCnpjDigits && ![11, 14].includes(cpfCnpjDigits.length)) {
+      return res.status(400).json({ error: 'cpf_cnpj_invalido', message: 'Informe um CPF ou CNPJ valido.' });
+    }
+    const cpfCnpjValue = cpfCnpjDigits ? cpfCnpjDigits : null;
 
     if (tipo === 'estabelecimento') {
       if (cepDigits.length !== 8) {
-        return res.status(400).json({ error: 'cep_invalido', message: 'Informe um CEP valido com 8 digitos.' });
+        return res.status(400).json({ error: 'cep_invalido', message: 'Informe um CEP válido com 8 dígitos.' });
       }
       if (!enderecoTrim) {
-        return res.status(400).json({ error: 'endereco_obrigatorio', message: 'Informe o endereco do estabelecimento.' });
+        return res.status(400).json({ error: 'endereco_obrigatorio', message: 'Informe o endereço do estabelecimento.' });
       }
       if (!numeroTrim) {
-        return res.status(400).json({ error: 'numero_obrigatorio', message: 'Informe o numero do endereco.' });
+        return res.status(400).json({ error: 'numero_obrigatorio', message: 'Informe o número do endereço.' });
       }
       if (!bairroTrim) {
-        return res.status(400).json({ error: 'bairro_obrigatorio', message: 'Informe o bairro do endereco.' });
+        return res.status(400).json({ error: 'bairro_obrigatorio', message: 'Informe o bairro do endereço.' });
       }
       if (!cidadeTrim) {
         return res.status(400).json({ error: 'cidade_obrigatoria', message: 'Informe a cidade.' });
@@ -88,7 +131,7 @@ router.post('/register', async (req, res) => {
       }
     } else {
       if (cepDigits.length && cepDigits.length !== 8) {
-        return res.status(400).json({ error: 'cep_invalido', message: 'Informe um CEP valido com 8 digitos.' });
+        return res.status(400).json({ error: 'cep_invalido', message: 'Informe um CEP válido com 8 dígitos.' });
       }
       if (estadoTrim && !/^[A-Z]{2}$/.test(estadoTrim)) {
         return res.status(400).json({ error: 'estado_invalido', message: 'Informe a UF com 2 letras.' });
@@ -106,11 +149,13 @@ router.post('/register', async (req, res) => {
 
     const hash = await bcrypt.hash(String(senha), 10);
     const [r] = await pool.query(
-      'INSERT INTO usuarios (nome, email, telefone, cep, endereco, numero, complemento, bairro, cidade, estado, avatar_url, senha_hash, tipo) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
+      'INSERT INTO usuarios (nome, email, telefone, data_nascimento, cpf_cnpj, cep, endereco, numero, complemento, bairro, cidade, estado, avatar_url, senha_hash, tipo) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
       [
         nomeTrim,
         emailTrim,
         telefoneTrim || null,
+        dataNascimentoValue,
+        cpfCnpjValue,
         cepDigits || null,
         enderecoTrim || null,
         numeroTrim || null,
@@ -140,6 +185,8 @@ router.post('/register', async (req, res) => {
       nome: nomeTrim,
       email: emailTrim,
       telefone: telefoneTrim || null,
+      data_nascimento: dataNascimentoValue,
+      cpf_cnpj: cpfCnpjValue,
       cep: cepDigits || null,
       endereco: enderecoTrim || null,
       numero: numeroTrim || null,
@@ -210,7 +257,7 @@ router.post('/login', async (req, res) => {
     const email = String(emailRaw).trim().toLowerCase();
 
     const [rows] = await pool.query(
-      'SELECT id, nome, email, telefone, cep, endereco, numero, complemento, bairro, cidade, estado, avatar_url, senha_hash, tipo, notify_email_estab, notify_whatsapp_estab, plan, plan_status, plan_trial_ends_at, plan_active_until, plan_subscription_id FROM usuarios WHERE LOWER(email)=? LIMIT 1',
+      'SELECT id, nome, email, telefone, data_nascimento, cpf_cnpj, cep, endereco, numero, complemento, bairro, cidade, estado, avatar_url, senha_hash, tipo, notify_email_estab, notify_whatsapp_estab, plan, plan_status, plan_trial_ends_at, plan_active_until, plan_subscription_id FROM usuarios WHERE LOWER(email)=? LIMIT 1',
       [email]
     );
     if (!rows.length) return res.status(401).json({ error: 'invalid_credentials' });
@@ -234,6 +281,8 @@ router.post('/login', async (req, res) => {
       nome: u.nome,
       email: u.email,
       telefone: u.telefone,
+      data_nascimento: u.data_nascimento || null,
+      cpf_cnpj: u.cpf_cnpj || null,
       cep: u.cep || null,
       endereco: u.endereco || null,
       numero: u.numero || null,
@@ -292,6 +341,8 @@ router.put('/me', auth, async (req, res) => {
       bairro,
       cidade,
       estado,
+      data_nascimento,
+      dataNascimento,
       notifyEmailEstab,
       notifyWhatsappEstab,
     } = req.body || {};
@@ -307,6 +358,20 @@ router.put('/me', auth, async (req, res) => {
     const bairroTrim = bairro ? String(bairro).trim() : '';
     const cidadeTrim = cidade ? String(cidade).trim() : '';
     const estadoTrim = estado ? String(estado).trim().toUpperCase() : '';
+    const dataNascimentoRaw = data_nascimento ?? dataNascimento;
+    const dataNascimentoValue = normalizeBirthdate(dataNascimentoRaw);
+    const hasDataNascimento = String(dataNascimentoRaw || '').trim().length > 0;
+    if (hasDataNascimento && !dataNascimentoValue) {
+      return res.status(400).json({ error: 'data_nascimento_invalida', message: 'Informe uma data de nascimento valida.' });
+    }
+    const cpfCnpjRaw = req.body?.cpf_cnpj ?? req.body?.cpfCnpj;
+    const cpfCnpjInfo = normalizeCpfCnpj(cpfCnpjRaw);
+    if (cpfCnpjInfo.provided && cpfCnpjInfo.digits && ![11, 14].includes(cpfCnpjInfo.digits.length)) {
+      return res.status(400).json({ error: 'cpf_cnpj_invalido', message: 'Informe um CPF ou CNPJ valido.' });
+    }
+    const cpfCnpjNext = cpfCnpjInfo.provided
+      ? (cpfCnpjInfo.digits || null)
+      : (req.user?.cpf_cnpj || null);
     const addressRequired = req.user?.tipo === 'estabelecimento';
 
     if (!nome) {
@@ -447,14 +512,15 @@ router.put('/me', auth, async (req, res) => {
     const bairroValue = bairroTrim || null;
     const cidadeValue = cidadeTrim || null;
     const estadoValue = estadoTrim || null;
+    const dataNascimentoNext = hasDataNascimento ? dataNascimentoValue : (req.user?.data_nascimento || null);
 
     const currentEmail = String(req.user?.email || '').trim().toLowerCase();
     const emailChanged = emailNorm !== currentEmail;
 
     if (emailChanged) {
       await pool.query(
-        'UPDATE usuarios SET nome=?, telefone=?, cep=?, endereco=?, numero=?, complemento=?, bairro=?, cidade=?, estado=?, notify_email_estab=?, notify_whatsapp_estab=?, avatar_url=? WHERE id=?',
-        [nome, phoneClean || null, cepValue, enderecoValue, numeroValue, complementoValue, bairroValue, cidadeValue, estadoValue, nextNotifyEmail ? 1 : 0, nextNotifyWhatsapp ? 1 : 0, nextAvatar, userId]
+        'UPDATE usuarios SET nome=?, telefone=?, data_nascimento=?, cpf_cnpj=?, cep=?, endereco=?, numero=?, complemento=?, bairro=?, cidade=?, estado=?, notify_email_estab=?, notify_whatsapp_estab=?, avatar_url=? WHERE id=?',
+        [nome, phoneClean || null, dataNascimentoNext, cpfCnpjNext, cepValue, enderecoValue, numeroValue, complementoValue, bairroValue, cidadeValue, estadoValue, nextNotifyEmail ? 1 : 0, nextNotifyWhatsapp ? 1 : 0, nextAvatar, userId]
       );
       await pool.query('DELETE FROM email_change_tokens WHERE user_id=?', [userId]);
       const code = String(Math.floor(100000 + Math.random() * 900000));
@@ -465,7 +531,7 @@ router.put('/me', auth, async (req, res) => {
       const html = `<p>Ola!</p><p>Use o codigo <strong>${code}</strong> para confirmar seu novo email.</p><p>O codigo expira em 30 minutos.</p>`;
       try { await notifyEmail(emailNorm, subject, html); } catch (err) { console.error('[auth/me][email]', err); }
 
-      const [[userRow]] = await pool.query("SELECT id, nome, email, telefone, cep, endereco, numero, complemento, bairro, cidade, estado, avatar_url, tipo, notify_email_estab, notify_whatsapp_estab, plan, plan_status, plan_trial_ends_at, plan_active_until, plan_subscription_id FROM usuarios WHERE id=? LIMIT 1", [userId]);
+      const [[userRow]] = await pool.query("SELECT id, nome, email, telefone, data_nascimento, cpf_cnpj, cep, endereco, numero, complemento, bairro, cidade, estado, avatar_url, tipo, notify_email_estab, notify_whatsapp_estab, plan, plan_status, plan_trial_ends_at, plan_active_until, plan_subscription_id FROM usuarios WHERE id=? LIMIT 1", [userId]);
       if (!userRow) {
         return res.status(404).json({ error: 'not_found', message: 'Usuario nao encontrado.' });
       }
@@ -474,6 +540,8 @@ router.put('/me', auth, async (req, res) => {
         ...userRow,
         nome: userRow.nome || nome,
         telefone: userRow.telefone || phoneClean,
+        data_nascimento: userRow.data_nascimento || dataNascimentoNext,
+        cpf_cnpj: userRow.cpf_cnpj ?? cpfCnpjNext,
         cep: userRow.cep || cepValue,
         endereco: userRow.endereco || enderecoValue,
         numero: userRow.numero || numeroValue,
@@ -495,11 +563,11 @@ router.put('/me', auth, async (req, res) => {
     }
 
     await pool.query(
-      'UPDATE usuarios SET nome=?, email=?, telefone=?, cep=?, endereco=?, numero=?, complemento=?, bairro=?, cidade=?, estado=?, notify_email_estab=?, notify_whatsapp_estab=?, avatar_url=? WHERE id=?',
-      [nome, email, phoneClean || null, cepValue, enderecoValue, numeroValue, complementoValue, bairroValue, cidadeValue, estadoValue, nextNotifyEmail ? 1 : 0, nextNotifyWhatsapp ? 1 : 0, nextAvatar, userId]
+      'UPDATE usuarios SET nome=?, email=?, telefone=?, data_nascimento=?, cpf_cnpj=?, cep=?, endereco=?, numero=?, complemento=?, bairro=?, cidade=?, estado=?, notify_email_estab=?, notify_whatsapp_estab=?, avatar_url=? WHERE id=?',
+      [nome, email, phoneClean || null, dataNascimentoNext, cpfCnpjNext, cepValue, enderecoValue, numeroValue, complementoValue, bairroValue, cidadeValue, estadoValue, nextNotifyEmail ? 1 : 0, nextNotifyWhatsapp ? 1 : 0, nextAvatar, userId]
     );
 
-    const [[userRow]] = await pool.query("SELECT id, nome, email, telefone, cep, endereco, numero, complemento, bairro, cidade, estado, avatar_url, tipo, notify_email_estab, notify_whatsapp_estab, plan, plan_status, plan_trial_ends_at, plan_active_until, plan_subscription_id FROM usuarios WHERE id=? LIMIT 1", [userId]);
+    const [[userRow]] = await pool.query("SELECT id, nome, email, telefone, data_nascimento, cpf_cnpj, cep, endereco, numero, complemento, bairro, cidade, estado, avatar_url, tipo, notify_email_estab, notify_whatsapp_estab, plan, plan_status, plan_trial_ends_at, plan_active_until, plan_subscription_id FROM usuarios WHERE id=? LIMIT 1", [userId]);
     if (!userRow) {
       return res.status(404).json({ error: 'not_found', message: 'Usuario nao encontrado.' });
     }
@@ -555,7 +623,7 @@ router.post('/me/email-confirm', auth, async (req, res) => {
     await pool.query('UPDATE usuarios SET email=? WHERE id=?', [newEmail, userId]);
     await pool.query('DELETE FROM email_change_tokens WHERE id=?', [token.id]);
 
-    const [[userRow]] = await pool.query("SELECT id, nome, email, telefone, cep, endereco, numero, complemento, bairro, cidade, estado, avatar_url, tipo, notify_email_estab, notify_whatsapp_estab, plan, plan_status, plan_trial_ends_at, plan_active_until, plan_subscription_id FROM usuarios WHERE id=? LIMIT 1", [userId]);
+    const [[userRow]] = await pool.query("SELECT id, nome, email, telefone, data_nascimento, cpf_cnpj, cep, endereco, numero, complemento, bairro, cidade, estado, avatar_url, tipo, notify_email_estab, notify_whatsapp_estab, plan, plan_status, plan_trial_ends_at, plan_active_until, plan_subscription_id FROM usuarios WHERE id=? LIMIT 1", [userId]);
     if (!userRow) {
       return res.status(404).json({ error: 'not_found', message: 'Usuario nao encontrado.' });
     }

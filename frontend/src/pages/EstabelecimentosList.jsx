@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link, useLocation, useSearchParams } from 'react-router-dom';
 import { Api, resolveAssetUrl } from '../utils/api';
 import LogoAO from '../components/LogoAO.jsx';
 import { IconStar } from '../components/Icons.jsx';
@@ -8,6 +8,20 @@ import EstablishmentsHero from '../components/EstablishmentsHero.jsx';
 import { IconMapPin } from '../components/Icons.jsx';
 
 const FAVORITES_CACHE_KEY = 'ao:favorites_local';
+const PAGE_SIZE_MOBILE = 8;
+const PAGE_SIZE_DESKTOP = 20;
+const PAGE_SIZE_BREAKPOINT = 768;
+const getPageSize = () => {
+  if (typeof window === 'undefined') return PAGE_SIZE_DESKTOP;
+  return window.innerWidth < PAGE_SIZE_BREAKPOINT ? PAGE_SIZE_MOBILE : PAGE_SIZE_DESKTOP;
+};
+const QUERY_DEBOUNCE_MS = 350;
+const getQueryFromSearch = (search) =>
+  (new URLSearchParams(search).get('q') || '').trim();
+const getInitialQuery = () => {
+  if (typeof window === 'undefined') return '';
+  return getQueryFromSearch(window.location.search);
+};
 
 const normalize = (value) =>
   String(value || '')
@@ -59,13 +73,18 @@ const ratingNumberFormatter = new Intl.NumberFormat('pt-BR', {
 
 export default function EstabelecimentosList() {
   const [items, setItems] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
   const [error, setError] = useState('');
-  const [query, setQuery] = useState('');
-  const [searchParams, setSearchParams] = useSearchParams();
+  const [query, setQuery] = useState(getInitialQuery);
+  const [debouncedQuery, setDebouncedQuery] = useState(getInitialQuery);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(getPageSize);
+  const location = useLocation();
+  const [, setSearchParams] = useSearchParams();
   const [showResults, setShowResults] = useState(() => {
-    const initial = (searchParams.get('q') || '').trim();
-    return initial.length > 0;
+    return getInitialQuery().length > 0;
   });
   const [pendingScroll, setPendingScroll] = useState(false);
   const searchInputRef = useRef(null);
@@ -86,29 +105,85 @@ export default function EstabelecimentosList() {
   const PROMO_KEY = 'home_promo_dismissed_at';
 
   useEffect(() => {
-    const q = (searchParams.get('q') || '').trim();
-    setQuery(q);
+    const q = getQueryFromSearch(location.search);
+    setQuery((prev) => (prev === q ? prev : q));
+    setDebouncedQuery((prev) => (prev === q ? prev : q));
     if (q) setShowResults(true);
-  }, [searchParams]);
+  }, [location.search]);
 
   useEffect(() => {
-    let mounted = true;
+    if (typeof window === 'undefined') return undefined;
+    const handleResize = () => {
+      setPageSize((prev) => {
+        const next = getPageSize();
+        return next === prev ? prev : next;
+      });
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedQuery(query.trim());
+    }, QUERY_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [query]);
+
+  useEffect(() => {
+    const current = getQueryFromSearch(location.search);
+    if (debouncedQuery === current) return;
+    const params = new URLSearchParams(location.search);
+    if (debouncedQuery) params.set('q', debouncedQuery);
+    else params.delete('q');
+    setSearchParams(params, { replace: true });
+  }, [debouncedQuery, location.search, setSearchParams]);
+
+  useEffect(() => {
+    if (!showResults) return;
+    setPage(1);
+  }, [debouncedQuery, showResults, pageSize]);
+
+  useEffect(() => {
+    if (!showResults) return;
+    let cancelled = false;
+    const isFirstPage = page === 1;
+    if (isFirstPage) {
+      setLoading(true);
+      setError('');
+      setLoadingMore(false);
+    } else {
+      setLoadingMore(true);
+    }
     (async () => {
       try {
-        const list = await Api.listEstablishments();
-        if (!mounted) return;
-        setItems(Array.isArray(list) ? list : []);
+        const response = await Api.listEstablishments({
+          q: debouncedQuery,
+          page,
+          limit: pageSize,
+        });
+        if (cancelled) return;
+        const list = Array.isArray(response) ? response : response?.items || [];
+        const nextHasMore = Array.isArray(response)
+          ? false
+          : Boolean(response?.has_more ?? list.length > pageSize);
+        setItems((prev) => (isFirstPage ? list : [...prev, ...list]));
+        setHasMore(nextHasMore);
       } catch (e) {
-        if (!mounted) return;
-        setError('Não foi possível carregar os estabelecimentos.');
+        if (cancelled) return;
+        if (isFirstPage) {
+          setError('Não foi possível carregar os estabelecimentos.');
+        }
       } finally {
-        if (mounted) setLoading(false);
+        if (cancelled) return;
+        setLoading(false);
+        setLoadingMore(false);
       }
     })();
     return () => {
-      mounted = false;
+      cancelled = true;
     };
-  }, []);
+  }, [debouncedQuery, page, showResults, pageSize]);
 
   useEffect(() => {
     try {
@@ -130,7 +205,7 @@ export default function EstabelecimentosList() {
     }
   }, []);
 
-  const normalizedQuery = useMemo(() => normalize(query.trim()), [query]);
+  const normalizedQuery = useMemo(() => normalize(debouncedQuery.trim()), [debouncedQuery]);
   const queryTokens = useMemo(
     () => (normalizedQuery ? normalizedQuery.split(/\s+/).filter(Boolean) : []),
     [normalizedQuery]
@@ -177,23 +252,17 @@ export default function EstabelecimentosList() {
     return () => window.cancelAnimationFrame(frame);
   }, [showResults, pendingScroll]);
 
-  const handleQueryChange = useCallback(
-    (value) => {
-      setQuery(value);
-      const trimmed = value.trim();
-      const params = new URLSearchParams(searchParams);
-      if (trimmed) params.set('q', trimmed);
-      else params.delete('q');
-      setSearchParams(params, { replace: true });
-    },
-    [searchParams, setSearchParams]
-  );
+  const handleQueryChange = useCallback((value) => {
+    setQuery(value);
+  }, []);
 
   const handleSubmit = useCallback((event) => {
     event.preventDefault();
     setShowResults(true);
     setPendingScroll(true);
-  }, []);
+    setDebouncedQuery(query.trim());
+    setPage(1);
+  }, [query]);
 
   const handleClosePromo = useCallback(() => {
     setPromoOpen(false);
@@ -331,14 +400,15 @@ export default function EstabelecimentosList() {
             <div className="home-results__state">Nenhum estabelecimento encontrado.</div>
           )}
           {!loading && !error && results.length > 0 && (
-            <div className="home-results__grid">
+            <>
+              <div className="home-results__grid">
               {results.map((item) => {
                 const { est } = item;
                 const name = est?.nome || est?.name || `Estabelecimento #${est?.id || ''}`;
                 const address = formatAddress(est);
                 const sp = new URLSearchParams();
                 sp.set('estabelecimento', String(est.id));
-                const currentQuery = (query || '').trim();
+                const currentQuery = (debouncedQuery || '').trim();
                 if (currentQuery) sp.set('q', currentQuery);
                 const slugSource = est?.slug || name;
                 const slug = slugSource ? toSlug(slugSource) : 'estabelecimento';
@@ -423,7 +493,20 @@ export default function EstabelecimentosList() {
                 </Link>
               );
               })}
-            </div>
+              </div>
+              {hasMore && (
+                <div style={{ marginTop: 14, display: 'flex', justifyContent: 'center' }}>
+                  <button
+                    type="button"
+                    className="btn btn--outline"
+                    onClick={() => setPage((prev) => prev + 1)}
+                    disabled={loadingMore}
+                  >
+                    {loadingMore ? <span className="spinner" /> : 'Carregar mais'}
+                  </button>
+                </div>
+              )}
+            </>
           )}
         </section>
       )}

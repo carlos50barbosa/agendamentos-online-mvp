@@ -40,6 +40,13 @@ const formatCep = (value = '') => {
   return `${digits.slice(0, 5)}-${digits.slice(5)}`;
 };
 
+const normalizeBirthdateInput = (value = '') => {
+  const text = String(value || '').trim();
+  if (!text) return '';
+  const match = text.match(/^\d{4}-\d{2}-\d{2}/);
+  return match ? match[0] : '';
+};
+
 const toSlug = (value = '') => {
   const normalized = String(value || '')
     .normalize('NFD')
@@ -405,6 +412,7 @@ function buildWorkingHoursPayload(schedule, notesText) {
 export default function Configuracoes() {
   const user = getUser();
   const isEstab = user?.tipo === 'estabelecimento';
+  const isCliente = user?.tipo === 'cliente';
   const location = useLocation();
   const sectionRefs = useRef({});
   const focusTimeoutRef = useRef(null);
@@ -426,10 +434,10 @@ export default function Configuracoes() {
   const [savingMessages, setSavingMessages] = useState(false);
   const [openSections, setOpenSections] = useState({});
   const [focusedSection, setFocusedSection] = useState('');
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [showQrCode, setShowQrCode] = useState(false);
   const [publicProfileForm, setPublicProfileForm] = useState({
     sobre: '',
-    contato_email: '',
     contato_telefone: '',
     site_url: '',
     instagram_url: '',
@@ -469,6 +477,16 @@ export default function Configuracoes() {
     }, 2400);
   }, [location?.state?.focusSection]);
 
+  useEffect(() => {
+    const handleBeforeUnload = (event) => {
+      if (!hasUnsavedChanges) return;
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [hasUnsavedChanges]);
+
   const toggleSection = useCallback((id) => {
     setOpenSections((prev) => ({ ...prev, [id]: !prev[id] }));
   }, []);
@@ -478,7 +496,6 @@ export default function Configuracoes() {
     setWorkingHours(schedule);
     setPublicProfileForm({
       sobre: profile?.sobre || '',
-      contato_email: profile?.contato_email || '',
       contato_telefone: profile?.contato_telefone || '',
       site_url: profile?.site_url || '',
       instagram_url: profile?.instagram_url || '',
@@ -490,10 +507,13 @@ export default function Configuracoes() {
     });
   }, [setWorkingHours]);
 
+  const markDirty = useCallback(() => setHasUnsavedChanges(true), []);
+
   const [profileForm, setProfileForm] = useState({
     nome: '',
     email: '',
     telefone: '',
+    data_nascimento: '',
     cep: '',
     endereco: '',
     numero: '',
@@ -506,6 +526,7 @@ export default function Configuracoes() {
     notifyWhatsappEstab: Boolean(user?.notify_whatsapp_estab ?? true),
   });
   const [passwordForm, setPasswordForm] = useState({ atual: '', nova: '', confirmar: '' });
+  const [showPasswordFields, setShowPasswordFields] = useState(false);
   const [confirmPasswordModal, setConfirmPasswordModal] = useState(false);
   const [confirmPasswordInput, setConfirmPasswordInput] = useState('');
   const [confirmPasswordError, setConfirmPasswordError] = useState('');
@@ -629,6 +650,7 @@ export default function Configuracoes() {
       nome: user.nome || '',
       email: user.email || '',
       telefone: formatPhoneLabel(user.telefone || ''),
+      data_nascimento: normalizeBirthdateInput(user.data_nascimento),
       cep: formatCep(user.cep || ''),
       endereco: user.endereco || '',
       numero: user.numero || '',
@@ -1153,11 +1175,13 @@ export default function Configuracoes() {
 
   const handleProfileChange = (key, value) => {
     setProfileForm((prev) => ({ ...prev, [key]: value }));
+    markDirty();
   };
 
   const handlePublicProfileChange = useCallback((key, value) => {
     setPublicProfileForm((prev) => ({ ...prev, [key]: value }));
-  }, []);
+    markDirty();
+  }, [markDirty]);
 
   const handleWorkingHoursToggle = useCallback((dayKey, enabled) => {
     setWorkingHours((prev) =>
@@ -1167,7 +1191,8 @@ export default function Configuracoes() {
           : day
       )
     );
-  }, []);
+    markDirty();
+  }, [markDirty]);
 
   const handleWorkingHoursTimeChange = useCallback((dayKey, field, value) => {
     const sanitized = sanitizeTimeInput(value);
@@ -1178,7 +1203,8 @@ export default function Configuracoes() {
           : day
       )
     );
-  }, []);
+    markDirty();
+  }, [markDirty]);
 
   const handleWorkingHoursBlockToggle = useCallback((dayKey, enabled) => {
     setWorkingHours((prev) =>
@@ -1188,7 +1214,8 @@ export default function Configuracoes() {
           : day
       )
     );
-  }, []);
+    markDirty();
+  }, [markDirty]);
 
   const handleWorkingHoursBlockChange = useCallback((dayKey, field, value) => {
     const sanitized = sanitizeTimeInput(value);
@@ -1199,7 +1226,8 @@ export default function Configuracoes() {
           : day
       )
     );
-  }, []);
+    markDirty();
+  }, [markDirty]);
 
   const handleAvatarFile = useCallback((event) => {
     const input = event?.target || null;
@@ -1225,6 +1253,7 @@ export default function Configuracoes() {
         setAvatarData(result);
         setAvatarRemove(false);
         setProfileForm((prev) => ({ ...prev, avatar_url: '' }));
+        markDirty();
       } else {
         setAvatarError('Falha ao processar a imagem.');
       }
@@ -1242,7 +1271,8 @@ export default function Configuracoes() {
     setAvatarError('');
     const input = avatarInputRef.current;
     if (input) input.click();
-  }, []);
+    markDirty();
+  }, [markDirty]);
 
   const handleAvatarRemove = useCallback(() => {
     setAvatarPreview('');
@@ -1252,11 +1282,17 @@ export default function Configuracoes() {
     setProfileForm((prev) => ({ ...prev, avatar_url: '' }));
     const input = avatarInputRef.current;
     if (input) input.value = '';
-  }, []);
+    markDirty();
+  }, [markDirty]);
 
   const handlePasswordChange = (key, value) => {
     setPasswordForm((prev) => ({ ...prev, [key]: value }));
+    markDirty();
   };
+  const resetPasswordFields = useCallback(() => {
+    setPasswordForm({ atual: '', nova: '', confirmar: '' });
+    setShowPasswordFields(false);
+  }, []);
 
   const closeConfirmPasswordModal = useCallback(() => {
     setConfirmPasswordModal(false);
@@ -1302,6 +1338,7 @@ export default function Configuracoes() {
         nome: profileForm.nome.trim(),
         email: profileForm.email.trim(),
         telefone: telefoneNorm,
+        data_nascimento: profileForm.data_nascimento || undefined,
         senhaAtual: currentPassword,
         senhaNova: passwordForm.nova || undefined,
         cep: cepDigits || undefined,
@@ -1339,9 +1376,7 @@ export default function Configuracoes() {
       if (avatarInputRef.current) {
         avatarInputRef.current.value = '';
       }
-      handlePasswordChange('atual', '');
-      handlePasswordChange('nova', '');
-      handlePasswordChange('confirmar', '');
+      resetPasswordFields();
       setConfirmPasswordInput('');
       setConfirmPasswordModal(false);
       setProfileStatus({ type: 'success', message: 'Perfil atualizado com sucesso.' });
@@ -1351,6 +1386,7 @@ export default function Configuracoes() {
           message: 'Perfil atualizado. Confirme o novo email com o codigo enviado.',
         });
       }
+      setHasUnsavedChanges(false);
     } catch (e) {
       const errorCode = e?.data?.error || '';
       const msg = e?.data?.message || e?.message || 'Falha ao atualizar perfil.';
@@ -1392,7 +1428,6 @@ export default function Configuracoes() {
         : '';
       const payload = {
         sobre: publicProfileForm.sobre?.trim() || null,
-        contato_email: publicProfileForm.contato_email?.trim() || null,
         contato_telefone: phoneDigits || null,
         site_url: publicProfileForm.site_url?.trim() || null,
         instagram_url: publicProfileForm.instagram_url?.trim() || null,
@@ -1407,6 +1442,7 @@ export default function Configuracoes() {
         applyPublicProfile(response.profile);
       }
       setPublicProfileStatus({ type: 'success', message: 'Perfil público atualizado com sucesso.' });
+      setHasUnsavedChanges(false);
     } catch (err) {
       const msg = err?.data?.message || err?.message || 'Falha ao atualizar perfil público.';
       setPublicProfileStatus({ type: 'error', message: msg });
@@ -1565,24 +1601,46 @@ export default function Configuracoes() {
                     checked={!!profileForm.notifyWhatsappEstab}
                     onChange={(e) => handleProfileChange('notifyWhatsappEstab', e.target.checked)}
                   />
-                  <span>Receber notificações por WhatsApp</span>
+                  <span>Receber notificações no WhatsApp</span>
                 </label>
               </div>
             </>
           )}
-          <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
-            <label className="label" style={{ flex: '1 1 260px' }}>
-              <span>Nova senha (opcional)</span>
-              <input className="input" type="password" value={passwordForm.nova} onChange={(e) => handlePasswordChange('nova', e.target.value)} />
-            </label>
-            <label className="label" style={{ flex: '1 1 260px' }}>
-              <span>Confirmar nova senha</span>
-              <input className="input" type="password" value={passwordForm.confirmar} onChange={(e) => handlePasswordChange('confirmar', e.target.value)} />
-            </label>
+          <div className="row" style={{ gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            {!showPasswordFields ? (
+              <button
+                type="button"
+                className="btn btn--outline btn--sm"
+                onClick={() => {
+                  setShowPasswordFields(true);
+                  setPasswordForm({ atual: '', nova: '', confirmar: '' });
+                }}
+              >
+                Alterar senha
+              </button>
+            ) : (
+              <button type="button" className="btn btn--ghost btn--sm" onClick={resetPasswordFields}>
+                Cancelar alteracao
+              </button>
+            )}
           </div>
-          <p className="small muted" style={{ margin: '-4px 0 0' }}>
-            Vamos pedir sua senha atual ao salvar as alteações.
-          </p>
+          {showPasswordFields && (
+            <>
+              <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+                <label className="label" style={{ flex: '1 1 260px' }}>
+                  <span>Nova senha</span>
+                  <input className="input" type="password" value={passwordForm.nova} onChange={(e) => handlePasswordChange('nova', e.target.value)} />
+                </label>
+                <label className="label" style={{ flex: '1 1 260px' }}>
+                  <span>Confirmar nova senha</span>
+                  <input className="input" type="password" value={passwordForm.confirmar} onChange={(e) => handlePasswordChange('confirmar', e.target.value)} />
+                </label>
+              </div>
+              <p className="small muted" style={{ margin: '-4px 0 0' }}>
+                Vamos pedir sua senha atual ao salvar as alteracoes.
+              </p>
+            </>
+          )}
           {profileStatus.message && (
             <div className={`notice notice--${profileStatus.type}`} role="alert">{profileStatus.message}</div>
           )}
@@ -1666,17 +1724,7 @@ export default function Configuracoes() {
               </span>
             </label>
             <div className="grid" style={{ gap: 10, gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}>
-              <label className="label">
-                <span>Email público</span>
-                <input
-                  className="input"
-                  type="email"
-                  value={publicProfileForm.contato_email}
-                  onChange={(e) => handlePublicProfileChange('contato_email', e.target.value)}
-                  disabled={publicProfileLoading || publicProfileSaving}
-                  placeholder="contato@exemplo.com"
-                />
-              </label>
+              
               <label className="label">
                 <span>Telefone público (WhatsApp)</span>
                 <input
@@ -1703,9 +1751,7 @@ export default function Configuracoes() {
                         className="working-hours__toggle"
                       />
                       <span>{day.label}</span>
-                      <span
-                        className={`working-hours__status working-hours__status--${day.enabled ? 'open' : 'closed'}`}
-                      >
+                      <span className={`working-hours__status working-hours__status--${day.enabled ? 'open' : 'closed'}`}>
                         {day.enabled ? 'Aberto' : 'Fechado'}
                       </span>
                     </label>
@@ -1717,7 +1763,7 @@ export default function Configuracoes() {
                         onChange={(e) => handleWorkingHoursTimeChange(day.key, 'start', e.target.value)}
                         disabled={publicProfileLoading || publicProfileSaving || !day.enabled}
                       />
-                      <span className="working-hours__separator">às</span>
+                      <span className="working-hours__separator">as</span>
                       <input
                         type="time"
                         className="input"
@@ -1745,7 +1791,7 @@ export default function Configuracoes() {
                             onChange={(e) => handleWorkingHoursBlockChange(day.key, 'blockStart', e.target.value)}
                             disabled={publicProfileLoading || publicProfileSaving || !day.enabled}
                           />
-                          <span className="working-hours__separator">às</span>
+                          <span className="working-hours__separator">as</span>
                           <input
                             type="time"
                             className="input"
@@ -1763,6 +1809,20 @@ export default function Configuracoes() {
                 Ative os dias em que atende e informe os horários.
               </span>
             </div>
+            <label className="label">
+              <span>Observações (opcional)</span>
+              <textarea
+                className="input"
+                rows={3}
+                value={publicProfileForm.horarios_text}
+                onChange={(e) => handlePublicProfileChange('horarios_text', e.target.value)}
+                disabled={publicProfileLoading || publicProfileSaving}
+                placeholder={'Plantões, feriados ou orientacões especiais'}
+              />
+              <span className="muted" style={{ fontSize: 12 }}>
+                Essas observações aparecem junto aos horários no agendamento.
+              </span>
+            </label>
             <div className="grid" style={{ gap: 10, gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}>
               <label className="label">
                 <span>Site</span>
@@ -1831,7 +1891,7 @@ export default function Configuracoes() {
                 <div>
                   <h4 style={{ margin: 0 }}>Fotos do estabelecimento</h4>
                   <p className="muted" style={{ margin: '4px 0 0', fontSize: 13 }}>
-                    Essas imagens aparecem na página pública e no fluxo de agendamento (/novo).
+                    Essas imagens aparecem na pagina publica e no fluxo de agendamento (/novo).
                   </p>
                 </div>
               </div>
@@ -2093,6 +2153,7 @@ export default function Configuracoes() {
     user?.id,
     profileForm,
     passwordForm,
+    showPasswordFields,
     profileSaving,
     profileStatus,
     avatarPreview,
@@ -2176,7 +2237,7 @@ export default function Configuracoes() {
         >
           <form id="confirm-password-form" onSubmit={handleConfirmPasswordSubmit} className="grid" style={{ gap: 10 }}>
             <p className="muted" style={{ margin: 0 }}>
-              Precisamos confirmar sua senha para salvar as alteações.
+              Precisamos confirmar sua senha para salvar as alterações.
             </p>
             <label className="label" style={{ marginBottom: 0 }}>
               <span>Senha atual</span>

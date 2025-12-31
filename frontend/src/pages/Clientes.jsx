@@ -3,6 +3,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Api } from '../utils/api';
 import { getUser } from '../utils/auth';
 import { IconSearch } from '../components/Icons.jsx';
+import Modal from '../components/Modal.jsx';
 
 const DATE_TIME = new Intl.DateTimeFormat('pt-BR', {
   day: '2-digit',
@@ -10,6 +11,11 @@ const DATE_TIME = new Intl.DateTimeFormat('pt-BR', {
   hour: '2-digit',
   minute: '2-digit',
   hour12: false,
+});
+const DATE_ONLY = new Intl.DateTimeFormat('pt-BR', {
+  day: '2-digit',
+  month: '2-digit',
+  year: 'numeric',
 });
 
 function formatDateTime(value) {
@@ -19,12 +25,39 @@ function formatDateTime(value) {
   return DATE_TIME.format(dt);
 }
 
+function formatDateOnly(value) {
+  if (!value) return '-';
+  const text = String(value).trim();
+  if (!text) return '-';
+  const match = text.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (match) {
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    const day = Number(match[3]);
+    const dt = new Date(year, month - 1, day);
+    if (!Number.isNaN(dt.getTime())) return DATE_ONLY.format(dt);
+  }
+  const dt = new Date(text);
+  if (Number.isNaN(dt.getTime())) return String(value);
+  return DATE_ONLY.format(dt);
+}
+
 function formatPhone(value) {
   if (!value) return '';
   const digits = String(value).replace(/\D/g, '');
   if (digits.length === 11) return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}`;
   if (digits.length === 10) return `(${digits.slice(0, 2)}) ${digits.slice(2, 6)}-${digits.slice(6)}`;
   return value;
+}
+
+function formatAddress(item) {
+  if (!item) return '-';
+  const line1 = [item.endereco, item.numero].filter(Boolean).join(', ');
+  const line2 = [item.bairro, item.cidade, item.estado].filter(Boolean).join(' - ');
+  const complement = item.complemento ? String(item.complemento) : '';
+  const cep = item.cep ? `CEP ${item.cep}` : '';
+  const parts = [line1, complement, line2, cep].filter(Boolean);
+  return parts.length ? parts.join(' | ') : '-';
 }
 
 const toDigits = (value) => String(value || '').replace(/\D/g, '');
@@ -69,6 +102,8 @@ export default function Clientes() {
   const [query, setQuery] = useState('');
   const [searchText, setSearchText] = useState('');
   const [reloadKey, setReloadKey] = useState(0);
+  const [detailClient, setDetailClient] = useState(null);
+  const [detailOpen, setDetailOpen] = useState(false);
 
   useEffect(() => {
     if (!isEstab) return undefined;
@@ -110,6 +145,16 @@ export default function Clientes() {
     if (norm.includes('confirm')) return { text: 'Confirmado', style: BADGE_TONES.confirmed };
     if (norm.includes('pend')) return { text: 'Pendente', style: BADGE_TONES.pending };
     return { text: status || '-', style: BADGE_TONES.default };
+  };
+
+  const handleOpenDetails = (item) => {
+    setDetailClient(item);
+    setDetailOpen(true);
+  };
+
+  const handleCloseDetails = () => {
+    setDetailOpen(false);
+    setDetailClient(null);
   };
 
   if (!isEstab) {
@@ -226,18 +271,17 @@ export default function Clientes() {
           >
             <table
               className="table"
-              style={{ width: '100%', minWidth: 820, textAlign: 'left', fontSize: 14, tableLayout: 'auto', color: palette.text }}
+              style={{ width: '100%', minWidth: 760, textAlign: 'left', fontSize: 14, tableLayout: 'auto', color: palette.text }}
             >
               <thead style={{ background: palette.tableHeader, borderBottom: palette.tableHeaderBorder, color: palette.text }}>
                 <tr>
-                  <th style={{ width: '18%', textAlign: 'left', fontSize: 13, padding: '10px 12px' }}>Nome</th>
-                  <th style={{ width: '20%', textAlign: 'left', fontSize: 13, padding: '10px 12px' }}>E-mail</th>
-                  <th style={{ width: '14%', textAlign: 'left', fontSize: 13, padding: '10px 12px' }}>Telefone</th>
-                  <th style={{ width: '10%', textAlign: 'left', fontSize: 13, padding: '10px 12px' }}>Ações</th>
-                  <th style={{ width: '16%', textAlign: 'left', fontSize: 13, padding: '10px 12px' }}>Último agendamento</th>
+                  <th style={{ width: '22%', textAlign: 'left', fontSize: 13, padding: '10px 12px' }}>Nome</th>
+                  <th style={{ width: '12%', textAlign: 'left', fontSize: 13, padding: '10px 12px' }}>Ações</th>
+                  <th style={{ width: '12%', textAlign: 'left', fontSize: 13, padding: '10px 12px' }}>Dados completos</th>
+                  <th style={{ width: '18%', textAlign: 'left', fontSize: 13, padding: '10px 12px' }}>Último agendamento</th>
                   <th style={{ width: '8%', textAlign: 'left', fontSize: 13, padding: '10px 12px' }}>Total</th>
-                  <th style={{ width: '17%', textAlign: 'left', fontSize: 13, padding: '10px 12px' }}>Último serviço</th>
-                  <th style={{ width: '9%', textAlign: 'left', fontSize: 13, padding: '10px 12px' }}>Status</th>
+                  <th style={{ width: '18%', textAlign: 'left', fontSize: 13, padding: '10px 12px' }}>Último serviço</th>
+                  <th style={{ width: '10%', textAlign: 'left', fontSize: 13, padding: '10px 12px' }}>Status</th>
                 </tr>
               </thead>
               <tbody>
@@ -247,8 +291,6 @@ export default function Clientes() {
                   return (
                     <tr key={item.id} style={{ fontSize: 14, color: palette.text }}>
                       <td style={{ ...cellStyle, padding: '10px 12px' }}><strong>{item?.nome || 'Cliente'}</strong></td>
-                      <td style={{ ...cellStyle, padding: '10px 12px' }}>{item?.email || '-'}</td>
-                      <td style={{ ...cellStyle, padding: '10px 12px' }}>{formatPhone(item?.telefone) || '-'}</td>
                       <td style={{ ...cellStyle, padding: '10px 12px' }}>
                         {waLink ? (
                           <a
@@ -263,6 +305,16 @@ export default function Clientes() {
                         ) : (
                           <span style={{ color: palette.subtle, fontSize: 12 }}>sem telefone</span>
                         )}
+                      </td>
+                      <td style={{ ...cellStyle, padding: '10px 12px' }}>
+                        <button
+                          type="button"
+                          className="btn btn--sm btn--outline"
+                          style={{ borderRadius: 8, padding: '6px 10px' }}
+                          onClick={() => handleOpenDetails(item)}
+                        >
+                          Ver dados
+                        </button>
                       </td>
                       <td style={{ ...cellStyle, padding: '10px 12px' }}>{formatDateTime(item?.last_appointment_at)}</td>
                       <td style={{ ...cellStyle, padding: '10px 12px' }}>{Number(item?.total_appointments || 0)}</td>
@@ -304,6 +356,32 @@ export default function Clientes() {
           </div>
         </div>
       </div>
+      {detailOpen && detailClient && (
+        <Modal title="Dados do cliente" onClose={handleCloseDetails} closeButton>
+          <div style={{ display: 'grid', gap: 10 }}>
+            <div>
+              <strong>Nome</strong>
+              <div>{detailClient?.nome || 'Cliente'}</div>
+            </div>
+            <div>
+              <strong>Email</strong>
+              <div>{detailClient?.email || '-'}</div>
+            </div>
+            <div>
+              <strong>Telefone</strong>
+              <div>{formatPhone(detailClient?.telefone) || '-'}</div>
+            </div>
+            <div>
+              <strong>Data de nascimento</strong>
+              <div>{formatDateOnly(detailClient?.data_nascimento)}</div>
+            </div>
+            <div>
+              <strong>Endereço</strong>
+              <div>{formatAddress(detailClient)}</div>
+            </div>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }

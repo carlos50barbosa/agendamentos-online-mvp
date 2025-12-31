@@ -3,6 +3,9 @@ import { Link } from 'react-router-dom';
 import { Api } from '../utils/api';
 import LogoAO from '../components/LogoAO.jsx';
 
+const WHATSAPP_SUPPORT_URL =
+  'https://wa.me/5511959929380?text=Ol%C3%A1%20Time%20Agendamentos%20Online!%20Esqueci%20meu%20e-mail%20de%20login%20e%20preciso%20recuperar%20o%20acesso.';
+
 export default function RecuperarSenha(){
   const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
@@ -52,20 +55,29 @@ export default function RecuperarSenha(){
               Se existir uma conta para <strong>{email}</strong>, você receberá um email com instruções.
             </div>
           ) : (
-            <form onSubmit={submit} className="row" style={{ gap: 10, flexWrap: 'wrap', marginTop: 10 }}>
-              <input
-                className="input"
-                type="email"
-                placeholder="Seu email"
-                value={email}
-                onChange={e=>setEmail(e.target.value)}
-                autoComplete="email"
-                required
-              />
-              <button className="btn btn--primary" disabled={!email || loading}>
-                {loading ? <span className="spinner" /> : 'Enviar link'}
-              </button>
-            </form>
+            <>
+              <form onSubmit={submit} className="row" style={{ gap: 10, flexWrap: 'wrap', marginTop: 10 }}>
+                <input
+                  className="input"
+                  type="email"
+                  placeholder="Seu email"
+                  value={email}
+                  onChange={e=>setEmail(e.target.value)}
+                  autoComplete="email"
+                  required
+                />
+                <button className="btn btn--primary" disabled={!email || loading}>
+                  {loading ? <span className="spinner" /> : 'Enviar link'}
+                </button>
+              </form>
+              <div className="muted" style={{ marginTop: 6, fontSize: 12, lineHeight: 1.35 }}>
+                Esqueceu qual e-mail usou? <Link to="/ajuda">Fale com o suporte</Link> ou{' '}
+                <a href={WHATSAPP_SUPPORT_URL} target="_blank" rel="noreferrer">
+                  chame no WhatsApp
+                </a>
+                .
+              </div>
+            </>
           )}
 
           {err && (

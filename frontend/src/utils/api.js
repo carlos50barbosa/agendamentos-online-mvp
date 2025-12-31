@@ -144,7 +144,7 @@ export const Api = {
   linkPhone: (token) => req('/auth/link-phone', { method: 'POST', body: JSON.stringify({ token }) }),
 
   // Estabelecimentos + ServiÃ§os (NOVOS)
-  listEstablishments: () => req('/establishments'),
+  listEstablishments: (params = {}) => req(`/establishments${toQuery(params)}`),
   getEstablishment: (idOrSlug) => req(`/establishments/${idOrSlug}`),
   getEstablishmentClients: (id, params = {}) =>
     req(`/establishments/${id}/clients${toQuery(params)}`),
@@ -202,10 +202,18 @@ export const Api = {
       body: JSON.stringify(payload),
       idempotencyKey: opts.idempotencyKey,
     }),
+  agendarEstabelecimento: (payload, opts = {}) =>
+    req('/agendamentos/estabelecimento', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+      idempotencyKey: opts.idempotencyKey,
+    }),
   meusAgendamentos: () => req('/agendamentos'),
   agendamentosEstabelecimento: (status) => req(`/agendamentos/estabelecimento${toQuery({ status })}`),
   cancelarAgendamento: (id) => req(`/agendamentos/${id}/cancel`, { method: 'PUT' }),
   cancelarAgendamentoEstab: (id) => req(`/agendamentos/${id}/cancel-estab`, { method: 'PUT' }),
+  reagendarAgendamentoEstab: (id, payload) =>
+    req(`/agendamentos/${id}/reschedule-estab`, { method: 'PUT', body: JSON.stringify(payload) }),
 
   // NotificaÃ§Ãµes (NOVO)
   scheduleWhatsApp: (payload) =>
@@ -283,4 +291,3 @@ export const Api = {
 
 // Exporta para depuraÃ§Ã£o no console do navegador
 export const API_BASE_URL = BASE;
-

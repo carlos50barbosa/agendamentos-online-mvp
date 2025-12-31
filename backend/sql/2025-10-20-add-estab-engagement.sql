@@ -4,7 +4,6 @@ USE agendamentos;
 CREATE TABLE IF NOT EXISTS estabelecimento_perfis (
   estabelecimento_id INT PRIMARY KEY,
   sobre TEXT NULL,
-  contato_email VARCHAR(160) NULL,
   contato_telefone VARCHAR(20) NULL,
   site_url VARCHAR(255) NULL,
   instagram_url VARCHAR(255) NULL,

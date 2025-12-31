@@ -10,6 +10,16 @@ import {
   IconLogout,
 } from '../components/Icons.jsx';
 
+const toSlug = (value = '') => {
+  const normalized = String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return normalized || 'estabelecimento';
+};
+
 /**
  * Build navigation structure used across desktop sidebar and mobile bottom bar.
  * @param {object|null} user
@@ -18,6 +28,14 @@ import {
 export function buildNavigation(user) {
   const isAuthenticated = Boolean(user);
   const isEstab = Boolean(user && user.tipo === 'estabelecimento');
+  const publicPagePath = (() => {
+    if (!isEstab) return '/novo';
+    const id = user?.id ? String(user.id) : '';
+    const slugSource = user?.slug || user?.nome || '';
+    const slug = toSlug(slugSource || (id ? `estabelecimento-${id}` : 'estabelecimento'));
+    const query = id ? `?estabelecimento=${encodeURIComponent(id)}` : '';
+    return `/novo/${slug}${query}`;
+  })();
 
   if (!isAuthenticated) {
     return {
@@ -29,7 +47,6 @@ export function buildNavigation(user) {
           heading: null,
           items: [
             { key: 'login', label: 'Login', to: '/login', icon: IconUser, type: 'link' },
-            { key: 'signup', label: 'Cadastro', to: '/cadastro', icon: IconPlus, type: 'link' },
           ],
         },
       ],
@@ -38,15 +55,19 @@ export function buildNavigation(user) {
 
   const mainItems = [
     { key: 'dashboard', label: 'Agendamentos', to: isEstab ? '/estab' : '/cliente', icon: IconHome, type: 'link' },
-    { key: 'new', label: 'Novo Agendamento', to: '/novo', icon: IconPlus, type: 'link' },
   ];
 
   if (isEstab) {
     mainItems.push(
+      { key: 'my-page', label: 'Minha página', to: publicPagePath, icon: IconList, type: 'link' },
+      { key: 'professionals', label: 'Profissionais', to: '/profissionais', icon: IconUser, type: 'link' },
       { key: 'services', label: 'Serviços', to: '/servicos', icon: IconWrench, type: 'link' },
       { key: 'clients', label: 'Clientes', to: '/clientes', icon: IconUsers, type: 'link' },
-      { key: 'professionals', label: 'Profissionais', to: '/profissionais', icon: IconUser, type: 'link' },
       { key: 'reports', label: 'Relatórios', to: '/relatorios', icon: IconChart, type: 'link' },
+    );
+  } else {
+    mainItems.push(
+      { key: 'new', label: 'Novo Agendamento', to: '/novo', icon: IconPlus, type: 'link' },
     );
   }
 

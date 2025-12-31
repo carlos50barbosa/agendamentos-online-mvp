@@ -262,7 +262,8 @@ router.get('/', async (req, res) => {
       SELECT inicio, fim
         FROM agendamentos
        WHERE estabelecimento_id = ?
-         AND status = 'confirmado'
+         AND status IN ('confirmado','pendente')
+         AND (status <> 'pendente' OR public_confirm_expires_at IS NULL OR public_confirm_expires_at >= NOW())
          AND DATE(inicio) BETWEEN DATE(?) AND DATE(?)
       `,
       [establishmentId, start, end]

@@ -15,7 +15,7 @@ export async function auth(req, res, next) {
     }
 
     const [rows] = await pool.query(
-      "SELECT id, nome, email, telefone, cep, endereco, numero, complemento, bairro, cidade, estado, avatar_url, tipo, notify_email_estab, notify_whatsapp_estab, plan, plan_status, plan_trial_ends_at, plan_active_until, plan_subscription_id FROM usuarios WHERE id=? LIMIT 1",
+      "SELECT id, nome, email, telefone, data_nascimento, cpf_cnpj, cep, endereco, numero, complemento, bairro, cidade, estado, avatar_url, tipo, notify_email_estab, notify_whatsapp_estab, plan, plan_status, plan_trial_ends_at, plan_active_until, plan_subscription_id FROM usuarios WHERE id=? LIMIT 1",
       [userId]
     );
 
@@ -27,6 +27,8 @@ export async function auth(req, res, next) {
       nome: row.nome,
       email: row.email,
       telefone: row.telefone,
+      data_nascimento: row.data_nascimento || null,
+      cpf_cnpj: row.cpf_cnpj || null,
       cep: row.cep || null,
       endereco: row.endereco || null,
       numero: row.numero || null,

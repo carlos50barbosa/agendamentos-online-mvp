@@ -4,6 +4,7 @@ import { pool } from '../lib/db.js';
 import { getPlanContext, isDelinquentStatus, formatPlanLimitExceeded } from '../lib/plans.js';
 import { auth as authRequired, isCliente, isEstabelecimento } from '../middleware/auth.js';
 import { notifyEmail, notifyWhatsapp, sendTemplate } from '../lib/notifications.js';
+import bcrypt from 'bcryptjs';
 import { checkMonthlyAppointmentLimit, notifyAppointmentLimitReached } from '../lib/appointment_limits.js';
 import { estabNotificationsDisabled } from '../lib/estab_notifications.js';
 import { clientWhatsappDisabled, whatsappImmediateDisabled, whatsappConfirmationDisabled } from '../lib/client_notifications.js';
@@ -11,7 +12,36 @@ import { clientWhatsappDisabled, whatsappImmediateDisabled, whatsappConfirmation
 const router = Router();
 
 const TZ = 'America/Sao_Paulo';
+const FRONTEND_BASE = String(process.env.FRONTEND_BASE_URL || process.env.APP_URL || 'http://localhost:3001').replace(/\/$/, '');
 const toDigits = (s) => String(s || '').replace(/\D/g, ''); // normaliza telefone para apenas digitos
+const normalizePhoneBR = (value) => {
+  let digits = toDigits(value);
+  if (!digits) return '';
+  digits = digits.replace(/^0+/, '');
+  if (digits.startsWith('55')) return digits;
+  if (digits.length >= 10 && digits.length <= 11) return `55${digits}`;
+  return digits;
+};
+const normalizeBirthdate = (value) => {
+  if (value === undefined || value === null) return null;
+  const raw = String(value).trim();
+  if (!raw) return null;
+  const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const dt = new Date(year, month - 1, day);
+  if (
+    Number.isNaN(dt.getTime()) ||
+    dt.getFullYear() !== year ||
+    dt.getMonth() + 1 !== month ||
+    dt.getDate() !== day
+  ) {
+    return null;
+  }
+  return `${match[1]}-${match[2]}-${match[3]}`;
+};
 const boolPref = (value, fallback = true) => {
   if (value === undefined || value === null) return fallback;
   if (value === true || value === false) return Boolean(value);
@@ -195,7 +225,7 @@ const buildWorkingRules = (horariosJson) => {
     if (
       valueText.includes('fechado') ||
       valueText.includes('sem atendimento') ||
-      valueText.includes('nao atende')
+      valueText.includes('não atende')
     ) {
       rules[idx] = { enabled: false, startMinutes: null, endMinutes: null, breaks: [], processed: true };
       recognized = true;
@@ -430,20 +460,20 @@ router.post('/', authRequired, isCliente, async (req, res) => {
         [profissional_id, estabelecimento_id]
       );
       if (!profRow) {
-        return res.status(400).json({ error: 'profissional_invalido', message: 'Profissional nao encontrado para este estabelecimento.' });
+        return res.status(400).json({ error: 'profissional_invalido', message: 'Profissional não encontrado para este estabelecimento.' });
       }
       if (!profRow.ativo) {
         return res.status(400).json({ error: 'profissional_inativo', message: 'Profissional inativo.' });
       }
       if (linkedProfessionalIds.length && !linkedProfessionalIds.includes(profissional_id)) {
-        return res.status(400).json({ error: 'profissional_servico', message: 'Profissional nao esta associado a este servico.' });
+        return res.status(400).json({ error: 'profissional_servico', message: 'Profissional não esta associado a este serviço.' });
       }
       profissionalRow = profRow;
     }
 
     const dur = Number(svc.duracao_min || 0);
     if (!Number.isFinite(dur) || dur <= 0) {
-      return res.status(400).json({ error: 'duracao_invalida', message: 'Duracao do servico invalida.' });
+      return res.status(400).json({ error: 'duracao_invalida', message: 'Duração do serviço invalida.' });
     }
     const fimDate = new Date(inicioDate.getTime() + dur * 60_000);
     let workingRules = null;
@@ -455,7 +485,7 @@ router.post('/', authRequired, isCliente, async (req, res) => {
       workingRules = buildWorkingRules(profile?.horarios_json || null);
     } catch {}
     if (!isWithinWorkingHours(inicioDate, fimDate, workingRules)) {
-      return res.status(400).json({ error: 'outside_business_hours', message: 'Horario fora do expediente do estabelecimento.' });
+      return res.status(400).json({ error: 'outside_business_hours', message: 'Horário fora do expediente do estabelecimento.' });
     }
     const planConfig = planContext?.config;
     const limitCheck = await checkMonthlyAppointmentLimit({
@@ -473,7 +503,7 @@ router.post('/', authRequired, isCliente, async (req, res) => {
       }));
       return res.status(403).json({
         error: 'plan_limit_agendamentos',
-        message: formatPlanLimitExceeded(planConfig, 'appointments') || 'Limite de agendamentos atingido para este mes.',
+        message: formatPlanLimitExceeded(planConfig, 'appointments') || 'Limite de agendamentos atingido para este mês.',
         details: {
           limit: limitCheck.limit,
           total: limitCheck.total,
@@ -490,6 +520,7 @@ router.post('/', authRequired, isCliente, async (req, res) => {
     let conflictSql = `
       SELECT id FROM agendamentos
       WHERE estabelecimento_id = ? AND status IN ('confirmado','pendente')
+        AND (status <> 'pendente' OR public_confirm_expires_at IS NULL OR public_confirm_expires_at >= NOW())
         AND (inicio < ? AND fim > ?)
     `;
     const conflictParams = [estabelecimento_id, fimDate, inicioDate];
@@ -539,6 +570,8 @@ router.post('/', authRequired, isCliente, async (req, res) => {
     const estNomeFriendly = estNome || 'nosso estabelecimento';
     const profNome = profissionalRow?.nome || '';
     const profLabel = profNome ? ` com ${profNome}` : '';
+    const appointmentLink = `${FRONTEND_BASE}/cliente?agendamento=${novo.id}`;
+    const appointmentLinkHtml = `<p><a href="${appointmentLink}">Ver agendamento</a></p>`;
 
     // (a) Emails (background)
     fireAndForget(async () => {
@@ -546,7 +579,7 @@ router.post('/', authRequired, isCliente, async (req, res) => {
         await notifyEmail(
           cli.email,
           'Agendamento confirmado',
-          `<p>Olá, <b>${cli?.nome ?? 'cliente'}</b>! Seu agendamento de <b>${svc.nome}</b>${profLabel ? ` com <b>${profNome}</b>` : ''} foi confirmado para <b>${inicioBR}</b>.</p>`
+          `<p>Olá, <b>${cli?.nome ?? 'cliente'}</b>! Seu agendamento de <b>${svc.nome}</b>${profLabel ? ` com <b>${profNome}</b>` : ''} foi confirmado para <b>${inicioBR}</b>.</p>${appointmentLinkHtml}`
         );
       }
       if (!blockEstabNotifications && est?.email && canEmailEst) {
@@ -562,21 +595,21 @@ router.post('/', authRequired, isCliente, async (req, res) => {
     fireAndForget(async () => {
       if (blockWhatsappImmediate || blockWhatsappConfirmation) return; // WhatsApp imediato desativado via env ou confirmacao desativada
       const paramMode = String(process.env.WA_TEMPLATE_PARAM_MODE || 'single').toLowerCase();
-      const tplName = process.env.WA_TEMPLATE_NAME_CONFIRM || process.env.WA_TEMPLATE_NAME || 'confirmacao_agendamento';
+      const tplName = process.env.WA_TEMPLATE_NAME_CONFIRM || process.env.WA_TEMPLATE_NAME || 'confirmacao_agendamento_v2';
       const tplLang = process.env.WA_TEMPLATE_LANG || 'pt_BR';
       const estNomeLabel = estNome || '';
       if (!blockClientWhatsapp && telCli) {
         if (/^triple|3$/.test(paramMode)) {
           try { await sendTemplate({ to: telCli, name: tplName, lang: tplLang, bodyParams: [svc.nome, inicioBR, estNomeLabel] }); } catch (e) { console.warn('[wa/confirm cli]', e?.message || e); }
         } else {
-          await notifyWhatsapp(`[OK] Confirmacao: ${svc.nome}${profNome ? ' / ' + profNome : ''} em ${inicioBR} - ${estNomeLabel}`, telCli);
+          await notifyWhatsapp(`✅ - Novo agendamento registrado: ${svc.nome}${profNome ? ' / ' + profNome : ''} em ${inicioBR} — ${estNomeLabel}. — Obrigado!`, telCli);
         }
       }
       if (!blockEstabNotifications && canWhatsappEst && telEst && telEst !== telCli) {
         if (/^triple|3$/.test(paramMode)) {
           try { await sendTemplate({ to: telEst, name: tplName, lang: tplLang, bodyParams: [svc.nome, inicioBR, estNomeLabel] }); } catch (e) { console.warn('[wa/confirm est]', e?.message || e); }
         } else {
-          await notifyWhatsapp(`[Novo] Agendamento: ${svc.nome}${profNome ? ' / ' + profNome : ''} em ${inicioBR} - Cliente: ${cli?.nome ?? ''}`, telEst);
+          await notifyWhatsapp(`✅ - Novo agendamento registrado: ${svc.nome}${profNome ? ' / ' + profNome : ''} em ${inicioBR} — ${estNomeLabel}. — Obrigado!`, telEst);
         }
       }
     });
@@ -610,6 +643,578 @@ router.post('/', authRequired, isCliente, async (req, res) => {
   }
 });
 
+
+
+// Criar agendamento (estabelecimento)
+router.post('/estabelecimento', authRequired, isEstabelecimento, async (req, res) => {
+  let conn;
+  try {
+    const {
+      estabelecimento_id: estabelecimentoIdRaw,
+      servico_id,
+      inicio,
+      nome,
+      email,
+      telefone,
+      profissional_id: profissionalIdRaw,
+      profissionalId,
+      cep,
+      endereco,
+      numero,
+      complemento,
+      bairro,
+      cidade,
+      estado,
+      data_nascimento,
+      dataNascimento,
+    } = req.body || {};
+
+    const estabelecimento_id = req.user?.id;
+    if (!estabelecimento_id) {
+      return res.status(403).json({ error: 'forbidden', message: 'Estabelecimento invalido.' });
+    }
+    if (estabelecimentoIdRaw && Number(estabelecimentoIdRaw) !== Number(estabelecimento_id)) {
+      return res.status(403).json({ error: 'forbidden', message: 'Estabelecimento invalido.' });
+    }
+
+    const professionalCandidate = profissionalIdRaw != null ? profissionalIdRaw : profissionalId;
+    const profissional_id = professionalCandidate == null ? null : Number(professionalCandidate);
+    if (profissional_id !== null && !Number.isFinite(profissional_id)) {
+      return res.status(400).json({ error: 'profissional_invalido', message: 'Profissional invalido.' });
+    }
+
+    if (!servico_id || !inicio || !nome || !email || !telefone) {
+      return res.status(400).json({
+        error: 'invalid_payload',
+        message: 'Campos obrigatorios: servico_id, inicio, nome, email, telefone.'
+      });
+    }
+
+    const cepDigits = (cep ? String(cep) : '').replace(/[^0-9]/g, '').slice(0, 8);
+    const enderecoTrim = endereco ? String(endereco).trim() : '';
+    const numeroTrim = numero ? String(numero).trim() : '';
+    const complementoTrim = complemento ? String(complemento).trim() : '';
+    const bairroTrim = bairro ? String(bairro).trim() : '';
+    const cidadeTrim = cidade ? String(cidade).trim() : '';
+    const estadoTrim = estado ? String(estado).trim().toUpperCase() : '';
+    const dataNascimentoRaw = data_nascimento ?? dataNascimento;
+    const dataNascimentoValue = normalizeBirthdate(dataNascimentoRaw);
+    if (dataNascimentoRaw && String(dataNascimentoRaw).trim() && !dataNascimentoValue) {
+      return res.status(400).json({ error: 'data_nascimento_invalida', message: 'Informe uma data de nascimento valida.' });
+    }
+    if (cepDigits && cepDigits.length !== 8) {
+      return res.status(400).json({ error: 'cep_invalido', message: 'Informe um CEP valido com 8 digitos.' });
+    }
+    if (estadoTrim && !/^[A-Z]{2}$/.test(estadoTrim)) {
+      return res.status(400).json({ error: 'estado_invalido', message: 'Informe a UF com 2 letras.' });
+    }
+
+    const inicioDate = new Date(inicio);
+    if (Number.isNaN(inicioDate.getTime())) {
+      return res.status(400).json({ error: 'invalid_date', message: 'Formato de data/hora invalido.' });
+    }
+    if (inicioDate.getTime() <= Date.now()) {
+      return res.status(400).json({ error: 'past_datetime', message: 'Nao e possivel agendar no passado.' });
+    }
+    if (!inBusinessHours(inicioDate.toISOString())) {
+      return res.status(400).json({ error: 'outside_business_hours', message: 'Horario fora do expediente.' });
+    }
+
+    const planContext = await getPlanContext(estabelecimento_id);
+    if (!planContext) {
+      return res.status(404).json({ error: 'estabelecimento_inexistente' });
+    }
+    if (isDelinquentStatus(planContext.status)) {
+      return res.status(403).json({ error: 'plan_delinquent', message: 'Este estabelecimento esta com o plano em atraso. Agendamentos temporariamente suspensos.' });
+    }
+
+    const [[svc]] = await pool.query(
+      'SELECT duracao_min, nome FROM servicos WHERE id=? AND estabelecimento_id=? AND ativo=1',
+      [servico_id, estabelecimento_id]
+    );
+    if (!svc) return res.status(400).json({ error: 'servico_invalido' });
+
+    const [serviceProfessionals] = await pool.query(
+      'SELECT profissional_id FROM servico_profissionais WHERE servico_id=?',
+      [servico_id]
+    );
+    const linkedProfessionalIds = serviceProfessionals.map((row) => row.profissional_id);
+    let profissionalRow = null;
+
+    if (linkedProfessionalIds.length && profissional_id == null) {
+      return res.status(400).json({ error: 'profissional_obrigatorio', message: 'Escolha um profissional para este servico.' });
+    }
+
+    if (profissional_id != null) {
+      const [[profRow]] = await pool.query(
+        'SELECT id, nome, avatar_url, ativo FROM profissionais WHERE id=? AND estabelecimento_id=?',
+        [profissional_id, estabelecimento_id]
+      );
+      if (!profRow) {
+        return res.status(400).json({ error: 'profissional_invalido', message: 'Profissional nao encontrado para este estabelecimento.' });
+      }
+      if (!profRow.ativo) {
+        return res.status(400).json({ error: 'profissional_inativo', message: 'Profissional inativo.' });
+      }
+      if (linkedProfessionalIds.length && !linkedProfessionalIds.includes(profissional_id)) {
+        return res.status(400).json({ error: 'profissional_servico', message: 'Profissional nao esta associado a este servico.' });
+      }
+      profissionalRow = profRow;
+    }
+
+    const dur = Number(svc.duracao_min || 0);
+    if (!Number.isFinite(dur) || dur <= 0) return res.status(400).json({ error: 'duracao_invalida' });
+    const fimDate = new Date(inicioDate.getTime() + dur * 60_000);
+    let workingRules = null;
+    try {
+      const [[profile]] = await pool.query(
+        'SELECT horarios_json FROM estabelecimento_perfis WHERE estabelecimento_id=? LIMIT 1',
+        [estabelecimento_id]
+      );
+      workingRules = buildWorkingRules(profile?.horarios_json || null);
+    } catch {}
+    if (!isWithinWorkingHours(inicioDate, fimDate, workingRules)) {
+      return res.status(400).json({ error: 'outside_business_hours', message: 'Horario fora do expediente do estabelecimento.' });
+    }
+
+    const planConfig = planContext?.config;
+    const limitCheck = await checkMonthlyAppointmentLimit({
+      estabelecimentoId: estabelecimento_id,
+      planConfig,
+      appointmentDate: inicioDate,
+    });
+    if (!limitCheck.ok) {
+      fireAndForget(() => notifyAppointmentLimitReached({
+        estabelecimentoId: estabelecimento_id,
+        limit: limitCheck.limit,
+        total: limitCheck.total,
+        range: limitCheck.range,
+        planConfig,
+      }));
+      return res.status(403).json({
+        error: 'plan_limit_agendamentos',
+        message: formatPlanLimitExceeded(planConfig, 'appointments') || 'Limite de agendamentos atingido para este mes.',
+        details: {
+          limit: limitCheck.limit,
+          total: limitCheck.total,
+          month: limitCheck.range?.label || null,
+        },
+      });
+    }
+
+    const emailNorm = String(email).trim().toLowerCase();
+    const telDigits = toDigits(telefone);
+    const telNorm = normalizePhoneBR(telefone);
+
+    let userId = null;
+    let userByEmail = null;
+    let userByPhone = null;
+    {
+      const [urows] = await pool.query(
+        'SELECT id, nome, email, telefone FROM usuarios WHERE LOWER(email)=? LIMIT 1',
+        [emailNorm]
+      );
+      if (urows.length) userByEmail = urows[0];
+    }
+    if (telNorm || telDigits) {
+      const candidates = [];
+      if (telNorm) candidates.push(telNorm);
+      if (telDigits && telDigits !== telNorm) candidates.push(telDigits);
+      for (const candidate of candidates) {
+        const [urows] = await pool.query(
+          'SELECT id, nome, email, telefone FROM usuarios WHERE telefone=? LIMIT 1',
+          [candidate]
+        );
+        if (urows.length) {
+          userByPhone = urows[0];
+          break;
+        }
+      }
+    }
+    if (userByEmail && userByPhone && userByEmail.id !== userByPhone.id) {
+      return res.status(409).json({
+        error: 'cliente_conflito',
+        message: 'Ja existe cliente com este email ou telefone. Revise os dados antes de continuar.',
+      });
+    }
+    const existingUser = userByEmail || userByPhone;
+    if (existingUser) {
+      const existingEmail = existingUser.email ? String(existingUser.email).trim().toLowerCase() : '';
+      const existingPhone = existingUser.telefone ? normalizePhoneBR(existingUser.telefone) : '';
+      const emailMismatch = existingEmail && emailNorm && existingEmail !== emailNorm;
+      const phoneMismatch = existingPhone && telNorm && existingPhone !== telNorm;
+      if (emailMismatch || phoneMismatch) {
+        return res.status(409).json({
+          error: 'cliente_conflito',
+          message: 'Ja existe cliente com este email ou telefone. Revise os dados antes de continuar.',
+        });
+      }
+      userId = existingUser.id;
+    }
+    if (!userId) {
+      const hash = await bcrypt.hash(Math.random().toString(36), 10);
+      const [r] = await pool.query(
+        "INSERT INTO usuarios (nome, email, telefone, data_nascimento, cep, endereco, numero, complemento, bairro, cidade, estado, senha_hash, tipo) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'cliente')",
+        [
+          String(nome).slice(0,120),
+          emailNorm,
+          telNorm || null,
+          dataNascimentoValue,
+          cepDigits || null,
+          enderecoTrim || null,
+          numeroTrim || null,
+          complementoTrim || null,
+          bairroTrim || null,
+          cidadeTrim || null,
+          estadoTrim || null,
+          hash,
+        ]
+      );
+      userId = r.insertId;
+    } else {
+      try {
+        const updates = ['nome=COALESCE(nome,?)'];
+        const params = [String(nome).slice(0,120)];
+        if (telNorm) {
+          updates.push('telefone=?');
+          params.push(telNorm);
+        }
+        if (dataNascimentoValue) {
+          updates.push('data_nascimento=COALESCE(data_nascimento,?)');
+          params.push(dataNascimentoValue);
+        }
+        if (cepDigits) {
+          updates.push('cep=COALESCE(cep,?)');
+          params.push(cepDigits);
+        }
+        if (enderecoTrim) {
+          updates.push('endereco=COALESCE(endereco,?)');
+          params.push(enderecoTrim);
+        }
+        if (numeroTrim) {
+          updates.push('numero=COALESCE(numero,?)');
+          params.push(numeroTrim);
+        }
+        if (complementoTrim) {
+          updates.push('complemento=COALESCE(complemento,?)');
+          params.push(complementoTrim);
+        }
+        if (bairroTrim) {
+          updates.push('bairro=COALESCE(bairro,?)');
+          params.push(bairroTrim);
+        }
+        if (cidadeTrim) {
+          updates.push('cidade=COALESCE(cidade,?)');
+          params.push(cidadeTrim);
+        }
+        if (estadoTrim) {
+          updates.push('estado=COALESCE(estado,?)');
+          params.push(estadoTrim);
+        }
+        if (updates.length) {
+          await pool.query(`UPDATE usuarios SET ${updates.join(', ')} WHERE id=?`, [...params, userId]);
+        }
+      } catch {}
+    }
+
+    conn = await pool.getConnection();
+    await conn.beginTransaction();
+
+    let conflictSql = `SELECT id FROM agendamentos
+       WHERE estabelecimento_id=? AND status IN ('confirmado','pendente')
+         AND (status <> 'pendente' OR public_confirm_expires_at IS NULL OR public_confirm_expires_at >= NOW())
+         AND (inicio < ? AND fim > ?)`;
+    const conflictParams = [estabelecimento_id, fimDate, inicioDate];
+    if (profissional_id != null && linkedProfessionalIds.length) {
+      conflictSql += ' AND (profissional_id IS NULL OR profissional_id=?)';
+      conflictParams.push(profissional_id);
+    }
+    conflictSql += ' FOR UPDATE';
+    const [conf] = await conn.query(conflictSql, conflictParams);
+    if (conf.length) { await conn.rollback(); conn.release(); return res.status(409).json({ error: 'slot_ocupado' }); }
+
+    const [ins] = await conn.query(
+      'INSERT INTO agendamentos (cliente_id, estabelecimento_id, servico_id, profissional_id, inicio, fim) VALUES (?,?,?,?,?,?)',
+      [userId, estabelecimento_id, servico_id, profissional_id || null, inicioDate, fimDate]
+    );
+
+    const [[novo]] = await conn.query('SELECT * FROM agendamentos WHERE id=?', [ins.insertId]);
+    const [[cli]] = await conn.query('SELECT email, telefone, nome FROM usuarios WHERE id=?', [userId]);
+    const [[est]] = await conn.query('SELECT email, telefone, nome, notify_email_estab, notify_whatsapp_estab FROM usuarios WHERE id=?', [estabelecimento_id]);
+
+    await conn.commit();
+    conn.release(); conn = null;
+
+    const inicioISO = new Date(novo.inicio).toISOString();
+    const inicioBR  = brDateTime(inicioISO);
+    const telCli = toDigits(cli?.telefone);
+    const telEst = toDigits(est?.telefone);
+    const canEmailEst = boolPref(est?.notify_email_estab, true);
+    const canWhatsappEst = boolPref(est?.notify_whatsapp_estab, true);
+    const blockEstabNotifications = estabNotificationsDisabled();
+    const blockClientWhatsapp = clientWhatsappDisabled();
+    const blockWhatsappImmediate = whatsappImmediateDisabled();
+    const blockWhatsappConfirmation = whatsappConfirmationDisabled();
+    const estNome = est?.nome || '';
+    const profNome = profissionalRow?.nome || '';
+    const profLabel = profNome ? ` com ${profNome}` : '';
+    const appointmentLink = `${FRONTEND_BASE}/cliente?agendamento=${novo.id}`;
+    const appointmentLinkHtml = `<p><a href="${appointmentLink}">Ver agendamento</a></p>`;
+
+    fireAndForget(async () => {
+      if (cli?.email) {
+        await notifyEmail(
+          cli.email,
+          'Agendamento confirmado',
+          `<p>Ola, <b>${cli?.nome ?? 'cliente'}</b>! Seu agendamento de <b>${svc.nome}</b>${profLabel ? ` com <b>${profNome}</b>` : ''} foi confirmado para <b>${inicioBR}</b>.</p>${appointmentLinkHtml}`
+        );
+      }
+      if (!blockEstabNotifications && est?.email && canEmailEst) {
+        await notifyEmail(
+          est.email,
+          'Novo agendamento recebido',
+          `<p>Voce recebeu um novo agendamento de <b>${svc.nome}</b>${profLabel ? ` com <b>${profNome}</b>` : ''} em <b>${inicioBR}</b> para o cliente <b>${cli?.nome ?? ''}</b>.</p>`
+        );
+      }
+    });
+
+    fireAndForget(async () => {
+      if (blockWhatsappImmediate || blockWhatsappConfirmation) return;
+      const paramMode = String(process.env.WA_TEMPLATE_PARAM_MODE || 'single').toLowerCase();
+      const tplName = process.env.WA_TEMPLATE_NAME_CONFIRM || process.env.WA_TEMPLATE_NAME || 'confirmacao_agendamento_v2';
+      const tplLang = process.env.WA_TEMPLATE_LANG || 'pt_BR';
+      const estNomeLabel = estNome || '';
+      if (!blockClientWhatsapp && telCli) {
+        if (/^triple|3$/.test(paramMode)) {
+          try { await sendTemplate({ to: telCli, name: tplName, lang: tplLang, bodyParams: [svc.nome, inicioBR, estNomeLabel] }); } catch (e) { console.warn('[wa/confirm cli]', e?.message || e); }
+        } else {
+          await notifyWhatsapp(`Novo agendamento registrado: ${svc.nome}${profNome ? ' / ' + profNome : ''} em ${inicioBR} - ${estNomeLabel}.`, telCli);
+        }
+      }
+      if (!blockEstabNotifications && canWhatsappEst && telEst && telEst !== telCli) {
+        if (/^triple|3$/.test(paramMode)) {
+          try { await sendTemplate({ to: telEst, name: tplName, lang: tplLang, bodyParams: [svc.nome, inicioBR, estNomeLabel] }); } catch (e) { console.warn('[wa/confirm est]', e?.message || e); }
+        } else {
+          await notifyWhatsapp(`Novo agendamento registrado: ${svc.nome}${profNome ? ' / ' + profNome : ''} em ${inicioBR} - ${estNomeLabel}.`, telEst);
+        }
+      }
+    });
+
+    return res.status(201).json({
+      id: novo.id,
+      cliente_id: novo.cliente_id,
+      estabelecimento_id: novo.estabelecimento_id,
+      servico_id: novo.servico_id,
+      profissional_id: novo.profissional_id,
+      profissional_nome: profissionalRow?.nome || null,
+      profissional_avatar_url: profissionalRow?.avatar_url || null,
+      inicio: novo.inicio,
+      fim: novo.fim,
+      status: novo.status,
+    });
+  } catch (e) {
+    try { if (conn) await conn.rollback(); } catch {}
+    if (conn) { try { conn.release(); } catch {} }
+    console.error('[agendamentos][POST][estabelecimento] erro:', e);
+    return res.status(500).json({ error: 'server_error' });
+  }
+});
+/* =================== Reagendamento (estabelecimento) =================== */
+
+// Reagendar (estabelecimento)
+router.put('/:id/reschedule-estab', authRequired, isEstabelecimento, async (req, res) => {
+  let conn;
+  try {
+    const { id } = req.params;
+    const estId = req.user.id;
+    const { inicio } = req.body || {};
+
+    if (!inicio) {
+      return res.status(400).json({ error: 'invalid_payload', message: 'Informe inicio (ISO).' });
+    }
+
+    const inicioDate = new Date(inicio);
+    if (Number.isNaN(inicioDate.getTime())) {
+      return res.status(400).json({ error: 'invalid_date', message: 'Formato de data/hora invalido.' });
+    }
+    if (inicioDate.getTime() <= Date.now()) {
+      return res.status(400).json({ error: 'past_datetime', message: 'Não e possível reagendar no passado.' });
+    }
+    if (!inBusinessHours(inicioDate.toISOString())) {
+      return res.status(400).json({ error: 'outside_business_hours', message: 'Horário fora do expediente (00:00-23:59).' });
+    }
+
+    const planContext = await getPlanContext(estId);
+    if (planContext && isDelinquentStatus(planContext.status)) {
+      return res.status(403).json({
+        error: 'plan_delinquent',
+        message: 'Sua assinatura esta em atraso. Reagendamentos temporariamente suspensos.',
+      });
+    }
+
+    conn = await pool.getConnection();
+    await conn.beginTransaction();
+
+    const [[ag]] = await conn.query(
+      `SELECT id, cliente_id, servico_id, profissional_id, status, inicio
+         FROM agendamentos
+        WHERE id=? AND estabelecimento_id=?
+        FOR UPDATE`,
+      [id, estId]
+    );
+    if (!ag) {
+      await conn.rollback();
+      conn.release();
+      conn = null;
+      return res.status(404).json({ error: 'not_found', message: 'Agendamento nao encontrado.' });
+    }
+
+    const statusNorm = String(ag.status || '').toLowerCase();
+    if (statusNorm === 'cancelado') {
+      await conn.rollback();
+      conn.release();
+      conn = null;
+      return res.status(409).json({ error: 'already_cancelled', message: 'Agendamento já está cancelado.' });
+    }
+    if (statusNorm === 'concluido') {
+      await conn.rollback();
+      conn.release();
+      conn = null;
+      return res.status(409).json({ error: 'already_done', message: 'Não é possível reagendar um atendimento concluído.' });
+    }
+
+    const startTime = ag?.inicio ? new Date(ag.inicio).getTime() : NaN;
+    if (Number.isFinite(startTime) && startTime <= Date.now()) {
+      await conn.rollback();
+      conn.release();
+      conn = null;
+      return res.status(409).json({
+        error: 'reschedule_forbidden_time_limit',
+        message: 'Reagendamento indisponivel: horario ja iniciado.',
+      });
+    }
+
+    const [[svc]] = await conn.query(
+      'SELECT duracao_min, nome FROM servicos WHERE id=? AND estabelecimento_id=? AND ativo=1',
+      [ag.servico_id, estId]
+    );
+    if (!svc) {
+      await conn.rollback();
+      conn.release();
+      conn = null;
+      return res.status(400).json({ error: 'servico_invalido', message: 'Serviço inválido ou inativo.' });
+    }
+    const dur = Number(svc.duracao_min || 0);
+    if (!Number.isFinite(dur) || dur <= 0) {
+      await conn.rollback();
+      conn.release();
+      conn = null;
+      return res.status(400).json({ error: 'duracao_invalida', message: 'Duração do serviço inválida.' });
+    }
+
+    const fimDate = new Date(inicioDate.getTime() + dur * 60_000);
+
+    let workingRules = null;
+    try {
+      const [[profile]] = await conn.query(
+        'SELECT horarios_json FROM estabelecimento_perfis WHERE estabelecimento_id=? LIMIT 1',
+        [estId]
+      );
+      workingRules = buildWorkingRules(profile?.horarios_json || null);
+    } catch {}
+    if (!isWithinWorkingHours(inicioDate, fimDate, workingRules)) {
+      await conn.rollback();
+      conn.release();
+      conn = null;
+      return res.status(400).json({
+        error: 'outside_business_hours',
+        message: 'Horário fora do expediente do estabelecimento.',
+      });
+    }
+
+    const [serviceProfessionals] = await conn.query(
+      'SELECT profissional_id FROM servico_profissionais WHERE servico_id=?',
+      [ag.servico_id]
+    );
+    const linkedProfessionalIds = serviceProfessionals.map((row) => row.profissional_id);
+
+    let conflictSql = `SELECT id FROM agendamentos
+       WHERE estabelecimento_id=? AND status IN ('confirmado','pendente')
+         AND (status <> 'pendente' OR public_confirm_expires_at IS NULL OR public_confirm_expires_at >= NOW())
+         AND id<>?
+         AND (inicio < ? AND fim > ?)`;
+    const conflictParams = [estId, ag.id, fimDate, inicioDate];
+    if (ag.profissional_id != null && linkedProfessionalIds.length) {
+      conflictSql += ' AND (profissional_id IS NULL OR profissional_id=?)';
+      conflictParams.push(ag.profissional_id);
+    }
+    conflictSql += ' FOR UPDATE';
+    const [conf] = await conn.query(conflictSql, conflictParams);
+    if (conf.length) {
+      await conn.rollback();
+      conn.release();
+      conn = null;
+      return res.status(409).json({ error: 'slot_ocupado', message: 'Horario indisponivel.' });
+    }
+
+    const oldInicioIso = ag?.inicio ? new Date(ag.inicio).toISOString() : null;
+
+    await conn.query(
+      'UPDATE agendamentos SET inicio=?, fim=? WHERE id=? AND estabelecimento_id=?',
+      [inicioDate, fimDate, ag.id, estId]
+    );
+
+    const [[updated]] = await conn.query(
+      'SELECT inicio, fim FROM agendamentos WHERE id=?',
+      [ag.id]
+    );
+
+    const [[cli]] = await conn.query(
+      'SELECT nome, email FROM usuarios WHERE id=?',
+      [ag.cliente_id || 0]
+    );
+    const [[est]] = await conn.query(
+      'SELECT nome FROM usuarios WHERE id=?',
+      [estId]
+    );
+
+    await conn.commit();
+    conn.release();
+    conn = null;
+
+    const updatedInicioIso = updated?.inicio
+      ? new Date(updated.inicio).toISOString()
+      : inicioDate.toISOString();
+    const appointmentLink = `${FRONTEND_BASE}/cliente?agendamento=${ag.id}`;
+    const appointmentLinkHtml = `<p><a href="${appointmentLink}">Ver agendamento</a></p>`;
+    fireAndForget(async () => {
+      if (!cli?.email) return;
+      if (oldInicioIso) {
+        const oldMs = new Date(oldInicioIso).getTime();
+        const newMs = new Date(updatedInicioIso).getTime();
+        if (Number.isFinite(oldMs) && Number.isFinite(newMs) && oldMs === newMs) return;
+      }
+      const clientName = cli?.nome || 'cliente';
+      const serviceName = svc?.nome || 'servico';
+      const estName = est?.nome || 'estabelecimento';
+      const oldLabel = oldInicioIso ? brDateTime(oldInicioIso) : '';
+      const newLabel = brDateTime(updatedInicioIso);
+      const oldLine = oldLabel ? `Horário anterior: <b>${oldLabel}</b>.<br/>` : '';
+      const html = `<p>Ola, <b>${clientName}</b>!</p>` +
+        `<p>Seu agendamento de <b>${serviceName}</b> no ${estName} foi reagendado.</p>` +
+        `<p>${oldLine}Novo horário: <b>${newLabel}</b>.</p>${appointmentLinkHtml}`;
+      await notifyEmail(cli.email, 'Agendamento reagendado', html);
+    });
+
+    return res.json({ id: ag.id, inicio: updated?.inicio || inicioDate, fim: updated?.fim || fimDate });
+  } catch (e) {
+    try { if (conn) await conn.rollback(); } catch {}
+    try { if (conn) conn.release(); } catch {}
+    console.error('[agendamentos/reschedule-estab]', e);
+    return res.status(500).json({ error: 'server_error' });
+  }
+});
+
 /* =================== Cancelamento =================== */
 
 // Cancelar (cliente)
@@ -639,7 +1244,7 @@ router.put('/:id/cancel', authRequired, isCliente, async (req, res) => {
         [id, req.user.id]
       );
       if (!ag) {
-        return res.status(404).json({ error: 'not_found', message: 'Agendamento nao encontrado.' });
+        return res.status(404).json({ error: 'not_found', message: 'Agendamento não encontrado.' });
       }
       if (ag?.cliente_confirmou_whatsapp_at) {
         return res.status(409).json({
@@ -657,7 +1262,7 @@ router.put('/:id/cancel', authRequired, isCliente, async (req, res) => {
           return res.status(409).json({ error: 'cancel_forbidden_time_limit', message });
         }
       }
-      return res.status(404).json({ error: 'not_found', message: 'Agendamento nao encontrado.' });
+      return res.status(404).json({ error: 'not_found', message: 'Agendamento não encontrado.' });
     }
 
     // contatos para notificar (opcional)
@@ -755,15 +1360,15 @@ router.put('/:id/cancel-estab', authRequired, isEstabelecimento, async (req, res
       [id, estId]
     );
     if (!ag) {
-      return res.status(404).json({ error: 'not_found', message: 'Agendamento nao encontrado.' });
+      return res.status(404).json({ error: 'not_found', message: 'Agendamento não encontrado.' });
     }
 
     const statusNorm = String(ag.status || '').toLowerCase();
     if (statusNorm === 'cancelado') {
-      return res.status(400).json({ error: 'already_cancelled', message: 'Agendamento ja esta cancelado.' });
+      return res.status(400).json({ error: 'already_cancelled', message: 'Agendamento já está cancelado.' });
     }
     if (statusNorm === 'concluido') {
-      return res.status(409).json({ error: 'cancel_forbidden', message: 'Nao e possivel cancelar um atendimento ja concluido.' });
+      return res.status(409).json({ error: 'cancel_forbidden', message: 'Não é possível cancelar um atendimento já concluído.' });
     }
     const secondsToStart = Number(ag?.seconds_to_start);
     const startTime = ag?.inicio ? new Date(ag.inicio).getTime() : NaN;
@@ -788,7 +1393,7 @@ router.put('/:id/cancel-estab', authRequired, isEstabelecimento, async (req, res
           message: 'Cancelamento indisponível: horário já iniciado.',
         });
       }
-      return res.status(404).json({ error: 'not_found', message: 'Agendamento nao encontrado.' });
+      return res.status(404).json({ error: 'not_found', message: 'Agendamento não encontrado.' });
     }
 
     const [[svc]] = await pool.query('SELECT nome FROM servicos WHERE id=?', [ag?.servico_id || 0]);

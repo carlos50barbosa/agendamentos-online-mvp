@@ -15,6 +15,8 @@ CREATE TABLE IF NOT EXISTS usuarios (
   nome         VARCHAR(120)          NOT NULL,
   email        VARCHAR(160)          NOT NULL UNIQUE,
   telefone     VARCHAR(20)           NULL,         -- usado para WhatsApp
+  data_nascimento DATE               NULL,
+  cpf_cnpj     VARCHAR(20)           NULL,
   notify_email_estab    TINYINT(1)   NOT NULL DEFAULT 1,
   notify_whatsapp_estab TINYINT(1)   NOT NULL DEFAULT 1,
   cep          VARCHAR(8)            NULL,
@@ -96,7 +98,10 @@ CREATE TABLE IF NOT EXISTS agendamentos (
   profissional_id    INT          NULL,
   inicio             DATETIME     NOT NULL,
   fim                DATETIME     NOT NULL,
-  status             ENUM('confirmado','cancelado') NOT NULL DEFAULT 'confirmado',
+  status             ENUM('confirmado','pendente','cancelado') NOT NULL DEFAULT 'confirmado',
+  public_confirm_token_hash VARCHAR(64) NULL,
+  public_confirm_expires_at DATETIME    NULL,
+  public_confirmed_at DATETIME          NULL,
   -- (NOVO) opcional: armazenar IDs dos jobs de lembrete do WhatsApp (1 dia / 15 min)
   wa_job_1d_id       VARCHAR(120) NULL,
   wa_job_15m_id      VARCHAR(120) NULL,
@@ -120,6 +125,7 @@ CREATE TABLE IF NOT EXISTS agendamentos (
   INDEX idx_ag_estab_status_inicio (estabelecimento_id, status, inicio),
   INDEX idx_ag_cliente_status_inicio (cliente_id, status, inicio),
   INDEX idx_ag_confirm_wa (cliente_confirmou_whatsapp_at),
+  INDEX idx_ag_public_confirm_expires (public_confirm_expires_at),
   INDEX idx_ag_reminder_estab_5h (estab_reminder_5h_sent_at, inicio)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
@@ -148,7 +154,6 @@ CREATE TABLE IF NOT EXISTS email_change_tokens (
 CREATE TABLE IF NOT EXISTS estabelecimento_perfis (
   estabelecimento_id INT PRIMARY KEY,
   sobre TEXT NULL,
-  contato_email VARCHAR(160) NULL,
   contato_telefone VARCHAR(20) NULL,
   site_url VARCHAR(255) NULL,
   instagram_url VARCHAR(255) NULL,
@@ -211,4 +216,13 @@ CREATE TABLE IF NOT EXISTS billing_payment_reminders (
   KEY idx_reminder_due (due_date),
   CONSTRAINT fk_billing_reminder_estab FOREIGN KEY (estabelecimento_id)
     REFERENCES usuarios(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+CREATE TABLE IF NOT EXISTS auditoria (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  protocolo VARCHAR(50) NOT NULL,
+  acao VARCHAR(30) NOT NULL,
+  alvo_email VARCHAR(255),
+  executado_por VARCHAR(100),
+  criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;

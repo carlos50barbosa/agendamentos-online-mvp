@@ -1,22 +1,12 @@
-// src/pages/NovoAgendamento.jsx
+﻿// src/pages/NovoAgendamento.jsx
 import React, { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import { Link, useSearchParams, useLocation } from "react-router-dom";
 import { Api, resolveAssetUrl } from "../utils/api";
 import { getUser } from "../utils/auth";
 import Modal from "../components/Modal.jsx";
 import EstablishmentsHero from "../components/EstablishmentsHero.jsx";
-import { IconMapPin, IconList, IconStar, IconPhone } from "../components/Icons.jsx";
+import { IconMapPin, IconList, IconStar } from "../components/Icons.jsx";
 const FAVORITES_CACHE_KEY = 'ao:favorites_local';
-const ESTABLISHMENTS_PAGE_SIZE_MOBILE = 8;
-const ESTABLISHMENTS_PAGE_SIZE_DESKTOP = 20;
-const ESTABLISHMENTS_PAGE_SIZE_BREAKPOINT = 768;
-const getEstablishmentsPageSize = () => {
-  if (typeof window === 'undefined') return ESTABLISHMENTS_PAGE_SIZE_DESKTOP;
-  return window.innerWidth < ESTABLISHMENTS_PAGE_SIZE_BREAKPOINT
-    ? ESTABLISHMENTS_PAGE_SIZE_MOBILE
-    : ESTABLISHMENTS_PAGE_SIZE_DESKTOP;
-};
-const QUERY_DEBOUNCE_MS = 350;
 /* =================== Helpers de Data =================== */
 const TZ = Intl.DateTimeFormat().resolvedOptions().timeZone || "America/Sao_Paulo";
 const DateHelpers = {
@@ -109,7 +99,7 @@ const DateHelpers = {
     const fmt = new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "short" });
     const s1 = fmt.format(start);
     const s2 = fmt.format(end);
-    return `${s1} • ${s2}`.replace(/\./g, "");
+    return `${s1} â€¢ ${s2}`.replace(/\./g, "");
   },
   formatTime: (datetime) => {
     const dt = new Date(datetime);
@@ -163,14 +153,8 @@ const ensureExternalUrl = (value) => {
   return `https://${trimmed.replace(/^https?:\/\//i, "")}`;
 };
 const formatPhoneDisplay = (value = "") => {
-  let digits = String(value || "").replace(/\D/g, "");
+  const digits = String(value || "").replace(/\D/g, "");
   if (!digits) return "";
-  if (digits.length > 11 && digits.startsWith("55")) {
-    digits = digits.slice(2);
-  }
-  if (digits.length > 11) {
-    digits = digits.slice(-11);
-  }
   if (digits.length <= 2) return digits;
   const ddd = digits.slice(0, 2);
   const rest = digits.slice(2);
@@ -178,21 +162,10 @@ const formatPhoneDisplay = (value = "") => {
   if (rest.length <= 4) return `(${ddd}) ${rest}`;
   if (rest.length === 7) return `(${ddd}) ${rest.slice(0, 3)}-${rest.slice(3)}`;
   if (rest.length === 8) return `(${ddd}) ${rest.slice(0, 4)}-${rest.slice(4)}`;
-  if (rest.length === 9) return `(${ddd}) ${rest.slice(0, 6)}-${rest.slice(6)}`;
+  if (rest.length === 9) return `(${ddd}) ${rest.slice(0, 5)}-${rest.slice(5)}`;
   return `(${ddd}) ${rest.slice(0, rest.length - 4)}-${rest.slice(-4)}`;
 };
-const normalizePhoneDigits = (value = "") => {
-  let digits = String(value || "").replace(/\D/g, "");
-  if (digits.length > 11 && digits.startsWith("55")) {
-    digits = digits.slice(2);
-  }
-  if (digits.length > 11) {
-    digits = digits.slice(-11);
-  }
-  return digits;
-};
-const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const isValidEmail = (value = "") => EMAIL_REGEX.test(String(value || "").trim().toLowerCase());
+const normalizePhoneDigits = (value) => String(value || "").replace(/\D/g, "").slice(0, 11);
 const genIdempotencyKey = () => `idem_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 const createGuestModalState = () => ({
   open: false,
@@ -201,21 +174,13 @@ const createGuestModalState = () => ({
   name: "",
   email: "",
   phone: "",
-  data_nascimento: "",
-  cep: "",
-  endereco: "",
-  numero: "",
-  complemento: "",
-  bairro: "",
-  cidade: "",
-  estado: "",
   otpReqId: "",
   otpCode: "",
   otpToken: "",
   error: "",
   info: "",
 });
-/* =================== Janela 07•22 =================== */
+/* =================== Janela 07â€¢22 =================== */
 const DEFAULT_BUSINESS_HOURS = { start: 7, end: 22 };
 const normalizeText = (value) =>
   String(value || '')
@@ -494,7 +459,7 @@ const inBusinessHours = (isoDatetime, schedule = null, durationMinutes = 0) => {
   const closeMinutes = DEFAULT_BUSINESS_HOURS.end * 60;
   return startMinutes >= openMinutes && endMinutes <= closeMinutes;
 };
-/* =================== Grade 07•22 =================== */
+/* =================== Grade 07â€¢22 =================== */
 const pad2 = (n) => String(n).padStart(2, "0");
 const localKey = (dateish) => {
   const d = new Date(dateish);
@@ -677,13 +642,13 @@ const displayEstablishmentAddress = (est) => {
     est?.bairro,
     [est?.cidade, est?.estado].filter(Boolean).join(' - '),
   ].filter(Boolean);
-  return parts.join(' • ');
+  return parts.join(' â€¢ ');
 };
 /* =================== UI Components =================== */
 const Toast = ({ type, message, onDismiss }) => (
   <div className={`toast ${type}`} role="status" aria-live="polite">
     <div className="toast-content">
-      <span className="toast-icon">{type === "success" ? "✔" : type === "error" ? "✘" : "ℹ"}</span>
+      <span className="toast-icon">{type === "success" ? "âœ”" : type === "error" ? "âœ˜" : "â„¹"}</span>
       {message}
     </div>
     <button className="toast-close" onClick={onDismiss} aria-label="Fechar">
@@ -711,7 +676,7 @@ const SlotButton = ({ slot, isSelected, onClick, density = "compact" }) => {
   return (
     <button
       className={className}
-      title={`${new Date(slot.datetime).toLocaleString("pt-BR")} – ${tooltipLabel}${isPast ? " (passado)" : ""}`}
+      title={`${new Date(slot.datetime).toLocaleString("pt-BR")} â€“ ${tooltipLabel}${isPast ? " (passado)" : ""}`}
       onClick={onClick}
       disabled={disabledReason}
       aria-disabled={disabledReason}
@@ -729,7 +694,7 @@ const ServiceCard = ({ service, selected, onSelect }) => {
   const description = ServiceHelpers.description(service);
   const imageRaw = service?.imagem_url || service?.image_url || service?.imagem || service?.image || service?.foto_url || '';
   const imageUrl = resolveAssetUrl(imageRaw);
-  const showPrice = price !== 'R$ 0,00';
+  const showPrice = price !== 'R$Â 0,00';
   const showDuration = duration > 0;
   const cardClass = ['mini-card', selected ? 'mini-card--selected' : ''].filter(Boolean).join(' ');
   return (
@@ -884,7 +849,7 @@ const EstablishmentCard = ({ est, selected, onSelect }) => {
                 : 'Estabelecimento ainda sem avaliações'
             }
           >
-            <span aria-hidden>★</span>
+            <span aria-hidden>â˜…</span>
             {hasRatings ? `${ratingLabel} (${ratingCount})` : 'Sem avaliações'}
           </span>
         </div>
@@ -892,7 +857,7 @@ const EstablishmentCard = ({ est, selected, onSelect }) => {
     </div>
   );
 };
-/* =================== Página Principal =================== */
+/* =================== PÃƒÂ¡gina Principal =================== */
 export default function NovoAgendamento() {
   const user = getUser();
   const isAuthenticated = Boolean(user?.id);
@@ -928,7 +893,6 @@ export default function NovoAgendamento() {
     forceBusy: [], // overlay para casos que o backend Não devolve ainda
   });
   const [estQuery, setEstQuery] = useState("");
-  const [debouncedEstQuery, setDebouncedEstQuery] = useState("");
   const [searchParams, setSearchParams] = useSearchParams();
   const [userLocation, setUserLocation] = useState(null);
   const [locating, setLocating] = useState(false);
@@ -937,7 +901,6 @@ export default function NovoAgendamento() {
   const coordsCacheRef = useRef(new Map());
   const estSearchInputRef = useRef(null);
   const servicesSectionRef = useRef(null);
-  const ensureEstParamPendingRef = useRef(false);
   const [distanceMap, setDistanceMap] = useState({});
   const [favoriteIds, setFavoriteIds] = useState(() => {
     try {
@@ -951,10 +914,6 @@ export default function NovoAgendamento() {
     }
   });
   const [establishmentsLoading, setEstablishmentsLoading] = useState(true);
-  const [establishmentsLoadingMore, setEstablishmentsLoadingMore] = useState(false);
-  const [establishmentsHasMore, setEstablishmentsHasMore] = useState(false);
-  const [establishmentsPage, setEstablishmentsPage] = useState(1);
-  const [establishmentsPageSize, setEstablishmentsPageSize] = useState(getEstablishmentsPageSize);
   const [establishmentsError, setEstablishmentsError] = useState('');
   const [establishmentExtras, setEstablishmentExtras] = useState({});
   const [professionalsByEstab, setProfessionalsByEstab] = useState({});
@@ -967,42 +926,12 @@ export default function NovoAgendamento() {
   const [ratingModal, setRatingModal] = useState({ open: false, nota: 0, comentario: '', saving: false, error: '' });
   const [planLimitModal, setPlanLimitModal] = useState({ open: false, message: '', details: null });
   const [guestModal, setGuestModal] = useState(() => createGuestModalState());
-  const [showGuestOptional, setShowGuestOptional] = useState(false);
-  // Inicializa estQuery a partir de ?q= da URL e reage a mudanças no histórico
+  // Inicializa estQuery a partir de ?q= da URL e reage a mudanÃ§as no histÃ³rico
   useEffect(() => {
     const q = (searchParams.get('q') || '').trim();
-    setEstQuery(q);
-    setDebouncedEstQuery(q);
+    if (q !== estQuery) setEstQuery(q);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return undefined;
-    const handleResize = () => {
-      setEstablishmentsPageSize((prev) => {
-        const next = getEstablishmentsPageSize();
-        return next === prev ? prev : next;
-      });
-    };
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, []);
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setDebouncedEstQuery(estQuery.trim());
-    }, QUERY_DEBOUNCE_MS);
-    return () => clearTimeout(timer);
-  }, [estQuery]);
-  useEffect(() => {
-    const current = (searchParams.get('q') || '').trim();
-    if (debouncedEstQuery === current) return;
-    const sp = new URLSearchParams(searchParams);
-    if (debouncedEstQuery) sp.set('q', debouncedEstQuery);
-    else sp.delete('q');
-    setSearchParams(sp, { replace: true });
-  }, [debouncedEstQuery, searchParams, setSearchParams]);
-  useEffect(() => {
-    setEstablishmentsPage(1);
-  }, [debouncedEstQuery, establishmentsPageSize]);
   useEffect(() => {
     try {
       const stored = sessionStorage.getItem(STORAGE_KEY);
@@ -1020,7 +949,7 @@ export default function NovoAgendamento() {
     } catch {}
   }, [userLocation]);
   // Inicializa/normaliza a semana a partir de ?week=YYYY-MM-DD
-  // Sempre força a segunda-feira correspondente
+  // Sempre forÃƒÂ§a a segunda-feira correspondente
   useEffect(() => {
     const w = (searchParams.get('week') || '').trim();
     if (/^\d{4}-\d{2}-\d{2}$/.test(w)) {
@@ -1033,7 +962,7 @@ export default function NovoAgendamento() {
   }, [searchParams, state.currentWeek]);
   const [modal, setModal] = useState({ isOpen: false, isSaving: false });
   const [toast, setToast] = useState(null);
-  const [viewMode] = useState('month'); // por ora, Mês é o padrão
+  const [viewMode] = useState('month'); // por ora, MÃªs ÃƒÂ© o padrÃƒÂ£o
   const [monthStart, setMonthStart] = useState(() => DateHelpers.firstOfMonthISO(new Date()));
   const [selectedDate, setSelectedDate] = useState(null); // YYYY-MM-DD
   const [professionalMenuOpen, setProfessionalMenuOpen] = useState(false);
@@ -1189,7 +1118,7 @@ export default function NovoAgendamento() {
       const [start] = laterToday;
       return {
         prefix: 'Fechado',
-        detail: `Abre hoje às ${formatMinutes(start)}`,
+        detail: `Abre hoje Ã s ${formatMinutes(start)}`,
         status: 'closed',
       };
     }
@@ -1204,7 +1133,7 @@ export default function NovoAgendamento() {
       if (offset === 1) {
         return {
           prefix: 'Fechado',
-          detail: `Abre amanhã às ${openTime}`,
+          detail: `Abre amanhÃ£ Ã s ${openTime}`,
           status: 'closed',
         };
       }
@@ -1213,7 +1142,7 @@ export default function NovoAgendamento() {
       const weekday = weekdayFormatter.format(nextDate);
       return {
         prefix: 'Fechado',
-        detail: `Abre ${weekday} às ${openTime}`,
+        detail: `Abre ${weekday} Ã s ${openTime}`,
         status: 'closed',
       };
     }
@@ -1224,7 +1153,7 @@ export default function NovoAgendamento() {
     const source = selectedEstablishment?.avatar_url || selectedEstablishment?.logo_url || selectedEstablishment?.foto_url;
     return resolveAssetUrl(source || '');
   }, [selectedEstablishment]);
-  const normalizedQuery = useMemo(() => normalizeText(debouncedEstQuery.trim()), [debouncedEstQuery]);
+  const normalizedQuery = useMemo(() => normalizeText(estQuery.trim()), [estQuery]);
   const queryTokens = useMemo(
     () => (normalizedQuery ? normalizedQuery.split(/\s+/).filter(Boolean) : []),
     [normalizedQuery]
@@ -1271,7 +1200,7 @@ export default function NovoAgendamento() {
     subscriptionStatus === 'active' ||
     subscriptionStatus === 'authorized';
   const bookingBlocked = !subscriptionActive && (planExpired || trialExpired);
-  const bookingBlockedMessage = 'Agendamentos indisponíveis no momento. Entre em contato com o estabelecimento.';
+  const bookingBlockedMessage = 'Agendamentos indisponÃ­veis no momento. Entre em contato com o estabelecimento.';
   useEffect(() => {
     const cache = coordsCacheRef.current;
     let changed = false;
@@ -1346,13 +1275,13 @@ export default function NovoAgendamento() {
     if (d && d % 5 === 0) return Math.max(15, Math.min(120, d));
     return 30;
   }, [selectedService]);
-  // Persistência leve (filtros/densidade)
+  // PersistÃƒÂªncia leve (filtros/densidade)
   useEffect(() => {
     try {
       const saved = JSON.parse(localStorage.getItem("novo-agendamento-ui") || "{}");
       setState((p) => ({
         ...p,
-        filters: { ...p.filters, ...saved.filters, onlyAvailable: false }, // força exibir ocupados
+        filters: { ...p.filters, ...saved.filters, onlyAvailable: false }, // forÃƒÂ§a exibir ocupados
         density: saved.density || p.density
       }));
     } catch {}
@@ -1377,88 +1306,36 @@ export default function NovoAgendamento() {
   /* ====== Carregar Estabelecimentos ====== */
   useEffect(() => {
     let cancelled = false;
-    const isFirstPage = establishmentsPage === 1;
-    if (isFirstPage) {
-      setEstablishmentsLoading(true);
-      setEstablishmentsError('');
-      setEstablishmentsLoadingMore(false);
-      setEstablishmentsHasMore(false);
-    } else {
-      setEstablishmentsLoadingMore(true);
-    }
     (async () => {
       try {
-        const response = await Api.listEstablishments({
-          q: debouncedEstQuery,
-          page: establishmentsPage,
-          limit: establishmentsPageSize,
-        });
+        setEstablishmentsLoading(true);
+        setEstablishmentsError('');
+        const list = await Api.listEstablishments();
         if (cancelled) return;
-        const list = Array.isArray(response) ? response : response?.items || [];
-        const nextHasMore = Array.isArray(response)
-          ? false
-          : Boolean(response?.has_more ?? list.length > establishmentsPageSize);
         setState((prev) => ({
           ...prev,
-          establishments: isFirstPage ? list : [...prev.establishments, ...list],
+          establishments: Array.isArray(list) ? list : [],
         }));
-        setEstablishmentsHasMore(nextHasMore);
       } catch {
         if (cancelled) return;
-        if (isFirstPage) {
-          setEstablishmentsError('Não foi possível carregar estabelecimentos.');
-        }
+        setEstablishmentsError('Não foi possível carregar estabelecimentos.');
         showToast('error', 'Não foi possível carregar estabelecimentos.');
       } finally {
-        if (!cancelled) {
-          setEstablishmentsLoading(false);
-          setEstablishmentsLoadingMore(false);
-        }
+        if (!cancelled) setEstablishmentsLoading(false);
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [debouncedEstQuery, establishmentsPage, establishmentsPageSize, showToast]);
-  useEffect(() => {
-    const estParam = (searchParams.get('estabelecimento') || '').trim();
-    if (!estParam) return;
-    if (establishments.some((est) => String(est.id) === estParam)) return;
-    if (ensureEstParamPendingRef.current) return;
-    ensureEstParamPendingRef.current = true;
-    let cancelled = false;
-    (async () => {
-      try {
-        const response = await Api.listEstablishments({ ids: estParam, limit: 1 });
-        if (cancelled) return;
-        const list = Array.isArray(response) ? response : response?.items || [];
-        if (!list.length) return;
-        setState((prev) => ({
-          ...prev,
-          establishments: [
-            ...list,
-            ...prev.establishments.filter((est) => String(est.id) !== estParam),
-          ],
-        }));
-      } catch {
-        // mantém silencioso; o fluxo principal já mostra erro se necessário
-      } finally {
-        if (!cancelled) ensureEstParamPendingRef.current = false;
-      }
-    })();
-    return () => {
-      cancelled = true;
-      ensureEstParamPendingRef.current = false;
-    };
-  }, [establishments, searchParams]);
-  // Se vier estabelecimento= na URL, seleciona automaticamente após carregar a lista
+  }, [showToast]);
+  // Se vier ?estabelecimento= na URL, seleciona automaticamente apÃ³s carregar a lista
   useEffect(() => {
     const estParam = (searchParams.get('estabelecimento') || '').trim();
     if (establishments.length && estParam && estParam !== state.establishmentId) {
       setState((p) => ({ ...p, establishmentId: estParam, serviceId: "", professionalId: "", slots: [], selectedSlot: null }));
     }
   }, [establishments, searchParams, state.establishmentId]);
-  /* ====== Carregar Serviços quando escolher Estabelecimento ====== */
+  /* ====== Carregar ServiÃƒÂ§os quando escolher Estabelecimento ====== */
   useEffect(() => {
     (async () => {
       if (!establishmentId) {
@@ -1476,7 +1353,7 @@ export default function NovoAgendamento() {
           ...p,
           services: list || [],
           serviceId: "",
-    professionalId: "", // aguarda o clique do usuário
+    professionalId: "", // aguarda o clique do usuÃƒÂ¡rio
           slots: [],
           selectedSlot: null,
         }));
@@ -1654,7 +1531,7 @@ useEffect(() => {
         if (!Array.isArray(persisted)) persisted = [];
       } catch {}
       const apptCounts = await getBusyFromAppointments();
-      // D) aplica overlay considerando capacidade por profissional/serviço
+      // D) aplica overlay considerando capacidade por profissional/serviÃ§o
       setState((prev) => {
         const rawForced = Array.from(new Set([...prev.forceBusy, ...persisted]));
         const filteredForced = rawForced.filter(
@@ -1680,19 +1557,16 @@ useEffect(() => {
         try {
           localStorage.setItem(fbKey(establishmentId, currentWeek), JSON.stringify(filteredForced));
         } catch {}
-          const previousSelected = prev.selectedSlot
-            ? overlayed.find(
-                (s) =>
-                  s.datetime === prev.selectedSlot.datetime &&
-                  isAvailableLabel(s.label) &&
-                  !DateHelpers.isPastSlot(s.datetime) &&
-                  inBusinessHours(s.datetime, workingSchedule, serviceDuration)
-              )
-            : null;
+          const firstAvailable = overlayed.find(
+            (s) =>
+              isAvailableLabel(s.label) &&
+              !DateHelpers.isPastSlot(s.datetime) &&
+              inBusinessHours(s.datetime, workingSchedule, serviceDuration)
+          );
         return {
           ...prev,
           slots: overlayed,
-          selectedSlot: previousSelected || null,
+          selectedSlot: firstAvailable || prev.selectedSlot || null,
           loading: false,
           forceBusy: filteredForced,
         };
@@ -1722,13 +1596,6 @@ useEffect(() => {
   // Teclas semana
   useEffect(() => {
     const onKey = (e) => {
-      if (e.defaultPrevented) return;
-      const target = e.target;
-      if (target?.closest?.('.modal')) return;
-      const tag = target?.tagName ? target.tagName.toLowerCase() : '';
-      if (target?.isContentEditable || tag === 'input' || tag === 'textarea' || tag === 'select') {
-        return;
-      }
       if (e.key === "ArrowLeft") setState((p) => ({ ...p, currentWeek: DateHelpers.addWeeksISO(p.currentWeek, -1) }));
       if (e.key === "ArrowRight") setState((p) => ({ ...p, currentWeek: DateHelpers.addWeeksISO(p.currentWeek, 1) }));
     };
@@ -1801,7 +1668,7 @@ useEffect(() => {
       const reminderTime = new Date(inMs - 8 * 60 * 60 * 1000);
       const dataBR = start.toLocaleDateString("pt-BR");
       const horaBR = start.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
-      const msgReminder = `⏰ Lembrete: faltam 8 horas para o seu ${servicoNome} em ${estabelecimentoNome} (${horaBR} de ${dataBR}).`;
+      const msgReminder = `Ã¢ÂÂ° Lembrete: faltam 8 horas para o seu ${servicoNome} em ${estabelecimentoNome} (${horaBR} de ${dataBR}).`;
       const tasks = [];
       if (reminderTime.getTime() > now)
         tasks.push(Api.scheduleWhatsApp?.({ to: toPhone, scheduledAt: reminderTime.toISOString(), message: msgReminder, metadata: { kind: "reminder_8h", appointmentAt: start.toISOString() } }));
@@ -1850,18 +1717,18 @@ useEffect(() => {
 
   const validateBookingSelection = useCallback(() => {
     if (!selectedSlot || !serviceId || !selectedService) {
-      return "Selecione um horá­rio para continuar.";
+      return "Selecione um horÃ‡Â­rio para continuar.";
     }
     if (bookingBlocked) {
-      return bookingBlockedMessage || "Agendamentos temporariamente indisponíveis.";
+      return bookingBlockedMessage || "Agendamentos temporariamente indisponÃ‡Â­veis.";
     }
     if (DateHelpers.isPastSlot(selectedSlot.datetime)) {
-      return "Não foi possível agendar no passado.";
+      return "NÃ‡Å“o foi possÃ‡Â­vel agendar no passado.";
     }
     if (!inBusinessHours(selectedSlot.datetime, workingSchedule, serviceDuration)) {
       return workingSchedule
-        ? "Este horário está fora do horário de atendimento do estabelecimento."
-        : "Este horário está fora do período de 07:00-22:00.";
+        ? "Este horÃ‡Â­rio estÃ‡Â¡ fora do horÃ‡Â­rio de atendimento do estabelecimento."
+        : "Este horÃ‡Â­rio estÃ‡Â¡ fora do perÃ‡Â­odo de 07:00-22:00.";
     }
     if (serviceProfessionals.length && !state.professionalId) {
       return "Selecione um profissional para continuar.";
@@ -1982,25 +1849,15 @@ useEffect(() => {
 
   const resetGuestModal = useCallback(() => {
     setGuestModal(createGuestModalState());
-    setShowGuestOptional(false);
   }, []);
 
   const openGuestModal = useCallback(() => {
-    setShowGuestOptional(false);
     setGuestModal((prev) => ({
       ...createGuestModalState(),
       open: true,
       name: prev.name || "",
       email: prev.email || "",
       phone: prev.phone || "",
-      data_nascimento: prev.data_nascimento || "",
-      cep: prev.cep || "",
-      endereco: prev.endereco || "",
-      numero: prev.numero || "",
-      complemento: prev.complemento || "",
-      bairro: prev.bairro || "",
-      cidade: prev.cidade || "",
-      estado: prev.estado || "",
     }));
   }, []);
 
@@ -2022,22 +1879,8 @@ useEffect(() => {
         setGuestModal((prev) => ({ ...prev, error: "Informe um email válido para confirmar o agendamento." }));
         return;
       }
-      if (!isValidEmail(email)) {
-        setGuestModal((prev) => ({ ...prev, error: "Informe um email válido." }));
-        return;
-      }
       if (phoneDigits.length < 10) {
         setGuestModal((prev) => ({ ...prev, error: "Informe um telefone com DDD para contato." }));
-        return;
-      }
-      const cepDigitsRaw = String(guestModal.cep || "").replace(/\D/g, "");
-      if (cepDigitsRaw && cepDigitsRaw.length !== 8) {
-        setGuestModal((prev) => ({ ...prev, error: "Informe um CEP válido com 8 dígitos." }));
-        return;
-      }
-      const estadoTrim = String(guestModal.estado || "").trim().toUpperCase();
-      if (estadoTrim && estadoTrim.length !== 2) {
-        setGuestModal((prev) => ({ ...prev, error: "Informe a UF com 2 letras." }));
         return;
       }
       if (manageLoading) setGuestModal((prev) => ({ ...prev, loading: true, error: "", info: "" }));
@@ -2050,21 +1893,6 @@ useEffect(() => {
           email,
           telefone: phoneDigits,
         };
-        const dataNascimento = (guestModal.data_nascimento || "").trim();
-        if (dataNascimento) payload.data_nascimento = dataNascimento;
-        const cepDigits = cepDigitsRaw.slice(0, 8);
-        if (cepDigits) payload.cep = cepDigits;
-        const enderecoTrim = (guestModal.endereco || "").trim();
-        if (enderecoTrim) payload.endereco = enderecoTrim;
-        const numeroTrim = (guestModal.numero || "").trim();
-        if (numeroTrim) payload.numero = numeroTrim;
-        const complementoTrim = (guestModal.complemento || "").trim();
-        if (complementoTrim) payload.complemento = complementoTrim;
-        const bairroTrim = (guestModal.bairro || "").trim();
-        if (bairroTrim) payload.bairro = bairroTrim;
-        const cidadeTrim = (guestModal.cidade || "").trim();
-        if (cidadeTrim) payload.cidade = cidadeTrim;
-        if (estadoTrim) payload.estado = estadoTrim;
         if (serviceProfessionals.length && state.professionalId) {
           payload.profissional_id = Number(state.professionalId);
         }
@@ -2077,9 +1905,9 @@ useEffect(() => {
           loading: false,
           step: "success",
           error: "",
-          info: "Enviamos um email de confirmacao. Confirme em ate 10 minutos.",
+          info: "Enviamos um email com a confirmação do agendamento.",
         }));
-        showToast("success", "Agendamento realizado! Confira seu email e confirme em ate 10 minutos.");
+        showToast("success", "Agendamento realizado! Confira seu email para confirmar.");
       } catch (e) {
         if (e?.data?.error === 'plan_limit_agendamentos') {
           const message = e?.data?.message || 'Limite de agendamentos do plano atingido.';
@@ -2102,7 +1930,7 @@ useEffect(() => {
               otpCode: "",
               otpToken: "",
               error: "",
-              info: "Enviamos um código para seu email. Digite para confirmar.",
+              info: "Enviamos um cÃ³digo para seu email. Digite para confirmar.",
             }));
           } catch {
             setGuestModal((prev) => ({
@@ -2127,14 +1955,6 @@ useEffect(() => {
       guestModal.name,
       guestModal.email,
       guestModal.phone,
-      guestModal.data_nascimento,
-      guestModal.cep,
-      guestModal.endereco,
-      guestModal.numero,
-      guestModal.complemento,
-      guestModal.bairro,
-      guestModal.cidade,
-      guestModal.estado,
       establishmentId,
       serviceId,
       selectedSlot,
@@ -2151,11 +1971,11 @@ useEffect(() => {
 
   const handleGuestOtpSubmit = useCallback(async () => {
     if (!guestModal.otpReqId) {
-      setGuestModal((prev) => ({ ...prev, error: "Solicite o envio do código para confirmar." }));
+      setGuestModal((prev) => ({ ...prev, error: "Solicite o envio do cÃ³digo para confirmar." }));
       return;
     }
     if (!guestModal.otpCode || !guestModal.otpCode.trim()) {
-      setGuestModal((prev) => ({ ...prev, error: "Informe o código recebido por email." }));
+      setGuestModal((prev) => ({ ...prev, error: "Informe o cÃ³digo recebido por email." }));
       return;
     }
     setGuestModal((prev) => ({ ...prev, loading: true, error: "", info: "" }));
@@ -2174,11 +1994,7 @@ useEffect(() => {
   const handleGuestResendOtp = useCallback(async () => {
     const email = (guestModal.email || "").trim();
     if (!email) {
-      setGuestModal((prev) => ({ ...prev, error: "Informe o email para reenviar o código." }));
-      return;
-    }
-    if (!isValidEmail(email)) {
-      setGuestModal((prev) => ({ ...prev, error: "Informe um email válido." }));
+      setGuestModal((prev) => ({ ...prev, error: "Informe o email para reenviar o cÃ³digo." }));
       return;
     }
     try {
@@ -2188,7 +2004,7 @@ useEffect(() => {
         ...prev,
         loading: false,
         otpReqId: resp?.request_id || prev.otpReqId || "",
-        info: "Código reenviado para seu email.",
+        info: "CÃ³digo reenviado para seu email.",
         step: "otp",
       }));
     } catch {
@@ -2201,17 +2017,23 @@ useEffect(() => {
   }, [resetGuestModal]);
 
   /* ====== Handlers ====== */
-  const handleQueryChange = useCallback((value) => {
-    setEstQuery(value);
-  }, []);
+  const handleQueryChange = useCallback(
+    (value) => {
+      setEstQuery(value);
+      const trimmed = value.trim();
+      const sp = new URLSearchParams(searchParams);
+      if (trimmed) sp.set('q', trimmed);
+      else sp.delete('q');
+      setSearchParams(sp, { replace: true });
+    },
+    [searchParams, setSearchParams]
+  );
   const handleSearchSubmit = useCallback((event) => {
     if (event?.preventDefault) event.preventDefault();
-    setDebouncedEstQuery(estQuery.trim());
-    setEstablishmentsPage(1);
-  }, [estQuery]);
+  }, []);
   const handleUseLocation = useCallback(() => {
     if (!navigator?.geolocation) {
-      setGeoError('Geolocalizacao nao esta disponível neste dispositivo.');
+      setGeoError('Geolocalizacao nao esta disponivel neste dispositivo.');
       return;
     }
     setGeoError('');
@@ -2464,7 +2286,7 @@ useEffect(() => {
   const handleToggleFavorite = async () => {
     if (!selectedEstablishment || !selectedEstablishmentId) return;
     if (!user || user.tipo !== 'cliente') {
-      showToast('info', 'Faça login como cliente para favoritar.');
+      showToast('info', 'FaÃ§a login como cliente para favoritar.');
       return;
     }
     if (selectedExtras?.favoriteUpdating) return;
@@ -2506,7 +2328,7 @@ useEffect(() => {
   const handleOpenRatingModal = () => {
     if (!selectedEstablishment || !selectedEstablishmentId) return;
     if (!user || user.tipo !== 'cliente') {
-      showToast('info', 'Faça login como cliente para avaliar.');
+      showToast('info', 'FaÃ§a login como cliente para avaliar.');
       return;
     }
     const existing = selectedExtras?.user_review;
@@ -2531,7 +2353,7 @@ useEffect(() => {
   const handleSaveRating = async () => {
     if (!selectedEstablishment || !selectedEstablishmentId) return;
     if (!user || user.tipo !== 'cliente') {
-      showToast('info', 'Faça login como cliente para avaliar.');
+      showToast('info', 'FaÃ§a login como cliente para avaliar.');
       return;
     }
     if (!ratingModal.nota || ratingModal.nota < 1) {
@@ -2620,6 +2442,7 @@ useEffect(() => {
       return { key, label, url };
     })
     .filter(Boolean);
+  const contactEmail = profileData?.contato_email || selectedEstablishment?.email || null;
   const contactPhone = profileData?.contato_telefone || selectedEstablishment?.telefone || null;
   const infoLoading = Boolean(selectedExtras?.loading);
   const professionalsError = selectedProfessionals?.error || infoModalError || '';
@@ -2630,7 +2453,7 @@ useEffect(() => {
     return DateHelpers.formatTime(end.toISOString());
   }, [selectedSlot, serviceDuration]);
   const weekLabel = DateHelpers.formatWeekLabel(currentWeek);
-  // Reordenar colunas da semana para começar pelo dia atual (se pertencer à semana atual)
+  // Reordenar colunas da semana para comeÃƒÂ§ar pelo dia atual (se pertencer ÃƒÂ  semana atual)
   const daysToRender = useMemo(() => {
     const list = DateHelpers.weekDays(currentWeek);
     const todayIso = DateHelpers.toISODate(new Date());
@@ -2639,13 +2462,13 @@ useEffect(() => {
   }, [currentWeek]);
   /* ====== UI por passos ====== */
   const step = !establishmentId ? 1 : !serviceId ? 2 : 3;
-  // Ao clicar num dia do Mês, define a semana correspondente e marca o dia
+  // Ao clicar num dia do MÃªs, define a semana correspondente e marca o dia
   const handlePickDay = useCallback((isoDay) => {
     setSelectedDate(isoDay);
     const wk = DateHelpers.weekStartISO(isoDay);
     if (wk !== currentWeek) setState((p) => ({ ...p, currentWeek: wk }));
   }, [currentWeek]);
-  // Quando o mês visível contém hoje, pré-seleciona o dia atual se nada estiver selecionado
+  // Quando o mÃªs visÃ­vel contÃ©m hoje, prÃ©-seleciona o dia atual se nada estiver selecionado
   useEffect(() => {
     const todayIso = DateHelpers.toISODate(new Date());
     if (DateHelpers.isSameMonth(todayIso, monthStart)) {
@@ -2680,37 +2503,23 @@ useEffect(() => {
       );
     }
     return (
-      <>
-        <div className="establishments__grid">
-          {establishmentResults.map(({ est }) => (
-            <EstablishmentCard
-              key={est.id}
-              est={est}
-              selected={String(est.id) === establishmentId}
-              onSelect={handleEstablishmentClick}
-            />
-          ))}
-        </div>
-        {establishmentsHasMore && (
-          <div style={{ marginTop: 12, display: 'flex', justifyContent: 'center' }}>
-            <button
-              type="button"
-              className="btn btn--outline"
-              onClick={() => setEstablishmentsPage((prev) => prev + 1)}
-              disabled={establishmentsLoadingMore}
-            >
-              {establishmentsLoadingMore ? <span className="spinner" /> : 'Carregar mais'}
-            </button>
-          </div>
-        )}
-      </>
+      <div className="establishments__grid">
+        {establishmentResults.map(({ est }) => (
+          <EstablishmentCard
+            key={est.id}
+            est={est}
+            selected={String(est.id) === establishmentId}
+            onSelect={handleEstablishmentClick}
+          />
+        ))}
+      </div>
     );
   };
   const renderServiceStep = () => (
     <>
       <div ref={servicesSectionRef} className="novo-agendamento__services">
         {services.length === 0 ? (
-          <div className="empty small">Sem serviços cadastrados.</div>
+          <div className="empty small">Sem serviÃ§os cadastrados.</div>
         ) : (
           services.map((s) => (
             <ServiceCard
@@ -2754,7 +2563,7 @@ useEffect(() => {
                 <div className="novo-agendamento__select-label">
                   <div>{selectedProfessional ? (selectedProfessional.nome || selectedProfessional.name) : 'Selecione um profissional'}</div>
                 </div>
-                <span className="novo-agendamento__select-caret" aria-hidden>▼</span>
+                <span className="novo-agendamento__select-caret" aria-hidden>â–¾</span>
               </button>
               {professionalMenuOpen && (
                 <div className="novo-agendamento__select-menu">
@@ -2785,10 +2594,10 @@ useEffect(() => {
           <div className="novo-agendamento__inline-summary">
             <div className="inline-summary__item inline-summary__item--service">
               <span className="inline-summary__value">{ServiceHelpers.title(selectedService)}</span>
-              {(serviceDuration || servicePrice !== 'R$ 0,00') && (
+              {(serviceDuration || servicePrice !== 'R$Â 0,00') && (
                 <div className="inline-summary__meta">
                   {serviceDuration ? <span>{serviceDuration} min</span> : null}
-                  {servicePrice !== 'R$ 0,00' ? <span>{servicePrice}</span> : null}
+                  {servicePrice !== 'R$Â 0,00' ? <span>{servicePrice}</span> : null}
                 </div>
               )}
             </div>
@@ -2809,7 +2618,7 @@ useEffect(() => {
               </summary>
               <div className="filters__content">
                 <label className="label">
-                  <span>Início da semana</span>
+                  <span>Iní­cio da semana</span>
                   <input
                     type="date"
                     value={currentWeek}
@@ -2821,16 +2630,16 @@ useEffect(() => {
                 <div className="row" style={{ alignItems: 'center', gap: 10 }}>
                   <label className="checkbox">
                     <input type="checkbox" checked={filters.onlyAvailable} onChange={() => handleFilterToggle('onlyAvailable')} />
-                    <span>Somente disponíveis</span>
+                    <span>Somente disponí­veis</span>
                   </label>
                   <label className="checkbox">
                     <input type="checkbox" checked={filters.hidePast} onChange={() => handleFilterToggle('hidePast')} />
                     <span>Ocultar horários passados</span>
                   </label>
                 </div>
-                <div className="row" style={{ gap: 6, flexWrap: 'wrap', marginTop: 6 }} role="group" aria-label="Período do dia">
+                <div className="row" style={{ gap: 6, flexWrap: 'wrap', marginTop: 6 }} role="group" aria-label="Perí­odo do dia">
                   <Chip active={filters.timeRange === 'all'} onClick={() => handleTimeRange('all')} title="Todos os horários">Todos</Chip>
-                  <Chip active={filters.timeRange === 'morning'} onClick={() => handleTimeRange('morning')} title="Manhã (07-12)">Manhã</Chip>
+                  <Chip active={filters.timeRange === 'morning'} onClick={() => handleTimeRange('morning')} title="Manhã (07-12)">ManhÃ£</Chip>
                   <Chip active={filters.timeRange === 'afternoon'} onClick={() => handleTimeRange('afternoon')} title="Tarde (12-18)">Tarde</Chip>
                   <Chip active={filters.timeRange === 'evening'} onClick={() => handleTimeRange('evening')} title="Noite (18-22)">Noite</Chip>
                 </div>
@@ -2844,7 +2653,7 @@ useEffect(() => {
               <div className="row" style={{ gap: 6, alignItems: 'center' }}>
                 <button
                   className="btn btn--sm"
-                  aria-label="Mês anterior"
+                  aria-label="MÃªs anterior"
                   onClick={() => setMonthStart(DateHelpers.formatLocalISO(DateHelpers.addMonths(monthStart, -1)))}
                 >
                   ‹
@@ -2852,7 +2661,7 @@ useEffect(() => {
                 <strong>{new Date(monthStart + 'T00:00:00').toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })}</strong>
                 <button
                   className="btn btn--sm"
-                  aria-label="Próximo mês"
+                  aria-label="PrÃ³ximo mÃªs"
                   onClick={() => setMonthStart(DateHelpers.formatLocalISO(DateHelpers.addMonths(monthStart, 1)))}
                 >
                   ›
@@ -3087,7 +2896,7 @@ useEffect(() => {
                   </button>
                   {!isAuthenticated ? (
                     <Link to={loginHref} className="summary-action">
-                      <span aria-hidden>♡</span>
+                      <span aria-hidden>★</span>
                       Favoritar
                     </Link>
                   ) : (
@@ -3096,7 +2905,7 @@ useEffect(() => {
                       className={`summary-action${selectedExtras?.is_favorite ? ' summary-action--highlight' : ''}`}
                       onClick={handleToggleFavorite}
                       disabled={!isClientUser || favoriteUpdating}
-                      title={!isClientUser ? 'Disponível apenas para clientes.' : undefined}
+                      title={!isClientUser ? 'Disponí­vel apenas para clientes.' : undefined}
                     >
                       <span aria-hidden>♡</span>
                       {selectedExtras?.is_favorite ? 'Favorito' : 'Favoritar'}
@@ -3113,9 +2922,9 @@ useEffect(() => {
                       className={`summary-action${ratingCount > 0 ? '' : ' summary-action--muted'}`}
                       onClick={handleOpenRatingModal}
                       disabled={!isClientUser || selectedExtras?.loading}
-                      title={!isClientUser ? 'Disponível apenas para clientes.' : undefined}
+                      title={!isClientUser ? 'DisponÃ­vel apenas para clientes.' : undefined}
                     >
-                      <span aria-hidden>★</span>
+                      <span aria-hidden>â˜…</span>
                       {ratingButtonLabel}
                     </button>
                   )}
@@ -3215,13 +3024,14 @@ useEffect(() => {
                     </section>
                     <section className="estab-info__section">
                       <h4>Contato</h4>
-                      {contactPhone ? (
+                      {contactPhone || contactEmail ? (
                         <ul className="estab-info__list">
                           {contactPhone && (
+                            <li>Telefone: {formatPhoneDisplay(contactPhone) || contactPhone}</li>
+                          )}
+                          {contactEmail && (
                             <li>
-                              <IconPhone aria-hidden style={{ width: 16, height: 16, marginRight: 6, verticalAlign: 'text-bottom' }} />
-                              <span className="sr-only">Telefone</span>
-                              <span>{formatPhoneDisplay(contactPhone) || contactPhone}</span>
+                              Email: <a href={`mailto:${contactEmail}`}>{contactEmail}</a>
                             </li>
                           )}
                         </ul>
@@ -3327,8 +3137,8 @@ useEffect(() => {
               ) : (
                 <div className="estab-reviews">
                   <div className="estab-reviews__summary">
-                    <div className="estab-reviews__average" aria-label={`Nota média ${ratingAverageLabel ?? '–'}`}>
-                      <span className="estab-reviews__value">{ratingAverageLabel ?? '–'}</span>
+                    <div className="estab-reviews__average" aria-label={`Nota mÃ©dia ${ratingAverageLabel ?? 'â€“'}`}>
+                      <span className="estab-reviews__value">{ratingAverageLabel ?? 'â€“'}</span>
                       <div className="estab-reviews__stars" aria-hidden="true">
                         {[1, 2, 3, 4, 5].map((value) => (
                           <span
@@ -3337,7 +3147,7 @@ useEffect(() => {
                               ratingSummary?.average != null && ratingSummary.average >= value - 0.5 ? ' is-active' : ''
                             }`}
                           >
-                            {ratingSummary?.average != null && ratingSummary.average >= value - 0.5 ? '★' : '☆'}
+                            {ratingSummary?.average != null && ratingSummary.average >= value - 0.5 ? 'â˜…' : 'â˜†'}
                           </span>
                         ))}
                       </div>
@@ -3496,7 +3306,7 @@ useEffect(() => {
                     zIndex: 2,
                   }}
                 >
-                  ‹
+                  â€¹
                 </button>
                 <button
                   type="button"
@@ -3511,7 +3321,7 @@ useEffect(() => {
                     zIndex: 2,
                   }}
                 >
-                  ›
+                  â€º
                 </button>
                 {(() => {
                   const currentImage = galleryImages[galleryViewIndex] || galleryImages[0];
@@ -3662,13 +3472,13 @@ useEffect(() => {
                   disabled={ratingModal.saving}
                   aria-label={`${value} ${value === 1 ? 'estrela' : 'estrelas'}`}
                 >
-                  {ratingModal.nota >= value ? '★' : '☆'}
+                  {ratingModal.nota >= value ? 'â˜…' : 'â˜†'}
                 </button>
               ))}
             </div>
             <textarea
               className="input rating-modal__comment"
-              placeholder="Conte sua experiência (opcional)"
+              placeholder="Conte sua experiÃªncia (opcional)"
               value={ratingModal.comentario}
               onChange={handleRatingCommentChange}
               rows={4}
@@ -3690,22 +3500,9 @@ useEffect(() => {
         <Modal onClose={guestModal.loading ? undefined : handleCloseGuestModal} closeButton>
           {guestModal.step === "success" ? (
             <>
-              <div className="confirmation-icon" aria-hidden="true">
-                <svg viewBox="0 0 48 48" width="56" height="56" focusable="false">
-                  <circle cx="24" cy="24" r="22" fill="#22c55e" />
-                  <path
-                    d="M16 24l6 6 12-12"
-                    fill="none"
-                    stroke="#ffffff"
-                    strokeWidth="4"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </svg>
-              </div>
               <h3>Agendamento realizado</h3>
               <p style={{ marginTop: 6 }}>
-                Enviamos um email de confirmacao. Confirme em ate 10 minutos. Se nao aparecer em alguns minutos, confira o spam ou reencontre o link mais tarde.
+                Enviamos um email com a confirmação do agendamento. Se não aparecer em alguns minutos, confira o spam ou reencontre o link mais tarde.
               </p>
               <div className="row" style={{ justifyContent: 'flex-end', gap: 8, marginTop: 12 }}>
                 <button type="button" className="btn btn--primary" onClick={handleCloseGuestModal}>
@@ -3756,31 +3553,17 @@ useEffect(() => {
           ) : (
             <>
               <h3>Finalizar agendamento</h3>
-              <div className="confirmation-card">
-                <p className="muted" style={{ marginTop: 0, fontStyle: 'italic', fontSize: 12 }}>
-                  Agendaremos e criaremos sua conta com estes dados. Vamos mandar a confirmação por email.
-                </p>
-                {selectedSlot && selectedService && (
-                  <dl className="confirmation-details">
-                    <div className="confirmation-details__item">
-                      <dt>Estabelecimento</dt>
-                      <dd>{selectedEstablishmentName}</dd>
-                    </div>
-                    <div className="confirmation-details__item">
-                      <dt>Serviço</dt>
-                      <dd>{ServiceHelpers.title(selectedService)}</dd>
-                    </div>
-                    <div className="confirmation-details__item">
-                      <dt>Data</dt>
-                      <dd>{DateHelpers.formatDateFull(selectedSlot.datetime)}</dd>
-                    </div>
-                    <div className="confirmation-details__item">
-                      <dt>Horário</dt>
-                      <dd><span className="badge badge--time">{DateHelpers.formatTime(selectedSlot.datetime)}{endTimeLabel ? ` • ${endTimeLabel}` : ''}</span></dd>
-                    </div>
-                  </dl>
-                )}
-              </div>
+              <p className="muted" style={{ marginTop: 4 }}>
+                Agendaremos e criaremos sua conta com estes dados. Vamos mandar a confirmação por email.
+              </p>
+              {selectedSlot && selectedService && (
+                <div className="confirmation-details" style={{ marginTop: 10 }}>
+                  <div className="confirmation-details__item"><span className="confirmation-details__label">Estabelecimento: </span><span className="confirmation-details__value">{selectedEstablishmentName}</span></div>
+                  <div className="confirmation-details__item"><span className="confirmation-details__label">Serviço: </span><span className="confirmation-details__value">{ServiceHelpers.title(selectedService)}</span></div>
+                  <div className="confirmation-details__item"><span className="confirmation-details__label">Data: </span><span className="confirmation-details__value">{DateHelpers.formatDateFull(selectedSlot.datetime)}</span></div>
+                  <div className="confirmation-details__item"><span className="confirmation-details__label">Horário: </span><span className="confirmation-details__value">{DateHelpers.formatTime(selectedSlot.datetime)}{endTimeLabel ? ` • ${endTimeLabel}` : ''}</span></div>
+                </div>
+              )}
               <div style={{ display: 'grid', gap: 10, marginTop: 12 }}>
                 <label style={{ display: 'grid', gap: 4 }}>
                   <span className="muted" style={{ fontWeight: 700 }}>Nome completo</span>
@@ -3811,110 +3594,13 @@ useEffect(() => {
                     className="input"
                     type="tel"
                     inputMode="tel"
-                    value={formatPhoneDisplay(guestModal.phone)}
-                    onChange={(e) => setGuestModal((prev) => ({ ...prev, phone: normalizePhoneDigits(e.target.value) }))}
+                    value={guestModal.phone}
+                    onChange={(e) => setGuestModal((prev) => ({ ...prev, phone: e.target.value }))}
                     disabled={guestModal.loading}
                     placeholder="(11) 99999-9999"
                   />
                 </label>
               </div>
-              <div className="row" style={{ marginTop: 6 }}>
-                <button
-                  type="button"
-                  className="btn btn--ghost btn--sm"
-                  onClick={() => setShowGuestOptional((prev) => !prev)}
-                  disabled={guestModal.loading}
-                >
-                  {showGuestOptional ? 'Ocultar dados opcionais' : 'Ver dados opcionais'}
-                </button>
-              </div>
-              {showGuestOptional && (
-                <div style={{ display: 'grid', gap: 10, marginTop: 8 }}>
-                  <label style={{ display: 'grid', gap: 4 }}>
-                    <span className="muted" style={{ fontWeight: 700 }}>Data de nascimento (opcional)</span>
-                    <input
-                      className="input"
-                      type="date"
-                      value={guestModal.data_nascimento}
-                      onChange={(e) => setGuestModal((prev) => ({ ...prev, data_nascimento: e.target.value }))}
-                      disabled={guestModal.loading}
-                    />
-                  </label>
-                  <label style={{ display: 'grid', gap: 4 }}>
-                    <span className="muted" style={{ fontWeight: 700 }}>CEP (opcional)</span>
-                    <input
-                      className="input"
-                      type="text"
-                      inputMode="numeric"
-                      value={guestModal.cep}
-                      onChange={(e) => setGuestModal((prev) => ({ ...prev, cep: e.target.value }))}
-                      disabled={guestModal.loading}
-                      placeholder="00000-000"
-                    />
-                  </label>
-                  <label style={{ display: 'grid', gap: 4 }}>
-                    <span className="muted" style={{ fontWeight: 700 }}>Endereço (opcional)</span>
-                    <input
-                      className="input"
-                      type="text"
-                      value={guestModal.endereco}
-                      onChange={(e) => setGuestModal((prev) => ({ ...prev, endereco: e.target.value }))}
-                      disabled={guestModal.loading}
-                    />
-                  </label>
-                  <label style={{ display: 'grid', gap: 4 }}>
-                    <span className="muted" style={{ fontWeight: 700 }}>Número (opcional)</span>
-                    <input
-                      className="input"
-                      type="text"
-                      value={guestModal.numero}
-                      onChange={(e) => setGuestModal((prev) => ({ ...prev, numero: e.target.value }))}
-                      disabled={guestModal.loading}
-                    />
-                  </label>
-                  <label style={{ display: 'grid', gap: 4 }}>
-                    <span className="muted" style={{ fontWeight: 700 }}>Complemento (opcional)</span>
-                    <input
-                      className="input"
-                      type="text"
-                      value={guestModal.complemento}
-                      onChange={(e) => setGuestModal((prev) => ({ ...prev, complemento: e.target.value }))}
-                      disabled={guestModal.loading}
-                    />
-                  </label>
-                  <label style={{ display: 'grid', gap: 4 }}>
-                    <span className="muted" style={{ fontWeight: 700 }}>Bairro (opcional)</span>
-                    <input
-                      className="input"
-                      type="text"
-                      value={guestModal.bairro}
-                      onChange={(e) => setGuestModal((prev) => ({ ...prev, bairro: e.target.value }))}
-                      disabled={guestModal.loading}
-                    />
-                  </label>
-                  <label style={{ display: 'grid', gap: 4 }}>
-                    <span className="muted" style={{ fontWeight: 700 }}>Cidade (opcional)</span>
-                    <input
-                      className="input"
-                      type="text"
-                      value={guestModal.cidade}
-                      onChange={(e) => setGuestModal((prev) => ({ ...prev, cidade: e.target.value }))}
-                      disabled={guestModal.loading}
-                    />
-                  </label>
-                  <label style={{ display: 'grid', gap: 4 }}>
-                    <span className="muted" style={{ fontWeight: 700 }}>Estado (opcional)</span>
-                    <input
-                      className="input"
-                      type="text"
-                      value={guestModal.estado}
-                      onChange={(e) => setGuestModal((prev) => ({ ...prev, estado: e.target.value.toUpperCase().slice(0, 2) }))}
-                      disabled={guestModal.loading}
-                      placeholder="SP"
-                    />
-                  </label>
-                </div>
-              )}
               {guestModal.error && (
                 <div className="notice notice--error" role="alert" style={{ marginTop: 10 }}>
                   {guestModal.error}
@@ -3981,7 +3667,7 @@ useEffect(() => {
             )}
             <div className="confirmation-details__item"><span className="confirmation-details__label">Data: </span><span className="confirmation-details__value">{DateHelpers.formatDateFull(selectedSlot.datetime)}</span></div>
             <div className="confirmation-details__item"><span className="confirmation-details__label">Horário: </span><span className="confirmation-details__value">
-              <span className="badge badge--time">{DateHelpers.formatTime(selectedSlot.datetime)}{endTimeLabel ? ` • ${endTimeLabel}` : ''}</span>
+              {DateHelpers.formatTime(selectedSlot.datetime)}{endTimeLabel ? ` • ${endTimeLabel}` : ''}
             </span></div>
           </div>
           <div className="row" style={{ justifyContent: 'flex-end', gap: 6, marginTop: 8 }}>

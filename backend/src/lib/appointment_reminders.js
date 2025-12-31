@@ -1,4 +1,4 @@
-import { notifyWhatsapp, sendTemplate } from './notifications.js';
+import { sendTemplate } from './notifications.js';
 import { clientWhatsappDisabled } from './client_notifications.js';
 
 const TZ = 'America/Sao_Paulo';
@@ -108,6 +108,8 @@ async function sendReminder(pool, row) {
     paramMode = 'quad';
   } else if (paramCountHint === 3) {
     paramMode = 'triple';
+  } else if (paramCountHint === 1) {
+    paramMode = 'single';
   } else if (/lembrete_agendamento_v2/.test(tplNameLower) && !/^quad|4|quatro/.test(paramModeEnv)) {
     // v2 template aceita 4 parametros: ajusta automaticamente mesmo sem mudar env
     paramMode = 'quad';
@@ -120,9 +122,11 @@ async function sendReminder(pool, row) {
     data,
     hora,
   ];
+  const singleParams = [msg];
+  const emptyParams = [];
 
   const warnMissingMessageId = (reason) => {
-    console.warn('[reminder8h] enviado sem message_id (confirmacao WA pode nao casar automaticamente)', {
+    console.warn('[reminder8h] enviado sem message_id (confirmação WA pode não casar automaticamente)', {
       agendamentoId: row.id,
       inicio: row.inicio,
       clienteTelefone: telCli,
@@ -148,7 +152,7 @@ async function sendReminder(pool, row) {
     } else if (/^triple|3$/.test(paramMode)) {
       waMessageId = await sendTemplateWithParams(tripleParams);
     } else {
-      await notifyWhatsapp(msg, telCli);
+      waMessageId = await sendTemplateWithParams(singleParams);
     }
     if (!waMessageId) {
       warnMissingMessageId('waMessageId vazio na resposta do template');
@@ -175,6 +179,22 @@ async function sendReminder(pool, row) {
         await markReminderSent(pool, row.id, waMessageId);
         return { sent: true };
       }
+      if (expected === 1 && !/^single|1|um$/.test(paramMode)) {
+        const waMessageId = await sendTemplateWithParams(singleParams);
+        if (!waMessageId) {
+          warnMissingMessageId('waMessageId vazio na resposta do template (fallback single)');
+        }
+        await markReminderSent(pool, row.id, waMessageId);
+        return { sent: true };
+      }
+      if (expected === 0) {
+        const waMessageId = await sendTemplateWithParams(emptyParams);
+        if (!waMessageId) {
+          warnMissingMessageId('waMessageId vazio na resposta do template (fallback empty)');
+        }
+        await markReminderSent(pool, row.id, waMessageId);
+        return { sent: true };
+      }
     } catch (fallbackErr) {
       console.error('[reminder8h] erro ao enviar (fallback)', row.id, fallbackErr?.status, fallbackErr?.body || fallbackErr?.message || fallbackErr);
       return { sent: false, error: fallbackErr?.message || String(fallbackErr) };
@@ -185,15 +205,8 @@ async function sendReminder(pool, row) {
       if (!tplHeaderImage) {
         console.warn('[reminder8h] template requer header de imagem mas nenhuma URL foi configurada (WA_TEMPLATE_REMINDER_HEADER_URL)');
       }
-      try {
-        await notifyWhatsapp(msg, telCli);
-        warnMissingMessageId('fallback header mismatch -> notifyWhatsapp texto');
-        await markReminderSent(pool, row.id, null);
-        return { sent: true };
-      } catch (fallbackErr) {
-        console.error('[reminder8h] erro ao enviar (texto fallback header)', row.id, fallbackErr?.status, fallbackErr?.body || fallbackErr?.message || fallbackErr);
-        return { sent: false, error: fallbackErr?.message || String(fallbackErr) };
-      }
+      console.error('[reminder8h] template header mismatch (template-only)', row.id, err?.status, err?.body || err?.message || err);
+      return { sent: false, error: err?.message || String(err) };
     }
 
     console.error('[reminder8h] erro ao enviar', row.id, err?.status, err?.body || err?.message || err);

@@ -22,7 +22,7 @@ import publicAgendamentosRouter from './routes/agendamentos_public.js';
 import otpPublicRouter from './routes/otp_public.js';
 import profissionaisRouter from './routes/profissionais.js';
 import { pool } from './lib/db.js';
-import { startMaintenance } from './lib/maintenance.js';
+import { startMaintenance, startPublicPendingCleanup } from './lib/maintenance.js';
 import { mountWebhooks } from './routes/webhooks.js';
 import { startBillingMonitor } from './lib/billing_monitor.js';
 import { startAppointmentReminders } from './lib/appointment_reminders.js';
@@ -136,6 +136,7 @@ app.listen(PORT, HOST, () => {
 
 // Tarefas de manutencao: limpeza de tokens expirados e lembretes de cobranca
 startMaintenance(pool);
+startPublicPendingCleanup(pool);
 startBillingMonitor();
 startAppointmentReminders(pool);
 startEstabReminders(pool);

@@ -19,6 +19,22 @@ export async function cleanupPasswordResets(pool) {
   }
 }
 
+export async function cleanupPublicPendingAppointments(pool) {
+  try {
+    const [r] = await pool.query(
+      `UPDATE agendamentos
+          SET status='cancelado'
+        WHERE status='pendente'
+          AND public_confirm_expires_at IS NOT NULL
+          AND public_confirm_expires_at < NOW()`
+    );
+    return { expiredCanceled: r?.affectedRows || 0 };
+  } catch (e) {
+    console.error('[maintenance] cleanupPublicPendingAppointments error:', e?.message || e);
+    return { expiredCanceled: 0, error: e?.message || String(e) };
+  }
+}
+
 export function startMaintenance(pool, { intervalMs } = {}) {
   const every = Number(intervalMs || 6 * 60 * 60 * 1000); // 6h
   async function tick() {
@@ -28,6 +44,18 @@ export function startMaintenance(pool, { intervalMs } = {}) {
   // primeira execução após pequeno delay para não travar o boot
   setTimeout(tick, 10_000);
   // agenda periódico
+  return setInterval(tick, every);
+}
+
+export function startPublicPendingCleanup(pool, { intervalMs } = {}) {
+  const every = Number(intervalMs || 60_000);
+  async function tick() {
+    const r = await cleanupPublicPendingAppointments(pool);
+    if (r?.expiredCanceled) {
+      console.log('[maintenance] public pending cleanup', r);
+    }
+  }
+  setTimeout(tick, 10_000);
   return setInterval(tick, every);
 }
 

@@ -6,12 +6,12 @@ import {
   IconUser,
   IconChevronLeft,
   IconChevronRight,
+  IconMenu,
   IconSun,
   IconMoon,
 } from './components/Icons.jsx';
 import LogoAO from './components/LogoAO.jsx';
 import Modal from './components/Modal.jsx';
-import MobileNavBar from './components/MobileNavBar.jsx';
 import { buildNavigation } from './utils/navigation.js';
 import { Api } from './utils/api.js';
 import {
@@ -284,6 +284,7 @@ function Sidebar({ open, user }) {
   const nav = useNavigate();
   const resolvedUser = user ?? getUser();
   const navigation = useMemo(() => buildNavigation(resolvedUser), [resolvedUser]);
+  const showActive = resolvedUser?.tipo !== 'estabelecimento';
 
   const [scrolled, setScrolled] = useState(false);
   const [el, setEl] = useState(null);
@@ -310,7 +311,7 @@ function Sidebar({ open, user }) {
               {navigation.sections.map((section) => (
                 <div key={section.key} className="sidelist__section">
                   {section.items.map((item) => (
-                    <NavLink key={item.key} to={item.to} className={({ isActive }) => `sidelist__item${isActive ? ' active' : ''}`}>
+                    <NavLink key={item.key} to={item.to} className={({ isActive }) => `sidelist__item${showActive && isActive ? ' active' : ''}`}>
                       <item.icon className="sidelist__icon" aria-hidden="true" />
                       <span>{item.label}</span>
                     </NavLink>
@@ -349,7 +350,7 @@ function Sidebar({ open, user }) {
                         <NavLink
                           key={item.key}
                           to={item.to}
-                          className={({ isActive }) => `sidelist__item${isActive ? ' active' : ''}`}
+                          className={({ isActive }) => `sidelist__item${showActive && isActive ? ' active' : ''}`}
                         >
                           <item.icon className="sidelist__icon" aria-hidden="true" />
                           <span>{item.label}</span>
@@ -391,6 +392,7 @@ function Sidebar({ open, user }) {
 
 export default function App() {
   const loc = useLocation();
+  const navigate = useNavigate();
   const isNovo = (loc?.pathname || '').startsWith('/novo');
   const [currentUser, setCurrentUser] = useState(() => getUser());
   const [billingStatus, setBillingStatus] = useState(null);
@@ -400,6 +402,17 @@ export default function App() {
   const isPlanos = (loc?.pathname || '') === '/planos';
   const hideShell = false;
   const topbarRef = useRef(null);
+  const topbarMenuButtonRef = useRef(null);
+  const topbarMenuPanelRef = useRef(null);
+  const [topbarMenuOpen, setTopbarMenuOpen] = useState(false);
+  const [topbarLogoutOpen, setTopbarLogoutOpen] = useState(false);
+  const topbarNavigation = useMemo(() => buildNavigation(currentUser), [currentUser]);
+  const showTopbarActive = !topbarNavigation.isEstab;
+  const handleTopbarLogout = useCallback(() => {
+    setTopbarLogoutOpen(false);
+    try { logout(); } catch {}
+    navigate('/loading?type=logout&next=/', { replace: true });
+  }, [navigate]);
 
   useEffect(() => {
     const handleUserEvent = (event) => {
@@ -585,7 +598,33 @@ const topbarAlert = useMemo(() => {
 
   useEffect(() => {
     updateTopbarHeight();
-  }, [topbarAlert, sidebarOpen, updateTopbarHeight]);
+  }, [topbarAlert, sidebarOpen, topbarMenuOpen, updateTopbarHeight]);
+
+  useEffect(() => {
+    setTopbarMenuOpen(false);
+  }, [loc?.pathname]);
+
+  useEffect(() => {
+    if (!topbarMenuOpen) return undefined;
+    const handleClickOutside = (event) => {
+      const buttonEl = topbarMenuButtonRef.current;
+      const panelEl = topbarMenuPanelRef.current;
+      if (buttonEl && buttonEl.contains(event.target)) return;
+      if (panelEl && panelEl.contains(event.target)) return;
+      setTopbarMenuOpen(false);
+    };
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') {
+        setTopbarMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [topbarMenuOpen]);
 
   return (
     <>
@@ -617,18 +656,91 @@ const topbarAlert = useMemo(() => {
                   <small>Rápido e sem fricção</small>
                 </span>
               </NavLink>
-              <div className="app-topbar__actions">
-                <button
-                  type="button"
-                  className={`theme-toggle${isPlanos ? ' is-disabled' : ''}`}
-                  onClick={isPlanos ? undefined : toggleTheme}
-                  disabled={isPlanos}
-                  aria-label={isPlanos ? 'Tema fixo no modo escuro' : `Ativar tema ${isDark ? 'claro' : 'escuro'}`}
-                  title={isPlanos ? 'Tema fixo no modo escuro' : isDark ? 'Alternar para tema claro' : 'Alternar para tema escuro'}
-                >
-                  {(isPlanos || !isDark) ? <IconMoon aria-hidden="true" /> : <IconSun aria-hidden="true" />}
-                </button>
-              </div>
+              {topbarNavigation.isAuthenticated ? (
+                <div className="app-topbar__menu">
+                  <button
+                    type="button"
+                    className="app-topbar__menu-toggle"
+                    onClick={() => setTopbarMenuOpen((open) => !open)}
+                    aria-expanded={topbarMenuOpen}
+                    aria-controls="app-topbar-menu"
+                    aria-label="Abrir menu"
+                    ref={topbarMenuButtonRef}
+                  >
+                    <IconMenu aria-hidden="true" />
+                  </button>
+                  {topbarMenuOpen && (
+                    <div
+                      className="app-topbar__menu-panel"
+                      id="app-topbar-menu"
+                      role="menu"
+                      aria-label="Menu principal"
+                      ref={topbarMenuPanelRef}
+                    >
+                      <nav className="app-topbar__menu-nav" aria-label="Navegacao principal">
+                        <div className="sidelist">
+                          {topbarNavigation.sections.map((section) => (
+                            <div key={section.key} className="sidelist__section">
+                              {section.heading && <div className="sidelist__heading">{section.heading}</div>}
+                              {section.items.map((item) => {
+                                if (item.type === 'action') {
+                                  return (
+                                    <button
+                                      key={item.key}
+                                      type="button"
+                                      className="sidelist__item sidelist__item--danger"
+                                      onClick={() => {
+                                        setTopbarMenuOpen(false);
+                                        setTopbarLogoutOpen(true);
+                                      }}
+                                    >
+                                      <item.icon className="sidelist__icon" aria-hidden="true" />
+                                      <span>{item.label}</span>
+                                    </button>
+                                  );
+                                }
+                                return (
+                                  <NavLink
+                                    key={item.key}
+                                    to={item.to}
+                                    className={({ isActive }) => `sidelist__item${showTopbarActive && isActive ? ' active' : ''}`}
+                                    onClick={() => setTopbarMenuOpen(false)}
+                                  >
+                                    <item.icon className="sidelist__icon" aria-hidden="true" />
+                                    <span>{item.label}</span>
+                                  </NavLink>
+                                );
+                              })}
+                            </div>
+                          ))}
+                        </div>
+                      </nav>
+                      {topbarNavigation.isAuthenticated && (
+                        <>
+                          <div className="app-topbar__menu-divider" />
+                          <div className="app-topbar__actions">
+                            <button
+                              type="button"
+                              className={`theme-toggle${isPlanos ? ' is-disabled' : ''}`}
+                              onClick={isPlanos ? undefined : toggleTheme}
+                              disabled={isPlanos}
+                              aria-label={isPlanos ? 'Tema fixo no modo escuro' : `Ativar tema ${isDark ? 'claro' : 'escuro'}`}
+                              title={isPlanos ? 'Tema fixo no modo escuro' : isDark ? 'Alternar para tema claro' : 'Alternar para tema escuro'}
+                            >
+                              {(isPlanos || !isDark) ? <IconMoon aria-hidden="true" /> : <IconSun aria-hidden="true" />}
+                            </button>
+                            <span className="app-topbar__theme-label">{(isPlanos || isDark) ? 'Tema escuro' : 'Tema claro'}</span>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <NavLink to="/login" className="btn btn--primary btn--sm app-topbar__login">
+                  Login
+                </NavLink>
+              )}
             </div>
             {topbarAlert && (
               <div className={`app-topbar__alert app-topbar__alert--${topbarAlert.variant}`}>
@@ -639,6 +751,18 @@ const topbarAlert = useMemo(() => {
               </div>
             )}
           </div>
+          {topbarLogoutOpen && (
+            <Modal
+              title="Sair da conta"
+              onClose={() => setTopbarLogoutOpen(false)}
+              actions={[
+                <button key="cancel" className="btn btn--outline" onClick={() => setTopbarLogoutOpen(false)}>Cancelar</button>,
+                <button key="confirm" className="btn btn--danger" onClick={handleTopbarLogout}>Sair</button>,
+              ]}
+            >
+              <p>Tem certeza que deseja sair?</p>
+            </Modal>
+          )}
           <BillingStatusBanner status={billingStatus} user={currentUser} planInfo={planBarInfo} />
           <div className="container">
             <Suspense
@@ -661,7 +785,6 @@ const topbarAlert = useMemo(() => {
           </div>
         </main>
       </div>
-      {!hideShell && <MobileNavBar user={currentUser} />}
     </>
   );
 }
