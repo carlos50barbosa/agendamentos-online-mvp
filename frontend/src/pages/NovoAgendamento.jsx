@@ -3119,7 +3119,19 @@ useEffect(() => {
                     <span>{(selectedEstablishmentName || 'AO').slice(0, 2).toUpperCase()}</span>
                   )}
                 </button>
-                <span className="novo-agendamento__summary-head-spacer" aria-hidden="true" />
+                {isOwnerViewing ? (
+                  <Link
+                    to="/configuracoes"
+                    state={{ focusSection: 'profile' }}
+                    className="novo-agendamento__summary-head-action"
+                    title="Editar foto do perfil"
+                    aria-label="Editar foto do perfil"
+                  >
+                    <IconGear aria-hidden style={{ width: 18, height: 18 }} />
+                  </Link>
+                ) : (
+                  <span className="novo-agendamento__summary-head-spacer" aria-hidden="true" />
+                )}
               </div>
               
               <div className="novo-agendamento__summary-content">
@@ -3154,41 +3166,30 @@ useEffect(() => {
                     Informações
                   </button>
                   {isOwnerViewing && (
-                    <>
-                      <Link
-                        to="/configuracoes"
-                        state={{ focusSection: 'profile' }}
-                        className="summary-action"
-                        title="Editar foto do perfil"
+                    <button
+                      type="button"
+                      className={`summary-action${publicShareLink ? '' : ' summary-action--muted'}`}
+                      onClick={handleSharePublicPage}
+                      disabled={!publicShareLink}
+                      title={publicShareLink ? 'Compartilhar p?gina do estabelecimento' : 'Link indispon?vel'}
+                    >
+                      <svg
+                        aria-hidden="true"
+                        width="14"
+                        height="14"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
                       >
-                        <IconGear aria-hidden style={{ width: 14, height: 14, color: '#6c2bd9' }} />
-                        Editar foto
-                      </Link>
-                      <button
-                        type="button"
-                        className={`summary-action${publicShareLink ? '' : ' summary-action--muted'}`}
-                        onClick={handleSharePublicPage}
-                        disabled={!publicShareLink}
-                        title={publicShareLink ? 'Compartilhar p?gina do estabelecimento' : 'Link indispon?vel'}
-                      >
-                        <svg
-                          aria-hidden="true"
-                          width="14"
-                          height="14"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                        >
-                          <path d="M4 12v7a1 1 0 001 1h14a1 1 0 001-1v-7" />
-                          <path d="M16 6l-4-4-4 4" />
-                          <path d="M12 2v14" />
-                        </svg>
-                        Compartilhar
-                      </button>
-                    </>
+                        <path d="M4 12v7a1 1 0 001 1h14a1 1 0 001-1v-7" />
+                        <path d="M16 6l-4-4-4 4" />
+                        <path d="M12 2v14" />
+                      </svg>
+                      Compartilhar
+                    </button>
                   )}
                   {!isAuthenticated ? (
                     <Link to={loginHref} className="summary-action">
