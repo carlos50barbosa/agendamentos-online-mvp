@@ -983,7 +983,7 @@ function ProfessionalAgendaView({
       .catch(() => {
         if (!cancelled) {
           setServices([])
-          setServicesError('Nao foi possivel carregar os servicos.')
+          setServicesError('Não foi possível carregar os serviços.')
         }
       })
       .finally(() => {
@@ -1311,7 +1311,7 @@ function ProfessionalAgendaView({
         if (cancelled) return
         setSelfBookingSlots([])
         setSelfBookingSlotsLoading(false)
-        setSelfBookingSlotsError('Nao foi possivel carregar os horarios.')
+        setSelfBookingSlotsError('Não foi possível carregar os horários.')
       })
     return () => {
       cancelled = true
@@ -1520,7 +1520,7 @@ function ProfessionalAgendaView({
   const modalTitleId = selectedEvent?.id ? `agenda-modal-title-${selectedEvent.id}` : 'agenda-modal-title'
   const selfBookingTitleId = 'agenda-self-booking-title'
   const whatsappLink = selectedEvent ? buildWhatsappLink(selectedEvent) : null
-  const whatsappLabel = whatsappLink ? 'WhatsApp' : 'Telefone nao informado'
+  const whatsappLabel = whatsappLink ? 'WhatsApp' : 'Telefone não informado'
   const canReschedule =
     Boolean(selectedEvent) &&
     !selectedEventStatus?.isCancelled &&
@@ -1540,20 +1540,20 @@ function ProfessionalAgendaView({
   const handleRescheduleSelected = async () => {
     if (!selectedEvent || rescheduleSaving || !canReschedule) return
     if (selectedEventHasStarted) {
-      setRescheduleError('Reagendamento indisponivel: horario ja iniciado.')
+      setRescheduleError('Reagendamento indisponível: horário já iniciado.')
       return
     }
     if (!rescheduleDate || !rescheduleTime) {
-      setRescheduleError('Informe data e horario.')
+      setRescheduleError('Informe data e horário.')
       return
     }
     const localDateTime = new Date(`${rescheduleDate}T${rescheduleTime}:00`)
     if (!Number.isFinite(localDateTime.getTime())) {
-      setRescheduleError('Data/hora invalida.')
+      setRescheduleError('Data/hora inválida.')
       return
     }
     if (localDateTime.getTime() <= Date.now()) {
-      setRescheduleError('Nao e possivel reagendar no passado.')
+      setRescheduleError('Não é possível reagendar no passado.')
       return
     }
     const payload = { inicio: localDateTime.toISOString() }
@@ -1601,7 +1601,7 @@ function ProfessionalAgendaView({
       }
       setRescheduleOpen(false)
     } catch (err) {
-      const msg = err?.data?.message || err?.message || 'Nao foi possivel reagendar.'
+      const msg = err?.data?.message || err?.message || 'Não foi possível reagendar.'
       setRescheduleError(msg)
     } finally {
       setRescheduleSaving(false)
@@ -1618,7 +1618,7 @@ function ProfessionalAgendaView({
       await onForceCancel(selectedEvent.id)
       setSelectedEvent((prev) => (prev ? { ...prev, status: 'cancelado' } : prev))
     } catch (err) {
-      const msg = err?.data?.message || err?.message || 'Nao foi possivel cancelar.'
+      const msg = err?.data?.message || err?.message || 'Não foi possível cancelar.'
       window.alert(msg)
     } finally {
       setCancelling(false)
@@ -1670,7 +1670,7 @@ function ProfessionalAgendaView({
     const telefone = normalizePhoneDigits(selfBookingPhone)
     const servicoIdNum = Number(selfBookingServiceId)
     if (!servicoIdNum) {
-      setSelfBookingError('Selecione um servico.')
+      setSelfBookingError('Selecione um serviço.')
       return
     }
     const selectedSlotIso =
@@ -1789,7 +1789,7 @@ function ProfessionalAgendaView({
       const msg =
         err?.data?.message ||
         err?.message ||
-        'Nao foi possivel criar o agendamento.'
+        'Não foi possível criar o agendamento.'
       setSelfBookingError(msg)
     } finally {
       setSelfBookingSaving(false)
@@ -1946,7 +1946,7 @@ function ProfessionalAgendaView({
               <div className="pro-agenda__modal-label">Dados do agendamento</div>
               <div className="pro-agenda__modal-reschedule-grid">
                 <label className="label">
-                  <span>Servico</span>
+                  <span>Serviço</span>
                   <select
                     className="input"
                     value={selfBookingServiceId}
@@ -1959,12 +1959,12 @@ function ProfessionalAgendaView({
                       {servicesLoading
                         ? 'Carregando...'
                         : services.length
-                        ? 'Selecione um servico'
-                        : 'Nenhum servico cadastrado'}
+                        ? 'Selecione um serviço'
+                        : 'Nenhum serviço cadastrado'}
                     </option>
                     {services.map((svc) => (
                       <option key={svc.id} value={svc.id}>
-                        {svc?.nome || svc?.title || 'Servico'}
+                        {svc?.nome || svc?.title || 'Serviço'}
                       </option>
                     ))}
                   </select>
@@ -1990,7 +1990,7 @@ function ProfessionalAgendaView({
                   </label>
                 )}
               </div>
-              <div className="pro-agenda__modal-label" style={{ marginTop: 12 }}>Data e horario</div>
+              <div className="pro-agenda__modal-label" style={{ marginTop: 12 }}>Data e horário</div>
               <div className="novo-agendamento__calendar">
                 <div className="month card" style={{ padding: 8, marginBottom: 8 }}>
                   <div className="row spread" style={{ alignItems: 'center', marginBottom: 6 }}>
@@ -2078,13 +2078,13 @@ function ProfessionalAgendaView({
                   </h3>
                   {selfBookingSelectedDate ? (
                     serviceProfessionals.length > 0 && !selfBookingProfessionalId ? (
-                      <div className="empty">Selecione um profissional para ver os horarios.</div>
+                      <div className="empty">Selecione um profissional para ver os horários.</div>
                     ) : (
                       <div className="slots--grid">
                         {selfBookingSlotsLoading ? (
                           Array.from({ length: 8 }).map((_, i) => <div key={i} className="shimmer pill" />)
                         ) : selfBookingSlotsForDay.length === 0 ? (
-                          <div className="empty">Sem horarios para este dia.</div>
+                          <div className="empty">Sem horários para este dia.</div>
                         ) : (
                           selfBookingSlotsForDay.map((slot) => {
                             const slotDisabled = !inBusinessHours(slot.datetime, workingSchedule, selfBookingServiceDuration)
@@ -2333,11 +2333,11 @@ function ProfessionalAgendaView({
                 </div>
                 <div>
                   <div className="pro-agenda__modal-label">Cliente</div>
-                  <div className="pro-agenda__modal-value">{selectedEvent?.client || 'Nao informado'}</div>
+                  <div className="pro-agenda__modal-value">{selectedEvent?.client || 'Não informado'}</div>
                 </div>
                 <div>
                   <div className="pro-agenda__modal-label">Serviço</div>
-                  <div className="pro-agenda__modal-value">{selectedEvent?.service || 'Servico'}</div>
+                  <div className="pro-agenda__modal-value">{selectedEvent?.service || 'Serviço'}</div>
                 </div>
               </div>
               {canReschedule && (
