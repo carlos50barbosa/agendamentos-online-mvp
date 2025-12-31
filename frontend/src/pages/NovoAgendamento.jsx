@@ -5,7 +5,7 @@ import { Api, resolveAssetUrl } from "../utils/api";
 import { getUser } from "../utils/auth";
 import Modal from "../components/Modal.jsx";
 import EstablishmentsHero from "../components/EstablishmentsHero.jsx";
-import { IconMapPin, IconList, IconStar, IconPhone } from "../components/Icons.jsx";
+import { IconMapPin, IconList, IconStar, IconPhone, IconGear } from "../components/Icons.jsx";
 const FAVORITES_CACHE_KEY = 'ao:favorites_local';
 const ESTABLISHMENTS_PAGE_SIZE_MOBILE = 8;
 const ESTABLISHMENTS_PAGE_SIZE_DESKTOP = 20;
@@ -222,6 +222,15 @@ const normalizeText = (value) =>
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase();
+const toSlug = (value = '') => {
+  const normalized = String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return normalized || 'estabelecimento';
+};
 const normalizeDayToken = (value) => normalizeText(value).replace(/[^a-z0-9]/g, '');
 const DAY_TOKEN_MAP = Object.freeze({
   sunday: ['domingo', 'dom', 'domingo-feira', 'sun', 'sunday'],
@@ -1093,6 +1102,38 @@ export default function NovoAgendamento() {
   const selectedProfessionals = selectedEstablishmentId ? professionalsByEstab[selectedEstablishmentId] : null;
   const profileData = selectedExtras?.profile || null;
   const galleryImages = Array.isArray(selectedExtras?.gallery) ? selectedExtras.gallery : [];
+  const publicShareLink = useMemo(() => {
+    if (!isOwnerViewing) return '';
+    const id = selectedEstablishmentId || (user?.id ? String(user.id) : '');
+    if (!id) return '';
+    let origin = 'https://agendamentosonline.com';
+    if (typeof window !== 'undefined') {
+      const currentOrigin = window.location?.origin || '';
+      if (currentOrigin.includes('agendamentosonline.com')) origin = currentOrigin;
+    }
+    const slugSource =
+      selectedEstablishment?.slug ||
+      user?.slug ||
+      selectedEstablishmentName ||
+      user?.nome ||
+      '';
+    const targetSlug = toSlug(slugSource || `estabelecimento-${id}`);
+    try {
+      const url = new URL(`/novo/${targetSlug}`, origin);
+      url.searchParams.set('estabelecimento', id);
+      return url.toString();
+    } catch {
+      return '';
+    }
+  }, [
+    isOwnerViewing,
+    selectedEstablishmentId,
+    selectedEstablishment?.slug,
+    selectedEstablishmentName,
+    user?.id,
+    user?.nome,
+    user?.slug,
+  ]);
   const rawHorarios = useMemo(
     () => (Array.isArray(profileData?.horarios) ? profileData.horarios : []),
     [profileData?.horarios]
@@ -1374,6 +1415,33 @@ export default function NovoAgendamento() {
   useEffect(() => () => {
     if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
   }, []);
+  const handleSharePublicPage = useCallback(async () => {
+    if (!publicShareLink) return;
+    const shareTitle = selectedEstablishmentName || 'Meu estabelecimento';
+    if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
+      try {
+        await navigator.share({
+          title: shareTitle,
+          text: `Agende com ${shareTitle}.`,
+          url: publicShareLink,
+        });
+        showToast('success', 'Link compartilhado.');
+        return;
+      } catch (err) {
+        if (err?.name === 'AbortError') return;
+      }
+    }
+    try {
+      if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(publicShareLink);
+        showToast('success', 'Link copiado para a área de transferência.');
+        return;
+      }
+      showToast('info', 'Copie o link da barra de endereços para compartilhar.');
+    } catch (err) {
+      showToast('error', 'Não foi possível copiar o link agora.');
+    }
+  }, [publicShareLink, selectedEstablishmentName, showToast]);
   /* ====== Carregar Estabelecimentos ====== */
   useEffect(() => {
     let cancelled = false;
@@ -2077,9 +2145,9 @@ useEffect(() => {
           loading: false,
           step: "success",
           error: "",
-          info: "Enviamos um email de confirmacao. Confirme em ate 10 minutos.",
+          info: "Enviamos um email de confirmação. Confirme em até 10 minutos.",
         }));
-        showToast("success", "Agendamento realizado! Confira seu email e confirme em ate 10 minutos.");
+        showToast("success", "Agendamento realizado! Confira seu email e confirme em até 10 minutos.");
       } catch (e) {
         if (e?.data?.error === 'plan_limit_agendamentos') {
           const message = e?.data?.message || 'Limite de agendamentos do plano atingido.';
@@ -3085,6 +3153,43 @@ useEffect(() => {
                     <IconList aria-hidden style={{ width: 14, height: 14, color: '#6c2bd9' }} />
                     Informações
                   </button>
+                  {isOwnerViewing && (
+                    <>
+                      <Link
+                        to="/configuracoes"
+                        state={{ focusSection: 'profile' }}
+                        className="summary-action"
+                        title="Editar foto do perfil"
+                      >
+                        <IconGear aria-hidden style={{ width: 14, height: 14, color: '#6c2bd9' }} />
+                        Editar foto
+                      </Link>
+                      <button
+                        type="button"
+                        className={`summary-action${publicShareLink ? '' : ' summary-action--muted'}`}
+                        onClick={handleSharePublicPage}
+                        disabled={!publicShareLink}
+                        title={publicShareLink ? 'Compartilhar p?gina do estabelecimento' : 'Link indispon?vel'}
+                      >
+                        <svg
+                          aria-hidden="true"
+                          width="14"
+                          height="14"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        >
+                          <path d="M4 12v7a1 1 0 001 1h14a1 1 0 001-1v-7" />
+                          <path d="M16 6l-4-4-4 4" />
+                          <path d="M12 2v14" />
+                        </svg>
+                        Compartilhar
+                      </button>
+                    </>
+                  )}
                   {!isAuthenticated ? (
                     <Link to={loginHref} className="summary-action">
                       <span aria-hidden>♡</span>
@@ -3705,7 +3810,7 @@ useEffect(() => {
               </div>
               <h3>Agendamento realizado</h3>
               <p style={{ marginTop: 6 }}>
-                Enviamos um email de confirmacao. Confirme em ate 10 minutos. Se nao aparecer em alguns minutos, confira o spam ou reencontre o link mais tarde.
+                Enviamos um email de confirmação. Confirme em até 10 minutos. Se não aparecer em alguns minutos, confira o spam ou reencontre o link mais tarde.
               </p>
               <div className="row" style={{ justifyContent: 'flex-end', gap: 8, marginTop: 12 }}>
                 <button type="button" className="btn btn--primary" onClick={handleCloseGuestModal}>
@@ -3825,7 +3930,7 @@ useEffect(() => {
                   onClick={() => setShowGuestOptional((prev) => !prev)}
                   disabled={guestModal.loading}
                 >
-                  {showGuestOptional ? 'Ocultar dados opcionais' : 'Ver dados opcionais'}
+                  {showGuestOptional ? 'Ocultar dados opcionais' : 'Adicionar dados opcionais'}
                 </button>
               </div>
               {showGuestOptional && (

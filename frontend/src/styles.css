@@ -2679,6 +2679,14 @@ button.danger:disabled,
   background: rgba(2,6,23,.03);
 }
 
+.dashboard-pro .pro-agenda__filter-avatar--fallback.pro-agenda__filter-avatar--all{
+  font-size:10px;
+}
+
+.dashboard-pro .pro-agenda__filter-text--all{
+  font-size: var(--agenda-font-xs);
+}
+
 .dashboard-pro .pro-agenda__filter-menu{
   position:absolute;
   top:110%;
@@ -3117,6 +3125,24 @@ button.danger:disabled,
 
 .dashboard-pro .pro-agenda .btn{
   min-height: var(--agenda-tap);
+}
+
+.dashboard-pro .pro-agenda__modal-actions{
+  gap:4px;
+  flex-wrap: nowrap;
+  padding:8px 10px 10px;
+}
+
+.dashboard-pro .pro-agenda__modal-actions .btn{
+  min-height: 26px;
+  padding: 3px 6px;
+  font-size: 10px;
+  line-height: 1.1;
+  white-space: normal;
+  text-align: center;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .dashboard-pro .modal__close{
@@ -4602,6 +4628,59 @@ button.danger:disabled,
 @media (max-width: 420px){
   .dashboard-pro .agenda-segmented{
     grid-template-columns: none !important;
+  }
+  .dashboard-pro .pro-agenda__toolbar-row--bottom{
+    flex-wrap: nowrap;
+    gap: 4px;
+  }
+  .dashboard-pro .pro-agenda__nav{
+    gap: 4px;
+    flex: 0 0 auto;
+  }
+  .dashboard-pro .pro-agenda__mini{
+    width: 30px;
+    height: 30px;
+    font-size: 14px;
+    border-radius: 10px;
+  }
+  .dashboard-pro .pro-agenda__btn{
+    min-height: 30px;
+    padding: 0 6px;
+    font-size: 11px;
+    border-radius: 10px;
+  }
+  .dashboard-pro .pro-agenda__date-pill{
+    flex: 1 1 auto;
+    min-width: 0;
+    max-width: none;
+    min-height: 30px;
+    padding: 0 6px;
+    font-size: 11px;
+    gap: 4px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .dashboard-pro .pro-agenda__add{
+    margin-left: 0;
+    min-height: 30px;
+    min-width: 30px;
+    padding: 0 6px;
+    border-radius: 10px;
+  }
+  .dashboard-pro .modal__actions.pro-agenda__modal-actions{
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 3px;
+    padding: 6px 8px 8px;
+  }
+  .dashboard-pro .modal__actions.pro-agenda__modal-actions .btn{
+    width: 100%;
+    min-width: 0;
+    min-height: 24px;
+    padding: 2px 4px;
+    font-size: 9px;
+    line-height: 1.05;
   }
 }
 

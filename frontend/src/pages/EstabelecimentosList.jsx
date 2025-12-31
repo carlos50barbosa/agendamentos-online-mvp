@@ -301,8 +301,8 @@ export default function EstabelecimentosList() {
               overflow: 'hidden',
               borderRadius: 14,
               padding: 16,
-              background: 'linear-gradient(135deg, #111827, #1d2539)',
-              color: '#e5e7eb',
+              background: 'linear-gradient(135deg, #1f1408, #3a220c)',
+              color: '#fef3c7',
               boxShadow: '0 18px 36px rgba(0,0,0,0.28)',
             }}
           >
@@ -312,27 +312,27 @@ export default function EstabelecimentosList() {
                 position: 'absolute',
                 inset: 0,
                 background:
-                  'radial-gradient(280px at 12% 18%, rgba(129,140,248,0.28), transparent 50%), radial-gradient(220px at 82% 18%, rgba(16,185,129,0.24), transparent 50%), radial-gradient(320px at 52% 90%, rgba(14,165,233,0.22), transparent 55%)',
+                  'radial-gradient(280px at 12% 18%, rgba(251,191,36,0.35), transparent 50%), radial-gradient(220px at 82% 18%, rgba(245,158,11,0.28), transparent 50%), radial-gradient(320px at 52% 90%, rgba(252,211,77,0.22), transparent 55%)',
               }}
             />
             <div style={{ position: 'relative', display: 'grid', gap: 10 }}>
-              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '6px 10px', borderRadius: 12, background: 'rgba(255,255,255,0.08)', width: 'fit-content', fontSize: 12, letterSpacing: '.04em', textTransform: 'uppercase' }}>
-                <span style={{ width: 10, height: 10, borderRadius: '50%', background: '#22c55e', boxShadow: '0 0 0 6px rgba(34,197,94,0.16)' }} />
-                Bem-vindo(a)
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '6px 10px', borderRadius: 12, background: 'rgba(251,191,36,0.18)', width: 'fit-content', fontSize: 12, letterSpacing: '.04em', textTransform: 'uppercase' }}>
+                <span style={{ width: 10, height: 10, borderRadius: '50%', background: '#fbbf24', boxShadow: '0 0 0 6px rgba(251,191,36,0.2)' }} />
+                Feliz Ano Novo
               </div>
-              <h3 style={{ margin: 0, fontSize: 20, lineHeight: 1.3, color: '#f8fafc' }}>
-                Agendamentos Online chegou para facilitar seus horários.
+              <h3 style={{ margin: 0, fontSize: 20, lineHeight: 1.3, color: '#fff7d1' }}>
+                Feliz Ano Novo! Que 2025 traga agenda cheia e muito sucesso.
               </h3>
-              <p style={{ margin: 0, fontSize: 14, lineHeight: 1.6, color: '#cbd5e1' }}>
-                Monte sua agenda, confirme clientes e deixe que a plataforma cuida do resto. Em breve, mais novidades e parcerias exclusivas.
+              <p style={{ margin: 0, fontSize: 14, lineHeight: 1.6, color: '#fde68a' }}>
+                Obrigado por fazer parte. Estamos preparando novidades douradas para deixar seus horários ainda mais práticos.
               </p>
               <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 4 }}>
-                <div style={{ width: 52, height: 52, borderRadius: 14, background: 'rgba(255,255,255,0.08)', display: 'grid', placeItems: 'center', boxShadow: '0 12px 28px rgba(0,0,0,0.24)' }}>
+                <div style={{ width: 52, height: 52, borderRadius: 14, background: 'rgba(251,191,36,0.16)', display: 'grid', placeItems: 'center', boxShadow: '0 12px 28px rgba(0,0,0,0.24)' }}>
                   <LogoAO size={28} />
                 </div>
                 <div style={{ display: 'grid', gap: 4 }}>
-                  <strong style={{ color: '#f8fafc', fontSize: 14 }}>Acompanhe por aqui</strong>
-                  <span style={{ color: '#cbd5e1', fontSize: 12 }}>Novos recursos e integrações aparecem primeiro neste espaço.</span>
+                  <strong style={{ color: '#fff7d1', fontSize: 14 }}>Acompanhe por aqui</strong>
+                  <span style={{ color: '#fde68a', fontSize: 12 }}>Novos recursos para 2025 aparecem primeiro neste espaço.</span>
                 </div>
               </div>
             </div>

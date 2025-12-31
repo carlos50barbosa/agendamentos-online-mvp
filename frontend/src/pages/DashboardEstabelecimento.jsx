@@ -1819,11 +1819,15 @@ function ProfessionalAgendaView({
                 {selectedResource?.avatar ? (
                   <img src={selectedResource.avatar} alt={selectedResource.title} className="pro-agenda__filter-avatar" />
                 ) : (
-                  <div className="pro-agenda__filter-avatar pro-agenda__filter-avatar--fallback">
+                  <div
+                    className={`pro-agenda__filter-avatar pro-agenda__filter-avatar--fallback${resourceFilter === 'all' ? ' pro-agenda__filter-avatar--all' : ''}`}
+                  >
                     {(selectedResource?.title || 'Todos').slice(0, 2).toUpperCase()}
                   </div>
                 )}
-                <span>{selectedResource?.title || 'Todos profissionais'}</span>
+                <span className={resourceFilter === 'all' ? 'pro-agenda__filter-text--all' : undefined}>
+                  {selectedResource?.title || 'Todos profissionais'}
+                </span>
                 <span className="pro-agenda__caret" aria-hidden="true">v</span>
               </button>
               {filterOpen && (
@@ -1833,8 +1837,8 @@ function ProfessionalAgendaView({
                     className={`pro-agenda__filter-option ${resourceFilter === 'all' ? 'is-active' : ''}`}
                     onClick={() => handleSelectResource('all')}
                   >
-                    <div className="pro-agenda__filter-avatar pro-agenda__filter-avatar--fallback">TO</div>
-                    <span>Todos profissionais</span>
+                    <div className="pro-agenda__filter-avatar pro-agenda__filter-avatar--fallback pro-agenda__filter-avatar--all">TO</div>
+                    <span className="pro-agenda__filter-text--all">Todos profissionais</span>
                   </button>
                   {resources.map((res) => (
                     <button
@@ -2157,7 +2161,7 @@ function ProfessionalAgendaView({
                   onClick={() => setShowSelfBookingOptional((prev) => !prev)}
                   disabled={selfBookingSaving}
                 >
-                  {showSelfBookingOptional ? 'Ocultar dados opcionais' : 'Ver dados opcionais'}
+                  {showSelfBookingOptional ? 'Ocultar dados opcionais' : 'Adicionar dados opcionais'}
                 </button>
               </div>
               {showSelfBookingOptional && (
@@ -2339,14 +2343,13 @@ function ProfessionalAgendaView({
               {canReschedule && (
                 <div className="pro-agenda__modal-reschedule">
                   <div className="pro-agenda__modal-reschedule-head">
-                    <div className="pro-agenda__modal-label">Alterar data/hora</div>
                     <button
                       type="button"
-                      className="btn btn--outline"
+                      className="btn btn--outline btn--sm"
                       onClick={handleToggleReschedule}
                       disabled={rescheduleDisabled}
                     >
-                      {rescheduleOpen ? 'Cancelar alteracao' : 'Alterar data/hora'}
+                      {rescheduleOpen ? 'Cancelar alteração' : 'Alterar data/hora'}
                     </button>
                   </div>
                   {rescheduleOpen && (
@@ -2390,21 +2393,21 @@ function ProfessionalAgendaView({
                 </div>
               )}
             </div>
-            <div className="modal__actions">
+            <div className="modal__actions pro-agenda__modal-actions">
               {rescheduleOpen && (
                 <button
                   type="button"
-                  className="btn btn--primary"
+                  className="btn btn--primary btn--sm"
                   onClick={handleRescheduleSelected}
                   disabled={rescheduleSaving}
                 >
-                  {rescheduleSaving ? 'Salvando...' : 'Salvar novo horário'}
+                  {rescheduleSaving ? 'Salvando...' : 'Salvar'}
                 </button>
               )}
               {!selectedEventStatus?.isCancelled && (
                 <button
                   type="button"
-                  className="btn pro-agenda__modal-cancel"
+                  className="btn pro-agenda__modal-cancel btn--sm"
                   onClick={handleCancelSelected}
                   disabled={cancelling || selectedEventHasStarted}
                 >
@@ -2413,7 +2416,7 @@ function ProfessionalAgendaView({
               )}
               <button
                 type="button"
-                className="btn pro-agenda__modal-whatsapp"
+                className="btn pro-agenda__modal-whatsapp btn--sm"
                 onClick={handleWhatsapp}
                 disabled={!whatsappLink}
                 title={whatsappLabel}
@@ -2421,7 +2424,7 @@ function ProfessionalAgendaView({
               >
                 WhatsApp
               </button>
-              <button type="button" className="btn btn--outline" onClick={handleCloseDetails}>
+              <button type="button" className="btn btn--outline btn--sm" onClick={handleCloseDetails}>
                 Fechar
               </button>
             </div>

@@ -1930,7 +1930,7 @@ useEffect(() => {
               otpCode: "",
               otpToken: "",
               error: "",
-              info: "Enviamos um cÃ³digo para seu email. Digite para confirmar.",
+              info: "Enviamos um código para seu email. Digite para confirmar.",
             }));
           } catch {
             setGuestModal((prev) => ({

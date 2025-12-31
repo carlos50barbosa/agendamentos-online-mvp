@@ -1620,7 +1620,7 @@ export default function Configuracoes() {
               </button>
             ) : (
               <button type="button" className="btn btn--ghost btn--sm" onClick={resetPasswordFields}>
-                Cancelar alteracao
+                Cancelar alteração
               </button>
             )}
           </div>
