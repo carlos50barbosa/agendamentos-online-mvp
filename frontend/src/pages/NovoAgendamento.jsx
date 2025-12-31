@@ -3159,11 +3159,11 @@ useEffect(() => {
                       <path d="M7 15l3-3 4 4 3-3 3 3" />
                       <circle cx="9" cy="9" r="1.5" />
                     </svg>
-                    Ver fotos
+                    Fotos
                   </button>
                   <button type="button" className="summary-action" onClick={handleOpenInfo}>
                     <IconList aria-hidden style={{ width: 14, height: 14, color: '#6c2bd9' }} />
-                    Informações
+                    Inf.
                   </button>
                   {isOwnerViewing && (
                     <button
