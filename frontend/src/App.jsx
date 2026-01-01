@@ -738,7 +738,7 @@ const topbarAlert = useMemo(() => {
                 </div>
               ) : (
                 <NavLink to="/login" className="btn btn--primary btn--sm app-topbar__login">
-                  Login
+                  Login | Cadastro
                 </NavLink>
               )}
             </div>

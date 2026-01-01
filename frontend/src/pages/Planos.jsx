@@ -1,8 +1,11 @@
 
 // src/pages/Planos.jsx
-import React, { useState } from 'react';
+import React, { Suspense, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { getUser } from '../utils/auth';
+
+const PlanosUpperExtras = React.lazy(() => import('./PlanosUpperExtras.jsx'));
+const PlanosLowerExtras = React.lazy(() => import('./PlanosLowerExtras.jsx'));
 
 function Feature({ icon = '✅', children }) {
   return (
@@ -22,118 +25,14 @@ function Stat({ value, label }) {
   );
 }
 
-function BenefitCard({ title, description, items }) {
-  return (
-    <article className="benefit-card">
-      <h3>{title}</h3>
-      <p>{description}</p>
-      <ul>{items.map((item, index) => <Feature key={index}>{item}</Feature>)}</ul>
-    </article>
-  );
-}
-
-function TestimonialCard({ quote, name, role }) {
-  return (
-    <figure className="testimonial-card">
-      <blockquote>“{quote}”</blockquote>
-      <figcaption>
-        <strong>{name}</strong>
-        <span>{role}</span>
-      </figcaption>
-    </figure>
-  );
-}
-
-function FAQItem({ question, answer }) {
-  return (
-    <details className="faq-item">
-      <summary>{question}</summary>
-      <p>{answer}</p>
-    </details>
-  );
-}
-
 const HERO_STATS = [
   { value: '+12k', label: 'agendamentos confirmados todos os meses' },
   { value: '72%', label: 'dos clientes retornam em menos de 3 meses' },
   { value: '3x', label: 'mais agendamentos vindos de canais digitais' },
 ];
 
-const CORE_BENEFITS = [
-  {
-    title: 'Transforme o primeiro contato em fidelização',
-    description: 'Centralize WhatsApp, Instagram, Google e seu site em uma agenda inteligente que responde sozinha e nunca esquece um cliente.',
-    items: [
-      'Link de agendamento personalizado para divulgar nas redes sociais',
-      'Confirmações automáticas por WhatsApp, SMS e e-mail',
-      'Lista de espera inteligente para ocupar horários cancelados',
-    ],
-  },
-  {
-    title: 'Operação eficiente do balcão ao financeiro',
-    description: 'Otimize o tempo da sua equipe com fluxos automatizados e relatórios que mostram onde concentrar esforços.',
-    items: [
-      'Painel em tempo real com profissionais, salas e recursos',
-      'Relatórios de receita, cancelamentos e ticket médio',
-      'Exportação contábil com um clique (CSV, Excel e API)',
-    ],
-  },
-  {
-    title: 'Experiência premium para seus clientes',
-    description: 'Encante em todas as etapas com lembretes gentis, confirmações instantâneas e um checkout sem fricção.',
-    items: [
-      'Chat de pré-atendimento com roteiros salvos para cada serviço',
-      'Pesquisa de satisfação pós-atendimento automática',
-      'Integração com carteiras digitais e pagamento na reserva',
-    ],
-  },
-];
 
-const TESTIMONIALS = [
-  {
-    quote: 'Triplicamos a base de clientes recorrentes sem contratar mais recepcionistas. A agenda online virou nosso melhor vendedor.',
-    name: 'Vanessa Moura',
-    role: 'Diretora do Espaço Essência (SP)',
-  },
-  {
-    quote: 'Os lembretes automáticos reduziram faltas em 63%. Hoje temos previsibilidade para investir em mídia e equipe.',
-    name: 'Paulo Martins',
-    role: 'Fundador do Studio Barber Pro (BH)',
-  },
-  {
-    quote: 'Organizamos 14 unidades com o mesmo padrão de atendimento. Os relatórios deram clareza para acelerar a expansão.',
-    name: 'Luciana Pereira',
-    role: 'COO da rede SunNails',
-  },
-];
 
-const FAQS = [
-  {
-    question: 'Preciso trocar todas as minhas ferramentas para usar o Agendamentos Online?',
-    answer: 'Não. Dá para começar usando apenas o que já oferecemos hoje (agenda online, notificações e relatórios) e manter as demais ferramentas que você utiliza no dia a dia. Assim que novas integrações ficarem disponíveis ajudamos você a conectar tudo com segurança.',
-  },
-  {
-    question: 'Existe taxa de implantação ou contrato de fidelidade?',
-    answer: 'Não existem taxas escondidas e o contrato é mensal. No plano Premium oferecemos onboarding assistido e migração personalizada já inclusos na mensalidade.',
-  },
-  {
-    question: 'Consigo testar com minha equipe antes de decidir?',
-    answer: 'Sim! Todos os planos têm 7 dias grátis com acesso completo. Nesse período nosso time de sucesso acompanha a configuração e apresenta as melhores práticas para seu segmento.',
-  },
-  {
-    question: 'Como funcionam upgrades e downgrades de plano?',
-    answer: (
-      <>
-        Upgrades liberam recursos imediatamente e a cobrança do novo valor ocorre no próximo ciclo de faturamento.
-        Downgrades passam a valer no ciclo seguinte, desde que os limites do plano (como quantidade de serviços e profissionais) sejam atendidos.
-        <br />
-        <Link className="btn btn--sm btn--outline" to="/configuracoes" style={{ marginTop: 8 }}>
-          Ir para Configurações
-        </Link>
-      </>
-    ),
-  },
-];
 
 const BILLING_CYCLES = {
   mensal: { label: 'Mensal', periodLabel: '/mês' },
@@ -278,44 +177,9 @@ export default function Planos() {
           </div>
         </div>
       </section>
-
-      <section className="benefits">
-        <div className="section-shell">
-          <header className="section-header">
-            <h2>Resultados previsíveis em cada etapa da jornada</h2>
-            <p>Do primeiro contato até o pós-atendimento, o Agendamentos Online cuida da experiência para você focar no crescimento.</p>
-          </header>
-          <div className="benefits-grid">
-            {CORE_BENEFITS.map((benefit) => (
-              <BenefitCard key={benefit.title} {...benefit} />
-            ))}
-          </div>
-        </div>
-      </section>
-
-      <section className="cta-band">
-        <div className="section-shell cta-band__inner">
-          <div className="cta-band__content">
-            <h2>Seu time no controle, seus clientes encantados</h2>
-            <p>Implantação guiada, suporte humano e insights diários para acelerar decisões.</p>
-          </div>
-          <button className="btn btn--primary btn--lg" onClick={() => nav('/contato?plano=premium')}>Quero falar com o time</button>
-        </div>
-      </section>
-
-      <section className="testimonials">
-        <div className="section-shell">
-          <header className="section-header">
-            <h2>Histórias de estabelecimentos que decidiram crescer com a gente</h2>
-            <p>Mais escala, menos improviso e uma experiência de agendamento que os clientes realmente amam.</p>
-          </header>
-          <div className="testimonials-grid">
-            {TESTIMONIALS.map((item) => (
-              <TestimonialCard key={item.name} {...item} />
-            ))}
-          </div>
-        </div>
-      </section>
+      <Suspense fallback={null}>
+        <PlanosUpperExtras onContactPremium={() => nav('/contato?plano=premium')} />
+      </Suspense>
 
       <section className="pricing" id="planos">
         <div className="section-shell">
@@ -392,33 +256,12 @@ export default function Planos() {
           </div>
         </div>
       </section>
-
-      <section className="faq">
-        <div className="section-shell">
-          <header className="section-header">
-            <h2>Perguntas frequentes</h2>
-            <p>Transparência desde o primeiro contato. Se algo não ficou claro, fale com a gente.</p>
-          </header>
-          <div className="faq-grid">
-            {FAQS.map((item) => (
-              <FAQItem key={item.question} {...item} />
-            ))}
-          </div>
-        </div>
-      </section>
-
-      <section className="cta-final">
-        <div className="section-shell cta-final__inner">
-          <div>
-            <h2>Pronto para lotar a agenda e encantar seus clientes?</h2>
-            <p>Comece hoje com 7 dias grátis. Sem cartão de crédito, sem compromisso.</p>
-          </div>
-          <div className="cta-final__actions">
-            <button className="btn btn--primary btn--lg" onClick={goCheckout('pro')}>Quero testar agora</button>
-            <button className="btn btn--outline btn--lg" onClick={() => nav('/contato')}>Agendar conversa com especialista</button>
-          </div>
-        </div>
-      </section>
+      <Suspense fallback={null}>
+        <PlanosLowerExtras
+          onStartTrial={goCheckout('pro')}
+          onTalkSpecialist={() => nav('/contato')}
+        />
+      </Suspense>
     </div>
   );
 }
