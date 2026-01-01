@@ -321,7 +321,7 @@ export default function EstabelecimentosList() {
                 Feliz Ano Novo
               </div>
               <h3 style={{ margin: 0, fontSize: 20, lineHeight: 1.3, color: '#fff7d1' }}>
-                Feliz Ano Novo! Que 2025 traga agenda cheia e muito sucesso.
+                Feliz Ano Novo! Que 2026 traga agenda cheia e muito sucesso.
               </h3>
               <p style={{ margin: 0, fontSize: 14, lineHeight: 1.6, color: '#fde68a' }}>
                 Obrigado por fazer parte. Estamos preparando novidades douradas para deixar seus horários ainda mais práticos.
