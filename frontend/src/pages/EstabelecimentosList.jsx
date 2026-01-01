@@ -332,7 +332,7 @@ export default function EstabelecimentosList() {
                 </div>
                 <div style={{ display: 'grid', gap: 4 }}>
                   <strong style={{ color: '#fff7d1', fontSize: 14 }}>Acompanhe por aqui</strong>
-                  <span style={{ color: '#fde68a', fontSize: 12 }}>Novos recursos para 2025 aparecem primeiro neste espaço.</span>
+                  <span style={{ color: '#fde68a', fontSize: 12 }}>Novos recursos para 2026 aparecem primeiro neste espaço.</span>
                 </div>
               </div>
             </div>

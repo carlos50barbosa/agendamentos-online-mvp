@@ -131,7 +131,7 @@ const formatPhoneDisplay = (value = '') => {
   if (rest.length <= 4) return `(${ddd}) ${rest}`
   if (rest.length === 7) return `(${ddd}) ${rest.slice(0, 3)}-${rest.slice(3)}`
   if (rest.length === 8) return `(${ddd}) ${rest.slice(0, 4)}-${rest.slice(4)}`
-  if (rest.length === 9) return `(${ddd}) ${rest.slice(0, 6)}-${rest.slice(6)}`
+  if (rest.length === 9) return `(${ddd}) ${rest.slice(0, 5)}-${rest.slice(5)}`
   return `(${ddd}) ${rest.slice(0, rest.length - 4)}-${rest.slice(-4)}`
 }
 
