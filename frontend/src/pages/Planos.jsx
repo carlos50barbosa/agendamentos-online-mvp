@@ -1,4 +1,3 @@
-
 // src/pages/Planos.jsx
 import React, { Suspense, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
@@ -31,9 +30,6 @@ const HERO_STATS = [
   { value: '3x', label: 'mais agendamentos vindos de canais digitais' },
 ];
 
-
-
-
 const BILLING_CYCLES = {
   mensal: { label: 'Mensal', periodLabel: '/mês' },
   anual: { label: 'Anual', periodLabel: '/ano' },
@@ -46,10 +42,11 @@ const PRICING_PLANS = [
     subtitle: 'Para começar com o essencial',
     prices: { mensal: '14,90', anual: '149,00' },
     features: [
-      'Agenda online e confirmações automáticas',
-      'Até 100 agendamentos/mês com até 10 serviços e 2 profissionais',
-      'Lembretes por e-mail',
-      'Lembretes por WhatsApp',
+      'Agendamentos ilimitados no sistema',
+      'Até 2 profissionais',
+      'Inclui 50 agendamentos com WhatsApp/mês (250 mensagens/mês)',
+      'Até 5 mensagens por agendamento (confirmações/lembretes/avisos)',
+      'Ao atingir o limite de WhatsApp, continua por e-mail e painel',
       'Relatórios básicos',
     ],
     annualNote: 'Economize o equivalente a 2 meses no plano anual.',
@@ -61,11 +58,12 @@ const PRICING_PLANS = [
     key: 'pro',
     title: 'Pro',
     subtitle: 'O melhor custo-benefício',
-    prices: { mensal: '49,90', anual: '499,00' },
+    prices: { mensal: '29,90', anual: '299,00' },
     features: [
-      'Tudo do Starter, com até 500 agendamentos/mês',
-      'Até 100 serviços e 10 profissionais',
-      'Lembretes e campanhas por WhatsApp',
+      'Agendamentos ilimitados no sistema',
+      'Até 5 profissionais',
+      'Inclui 100 agendamentos com WhatsApp/mês (500 mensagens/mês)',
+      'Até 5 mensagens por agendamento (confirmações/lembretes/avisos)',
       'Relatórios avançados e indicadores em tempo real',
       'Suporte prioritário via WhatsApp Business',
     ],
@@ -79,19 +77,18 @@ const PRICING_PLANS = [
     key: 'premium',
     title: 'Premium',
     subtitle: 'Para alto volume e franquias',
-    prices: { mensal: '199,00', anual: '1.990,00' },
+    prices: { mensal: '99,90', anual: '999,00' },
     features: [
-      'Agendamentos, serviços e profissionais ilimitados',
-      'Tudo do Pro com integrações personalizadas',
-      'Onboarding assistido e treinamento da equipe',
-      'API e dashboards executivos',
-      'SLA dedicado e gerente de sucesso',
+      'Agendamentos ilimitados no sistema',
+      'Até 10 profissionais',
+      'Inclui 300 agendamentos com WhatsApp/mês (1500 mensagens/mês)',
+      'Até 5 mensagens por agendamento (confirmações/lembretes/avisos)',
+      'Suporte prioritário e onboarding do time',
     ],
     annualNote: 'Economize o equivalente a 2 meses no plano anual.',
     ctaVariant: 'btn btn--outline',
-    ctaLabel: 'Falar com vendas',
-    ctaKind: 'sales',
-    ctaHref: '/contato?plano=premium',
+    ctaLabel: 'Assinar Premium',
+    ctaKind: 'checkout',
   },
 ];
 
@@ -129,7 +126,7 @@ export default function Planos() {
           <div className="hero__badge-row">
             <span className="hero__badge">Implementação guiada em 7 dias</span>
             <span className="hero__badge hero__badge--outline">Sem fidelidade</span>
-            <span className="hero__badge hero__badge--outline">Suporte humano 7×12</span>
+            <span className="hero__badge hero__badge--outline">Suporte humano 7-12</span>
           </div>
           <div className="hero__actions">
             <button className="btn btn--primary btn--lg" onClick={goCheckout('pro')}>Começar teste de 7 dias</button>
@@ -139,7 +136,7 @@ export default function Planos() {
             <div className="alert-inline" role="status">Página pensada para estabelecimentos. Faça login como estabelecimento para contratar um plano.</div>
           )}
           <div className="hero__footnote">
-            <span>7 dias grátis · sem cartão de crédito</span>
+            <span>7 dias grátis — sem cartão de crédito</span>
             <span>Integrações com WhatsApp, Instagram e Google</span>
           </div>
           <div className="stats-grid">

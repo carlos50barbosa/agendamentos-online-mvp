@@ -2,8 +2,13 @@
 import { Router } from 'express'
 import { createHmac, createHash } from 'node:crypto'
 import { auth, isEstabelecimento } from '../middleware/auth.js'
-import { createMercadoPagoPixCheckout, syncMercadoPagoPayment } from '../lib/billing.js'
+import { createMercadoPagoPixCheckout, createMercadoPagoPixTopupCheckout, syncMercadoPagoPayment } from '../lib/billing.js'
 import { notifyEmail } from '../lib/notifications.js'
+import {
+  getWhatsAppWalletSnapshot,
+  WHATSAPP_TOPUP_PACKAGES,
+  listWhatsAppTopups,
+} from '../lib/whatsapp_wallet.js'
 import {
   getPlanContext,
   serializePlanContext,
@@ -23,6 +28,8 @@ import {
 import { pool } from '../lib/db.js'
 import { config } from '../lib/config.js'
 import { resolveBillingState } from '../lib/billing_monitor.js'
+import { BillingService } from '../lib/billing_service.js'
+import { listActiveWhatsAppPacks, findWhatsAppPack } from '../lib/addon_packs.js'
 
 const router = Router()
 const DAY_MS = 86400000
@@ -58,6 +65,8 @@ async function findPendingPixSubscription(estabelecimentoId, { plan, billingCycl
     const status = String(sub.status || '').toLowerCase()
     if (status !== 'pending') continue
     if (!sub.gatewayPreferenceId) continue
+    const ref = String(sub.externalReference || '')
+    if (ref.startsWith('wallet:whatsapp_topup')) continue
     if (targetPlan && normalizePlanKey(sub.plan) !== targetPlan) continue
     if (targetCycle && normalizeBillingCycle(sub.billingCycle) !== targetCycle) continue
     return sub
@@ -78,8 +87,10 @@ function verifyWebhookSignature(req, resourceId) {
   if (!header) return { valid: false, reason: 'missing_signature' }
 
   const parts = String(header)
-    .split(',')
-    .map((segment) => segment.trim().split('='))
+    .split(/[;,]/g) // aceita "," e ";"
+    .map((segment) => segment.trim())
+    .filter(Boolean)
+    .map((segment) => segment.split('='))
     .filter((pair) => pair.length === 2)
 
   const normalizeHeaderVal = (v) => String(v || '').trim().replace(/^"|"$/g, '').replace(/^'|'$/g, '')
@@ -394,6 +405,53 @@ function normalizeResourceCandidate(value) {
   return segments[segments.length - 1]
 }
 
+function serializeWhatsAppPack(pack) {
+  if (!pack) return null
+  const waMessages = Number(pack.waMessages ?? pack.wa_messages ?? pack.messages ?? 0) || 0
+  const priceCents = Number(pack.price_cents ?? pack.priceCents ?? pack.price ?? 0) || 0
+  return {
+    id: pack.id ?? null,
+    code: pack.code || null,
+    name: pack.name || null,
+    price_cents: priceCents,
+    wa_messages: waMessages,
+  }
+}
+
+function serializeTopupHistory(entry) {
+  if (!entry) return null
+  const meta = entry.metadata && typeof entry.metadata === 'object' ? entry.metadata : {}
+  const nestedPack = meta.pack && typeof meta.pack === 'object' ? meta.pack : {}
+  return {
+    id: entry.id ?? null,
+    payment_id: entry.payment_id || null,
+    messages: meta.messages ?? entry.delta ?? null,
+    extra_delta: entry.extra_delta ?? null,
+    pack_code: meta.pack_code || nestedPack.code || null,
+    pack_id: meta.pack_id ?? nestedPack.id ?? null,
+    price_cents: meta.price_cents ?? nestedPack.price_cents ?? null,
+    created_at: entry.created_at || null,
+  }
+}
+
+router.get('/plans', auth, isEstabelecimento, async (_req, res) => {
+  try {
+    const plans = await BillingService.listPlans()
+    return res.json({
+      plans: plans.map((plan) => ({
+        code: plan.code,
+        name: plan.name,
+        price_cents: plan.priceCents,
+        max_professionals: plan.maxProfessionals,
+        included_wa_messages: plan.includedWaMessages,
+      })),
+    })
+  } catch (err) {
+    console.error('GET /billing/plans', err)
+    return res.status(500).json({ error: 'plans_fetch_failed' })
+  }
+})
+
 router.get('/status', auth, isEstabelecimento, async (req, res) => {
   try {
     const ctx = await getPlanContext(req.user.id)
@@ -434,7 +492,15 @@ router.get('/status', auth, isEstabelecimento, async (req, res) => {
 router.get('/subscription', auth, isEstabelecimento, async (req, res) => {
   try {
     const planContext = await getPlanContext(req.user.id)
-    const history = await listSubscriptionsForEstabelecimento(req.user.id)
+    const fullHistory = await listSubscriptionsForEstabelecimento(req.user.id)
+
+    const isWhatsAppTopup = (sub) => {
+      const ref = String(sub?.externalReference || '')
+      return ref.startsWith('wallet:whatsapp_topup')
+    }
+
+    const topups = fullHistory.filter(isWhatsAppTopup)
+    const history = fullHistory.filter((sub) => !isWhatsAppTopup(sub))
 
     // Escolhe uma assinatura "efetiva" priorizando status ativos
     const priority = {
@@ -493,10 +559,63 @@ router.get('/subscription', auth, isEstabelecimento, async (req, res) => {
       }
     }
 
+    let billingPlan = null
+    let professionalsUsage = null
+    try {
+      billingPlan = await BillingService.getCurrentPlan(req.user.id)
+      const totalActive = await BillingService.countActiveProfessionals(req.user.id)
+      professionalsUsage = { total: totalActive, limit: billingPlan?.maxProfessionals ?? null }
+    } catch (err) {
+      console.warn('[billing/subscription][current plan]', err?.message || err)
+    }
+
+    if (serializedPlan) {
+      serializedPlan.limits = serializedPlan.limits || {}
+      serializedPlan.limits.maxProfessionals =
+        billingPlan?.maxProfessionals ?? serializedPlan.limits.maxProfessionals ?? null
+      serializedPlan.usage = serializedPlan.usage || {}
+      if (professionalsUsage) {
+        serializedPlan.usage.professionals = {
+          total: professionalsUsage.total,
+          limit: professionalsUsage.limit,
+        }
+      }
+    }
+
+    let whatsappWallet = null
+    try {
+      whatsappWallet = await getWhatsAppWalletSnapshot(req.user.id, { planContext })
+      if (serializedPlan) {
+        serializedPlan.usage = serializedPlan.usage || {}
+        serializedPlan.usage.whatsapp = whatsappWallet
+      }
+    } catch (err) {
+      console.warn('[billing/subscription][wallet]', err?.message || err)
+    }
+
+    let whatsappPacks = []
+    try {
+      whatsappPacks = await listActiveWhatsAppPacks()
+    } catch (err) {
+      console.warn('[billing/subscription][packs]', err?.message || err)
+    }
+
     return res.json({
       plan: serializedPlan,
+      whatsapp_packages: (whatsappPacks.length ? whatsappPacks : WHATSAPP_TOPUP_PACKAGES).map(serializeWhatsAppPack).filter(Boolean),
       subscription: serializeSubscription(effective),
       history: history.map(serializeSubscription),
+      topups: topups.map(serializeSubscription),
+      current_plan: billingPlan
+        ? {
+            code: billingPlan.code,
+            name: billingPlan.name,
+            price_cents: billingPlan.priceCents,
+            max_professionals: billingPlan.maxProfessionals,
+            included_wa_messages: billingPlan.includedWaMessages,
+          }
+        : null,
+      professional_limit: professionalsUsage,
     })
   } catch (error) {
     console.error('GET /billing/subscription', error)
@@ -504,37 +623,186 @@ router.get('/subscription', auth, isEstabelecimento, async (req, res) => {
   }
 })
 
+router.get('/whatsapp/packs', auth, isEstabelecimento, async (_req, res) => {
+  try {
+    let packs = []
+    try {
+      packs = await listActiveWhatsAppPacks()
+    } catch (err) {
+      console.warn('[billing/whatsapp/packs] fallback to static packages', err?.message || err)
+    }
+    const responsePacks = (packs.length ? packs : WHATSAPP_TOPUP_PACKAGES).map(serializeWhatsAppPack).filter(Boolean)
+    return res.json({ ok: true, packs: responsePacks })
+  } catch (err) {
+    console.error('GET /billing/whatsapp/packs', err)
+    return res.status(500).json({ error: 'packs_fetch_failed' })
+  }
+})
+
+// Wallet WhatsApp (saldo de mensagens por estabelecimento)
+router.get('/whatsapp/wallet', auth, isEstabelecimento, async (req, res) => {
+  // Evita cache/304: sempre retorna dados atualizados (saldo muda após PIX/webhook)
+  res.set({
+    'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+    Pragma: 'no-cache',
+    Expires: '0',
+  });
+
+  try {
+    const planContext = await getPlanContext(req.user.id);
+    const wallet = await getWhatsAppWalletSnapshot(req.user.id, { planContext });
+
+    let packs = [];
+    try {
+      packs = await listActiveWhatsAppPacks();
+    } catch (err) {
+      console.warn('[billing/whatsapp/wallet][packs]', err?.message || err);
+    }
+
+    const history = await listWhatsAppTopups(req.user.id, { limit: 5 }).catch(() => []);
+
+    return res.json({
+      ok: true,
+      wallet,
+      packages: (packs.length ? packs : WHATSAPP_TOPUP_PACKAGES)
+        .map(serializeWhatsAppPack)
+        .filter(Boolean),
+      history: history.map(serializeTopupHistory).filter(Boolean),
+    });
+  } catch (err) {
+    console.error('GET /billing/whatsapp/wallet', err);
+    return res.status(500).json({ error: 'wallet_fetch_failed' });
+  }
+});
+
+// Checkout PIX para pacote extra de mensagens WhatsApp
+router.post('/whatsapp/pix', auth, isEstabelecimento, async (req, res) => {
+  try {
+    const { messages, pack_code, pack_id, packCode, packId } = req.body || {}
+    const packCodeInput = (pack_code || packCode || '').trim() || null
+    const packIdInput = pack_id ?? packId ?? null
+
+    if (!packCodeInput) {
+      return res.status(400).json({ error: 'pack_required' })
+    }
+
+    let availablePacks = []
+    try {
+      availablePacks = await listActiveWhatsAppPacks()
+    } catch (err) {
+      console.warn('[billing/whatsapp/pix][packs]', err?.message || err)
+    }
+
+    let selectedPack = null
+    if (packIdInput != null || packCodeInput) {
+      selectedPack = await findWhatsAppPack({ id: packIdInput, code: packCodeInput, activeOnly: true })
+      if (!selectedPack) return res.status(404).json({ error: 'pack_not_found' })
+    } else if (messages && availablePacks.length) {
+      selectedPack = availablePacks.find((p) => Number(p.waMessages || 0) === Number(messages || 0)) || null
+    }
+
+    if (!selectedPack && !messages) {
+      return res.status(400).json({ error: 'invalid_pack', message: 'Pacote n\u00e3o informado.' })
+    }
+
+    const result = await createMercadoPagoPixTopupCheckout({
+      estabelecimento: { id: req.user.id, email: req.user.email },
+      messages: selectedPack?.waMessages ?? messages,
+      planHint: req.user.plan || 'starter',
+      pack: selectedPack,
+      availablePacks: availablePacks.length ? availablePacks : null,
+    })
+
+    const packResponse =
+      serializeWhatsAppPack(selectedPack) ||
+      (result.package
+        ? {
+            code: result.package.code || null,
+            name: result.package.name || null,
+            price_cents: result.package.priceCents,
+            wa_messages: result.package.messages,
+          }
+        : null)
+
+    console.info('[billing/whatsapp/pix/create]', {
+      user_id: req.user?.id,
+      user_email: req.user?.email,
+      estab_id: req.user?.id,
+      pack_code: selectedPack?.code || packCodeInput || null,
+      pack_id: selectedPack?.id ?? packIdInput ?? null,
+      messages: result?.pix?.messages || messages || selectedPack?.waMessages,
+      payment_id: result?.pix?.payment_id || result?.subscription?.gateway_preference_id || null,
+    })
+
+    return res.json({
+      ok: true,
+      init_point: result.initPoint,
+      subscription: serializeSubscription(result.subscription),
+      pix: result.pix,
+      pack: packResponse,
+      package: result.package ? { messages: result.package.messages, price_cents: result.package.priceCents } : null,
+    })
+  } catch (error) {
+    const responseData = error?.response?.data
+    const cause = error?.cause || responseData || null
+    const detail =
+      (responseData && (responseData.message || responseData.error || responseData.error_message)) ||
+      (Array.isArray(error?.cause) && (error.cause[0]?.description || error.cause[0]?.error)) ||
+      error?.message || 'Falha ao criar cobranca PIX'
+    console.error('POST /billing/whatsapp/pix', detail, cause || error)
+    return res.status(400).json({ error: 'pix_failed', message: detail, cause })
+  }
+})
+
 router.post('/webhook', async (req, res) => {
-  const event = req.body || {}
-  // MP pode mandar o id como body.data.id ou como query data.id
-  const resourceId = event?.data?.id || req.query?.id || req.query?.['data.id'] || event?.resource || event?.id || null
+  const event = req.body || {};
+
+  // MP pode mandar o id como body.data.id ou query data.id ou query id
+  const resourceId =
+    event?.data?.id ||
+    req.query?.['data.id'] ||
+    req.query?.id ||
+    event?.resource ||
+    event?.id ||
+    null;
+
   if (!resourceId) {
-    console.warn('[billing:webhook] evento sem resource id', event)
-    return res.status(200).json({ ok: false, reason: 'missing_resource' })
+    console.warn('[billing:webhook] evento sem resource id', { query: req.query, body: event });
+    // Sempre 200/ok pra evitar retries
+    return res.status(200).json({ ok: true, ignored: 'missing_resource' });
   }
 
-  const verification = verifyWebhookSignature(req, resourceId)
+  const verification = verifyWebhookSignature(req, resourceId);
   if (!verification.valid) {
-    console.warn('[billing:webhook] assinatura invalida', verification)
-    return res.status(401).json({ ok: false, reason: 'invalid_signature' })
+    console.warn('[billing:webhook] assinatura invalida (ignored)', verification);
+    // Evita retries infinitos do MP. Apenas ignora.
+    return res.status(200).json({ ok: true, ignored: 'invalid_signature' });
   }
 
   try {
-    const topic = String(req.query?.type || req.query?.topic || event?.type || event?.topic || req.headers['x-topic'] || '').toLowerCase()
+    const topic = String(
+      req.query?.type ||
+      req.query?.topic ||
+      event?.type ||
+      event?.topic ||
+      req.headers['x-topic'] ||
+      ''
+    ).toLowerCase();
+
     if (topic === 'payment') {
-      const r = await syncMercadoPagoPayment(resourceId, event)
-      console.log('[billing:webhook] payment', resourceId, r?.ok ? 'approved' : 'ignored', { ok: r?.ok })
-      return res.status(200).json({ ok: true })
+      const r = await syncMercadoPagoPayment(resourceId, event);
+      console.log('[billing:webhook] payment', resourceId, r?.ok ? 'approved' : 'ignored', { ok: !!r?.ok });
+      return res.status(200).json({ ok: true, processed: !!r?.ok });
     }
 
-    console.log('[billing:webhook] ignoring topic', topic || 'unknown', 'for resource', resourceId)
+    console.log('[billing:webhook] ignoring topic', topic || 'unknown', 'for resource', resourceId);
+    return res.status(200).json({ ok: true, ignored: 'unsupported_topic', topic: topic || 'unknown' });
   } catch (error) {
-    console.error('[billing:webhook] falha ao sincronizar', resourceId, error)
-    return res.status(200).json({ ok: false })
+    console.error('[billing:webhook] falha ao sincronizar', resourceId, error);
+    // 200 pra evitar retries; o log já registra o problema
+    return res.status(200).json({ ok: true, ignored: 'internal_error' });
   }
-
-  return res.status(200).json({ ok: true })
-})
+});
 
 // Auxilia validações do painel do Mercado Pago (algumas checagens usam GET/HEAD)
 router.get('/webhook', (req, res) => {

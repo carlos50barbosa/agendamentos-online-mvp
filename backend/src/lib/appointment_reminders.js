@@ -1,4 +1,5 @@
-import { sendTemplate } from './notifications.js';
+import { notifyEmail } from './notifications.js';
+import { sendAppointmentWhatsApp } from './whatsapp_outbox.js';
 import { clientWhatsappDisabled } from './client_notifications.js';
 
 const TZ = 'America/Sao_Paulo';
@@ -135,25 +136,109 @@ async function sendReminder(pool, row) {
   };
 
   const sendTemplateWithParams = async (params) => {
-    const resp = await sendTemplate({
+    const r = await sendAppointmentWhatsApp({
+      estabelecimentoId: row.estabelecimento_id,
+      agendamentoId: row.id,
       to: telCli,
-      name: tplName,
-      lang: tplLang,
-      bodyParams: params,
-      headerImageUrl: tplHeaderImage || undefined,
+      kind: 'reminder_8h',
+      template: {
+        name: tplName,
+        lang: tplLang,
+        bodyParams: params,
+        headerImageUrl: tplHeaderImage || undefined,
+      },
     });
-    return resp?.messages?.[0]?.id || null;
+    return { result: r, messageId: r?.provider_message_id || null };
   };
 
   try {
     let waMessageId = null;
+    let result = null;
     if (/^quad|4|quatro/.test(paramMode)) {
-      waMessageId = await sendTemplateWithParams(quadParams);
+      const r = await sendTemplateWithParams(quadParams);
+      waMessageId = r.messageId;
+      result = r.result;
     } else if (/^triple|3$/.test(paramMode)) {
-      waMessageId = await sendTemplateWithParams(tripleParams);
+      const r = await sendTemplateWithParams(tripleParams);
+      waMessageId = r.messageId;
+      result = r.result;
     } else {
-      waMessageId = await sendTemplateWithParams(singleParams);
+      const r = await sendTemplateWithParams(singleParams);
+      waMessageId = r.messageId;
+      result = r.result;
     }
+
+    if (result?.blocked && (result.reason === 'insufficient_balance' || result.reason === 'per_appointment_limit')) {
+      const email = String(row?.cliente_email || '').trim().toLowerCase();
+      if (email) {
+        try {
+          await notifyEmail(
+            email,
+            'Lembrete do seu agendamento',
+            `<p>Ol\u00e1${firstName(row?.cliente_nome) ? `, <b>${firstName(row?.cliente_nome)}</b>` : ''}! Faltam 8 horas para o seu agendamento de <b>${row.servico_nome}</b> em <b>${estNomeFriendly}</b> (${hora} de ${data}).</p>`
+          );
+        } catch (err) {
+          console.warn('[reminder8h][email-fallback] failed', err?.message || err);
+        }
+      }
+      await markReminderSent(pool, row.id, null);
+      return { sent: false, reason: result.reason };
+    }
+
+    if (result && result.ok === false) {
+      const pseudoErr = { body: result.wa_body, message: result.detail };
+      const expected = extractExpectedParams(pseudoErr);
+      try {
+        if (expected === 4) {
+          const attempt = await sendTemplateWithParams(quadParams);
+          const waMessageId = attempt.messageId;
+          const r = attempt.result;
+          if (r && r.ok === false) return { sent: false, error: r?.detail || r?.error || 'send_failed' };
+          if (!waMessageId) warnMissingMessageId('waMessageId vazio na resposta do template (fallback quad)');
+          await markReminderSent(pool, row.id, waMessageId);
+          return { sent: true };
+        }
+        if (expected === 3) {
+          const attempt = await sendTemplateWithParams(tripleParams);
+          const waMessageId = attempt.messageId;
+          const r = attempt.result;
+          if (r && r.ok === false) return { sent: false, error: r?.detail || r?.error || 'send_failed' };
+          if (!waMessageId) warnMissingMessageId('waMessageId vazio na resposta do template (fallback triple)');
+          await markReminderSent(pool, row.id, waMessageId);
+          return { sent: true };
+        }
+        if (expected === 1) {
+          const attempt = await sendTemplateWithParams(singleParams);
+          const waMessageId = attempt.messageId;
+          const r = attempt.result;
+          if (r && r.ok === false) return { sent: false, error: r?.detail || r?.error || 'send_failed' };
+          if (!waMessageId) warnMissingMessageId('waMessageId vazio na resposta do template (fallback single)');
+          await markReminderSent(pool, row.id, waMessageId);
+          return { sent: true };
+        }
+        if (expected === 0) {
+          const attempt = await sendTemplateWithParams(emptyParams);
+          const waMessageId = attempt.messageId;
+          const r = attempt.result;
+          if (r && r.ok === false) return { sent: false, error: r?.detail || r?.error || 'send_failed' };
+          if (!waMessageId) warnMissingMessageId('waMessageId vazio na resposta do template (fallback empty)');
+          await markReminderSent(pool, row.id, waMessageId);
+          return { sent: true };
+        }
+      } catch (fallbackErr) {
+        console.error('[reminder8h] erro ao enviar (fallback)', row.id, fallbackErr?.status, fallbackErr?.body || fallbackErr?.message || fallbackErr);
+        return { sent: false, error: fallbackErr?.message || String(fallbackErr) };
+      }
+
+      const headerMismatch = requiresImageHeader(pseudoErr);
+      if (headerMismatch) {
+        if (!tplHeaderImage) {
+          console.warn('[reminder8h] template requer header de imagem mas nenhuma URL foi configurada (WA_TEMPLATE_REMINDER_HEADER_URL)');
+        }
+      }
+      return { sent: false, error: result?.detail || result?.error || 'send_failed' };
+    }
+
     if (!waMessageId) {
       warnMissingMessageId('waMessageId vazio na resposta do template');
     }
@@ -164,7 +249,10 @@ async function sendReminder(pool, row) {
     const expected = extractExpectedParams(err);
     try {
       if (expected === 4 && !/^quad|4|quatro/.test(paramMode)) {
-        const waMessageId = await sendTemplateWithParams(quadParams);
+        const attempt = await sendTemplateWithParams(quadParams);
+        const waMessageId = attempt.messageId;
+        const r = attempt.result;
+        if (r && r.ok === false) return { sent: false, error: r?.detail || r?.error || 'send_failed' };
         if (!waMessageId) {
           warnMissingMessageId('waMessageId vazio na resposta do template (fallback quad)');
         }
@@ -172,7 +260,10 @@ async function sendReminder(pool, row) {
         return { sent: true };
       }
       if (expected === 3 && !/^triple|3$/.test(paramMode)) {
-        const waMessageId = await sendTemplateWithParams(tripleParams);
+        const attempt = await sendTemplateWithParams(tripleParams);
+        const waMessageId = attempt.messageId;
+        const r = attempt.result;
+        if (r && r.ok === false) return { sent: false, error: r?.detail || r?.error || 'send_failed' };
         if (!waMessageId) {
           warnMissingMessageId('waMessageId vazio na resposta do template (fallback triple)');
         }
@@ -180,7 +271,10 @@ async function sendReminder(pool, row) {
         return { sent: true };
       }
       if (expected === 1 && !/^single|1|um$/.test(paramMode)) {
-        const waMessageId = await sendTemplateWithParams(singleParams);
+        const attempt = await sendTemplateWithParams(singleParams);
+        const waMessageId = attempt.messageId;
+        const r = attempt.result;
+        if (r && r.ok === false) return { sent: false, error: r?.detail || r?.error || 'send_failed' };
         if (!waMessageId) {
           warnMissingMessageId('waMessageId vazio na resposta do template (fallback single)');
         }
@@ -188,7 +282,10 @@ async function sendReminder(pool, row) {
         return { sent: true };
       }
       if (expected === 0) {
-        const waMessageId = await sendTemplateWithParams(emptyParams);
+        const attempt = await sendTemplateWithParams(emptyParams);
+        const waMessageId = attempt.messageId;
+        const r = attempt.result;
+        if (r && r.ok === false) return { sent: false, error: r?.detail || r?.error || 'send_failed' };
         if (!waMessageId) {
           warnMissingMessageId('waMessageId vazio na resposta do template (fallback empty)');
         }
@@ -222,7 +319,7 @@ export function startAppointmentReminders(pool, { intervalMs } = {}) {
       const [rows] = await pool.query(
         `
         SELECT a.id, a.inicio, a.servico_id, a.estabelecimento_id, a.profissional_id,
-               c.nome AS cliente_nome, c.telefone AS cliente_telefone,
+               c.nome AS cliente_nome, c.telefone AS cliente_telefone, c.email AS cliente_email,
                e.nome AS estabelecimento_nome, e.telefone AS estabelecimento_telefone,
                s.nome AS servico_nome,
                p.nome AS profissional_nome

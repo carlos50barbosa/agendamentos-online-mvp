@@ -5,6 +5,9 @@ process.env.DB_USER = process.env.DB_USER || 'test'
 process.env.DB_PASS = process.env.DB_PASS || 'test'
 process.env.DB_NAME = process.env.DB_NAME || 'test'
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'secret'
+process.env.WHATSAPP_ALLOWED_LIST = process.env.WHATSAPP_ALLOWED_LIST || ''
+process.env.MERCADOPAGO_MOCK = process.env.MERCADOPAGO_MOCK || '1'
+process.env.MERCADOPAGO_ACCESS_TOKEN = process.env.MERCADOPAGO_ACCESS_TOKEN || 'test-token'
 
 const { pool } = await import('../src/lib/db.js')
 const establishmentsRouter = (await import('../src/routes/estabelecimentos.js')).default
@@ -12,7 +15,28 @@ const agendamentosRouter = (await import('../src/routes/agendamentos.js')).defau
 const servicosRouter = (await import('../src/routes/servicos.js')).default
 const slotsRouter = (await import('../src/routes/slots.js')).default
 const relatoriosRouter = (await import('../src/routes/relatorios.js')).default
+const professionalsRouter = (await import('../src/routes/profissionais.js')).default
+const billingRouter = (await import('../src/routes/billing.js')).default
 const { setAppointmentLimitNotifier } = await import('../src/lib/appointment_limits.js')
+const { ensureWithinProfessionalLimit } = await import('../src/middleware/billing.js')
+const {
+  getWhatsAppWalletSnapshot,
+  debitWhatsAppMessage,
+  recordWhatsAppBlocked,
+  WHATSAPP_MAX_MESSAGES_PER_APPOINTMENT,
+} = await import('../src/lib/whatsapp_wallet.js')
+const { createMercadoPagoPixTopupCheckout, syncMercadoPagoPayment } = await import('../src/lib/billing.js')
+
+const DEFAULT_BILLING_PLANS = [
+  { code: 'starter', name: 'Starter', price_cents: 1490, max_professionals: 2, included_wa_messages: 250 },
+  { code: 'pro', name: 'Pro', price_cents: 2990, max_professionals: 5, included_wa_messages: 500 },
+  { code: 'premium', name: 'Premium', price_cents: 9990, max_professionals: 10, included_wa_messages: 1500 },
+]
+
+const DEFAULT_WHATSAPP_PACKS = [
+  { id: 1, code: 'wa-100', name: 'WhatsApp 100', price_cents: 990, wa_messages: 100, is_active: 1 },
+  { id: 2, code: 'wa-300', name: 'WhatsApp 300', price_cents: 2490, wa_messages: 300, is_active: 1 },
+]
 
 const state = {
   usuarios: new Map(),
@@ -21,7 +45,13 @@ const state = {
   profissionais: [],
   servicoProfissionais: new Map(),
   bloqueios: [],
-  report: defaultReport()
+  report: defaultReport(),
+  subscriptions: [],
+  billingPlans: [],
+  billingAddonPacks: [],
+  whatsappWallets: new Map(),
+  whatsappTransactions: [],
+  subscriptionEvents: [],
 }
 
 const appointmentLimitNotifications = []
@@ -66,7 +96,7 @@ function clone(value) {
   return JSON.parse(JSON.stringify(value))
 }
 
-function seedScenario({ user = {}, services = null, professionals = [], serviceProfessionals = [], bloqueios = [], appointments = [], report = null } = {}) {
+function seedScenario({ user = {}, services = null, professionals = [], serviceProfessionals = [], bloqueios = [], appointments = [], subscriptions = [], report = null, billingPlans = null, addonPacks = null } = {}) {
   state.usuarios.clear()
   state.usuarios.set(1, {
     id: 1,
@@ -143,12 +173,37 @@ function seedScenario({ user = {}, services = null, professionals = [], serviceP
 
   state.agendamentos = appointments.map((item, index) => ({
     id: item.id ?? index + 1,
+    cliente_id: item.cliente_id ?? item.clienteId ?? null,
     estabelecimento_id: item.estabelecimento_id ?? 1,
-    inicio: item.inicio ? new Date(item.inicio) : new Date(),
-    status: item.status || 'confirmado'
+    servico_id: item.servico_id ?? item.servicoId ?? null,
+    profissional_id: item.profissional_id ?? item.profissionalId ?? null,
+    inicio: (() => {
+      const d = item.inicio ? new Date(item.inicio) : new Date()
+      return Number.isNaN(d.getTime()) ? new Date() : d
+    })(),
+    fim: (() => {
+      if (item.fim) {
+        const d = new Date(item.fim)
+        if (!Number.isNaN(d.getTime())) return d
+      }
+      const start = item.inicio ? new Date(item.inicio) : new Date()
+      const base = Number.isNaN(start.getTime()) ? new Date() : start
+      const durMin = Number(item.duracao_min || item.duracaoMin || 60) || 60
+      return new Date(base.getTime() + durMin * 60_000)
+    })(),
+    public_confirm_expires_at: item.public_confirm_expires_at ? new Date(item.public_confirm_expires_at) : null,
+    status: item.status || 'confirmado',
+    wa_messages_sent: item.wa_messages_sent ?? item.waMessagesSent ?? 0,
   }))
 
+  state.subscriptions = Array.isArray(subscriptions) ? clone(subscriptions) : []
+
   state.report = applyReportOverrides(defaultReport(), report)
+  state.billingPlans = Array.isArray(billingPlans) && billingPlans.length ? clone(billingPlans) : clone(DEFAULT_BILLING_PLANS)
+  state.billingAddonPacks = Array.isArray(addonPacks) && addonPacks.length ? clone(addonPacks) : clone(DEFAULT_WHATSAPP_PACKS)
+  state.whatsappWallets = new Map()
+  state.whatsappTransactions = []
+  state.subscriptionEvents = []
 }
 
 function findUserById(id) {
@@ -162,6 +217,110 @@ function findProfessionalById(id) {
 function getProfessionalsByService(serviceId) {
   const set = state.servicoProfissionais.get(Number(serviceId)) || new Set()
   return Array.from(set).map((id) => findProfessionalById(id)).filter(Boolean)
+}
+
+async function simulateSendAppointment({ estabelecimentoId, agendamentoId, to, providerMessageId = 'test-message', message = '' }) {
+  const estId = Number(estabelecimentoId || 0)
+  const agId = agendamentoId != null ? Number(agendamentoId) : null
+  if (!estId || !to) return { ok: false, error: 'invalid_payload' }
+
+  const wallet = await getWhatsAppWalletSnapshot(estId)
+  if (!wallet) return { ok: false, error: 'wallet_unavailable' }
+
+  if (agId) {
+    const ag = state.agendamentos.find((a) => Number(a.id) === agId)
+    const sentCount = ag ? Number(ag.wa_messages_sent || 0) : 0
+    if (sentCount >= WHATSAPP_MAX_MESSAGES_PER_APPOINTMENT) {
+      await recordWhatsAppBlocked({
+        estabelecimentoId: estId,
+        agendamentoId: agId,
+        reason: 'per_appointment_limit',
+        metadata: { sentCount, max: WHATSAPP_MAX_MESSAGES_PER_APPOINTMENT },
+      })
+      return { ok: true, sent: false, blocked: true, reason: 'per_appointment_limit', wallet }
+    }
+  }
+
+  if ((wallet.total_balance || 0) < 1) {
+    await recordWhatsAppBlocked({
+      estabelecimentoId: estId,
+      agendamentoId: agId,
+      reason: 'insufficient_balance',
+      metadata: { message },
+    })
+    return { ok: true, sent: false, blocked: true, reason: 'insufficient_balance', wallet }
+  }
+
+  if (agId) {
+    const ag = state.agendamentos.find((a) => Number(a.id) === agId)
+    if (ag) ag.wa_messages_sent = (ag.wa_messages_sent || 0) + 1
+  }
+
+  const debit = await debitWhatsAppMessage({
+    estabelecimentoId: estId,
+    agendamentoId: agId,
+    providerMessageId,
+    metadata: { message },
+  })
+  return { ok: true, sent: true, provider_message_id: providerMessageId, debit }
+}
+
+function getWallet(estId) {
+  return state.whatsappWallets.get(Number(estId)) || null
+}
+
+function upsertWallet({ estabelecimento_id, cycle_start, cycle_end, included_limit, included_balance, extra_balance }) {
+  const key = Number(estabelecimento_id)
+  const current = state.whatsappWallets.get(key)
+  if (current) {
+    state.whatsappWallets.set(key, {
+      ...current,
+      cycle_start,
+      cycle_end,
+      included_limit,
+      included_balance,
+      extra_balance,
+    })
+    return current
+  }
+  const wallet = {
+    estabelecimento_id: key,
+    cycle_start,
+    cycle_end,
+    included_limit,
+    included_balance,
+    extra_balance,
+  }
+  state.whatsappWallets.set(key, wallet)
+  return wallet
+}
+
+function insertWaTransaction(tx) {
+  const nextId = state.whatsappTransactions.reduce((max, t) => Math.max(max, t.id || 0), 0) + 1
+  const providerId = tx.provider_message_id ? String(tx.provider_message_id) : null
+  if (providerId && state.whatsappTransactions.some((t) => String(t.provider_message_id || '') === providerId)) {
+    return { affectedRows: 0, insertId: 0 }
+  }
+  if (tx.payment_id && state.whatsappTransactions.some((t) => t.kind === tx.kind && String(t.payment_id || '') === String(tx.payment_id))) {
+    return { affectedRows: 0, insertId: 0 }
+  }
+  if (
+    tx.kind === 'cycle_reset' &&
+    tx.cycle_start &&
+    state.whatsappTransactions.some(
+      (t) =>
+        t.kind === 'cycle_reset' &&
+        Number(t.estabelecimento_id) === Number(tx.estabelecimento_id) &&
+        new Date(t.cycle_start).getTime() === new Date(tx.cycle_start).getTime()
+    )
+  ) {
+    return { affectedRows: 0, insertId: 0 }
+  }
+
+  const record = { id: nextId, ...tx }
+  if (!record.created_at) record.created_at = new Date()
+  state.whatsappTransactions.push(record)
+  return { affectedRows: 1, insertId: nextId }
 }
 
 
@@ -184,7 +343,24 @@ pool.query = async (sql, params = []) => {
     }], []]
   }
 
-  if (norm.startsWith("SELECT COUNT(*) AS total FROM agendamentos WHERE estabelecimento_id=? AND status IN ('confirmado','pendente') AND inicio >= ? AND inicio < ?")) {
+  if (norm.startsWith("SELECT COUNT(*) AS total FROM agendamentos WHERE estabelecimento_id=? AND status IN ('confirmado','pendente'") && norm.includes('AND inicio >= ? AND inicio < ?')) {
+    const [estId, start, end] = params
+    const startMs = new Date(start).getTime()
+    const endMs = new Date(end).getTime()
+    const allowedStatuses = norm.includes("'concluido'")
+      ? ['confirmado', 'pendente', 'concluido']
+      : ['confirmado', 'pendente']
+    const total = state.agendamentos.filter((a) => {
+      if (Number(a.estabelecimento_id) !== Number(estId)) return false
+      const ms = new Date(a.inicio).getTime()
+      if (Number.isNaN(ms)) return false
+      const status = String(a.status || 'confirmado').toLowerCase()
+      return allowedStatuses.includes(status) && ms >= startMs && ms < endMs
+    }).length
+    return [[{ total }], []]
+  }
+
+  if (norm.startsWith('SELECT COUNT(*) AS total FROM agendamentos WHERE estabelecimento_id=? AND inicio >= ? AND inicio < ?')) {
     const [estId, start, end] = params
     const startMs = new Date(start).getTime()
     const endMs = new Date(end).getTime()
@@ -192,10 +368,44 @@ pool.query = async (sql, params = []) => {
       if (Number(a.estabelecimento_id) !== Number(estId)) return false
       const ms = new Date(a.inicio).getTime()
       if (Number.isNaN(ms)) return false
-      const status = String(a.status || 'confirmado').toLowerCase()
-      return ['confirmado', 'pendente'].includes(status) && ms >= startMs && ms < endMs
+      return ms >= startMs && ms < endMs
     }).length
     return [[{ total }], []]
+  }
+
+  if (norm.startsWith('SELECT id FROM agendamentos WHERE estabelecimento_id') && norm.includes("status IN ('confirmado','pendente')") && norm.includes('(inicio < ? AND fim > ?)')) {
+    const estId = params[0]
+    const endMs = new Date(params[1]).getTime()
+    const startMs = new Date(params[2]).getTime()
+    const hasProfessionalFilter = norm.includes('profissional_id=?')
+    const professionalId = hasProfessionalFilter ? Number(params[3]) : null
+    const nowMs = Date.now()
+
+    const rows = state.agendamentos
+      .filter((a) => {
+        if (Number(a.estabelecimento_id) !== Number(estId)) return false
+        const status = String(a.status || 'confirmado').toLowerCase()
+        if (!['confirmado', 'pendente'].includes(status)) return false
+
+        if (status === 'pendente') {
+          const expMs = a.public_confirm_expires_at ? new Date(a.public_confirm_expires_at).getTime() : NaN
+          if (Number.isFinite(expMs) && expMs < nowMs) return false
+        }
+
+        const aStartMs = new Date(a.inicio).getTime()
+        const aEndMs = new Date(a.fim).getTime()
+        if (Number.isNaN(aStartMs) || Number.isNaN(aEndMs)) return false
+        if (!(aStartMs < endMs && aEndMs > startMs)) return false
+
+        if (hasProfessionalFilter) {
+          if (a.profissional_id != null && Number(a.profissional_id) !== Number(professionalId)) return false
+        }
+
+        return true
+      })
+      .map((a) => ({ id: a.id }))
+
+    return [rows, []]
   }
 
   if (norm.startsWith("SELECT plan, plan_status, plan_trial_ends_at, plan_active_until, plan_subscription_id, plan_cycle FROM usuarios WHERE id=?")) {
@@ -223,6 +433,61 @@ pool.query = async (sql, params = []) => {
       plan_active_until: user.plan_active_until ? new Date(user.plan_active_until) : null,
       plan_subscription_id: user.plan_subscription_id || null
     }], []]
+  }
+
+  if (norm.startsWith('SELECT code, name, price_cents, max_professionals, included_wa_messages FROM billing_plans WHERE code=?')) {
+    const code = params[0]
+    const row = state.billingPlans.find((p) => p.code === code)
+    return [row ? [{ ...row }] : [], []]
+  }
+
+  if (norm.startsWith('SELECT code, name, price_cents, max_professionals, included_wa_messages FROM billing_plans ORDER BY')) {
+    return [state.billingPlans.map((p) => ({ ...p })), []]
+  }
+
+  if (norm.startsWith('SELECT id, code, name, price_cents, wa_messages, is_active, created_at FROM billing_addon_packs WHERE is_active=1')) {
+    const rows = state.billingAddonPacks.filter((p) => p.is_active === 1 || p.is_active === true).map((p) => ({ ...p }))
+    return [rows, []]
+  }
+
+  if (norm.startsWith('SELECT id, code, name, price_cents, wa_messages, is_active, created_at FROM billing_addon_packs WHERE code=?')) {
+    const code = params[0]
+    const requireActive = norm.includes('AND is_active=1')
+    const row = state.billingAddonPacks.find(
+      (p) => p.code === code && (!requireActive || p.is_active === 1 || p.is_active === true)
+    )
+    return [row ? [{ ...row }] : [], []]
+  }
+
+  if (norm.startsWith('SELECT id, code, name, price_cents, wa_messages, is_active, created_at FROM billing_addon_packs WHERE id=?')) {
+    const id = Number(params[0])
+    const requireActive = norm.includes('AND is_active=1')
+    const row = state.billingAddonPacks.find(
+      (p) => Number(p.id) === id && (!requireActive || p.is_active === 1 || p.is_active === true)
+    )
+    return [row ? [{ ...row }] : [], []]
+  }
+
+  if (norm.startsWith('SELECT bp.* FROM subscriptions s JOIN billing_plans bp ON bp.code = s.plan WHERE s.estabelecimento_id')) {
+    const estId = Number(params[0])
+    const allowed = new Set(['active', 'trialing'])
+    const matches = state.subscriptions
+      .filter((row) => Number(row?.estabelecimento_id ?? row?.estabelecimentoId) === estId && allowed.has(String(row?.status || '').toLowerCase()))
+      .map((row) => {
+        const endRaw = row.current_period_end ?? row.currentPeriodEnd ?? row.period_end ?? null
+        const endMs = endRaw ? new Date(endRaw).getTime() : 0
+        return { row, endMs: Number.isFinite(endMs) ? endMs : 0 }
+      })
+      .sort((a, b) => {
+        if (a.endMs !== b.endMs) return b.endMs - a.endMs
+        const idA = Number(a.row?.id || 0)
+        const idB = Number(b.row?.id || 0)
+        return idB - idA
+      })
+    const picked = matches[0]?.row
+    if (!picked) return [[], []]
+    const plan = state.billingPlans.find((p) => p.code === picked.plan)
+    return [plan ? [{ ...plan }] : [], []]
   }
 
   if (norm.startsWith("SELECT id, nome, email, telefone, slug, avatar_url, plan, plan_status, plan_trial_ends_at, plan_active_until, plan_subscription_id FROM usuarios WHERE id")) {
@@ -256,10 +521,29 @@ pool.query = async (sql, params = []) => {
     return [svc ? [{ duracao_min: svc.duracao_min, nome: svc.nome }] : [], []]
   }
 
+  if (norm.startsWith("SELECT COUNT(*) AS total FROM profissionais WHERE estabelecimento_id=? AND ativo = 1")) {
+    const estId = params[0]
+    const total = state.profissionais.filter((p) => p.estabelecimento_id === estId && (p.ativo === 1 || p.ativo === true)).length
+    return [[{ total }], []]
+  }
+
   if (norm.startsWith("SELECT COUNT(*) AS total FROM profissionais WHERE estabelecimento_id")) {
     const estId = params[0]
     const total = state.profissionais.filter((p) => p.estabelecimento_id === estId).length
     return [[{ total }], []]
+  }
+
+  if (norm.startsWith('SELECT wa_messages_sent FROM agendamentos WHERE id=?')) {
+    const id = params[0]
+    const row = state.agendamentos.find((a) => Number(a.id) === Number(id))
+    return [row ? [{ wa_messages_sent: row.wa_messages_sent ?? 0 }] : [], []]
+  }
+
+  if (norm.startsWith('UPDATE agendamentos SET wa_messages_sent=wa_messages_sent+1 WHERE id=?')) {
+    const id = params[0]
+    const row = state.agendamentos.find((a) => Number(a.id) === Number(id))
+    if (row) row.wa_messages_sent = (row.wa_messages_sent || 0) + 1
+    return [{ affectedRows: row ? 1 : 0 }, []]
   }
 
   if (norm.includes('FROM agendamentos a') && norm.includes('receita_perdida')) {
@@ -328,6 +612,52 @@ pool.query = async (sql, params = []) => {
     const [id, estId] = params
     const p = state.profissionais.find((row) => row.id === id && row.estabelecimento_id === estId)
     return [p ? [{ id: p.id, nome: p.nome, avatar_url: p.avatar_url || null, ativo: p.ativo ? 1 : 0 }] : [], []]
+  }
+
+  if (norm.startsWith('INSERT INTO profissionais')) {
+    const [estId, nome, descricao, avatarUrl, ativoFlag] = params
+    const nextId = state.profissionais.reduce((max, p) => Math.max(max, p.id), 0) + 1
+    const newProf = {
+      id: nextId,
+      estabelecimento_id: estId,
+      nome,
+      descricao: descricao || null,
+      avatar_url: avatarUrl || null,
+      ativo: ativoFlag ? 1 : 0,
+      created_at: new Date(),
+      updated_at: new Date(),
+    }
+    state.profissionais.push(newProf)
+    return [{ insertId: nextId, affectedRows: 1 }, []]
+  }
+
+  if (norm.startsWith('SELECT id, estabelecimento_id, nome, descricao, avatar_url, ativo, created_at FROM profissionais WHERE id=?')) {
+    const id = params[0]
+    const p = state.profissionais.find((row) => row.id === id)
+    return [p ? [{ ...p }] : [], []]
+  }
+
+  if (norm.startsWith('UPDATE profissionais SET')) {
+    const [nome, descricao, avatarUrl, ativoFlag, id, estId] = params
+    const p = state.profissionais.find((row) => row.id === id && row.estabelecimento_id === estId)
+    if (!p) return [{ affectedRows: 0 }, []]
+    p.nome = nome
+    p.descricao = descricao
+    p.avatar_url = avatarUrl
+    p.ativo = ativoFlag
+    p.updated_at = new Date()
+    return [{ affectedRows: 1 }, []]
+  }
+
+  if (norm.startsWith('SELECT email, telefone, nome FROM usuarios WHERE id=?')) {
+    const id = params[0]
+    const user = findUserById(id)
+    if (!user) return [[], []]
+    return [[{
+      email: user.email || null,
+      telefone: user.telefone || null,
+      nome: user.nome || null,
+    }], []]
   }
 
   if (norm.startsWith('SELECT email, telefone, nome, notify_email_estab, notify_whatsapp_estab FROM usuarios WHERE id=?')) {
@@ -438,6 +768,289 @@ pool.query = async (sql, params = []) => {
     return [{ insertId: nextId, affectedRows: 1 }, []]
   }
 
+  if (norm.startsWith('SELECT * FROM subscriptions WHERE estabelecimento_id=? ORDER BY created_at DESC LIMIT 1')) {
+    const estId = params[0]
+    const latest = state.subscriptions
+      .filter((row) => Number(row?.estabelecimento_id ?? row?.estabelecimentoId) === Number(estId))
+      .map((row) => ({ row, ms: new Date(row?.created_at ?? row?.createdAt ?? 0).getTime() }))
+      .filter((entry) => Number.isFinite(entry.ms))
+      .sort((a, b) => b.ms - a.ms)?.[0]?.row || null
+    return [latest ? [clone(latest)] : [], []]
+  }
+
+  if (norm.startsWith('SELECT * FROM subscriptions WHERE id=?')) {
+    const id = Number(params[0])
+    const row = state.subscriptions.find((r) => Number(r.id) === id)
+    return [row ? [clone(row)] : [], []]
+  }
+
+  if (norm.startsWith('SELECT * FROM subscriptions WHERE gateway_preference_id=?')) {
+    const pref = String(params[0])
+    const matches = state.subscriptions
+      .filter((r) => String(r.gateway_preference_id || r.gatewayPreferenceId || '') === pref)
+      .sort((a, b) => Number(b.id || 0) - Number(a.id || 0))
+    const row = matches[0] || null
+    return [row ? [clone(row)] : [], []]
+  }
+
+  if (norm.startsWith('SELECT * FROM subscriptions WHERE external_reference=?')) {
+    const external = String(params[0])
+    const matches = state.subscriptions
+      .filter((r) => String(r.external_reference || r.externalReference || '') === external)
+      .sort((a, b) => Number(b.id || 0) - Number(a.id || 0))
+    const row = matches[0] || null
+    return [row ? [clone(row)] : [], []]
+  }
+
+  if (norm.startsWith('SELECT * FROM subscriptions WHERE estabelecimento_id=? ORDER BY created_at DESC')) {
+    const estId = Number(params[0])
+    const rows = state.subscriptions
+      .filter((row) => Number(row?.estabelecimento_id ?? row?.estabelecimentoId) === estId)
+      .sort((a, b) => {
+        const msA = new Date(a?.created_at ?? a?.createdAt ?? 0).getTime()
+        const msB = new Date(b?.created_at ?? b?.createdAt ?? 0).getTime()
+        if (msA !== msB) return msB - msA
+        return Number(b.id || 0) - Number(a.id || 0)
+      })
+    return [rows.map((r) => clone(r)), []]
+  }
+
+  if (norm.startsWith('INSERT INTO subscriptions')) {
+    const columnsStr = norm.substring(norm.indexOf('(') + 1, norm.indexOf(') VALUES'))
+    const columns = columnsStr.split(',').map((c) => c.trim())
+    const row = { id: state.subscriptions.reduce((max, s) => Math.max(max, s.id || 0), 0) + 1 }
+    columns.forEach((col, idx) => {
+      row[col] = params[idx]
+    })
+    row.created_at = row.created_at || new Date()
+    row.updated_at = row.updated_at || new Date()
+    state.subscriptions.push(row)
+    return [{ insertId: row.id, affectedRows: 1 }, []]
+  }
+
+  if (norm.startsWith('UPDATE subscriptions SET')) {
+    const id = Number(params[params.length - 1])
+    const row = state.subscriptions.find((r) => Number(r.id) === id)
+    if (!row) return [{ affectedRows: 0 }, []]
+    const setPart = norm.substring('UPDATE subscriptions SET '.length, norm.indexOf(' WHERE'))
+    const assignments = setPart.split(',').map((a) => a.trim())
+    const values = params.slice(0, -1)
+    assignments.forEach((assign, idx) => {
+      const [col] = assign.split('=')
+      if (col && col !== 'updated_at') {
+        row[col] = values[idx]
+      }
+    })
+    row.updated_at = new Date()
+    return [{ affectedRows: 1 }, []]
+  }
+
+  if (norm.startsWith('INSERT INTO subscription_events')) {
+    const [subscriptionId, eventType, gatewayEventId, payload] = params
+    const nextId = state.subscriptionEvents.reduce((max, ev) => Math.max(max, ev.id || 0), 0) + 1
+    state.subscriptionEvents.push({
+      id: nextId,
+      subscription_id: subscriptionId,
+      event_type: eventType,
+      gateway_event_id: gatewayEventId,
+      payload,
+      created_at: new Date(),
+    })
+    return [{ insertId: nextId, affectedRows: 1 }, []]
+  }
+
+  if (norm.startsWith('INSERT IGNORE INTO whatsapp_wallets')) {
+    const [estId, cycleStart, cycleEnd, includedLimit, includedBalance] = params
+    const existing = getWallet(estId)
+    if (existing) return [{ affectedRows: 0, insertId: 0 }, []]
+    upsertWallet({
+      estabelecimento_id: estId,
+      cycle_start: new Date(cycleStart),
+      cycle_end: new Date(cycleEnd),
+      included_limit: Number(includedLimit),
+      included_balance: Number(includedBalance),
+      extra_balance: 0,
+    })
+    return [{ affectedRows: 1, insertId: null }, []]
+  }
+
+  if (norm.startsWith('SELECT estabelecimento_id, cycle_start, cycle_end, included_limit, included_balance, extra_balance FROM whatsapp_wallets WHERE estabelecimento_id=?')) {
+    const estId = params[0]
+    const wallet = getWallet(estId)
+    return [wallet ? [{ ...wallet }] : [], []]
+  }
+
+  if (norm.startsWith('UPDATE whatsapp_wallets SET cycle_start=?')) {
+    const [cycleStart, cycleEnd, includedLimit, includedBalance, estId] = params
+    const wallet = getWallet(estId)
+    if (wallet) {
+      upsertWallet({
+        ...wallet,
+        cycle_start: new Date(cycleStart),
+        cycle_end: new Date(cycleEnd),
+        included_limit: Number(includedLimit),
+        included_balance: Number(includedBalance),
+      })
+    }
+    return [{ affectedRows: wallet ? 1 : 0 }, []]
+  }
+
+  if (norm.startsWith('UPDATE whatsapp_wallets SET included_limit=')) {
+    const [includedLimit, includedBalance, estId] = params
+    const wallet = getWallet(estId)
+    if (wallet) {
+      upsertWallet({
+        ...wallet,
+        included_limit: Number(includedLimit),
+        included_balance: Number(includedBalance),
+      })
+    }
+    return [{ affectedRows: wallet ? 1 : 0 }, []]
+  }
+
+  if (norm.startsWith('UPDATE whatsapp_wallets SET extra_balance=extra_balance+?')) {
+    const [delta, estId] = params
+    const wallet = getWallet(estId)
+    if (wallet) {
+      wallet.extra_balance = (wallet.extra_balance || 0) + Number(delta || 0)
+      upsertWallet(wallet)
+    }
+    return [{ affectedRows: wallet ? 1 : 0 }, []]
+  }
+
+  if (norm.startsWith('UPDATE whatsapp_wallets SET included_balance=GREATEST(included_balance-1')) {
+    const estId = params[0]
+    const wallet = getWallet(estId)
+    if (wallet) {
+      wallet.included_balance = Math.max((wallet.included_balance || 0) - 1, 0)
+      upsertWallet(wallet)
+    }
+    return [{ affectedRows: wallet ? 1 : 0 }, []]
+  }
+
+  if (norm.startsWith('UPDATE whatsapp_wallets SET extra_balance=GREATEST(extra_balance-1')) {
+    const estId = params[0]
+    const wallet = getWallet(estId)
+    if (wallet) {
+      wallet.extra_balance = Math.max((wallet.extra_balance || 0) - 1, 0)
+      upsertWallet(wallet)
+    }
+    return [{ affectedRows: wallet ? 1 : 0 }, []]
+  }
+
+  if (norm.startsWith('INSERT INTO whatsapp_wallet_transactions')) {
+    if (norm.includes("'blocked'")) {
+      const [estId, agendamentoId, reason, metadata] = params
+      const result = insertWaTransaction({
+        estabelecimento_id: estId,
+        kind: 'blocked',
+        delta: 0,
+        included_delta: 0,
+        extra_delta: 0,
+        agendamento_id: agendamentoId,
+        reason,
+        metadata,
+      })
+      return [result, []]
+    }
+  }
+
+  if (norm.startsWith("SELECT id, delta, included_delta, extra_delta, payment_id, metadata, created_at FROM whatsapp_wallet_transactions WHERE estabelecimento_id=? AND kind='topup_credit'")) {
+    const [estId, limitRaw] = params
+    const limit = Number(limitRaw) || 0
+    const rows = state.whatsappTransactions
+      .filter((t) => Number(t.estabelecimento_id) === Number(estId) && t.kind === 'topup_credit')
+      .sort((a, b) => Number(b.id || 0) - Number(a.id || 0))
+      .slice(0, limit || state.whatsappTransactions.length)
+      .map((t) => ({ id: t.id, delta: t.delta, included_delta: t.included_delta, extra_delta: t.extra_delta, payment_id: t.payment_id, metadata: t.metadata, created_at: t.created_at }))
+    return [rows, []]
+  }
+
+  if (norm.startsWith('INSERT IGNORE INTO whatsapp_wallet_transactions')) {
+    if (norm.includes("'cycle_reset'")) {
+      const [estId, delta, includedDelta, cycleStart, cycleEnd, metadata] = params
+      const result = insertWaTransaction({
+        estabelecimento_id: estId,
+        kind: 'cycle_reset',
+        delta: Number(delta),
+        included_delta: Number(includedDelta),
+        extra_delta: 0,
+        cycle_start: new Date(cycleStart),
+        cycle_end: new Date(cycleEnd),
+        metadata,
+      })
+      return [result, []]
+    }
+    if (norm.includes("'topup_credit'")) {
+      const [estId, delta, extraDelta, subscriptionId, paymentId, reason, metadata] = params.length >= 7
+        ? params
+        : [...params, 'pix_pack', null].slice(0, 7)
+      const result = insertWaTransaction({
+        estabelecimento_id: estId,
+        kind: 'topup_credit',
+        delta: Number(delta),
+        included_delta: 0,
+        extra_delta: Number(extraDelta),
+        subscription_id: subscriptionId,
+        payment_id: paymentId,
+        reason,
+        metadata,
+      })
+      return [result, []]
+    }
+    if (norm.includes("'debit'")) {
+      const [estId, includedDelta, extraDelta, agendamentoId, providerMessageId, metadata] = params
+      const result = insertWaTransaction({
+        estabelecimento_id: estId,
+        kind: 'debit',
+        delta: -1,
+        included_delta: Number(includedDelta),
+        extra_delta: Number(extraDelta),
+        agendamento_id: agendamentoId,
+        provider_message_id: providerMessageId,
+        metadata,
+      })
+      return [result, []]
+    }
+    if (norm.includes("'blocked'")) {
+      const [estId, agendamentoId, reason, metadata] = params
+      const result = insertWaTransaction({
+        estabelecimento_id: estId,
+        kind: 'blocked',
+        delta: 0,
+        included_delta: 0,
+        extra_delta: 0,
+        agendamento_id: agendamentoId,
+        reason,
+        metadata,
+      })
+      return [result, []]
+    }
+  }
+
+  if (norm.startsWith('INSERT INTO agendamentos (cliente_id, estabelecimento_id, servico_id, profissional_id, inicio, fim)')) {
+    const [clienteId, estId, servicoId, profissionalId, inicio, fim] = params
+    const nextId = state.agendamentos.reduce((max, item) => Math.max(max, item.id), 0) + 1
+    state.agendamentos.push({
+      id: nextId,
+      cliente_id: clienteId,
+      estabelecimento_id: estId,
+      servico_id: servicoId,
+      profissional_id: profissionalId ?? null,
+      inicio: new Date(inicio),
+      fim: new Date(fim),
+      status: 'confirmado',
+      public_confirm_expires_at: null,
+    })
+    return [{ insertId: nextId, affectedRows: 1 }, []]
+  }
+
+  if (norm.startsWith('SELECT * FROM agendamentos WHERE id=?')) {
+    const id = params[0]
+    const row = state.agendamentos.find((a) => Number(a.id) === Number(id)) || null
+    return [row ? [clone(row)] : [], []]
+  }
+
   throw new Error(`Unhandled query: ${norm}`)
 }
 
@@ -458,35 +1071,64 @@ function getRouteHandler(router, path, method) {
   return stack[stack.length - 1].handle
 }
 
-async function callHandler(handler, { params = {}, body = {}, query = {}, user = {}, headers = {} }) {
+async function callHandler(handler, { params = {}, body = {}, query = {}, user = {}, headers = {}, middlewares = [] }) {
   return new Promise((resolve, reject) => {
     let statusCode = 200
+    let finished = false
     const req = { params, body, query, user, headers }
     const res = {
       status(code) { statusCode = code; return this },
-      json(payload) { resolve({ status: statusCode, body: payload }); return this },
-      send(payload) { resolve({ status: statusCode, body: payload }); return this },
+      json(payload) {
+        finished = true
+        resolve({ status: statusCode, body: payload }); return this
+      },
+      send(payload) {
+        finished = true
+        resolve({ status: statusCode, body: payload }); return this
+      },
       setHeader() { return this }
     }
-    try {
-      const maybe = handler(req, res, (err) => {
-        if (err) reject(err)
-        else resolve({ status: statusCode, body: null })
-      })
-      if (maybe && typeof maybe.then === 'function') {
-        maybe.catch(reject)
+    const runHandler = () => {
+      if (finished) return
+      try {
+        const maybe = handler(req, res, (err) => {
+          if (err) reject(err)
+          else resolve({ status: statusCode, body: null })
+        })
+        if (maybe && typeof maybe.then === 'function') {
+          maybe.catch(reject)
+        }
+      } catch (err) {
+        reject(err)
       }
-    } catch (err) {
-      reject(err)
     }
+    const runMiddleware = (index) => {
+      if (finished) return
+      if (index >= middlewares.length) return runHandler()
+      try {
+        const maybe = middlewares[index](req, res, (err) => {
+          if (err) reject(err)
+          else runMiddleware(index + 1)
+        })
+        if (maybe && typeof maybe.then === 'function') {
+          maybe.catch(reject)
+        }
+      } catch (err) {
+        reject(err)
+      }
+    }
+    runMiddleware(0)
   })
 }
 
 const planHandler = getRouteHandler(establishmentsRouter, '/:id/plan', 'put')
 const createAppointmentHandler = getRouteHandler(agendamentosRouter, '/', 'post')
 const createServiceHandler = getRouteHandler(servicosRouter, '/', 'post')
+const createProfessionalHandler = getRouteHandler(professionalsRouter, '/', 'post')
 const slotToggleHandler = getRouteHandler(slotsRouter, '/toggle', 'post')
 const relatorioHandler = getRouteHandler(relatoriosRouter, '/estabelecimento', 'get')
+const waWalletHandler = getRouteHandler(billingRouter, '/whatsapp/wallet', 'get')
+const waPacksHandler = getRouteHandler(billingRouter, '/whatsapp/packs', 'get')
 
 const results = []
 
@@ -520,7 +1162,7 @@ results.push({ name: 'agendar com plano delinquent', response: res2 })
 assert.equal(res2.status, 403)
 assert.equal(res2.body?.error, 'plan_delinquent')
 
-// 3) downgrade bloqueado por limite de servicos
+// 3) downgrade permitido mesmo com muitos servicos (sem limite de servicos)
 seedScenario({
   user: { plan: 'pro', plan_status: 'active' },
   services: Array.from({ length: 12 }, (_, index) => ({ id: 200 + index }))
@@ -530,9 +1172,10 @@ const res3 = await callHandler(planHandler, {
   user: { id: 1, tipo: 'estabelecimento', plan: 'pro', plan_status: 'active' },
   body: { plan: 'starter' }
 })
-results.push({ name: 'downgrade bloqueado por limite', response: res3 })
-assert.equal(res3.status, 409)
-assert.equal(res3.body?.error, 'plan_downgrade_blocked')
+results.push({ name: 'downgrade permitido sem limite de servicos', response: res3 })
+assert.equal(res3.status, 200)
+assert.equal(res3.body.ok, true)
+assert.equal(res3.body.plan.plan, 'starter')
 
 // 4) criacao de servico bloqueada por inadimplencia
 seedScenario({ user: { plan_status: 'delinquent' } })
@@ -544,18 +1187,20 @@ results.push({ name: 'criar servico com plano delinquent', response: res4 })
 assert.equal(res4.status, 402)
 assert.equal(res4.body?.error, 'plan_delinquent')
 
-// 5) criacao de servico bloqueada por limite do plano
+// 5) criacao de servico permitida acima do antigo limite (sem limite de servicos)
 seedScenario({
   user: { plan: 'starter', plan_status: 'active' },
-  services: Array.from({ length: 10 }, (_, index) => ({ id: 300 + index }))
+  services: Array.from({ length: 10 }, (_, index) => ({ id: 300 + index })),
+  professionals: [{ id: 10, estabelecimento_id: 1, nome: 'Profissional Teste' }],
 })
 const res5 = await callHandler(createServiceHandler, {
-  body: { nome: 'Servico Extra', duracao_min: 45, preco_centavos: 1500 },
+  body: { nome: 'Servico Extra', duracao_min: 45, preco_centavos: 1500, professionalIds: [10] },
   user: { id: 1, tipo: 'estabelecimento' }
 })
-results.push({ name: 'criar servico acima do limite', response: res5 })
-assert.equal(res5.status, 403)
-assert.equal(res5.body?.error, 'plan_limit')
+results.push({ name: 'criar servico acima do antigo limite', response: res5 })
+assert.equal(res5.status, 200)
+assert.equal(res5.body?.nome, 'Servico Extra')
+assert.equal(state.servicos.length, 11)
 
 // 6) upgrade direto para premium ativo
 seedScenario()
@@ -660,7 +1305,7 @@ results.push({ name: 'relatorio bloqueado por plano', response: res12 })
 assert.equal(res12.status, 402)
 assert.equal(res12.body?.error, 'plan_delinquent')
 
-// 13) agendamento bloqueado por limite mensal do plano
+// 13) agendamento permitido mesmo acima do antigo limite mensal do plano
 const limitMonth = new Date()
 limitMonth.setMonth(limitMonth.getMonth() + 1)
 limitMonth.setDate(10)
@@ -687,12 +1332,168 @@ const res13 = await callHandler(createAppointmentHandler, {
   },
   user: { id: 77, tipo: 'cliente' }
 })
-results.push({ name: 'agendar bloqueado por limite do plano', response: res13 })
-assert.equal(res13.status, 403)
-assert.equal(res13.body?.error, 'plan_limit_agendamentos')
-assert.equal(appointmentLimitNotifications.length, 1)
-assert.equal(appointmentLimitNotifications[0]?.limit, 100)
-assert.equal(appointmentLimitNotifications[0]?.total, 100)
+results.push({ name: 'agendar permitido acima do antigo limite do plano', response: res13 })
+assert.equal(res13.status, 201)
+assert.equal(typeof res13.body?.id, 'number')
+assert.equal(res13.body?.error, undefined)
+assert.equal(appointmentLimitNotifications.length, 0)
+
+// 14) bloqueio ao exceder limite de profissionais do plano vigente (starter)
+seedScenario({
+  user: { plan: 'starter', plan_status: 'active' },
+  subscriptions: [{
+    id: 1,
+    estabelecimento_id: 1,
+    plan: 'starter',
+    status: 'active',
+    current_period_end: new Date(),
+    created_at: new Date(),
+  }],
+})
+const res14a = await callHandler(createProfessionalHandler, {
+  body: { nome: 'Profissional A', ativo: true },
+  user: { id: 1, tipo: 'estabelecimento' },
+  middlewares: [ensureWithinProfessionalLimit()],
+})
+results.push({ name: 'criar profissional dentro do limite', response: res14a })
+assert.equal(res14a.status, 200)
+
+const res14b = await callHandler(createProfessionalHandler, {
+  body: { nome: 'Profissional B', ativo: true },
+  user: { id: 1, tipo: 'estabelecimento' },
+  middlewares: [ensureWithinProfessionalLimit()],
+})
+results.push({ name: 'criar segundo profissional dentro do limite', response: res14b })
+assert.equal(res14b.status, 200)
+
+const res14c = await callHandler(createProfessionalHandler, {
+  body: { nome: 'Profissional C', ativo: true },
+  user: { id: 1, tipo: 'estabelecimento' },
+  middlewares: [ensureWithinProfessionalLimit()],
+})
+results.push({ name: 'bloqueio ao exceder limite de profissionais', response: res14c })
+assert.equal(res14c.status, 403)
+assert.equal(res14c.body?.error, 'professional_limit_reached')
+
+// 15) wallet cria franquia do plano e debita com idempotencia
+seedScenario({
+  user: { plan: 'starter', plan_status: 'active' },
+  subscriptions: [{
+    id: 10,
+    estabelecimento_id: 1,
+    plan: 'starter',
+    status: 'active',
+    current_period_end: new Date(),
+    created_at: new Date(),
+  }],
+})
+const walletA = await getWhatsAppWalletSnapshot(1)
+results.push({ name: 'wallet cria franquia starter', response: { status: 200 } })
+assert.equal(walletA?.included_balance, 250)
+assert.equal(walletA?.total_balance, 250)
+
+const debitA = await debitWhatsAppMessage({ estabelecimentoId: 1, agendamentoId: null, providerMessageId: 'msg-123' })
+assert.equal(debitA.ok, true)
+assert.equal(debitA.bucket, 'included')
+const walletB = await getWhatsAppWalletSnapshot(1)
+assert.equal(walletB?.included_balance, 249)
+
+const debitB = await debitWhatsAppMessage({ estabelecimentoId: 1, agendamentoId: null, providerMessageId: 'msg-123' })
+assert.equal(debitB.ok, true)
+assert.equal(debitB.idempotent, true)
+const walletC = await getWhatsAppWalletSnapshot(1)
+assert.equal(walletC?.included_balance, 249)
+
+// 16) limite de 5 mensagens por agendamento
+seedScenario({
+  user: { plan: 'starter', plan_status: 'active' },
+  appointments: [{ id: 900, estabelecimento_id: 1, wa_messages_sent: WHATSAPP_MAX_MESSAGES_PER_APPOINTMENT }],
+})
+const waLimit = await simulateSendAppointment({
+  estabelecimentoId: 1,
+  agendamentoId: 900,
+  to: '5511999999999',
+  message: 'teste',
+})
+results.push({ name: 'wa bloqueia por limite por agendamento', response: { status: 200 } })
+assert.equal(waLimit.blocked, true)
+assert.equal(waLimit.reason, 'per_appointment_limit')
+const agLimitRow = state.agendamentos.find((a) => a.id === 900)
+assert.equal(agLimitRow?.wa_messages_sent, WHATSAPP_MAX_MESSAGES_PER_APPOINTMENT)
+
+// 17) sem saldo: bloqueia envio mas mantem agendamento
+seedScenario({
+  user: { plan: 'starter', plan_status: 'delinquent' },
+  appointments: [{ id: 901, estabelecimento_id: 1, wa_messages_sent: 0 }],
+})
+const waNoBalance = await simulateSendAppointment({
+  estabelecimentoId: 1,
+  agendamentoId: 901,
+  to: '5511888888888',
+  message: 'sem saldo',
+})
+results.push({ name: 'wa bloqueia por saldo insuficiente', response: { status: 200 } })
+assert.equal(waNoBalance.blocked, true)
+assert.equal(waNoBalance.reason, 'insufficient_balance')
+const agNoBalance = state.agendamentos.find((a) => a.id === 901)
+assert.equal(agNoBalance?.wa_messages_sent, 0)
+assert.ok(agNoBalance)
+
+// 18) listar pacotes extras de WhatsApp
+seedScenario()
+const res15 = await callHandler(waPacksHandler, {
+  user: { id: 1, tipo: 'estabelecimento' }
+})
+results.push({ name: 'listar pacotes whatsapp', response: res15 })
+assert.equal(res15.status, 200)
+assert.ok(Array.isArray(res15.body?.packs))
+assert.ok(res15.body.packs.length >= 1)
+assert.equal(res15.body.packs[0]?.code, state.billingAddonPacks[0].code)
+
+// 19) cobranca PIX do pack e credito apos webhook
+seedScenario({
+  user: { plan: 'starter', plan_status: 'active', email: 'pix@teste.com' },
+})
+const targetPack = state.billingAddonPacks[0]
+const beforePixWallet = await getWhatsAppWalletSnapshot(1)
+results.push({ name: 'wallet inicial pix pack', response: { status: 200, body: beforePixWallet } })
+assert.equal(beforePixWallet.extra_balance, 0)
+
+const pixPack = await createMercadoPagoPixTopupCheckout({
+  estabelecimento: { id: 1, email: 'pix@teste.com' },
+  pack: targetPack,
+  planHint: 'starter',
+  availablePacks: state.billingAddonPacks,
+})
+results.push({ name: 'criar cobranca pix pack', response: { status: 200, body: pixPack.pix } })
+assert.ok(pixPack.pix?.payment_id)
+assert.ok(pixPack.pix?.qr_code)
+assert.equal(pixPack.pix?.pack_code, targetPack.code)
+pixPack.payment.status = 'approved'
+
+const syncPixA = await syncMercadoPagoPayment(pixPack.payment.id, { type: 'payment' })
+results.push({ name: 'webhook aprovado pack', response: { status: syncPixA?.ok ? 200 : 400 } })
+assert.equal(syncPixA.ok, true)
+
+const afterPixWallet = await getWhatsAppWalletSnapshot(1)
+assert.equal(afterPixWallet.extra_balance, targetPack.wa_messages)
+const txCount = state.whatsappTransactions.length
+
+const syncPixB = await syncMercadoPagoPayment(pixPack.payment.id, { type: 'payment' })
+results.push({ name: 'webhook idempotente pack', response: { status: syncPixB?.ok ? 200 : 400, body: syncPixB } })
+const afterRepeatWallet = await getWhatsAppWalletSnapshot(1)
+assert.equal(afterRepeatWallet.extra_balance, targetPack.wa_messages)
+assert.equal(state.whatsappTransactions.length, txCount)
+
+const walletRes = await callHandler(waWalletHandler, {
+  user: { id: 1, tipo: 'estabelecimento' }
+})
+results.push({ name: 'wallet com historico', response: walletRes })
+assert.equal(walletRes.status, 200)
+assert.equal(walletRes.body?.wallet?.extra_balance, targetPack.wa_messages)
+assert.ok(Array.isArray(walletRes.body?.history))
+assert.equal(walletRes.body.history?.[0]?.payment_id, pixPack.pix.payment_id)
+assert.equal(walletRes.body.history?.[0]?.pack_code, targetPack.code)
 
 console.log('Testes executados com sucesso:')
 for (const { name, response } of results) {

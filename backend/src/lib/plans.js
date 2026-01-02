@@ -13,36 +13,42 @@ const PLAN_CONFIG = {
     label: 'Starter',
     priceCents: 1490,
     annualPriceCents: 14900,
-    maxMonthlyAppointments: 100,
-    maxServices: 10,
+    maxMonthlyAppointments: LIMIT_UNLIMITED,
+    maxServices: LIMIT_UNLIMITED,
     maxProfessionals: 2,
     maxGalleryImages: 5,
     allowWhatsApp: true,
     allowAdvancedReports: false,
+    whatsappIncludedMessages: 250,
+    whatsappMaxMessagesPerAppointment: 5,
   },
   pro: {
     code: 'pro',
     label: 'Pro',
-    priceCents: 4990,
-    annualPriceCents: 49900,
-    maxMonthlyAppointments: 500,
-    maxServices: 100,
-    maxProfessionals: 10,
+    priceCents: 2990,
+    annualPriceCents: 29900,
+    maxMonthlyAppointments: LIMIT_UNLIMITED,
+    maxServices: LIMIT_UNLIMITED,
+    maxProfessionals: 5,
     maxGalleryImages: 15,
     allowWhatsApp: true,
     allowAdvancedReports: true,
+    whatsappIncludedMessages: 500,
+    whatsappMaxMessagesPerAppointment: 5,
   },
   premium: {
     code: 'premium',
     label: 'Premium',
-    priceCents: 19900,
-    annualPriceCents: 199000,
+    priceCents: 9990,
+    annualPriceCents: 99900,
     maxMonthlyAppointments: LIMIT_UNLIMITED,
     maxServices: LIMIT_UNLIMITED,
-    maxProfessionals: LIMIT_UNLIMITED,
+    maxProfessionals: 10,
     maxGalleryImages: LIMIT_UNLIMITED,
     allowWhatsApp: true,
     allowAdvancedReports: true,
+    whatsappIncludedMessages: 1500,
+    whatsappMaxMessagesPerAppointment: 5,
   },
 };
 
@@ -185,6 +191,8 @@ export function serializePlanContext(context) {
       maxGalleryImages: config.maxGalleryImages,
       allowWhatsApp: config.allowWhatsApp,
       allowAdvancedReports: config.allowAdvancedReports,
+      whatsappIncludedMessages: config.whatsappIncludedMessages ?? null,
+      whatsappMaxMessagesPerAppointment: config.whatsappMaxMessagesPerAppointment ?? 5,
     },
     features: {
       allow_whatsapp: config.allowWhatsApp,
@@ -214,5 +222,3 @@ export function getPlanPriceCents(plan, cycle = 'mensal') {
 export function getPlanLabel(plan) {
   return resolvePlanConfig(plan).label;
 }
-
-

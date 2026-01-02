@@ -180,6 +180,9 @@ export const Api = {
     return req('/billing/pix', { method: 'POST', body: JSON.stringify(body) });
   },
   billingStatus: () => req('/billing/status'),
+  billingWhatsAppPacks: () => req('/billing/whatsapp/packs'),
+  billingWhatsAppWallet: () => req('/billing/whatsapp/wallet'),
+  billingWhatsAppPix: (payload) => req('/billing/whatsapp/pix', { method: 'POST', body: JSON.stringify(payload || {}) }),
 
   // ServiÃ§os (rotas existentes)
   servicosList: () => req('/servicos'),

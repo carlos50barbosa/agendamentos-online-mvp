@@ -4,7 +4,8 @@ import crypto from 'crypto';
 import { pool } from '../lib/db.js';
 import { getPlanContext, isDelinquentStatus, formatPlanLimitExceeded } from '../lib/plans.js';
 import bcrypt from 'bcryptjs';
-import { notifyEmail, notifyWhatsapp, sendTemplate } from '../lib/notifications.js';
+import { notifyEmail } from '../lib/notifications.js';
+import { sendAppointmentWhatsApp } from '../lib/whatsapp_outbox.js';
 import { estabNotificationsDisabled } from '../lib/estab_notifications.js';
 import { clientWhatsappDisabled, whatsappImmediateDisabled, whatsappConfirmationDisabled } from '../lib/client_notifications.js';
 import jwt from 'jsonwebtoken';
@@ -430,16 +431,17 @@ async function notifyPublicConfirmedAppointment(appointmentId) {
     } catch {}
 
     try {
-      if (!blockWhatsappImmediate && !blockWhatsappConfirmation && !blockClientWhatsapp && telCli) {
-        const paramMode = String(process.env.WA_TEMPLATE_PARAM_MODE || 'single').toLowerCase();
-        const tplName = process.env.WA_TEMPLATE_NAME_CONFIRM || process.env.WA_TEMPLATE_NAME || 'confirmacao_agendamento_v2';
-        const tplLang = process.env.WA_TEMPLATE_LANG || 'pt_BR';
-        if (/^triple|3$/.test(paramMode)) {
-          await sendTemplate({
+        if (!blockWhatsappImmediate && !blockWhatsappConfirmation && !blockClientWhatsapp && telCli) {
+          const paramMode = String(process.env.WA_TEMPLATE_PARAM_MODE || 'single').toLowerCase();
+          const tplName = process.env.WA_TEMPLATE_NAME_CONFIRM || process.env.WA_TEMPLATE_NAME || 'confirmacao_agendamento_v2';
+          const tplLang = process.env.WA_TEMPLATE_LANG || 'pt_BR';
+          if (/^triple|3$/.test(paramMode)) {
+          await sendAppointmentWhatsApp({
+            estabelecimentoId: ag.estabelecimento_id,
+            agendamentoId: ag.id,
             to: telCli,
-            name: tplName,
-            lang: tplLang,
-            bodyParams: [svc.nome, inicioBR, est?.nome || '']
+            kind: 'confirm_cli',
+            template: { name: tplName, lang: tplLang, bodyParams: [svc.nome, inicioBR, est?.nome || ''] },
           });
         } else {
           const waMsg = (tmpl.wa_template || `Novo agendamento registrado: {{servico_nome}} em {{data_hora}} - {{estabelecimento_nome}}.`)
@@ -448,14 +450,26 @@ async function notifyPublicConfirmedAppointment(appointmentId) {
             .replace(/{{\s*data_hora\s*}}/g, inicioBR)
             .replace(/{{\s*estabelecimento_nome\s*}}/g, est?.nome || '')
             .replace(/{{\s*profissional_nome\s*}}/g, profNome ? ` com ${profNome}` : '');
-          await notifyWhatsapp(waMsg, telCli);
+          await sendAppointmentWhatsApp({
+            estabelecimentoId: ag.estabelecimento_id,
+            agendamentoId: ag.id,
+            to: telCli,
+            kind: 'confirm_cli',
+            message: waMsg,
+          });
         }
       }
     } catch {}
 
     try {
       if (!blockWhatsappImmediate && !blockWhatsappConfirmation && !blockEstabNotifications && canWhatsappEst && telEst && telEst !== telCli) {
-        await notifyWhatsapp(`Novo agendamento: ${svc.nome}${profLabel} em ${inicioBR} - Cliente: ${String(ag.cliente_nome) || ''}`, telEst);
+        await sendAppointmentWhatsApp({
+          estabelecimentoId: ag.estabelecimento_id,
+          agendamentoId: ag.id,
+          to: telEst,
+          kind: 'confirm_est',
+          message: `Novo agendamento: ${svc.nome}${profLabel} em ${inicioBR} - Cliente: ${String(ag.cliente_nome) || ''}`,
+        });
       }
     } catch {}
   } catch (e) {

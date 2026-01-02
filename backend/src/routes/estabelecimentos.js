@@ -1504,33 +1504,6 @@ router.put('/:id/plan', auth, isEstabelecimento, async (req, res) => {
 
 
     if (isDowngrade(currentPlan, rawPlan)) {
-
-      const [[svcRow]] = await pool.query(
-
-        'SELECT COUNT(*) AS total FROM servicos WHERE estabelecimento_id=?',
-
-        [id]
-
-      );
-
-      const totalServices = Number(svcRow?.total || 0);
-
-      if (targetConfig.maxServices !== null && totalServices > targetConfig.maxServices) {
-
-        return res.status(409).json({
-
-          error: 'plan_downgrade_blocked',
-
-          message: formatPlanLimitExceeded(targetConfig, 'services'),
-
-          details: { services: totalServices, limit: targetConfig.maxServices },
-
-        });
-
-      }
-
-
-
       if (targetConfig.maxProfessionals !== null) {
 
         const totalProfessionals = await countProfessionals(id);
@@ -2251,7 +2224,6 @@ router.get('/:id/stats', auth, isEstabelecimento, async (req, res) => {
 
 
 export default router;
-
 
 
 

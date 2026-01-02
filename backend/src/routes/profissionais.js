@@ -3,11 +3,10 @@ import { pool } from '../lib/db.js';
 import { auth, isEstabelecimento } from '../middleware/auth.js';
 import {
   getPlanContext,
-  resolvePlanConfig,
-  formatPlanLimitExceeded,
   isDelinquentStatus,
 } from '../lib/plans.js';
 import { saveAvatarFromDataUrl, removeAvatarFile } from '../lib/avatar.js';
+import { ensureWithinProfessionalLimit } from '../middleware/billing.js';
 
 const router = Router();
 
@@ -59,7 +58,14 @@ router.get('/', auth, isEstabelecimento, async (req, res) => {
   }
 });
 
-router.post('/', auth, isEstabelecimento, async (req, res) => {
+router.post(
+  '/',
+  auth,
+  isEstabelecimento,
+  ensureWithinProfessionalLimit({
+    isActivating: (req) => toBoolean(req.body?.ativo ?? true) === true,
+  }),
+  async (req, res) => {
   try {
     const estId = req.user.id;
     let { nome, descricao, avatar, ativo = true } = req.body || {};
@@ -72,7 +78,6 @@ router.post('/', auth, isEstabelecimento, async (req, res) => {
     }
 
     const planContext = await getPlanContext(estId);
-    const planConfig = planContext?.config || resolvePlanConfig('starter');
     const planStatus = planContext?.status || 'trialing';
 
     if (isDelinquentStatus(planStatus)) {
@@ -80,21 +85,6 @@ router.post('/', auth, isEstabelecimento, async (req, res) => {
         error: 'plan_delinquent',
         message: 'Sua assinatura esta em atraso. Regularize o pagamento para cadastrar profissionais.',
       });
-    }
-
-    if (planConfig.maxProfessionals !== null) {
-      const [[countRow]] = await pool.query(
-        'SELECT COUNT(*) AS total FROM profissionais WHERE estabelecimento_id=?',
-        [estId]
-      );
-      const total = Number(countRow?.total || 0);
-      if (total >= planConfig.maxProfessionals) {
-        return res.status(403).json({
-          error: 'plan_limit',
-          message: formatPlanLimitExceeded(planConfig, 'professionals') || 'Limite de profissionais atingido.',
-          details: { limit: planConfig.maxProfessionals, total },
-        });
-      }
     }
 
     let avatarUrl = null;
@@ -127,13 +117,13 @@ router.post('/', auth, isEstabelecimento, async (req, res) => {
     console.error('[profissionais][create]', err);
     return res.status(500).json({ error: 'create_profissional_failed' });
   }
-});
+  }
+);
 
-router.put('/:id', auth, isEstabelecimento, async (req, res) => {
+async function loadProfessional(req, res, next) {
   try {
     const estId = req.user.id;
     const { id } = req.params;
-    let { nome, descricao, avatar, avatarRemove, ativo } = req.body || {};
 
     const [[row]] = await pool.query(
       'SELECT id, nome, descricao, avatar_url, ativo FROM profissionais WHERE id=? AND estabelecimento_id=?',
@@ -141,6 +131,33 @@ router.put('/:id', auth, isEstabelecimento, async (req, res) => {
     );
     if (!row) return res.status(404).json({ error: 'not_found' });
 
+    req.professional = row;
+    return next();
+  } catch (err) {
+    console.error('[profissionais][load]', err);
+    return res.status(500).json({ error: 'load_profissional_failed' });
+  }
+}
+
+router.put(
+  '/:id',
+  auth,
+  isEstabelecimento,
+  loadProfessional,
+  ensureWithinProfessionalLimit({
+    isActivating: (req) => {
+      const currentActive = toBoolean(req.professional?.ativo);
+      const nextActive = req.body?.ativo == null ? currentActive : toBoolean(req.body.ativo);
+      return currentActive === false && nextActive === true;
+    },
+  }),
+  async (req, res) => {
+  try {
+    const estId = req.user.id;
+    const { id } = req.params;
+    let { nome, descricao, avatar, avatarRemove, ativo } = req.body || {};
+
+    const row = req.professional;
     const nextNome = nome != null ? String(nome).trim() : row.nome;
     const nextDescricao = descricao != null ? String(descricao).trim() : row.descricao;
     const wantsRemove = avatarRemove === true || avatarRemove === 'true';
@@ -182,7 +199,8 @@ router.put('/:id', auth, isEstabelecimento, async (req, res) => {
     console.error('[profissionais][update]', err);
     res.status(500).json({ error: 'update_profissional_failed' });
   }
-});
+  }
+);
 
 router.delete('/:id', auth, isEstabelecimento, async (req, res) => {
   try {

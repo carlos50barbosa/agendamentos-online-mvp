@@ -1,5 +1,6 @@
 // backend/src/lib/estab_reminders.js
-import { notifyEmail, notifyWhatsapp, sendTemplate } from './notifications.js';
+import { notifyEmail } from './notifications.js';
+import { sendAppointmentWhatsApp } from './whatsapp_outbox.js';
 import { estabNotificationsDisabled } from './estab_notifications.js';
 
 const TZ = 'America/Sao_Paulo';
@@ -120,30 +121,41 @@ async function sendEstabReminder(pool, row) {
     const params3 = [service, whenLabel, clientName];
     const params4 = [service, whenLabel, clientName, profName || '-'];
 
-    const sendWithParams = async (params) => {
-      const resp = await sendTemplate({ to: telEst, name: tplName, lang: tplLang, bodyParams: params });
-      return resp?.messages?.[0]?.id || null;
-    };
+    const sendWithParams = async (params) =>
+      sendAppointmentWhatsApp({
+        estabelecimentoId: row?.estabelecimento_id,
+        agendamentoId: row.id,
+        to: telEst,
+        kind: 'estab_reminder_5h',
+        template: { name: tplName, lang: tplLang, bodyParams: params },
+      });
 
     try {
-      if (/^quad|4|quatro/.test(paramModeEnv)) {
-        waMessageId = await sendWithParams(params4);
-      } else {
-        waMessageId = await sendWithParams(params3);
-      }
-    } catch (err) {
-      const expected = extractExpectedParams(err);
-      try {
-        if (expected === 4 && !/^quad|4|quatro/.test(paramModeEnv)) {
-          waMessageId = await sendWithParams(params4);
-        } else if (expected === 3 && !/^triple|3$/.test(paramModeEnv)) {
-          waMessageId = await sendWithParams(params3);
+      const firstParams = /^quad|4|quatro/.test(paramModeEnv) ? params4 : params3;
+      const attempt = await sendWithParams(firstParams);
+      waMessageId = attempt?.provider_message_id || null;
+
+      if (attempt && attempt.ok === false) {
+        const expected = extractExpectedParams({ body: attempt.wa_body, message: attempt.detail });
+        if (expected === 4 && firstParams !== params4) {
+          const a2 = await sendWithParams(params4);
+          waMessageId = waMessageId || a2?.provider_message_id || null;
+        } else if (expected === 3 && firstParams !== params3) {
+          const a2 = await sendWithParams(params3);
+          waMessageId = waMessageId || a2?.provider_message_id || null;
         } else {
-          await notifyWhatsapp(msgText, telEst);
+          const a2 = await sendAppointmentWhatsApp({
+            estabelecimentoId: row?.estabelecimento_id,
+            agendamentoId: row.id,
+            to: telEst,
+            kind: 'estab_reminder_5h',
+            message: msgText,
+          });
+          waMessageId = waMessageId || a2?.provider_message_id || null;
         }
-      } catch (fallbackErr) {
-        console.warn('[estab-reminder-5h] erro ao enviar (fallback WA)', fallbackErr?.message || fallbackErr);
       }
+    } catch (fallbackErr) {
+      console.warn('[estab-reminder-5h] erro ao enviar (fallback WA)', fallbackErr?.message || fallbackErr);
     }
   }
 
@@ -174,7 +186,7 @@ export function startEstabReminders(pool, { intervalMs } = {}) {
 
       const [rows] = await pool.query(
         `
-        SELECT a.id, a.inicio, a.servico_id, a.cliente_id, a.profissional_id,
+        SELECT a.id, a.inicio, a.servico_id, a.estabelecimento_id, a.cliente_id, a.profissional_id,
                s.nome AS servico_nome,
                c.nome AS cliente_nome,
                e.nome AS estabelecimento_nome, e.email AS estabelecimento_email, e.telefone AS estabelecimento_telefone,

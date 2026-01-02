@@ -4,7 +4,6 @@ import { auth, isEstabelecimento } from '../middleware/auth.js';
 import {
   getPlanContext,
   resolvePlanConfig,
-  formatPlanLimitExceeded,
   isDelinquentStatus,
 } from '../lib/plans.js';
 import { saveServiceImageFromDataUrl, removeServiceImageFile } from '../lib/service_images.js';
@@ -176,21 +175,6 @@ router.post('/', auth, isEstabelecimento, async (req, res) => {
         error: 'plan_delinquent',
         message: 'Sua assinatura esta em atraso. Regularize o pagamento para cadastrar novos servicos.',
       });
-    }
-
-    if (planConfig.maxServices !== null) {
-      const [[countRow]] = await pool.query(
-        'SELECT COUNT(*) AS total FROM servicos WHERE estabelecimento_id=?',
-        [estId]
-      );
-      const total = Number(countRow?.total || 0);
-      if (total >= planConfig.maxServices) {
-        return res.status(403).json({
-          error: 'plan_limit',
-          message: formatPlanLimitExceeded(planConfig, 'services') || 'Limite de servicos atingido.',
-          details: { limit: planConfig.maxServices, total },
-        });
-      }
     }
 
     let professionalIdsToLink = [];

@@ -3,7 +3,8 @@ import { Router } from 'express';
 import { pool } from '../lib/db.js';
 import { getPlanContext, isDelinquentStatus, formatPlanLimitExceeded } from '../lib/plans.js';
 import { auth as authRequired, isCliente, isEstabelecimento } from '../middleware/auth.js';
-import { notifyEmail, notifyWhatsapp, sendTemplate } from '../lib/notifications.js';
+import { notifyEmail } from '../lib/notifications.js';
+import { sendAppointmentWhatsApp } from '../lib/whatsapp_outbox.js';
 import bcrypt from 'bcryptjs';
 import { checkMonthlyAppointmentLimit, notifyAppointmentLimitReached } from '../lib/appointment_limits.js';
 import { estabNotificationsDisabled } from '../lib/estab_notifications.js';
@@ -600,16 +601,40 @@ router.post('/', authRequired, isCliente, async (req, res) => {
       const estNomeLabel = estNome || '';
       if (!blockClientWhatsapp && telCli) {
         if (/^triple|3$/.test(paramMode)) {
-          try { await sendTemplate({ to: telCli, name: tplName, lang: tplLang, bodyParams: [svc.nome, inicioBR, estNomeLabel] }); } catch (e) { console.warn('[wa/confirm cli]', e?.message || e); }
+          await sendAppointmentWhatsApp({
+            estabelecimentoId: estabelecimento_id,
+            agendamentoId: novo.id,
+            to: telCli,
+            kind: 'confirm_cli',
+            template: { name: tplName, lang: tplLang, bodyParams: [svc.nome, inicioBR, estNomeLabel] },
+          });
         } else {
-          await notifyWhatsapp(`✅ - Novo agendamento registrado: ${svc.nome}${profNome ? ' / ' + profNome : ''} em ${inicioBR} — ${estNomeLabel}. — Obrigado!`, telCli);
+          await sendAppointmentWhatsApp({
+            estabelecimentoId: estabelecimento_id,
+            agendamentoId: novo.id,
+            to: telCli,
+            kind: 'confirm_cli',
+            message: `✅ - Novo agendamento registrado: ${svc.nome}${profNome ? ' / ' + profNome : ''} em ${inicioBR} — ${estNomeLabel}. — Obrigado!`,
+          });
         }
       }
       if (!blockEstabNotifications && canWhatsappEst && telEst && telEst !== telCli) {
         if (/^triple|3$/.test(paramMode)) {
-          try { await sendTemplate({ to: telEst, name: tplName, lang: tplLang, bodyParams: [svc.nome, inicioBR, estNomeLabel] }); } catch (e) { console.warn('[wa/confirm est]', e?.message || e); }
+          await sendAppointmentWhatsApp({
+            estabelecimentoId: estabelecimento_id,
+            agendamentoId: novo.id,
+            to: telEst,
+            kind: 'confirm_est',
+            template: { name: tplName, lang: tplLang, bodyParams: [svc.nome, inicioBR, estNomeLabel] },
+          });
         } else {
-          await notifyWhatsapp(`✅ - Novo agendamento registrado: ${svc.nome}${profNome ? ' / ' + profNome : ''} em ${inicioBR} — ${estNomeLabel}. — Obrigado!`, telEst);
+          await sendAppointmentWhatsApp({
+            estabelecimentoId: estabelecimento_id,
+            agendamentoId: novo.id,
+            to: telEst,
+            kind: 'confirm_est',
+            message: `✅ - Novo agendamento registrado: ${svc.nome}${profNome ? ' / ' + profNome : ''} em ${inicioBR} — ${estNomeLabel}. — Obrigado!`,
+          });
         }
       }
     });
@@ -986,16 +1011,40 @@ router.post('/estabelecimento', authRequired, isEstabelecimento, async (req, res
       const estNomeLabel = estNome || '';
       if (!blockClientWhatsapp && telCli) {
         if (/^triple|3$/.test(paramMode)) {
-          try { await sendTemplate({ to: telCli, name: tplName, lang: tplLang, bodyParams: [svc.nome, inicioBR, estNomeLabel] }); } catch (e) { console.warn('[wa/confirm cli]', e?.message || e); }
+          await sendAppointmentWhatsApp({
+            estabelecimentoId: req.user.id,
+            agendamentoId: novo.id,
+            to: telCli,
+            kind: 'confirm_cli',
+            template: { name: tplName, lang: tplLang, bodyParams: [svc.nome, inicioBR, estNomeLabel] },
+          });
         } else {
-          await notifyWhatsapp(`Novo agendamento registrado: ${svc.nome}${profNome ? ' / ' + profNome : ''} em ${inicioBR} - ${estNomeLabel}.`, telCli);
+          await sendAppointmentWhatsApp({
+            estabelecimentoId: req.user.id,
+            agendamentoId: novo.id,
+            to: telCli,
+            kind: 'confirm_cli',
+            message: `Novo agendamento registrado: ${svc.nome}${profNome ? ' / ' + profNome : ''} em ${inicioBR} - ${estNomeLabel}.`,
+          });
         }
       }
       if (!blockEstabNotifications && canWhatsappEst && telEst && telEst !== telCli) {
         if (/^triple|3$/.test(paramMode)) {
-          try { await sendTemplate({ to: telEst, name: tplName, lang: tplLang, bodyParams: [svc.nome, inicioBR, estNomeLabel] }); } catch (e) { console.warn('[wa/confirm est]', e?.message || e); }
+          await sendAppointmentWhatsApp({
+            estabelecimentoId: req.user.id,
+            agendamentoId: novo.id,
+            to: telEst,
+            kind: 'confirm_est',
+            template: { name: tplName, lang: tplLang, bodyParams: [svc.nome, inicioBR, estNomeLabel] },
+          });
         } else {
-          await notifyWhatsapp(`Novo agendamento registrado: ${svc.nome}${profNome ? ' / ' + profNome : ''} em ${inicioBR} - ${estNomeLabel}.`, telEst);
+          await sendAppointmentWhatsApp({
+            estabelecimentoId: req.user.id,
+            agendamentoId: novo.id,
+            to: telEst,
+            kind: 'confirm_est',
+            message: `Novo agendamento registrado: ${svc.nome}${profNome ? ' / ' + profNome : ''} em ${inicioBR} - ${estNomeLabel}.`,
+          });
         }
       }
     });
@@ -1320,15 +1369,23 @@ router.put('/:id/cancel', authRequired, isCliente, async (req, res) => {
         const tplLang = process.env.WA_TEMPLATE_LANG || 'pt_BR';
         const params3 = [serviceName, whenLabel, clientName];
         const params4 = [serviceName, whenLabel, clientName, profName || '-'];
-        try {
-          if (/^quad|4|quatro/.test(paramMode)) {
-            await sendTemplate({ to: telEst, name: tplName, lang: tplLang, bodyParams: params4 });
-          } else {
-            await sendTemplate({ to: telEst, name: tplName, lang: tplLang, bodyParams: params3 });
-          }
-        } catch (err) {
-          console.warn('[cancel/estab][wa]', err?.message || err);
-          try { await notifyWhatsapp(cancelText, telEst); } catch (err2) { console.warn('[cancel/estab][wa-text]', err2?.message || err2); }
+        const tplParams = /^quad|4|quatro/.test(paramMode) ? params4 : params3;
+        const waResult = await sendAppointmentWhatsApp({
+          estabelecimentoId: a?.estabelecimento_id,
+          agendamentoId: id,
+          to: telEst,
+          kind: 'cancel_est',
+          template: { name: tplName, lang: tplLang, bodyParams: tplParams },
+        });
+        if (waResult && waResult.ok === false) {
+          console.warn('[cancel/estab][wa]', waResult?.detail || waResult?.error || 'send_failed');
+          await sendAppointmentWhatsApp({
+            estabelecimentoId: a?.estabelecimento_id,
+            agendamentoId: id,
+            to: telEst,
+            kind: 'cancel_est',
+            message: cancelText,
+          });
         }
       }
     });
@@ -1438,33 +1495,44 @@ router.put('/:id/cancel-estab', authRequired, isEstabelecimento, async (req, res
         paramMode = 'quad';
       }
 
-      const sendParams = async (p) => sendTemplate({ to: telCli, name: tplName, lang: tplLang, bodyParams: p });
+      const sendParams = async (p) =>
+        sendAppointmentWhatsApp({
+          estabelecimentoId: estId,
+          agendamentoId: id,
+          to: telCli,
+          kind: 'cancel_cli',
+          template: { name: tplName, lang: tplLang, bodyParams: p },
+        });
 
       if (/^quad|4|quatro/.test(paramMode)) {
         if (!blockClientWhatsapp && telCli) {
-          try { await sendParams(params4); } catch (e) {
-            const details = e?.body?.error?.error_data?.details || e?.body?.error?.message || e?.message || '';
-            if (/expected number of params\s*\(3\)/i.test(String(details))) {
-              try { await sendParams(params3); } catch (e2) { console.warn('[wa/cancel cli est] (fallback 3)', e2?.message || e2); }
-            } else {
-              console.warn('[wa/cancel cli est]', e?.message || e);
+          const r1 = await sendParams(params4);
+          if (r1 && r1.ok === false) {
+            const r2 = await sendParams(params3);
+            if (r2 && r2.ok === false) {
+              console.warn('[wa/cancel cli est] (fallback 3)', r2?.detail || r2?.error || 'send_failed');
             }
           }
         }
       } else if (/^triple|3$/.test(paramMode)) {
         if (!blockClientWhatsapp && telCli) {
-          try { await sendParams(params3); } catch (e) {
-            const details = e?.body?.error?.error_data?.details || e?.body?.error?.message || e?.message || '';
-            if (/expected number of params\s*\(4\)/i.test(String(details))) {
-              try { await sendParams(params4); } catch (e2) { console.warn('[wa/cancel cli est] (fallback 4)', e2?.message || e2); }
-            } else {
-              console.warn('[wa/cancel cli est]', e?.message || e);
+          const r1 = await sendParams(params3);
+          if (r1 && r1.ok === false) {
+            const r2 = await sendParams(params4);
+            if (r2 && r2.ok === false) {
+              console.warn('[wa/cancel cli est] (fallback 4)', r2?.detail || r2?.error || 'send_failed');
             }
           }
         }
       } else {
         if (!blockClientWhatsapp && telCli) {
-          await notifyWhatsapp(`Seu agendamento ${id} (${svc?.nome ?? 'servico'}) em ${inicioBR} foi cancelado pelo estabelecimento.`, telCli);
+          await sendAppointmentWhatsApp({
+            estabelecimentoId: estId,
+            agendamentoId: id,
+            to: telCli,
+            kind: 'cancel_cli',
+            message: `Seu agendamento ${id} (${svc?.nome ?? 'servico'}) em ${inicioBR} foi cancelado pelo estabelecimento.`,
+          });
         }
       }
     });
