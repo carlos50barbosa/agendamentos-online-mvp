@@ -4370,27 +4370,28 @@ body.planos-no-scrollbar .container--wide::-webkit-scrollbar{
 }
 .planos-footer__meta{
   display:flex;
-  flex-wrap:wrap;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
   gap:8px;
   font-size:14px;
   color:var(--muted);
-  justify-content:center;
+  width:100%;
 }
-.planos-footer__links{
-  display:flex;
-  flex-wrap:wrap;
-  gap:8px;
-  font-size:14px;
-  justify-content:center;
+.planos-footer__meta > *{
+  margin:0;
 }
-.planos-footer__links a,
+.planos-footer__meta-links{
+  margin:0;
+}
 .planos-footer__meta a{
   color:var(--muted);
   text-decoration:none;
 }
-.planos-footer__links a:hover,
-.planos-footer__meta a:hover{ color:var(--text); text-decoration:underline; }
-.planos-footer__separator{ color:var(--muted); }
+.planos-footer__meta a:hover{
+  color:var(--text);
+  text-decoration:underline;
+}
 
 /* =======================
    Tooltips (final override)

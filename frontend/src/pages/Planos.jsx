@@ -364,16 +364,11 @@ export default function Planos() {
       <footer className="planos-footer">
         <div className="section-shell planos-footer__inner">
           <div className="planos-footer__meta">
-            <span>Agendamentos Online © 2025 Todos os direitos reservados</span>
-            <span className="planos-footer__separator" aria-hidden="true">|</span>
+            <p>Agendamentos Online © 2025 Todos os direitos reservados</p>
             <a href="mailto:servicos.negocios.digital@gmail.com">servicos.negocios.digital@gmail.com</a>
-            <span className="planos-footer__separator" aria-hidden="true">|</span>
-            <a href="https://www.instagram.com/agendamentos.online/" target="_blank" rel="noreferrer">instagram.com/agendamentos.online</a>
-          </div>
-          <div className="planos-footer__links">
-            <Link to="/termos">Termos de Uso</Link>
-            <span className="planos-footer__separator" aria-hidden="true">|</span>
-            <Link to="/politica-privacidade">Política de Privacidade</Link>
+            <p className="planos-footer__meta-links">
+              <Link to="/termos">Termos de Uso</Link> e <Link to="/politica-privacidade">Política de Privacidade</Link>
+            </p>
           </div>
         </div>
       </footer>
