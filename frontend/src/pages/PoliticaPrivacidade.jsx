@@ -15,7 +15,7 @@ const sections = [
     id: 'controlador',
     title: '2. Controlador dos dados',
     paragraphs: [
-      'O controlador das informações é a AGENDAMENTOS ONLINE TECNOLOGIA LTDA., inscrita no CNPJ 12.345.678/0001-99, com sede na cidade de São Paulo/SP.',
+      'O controlador dos dados é o responsável pela plataforma Agendamentos Online.',
       'Dúvidas, solicitações ou exercício de direitos podem ser encaminhados para servicos.negocios.digital@gmail.com.',
     ],
   },
