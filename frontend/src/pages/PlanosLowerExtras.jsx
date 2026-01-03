@@ -21,7 +21,7 @@ const FAQS = [
   },
   {
     question: 'O que acontece ao atingir o limite de WhatsApp no Starter?',
-    answer: 'No Starter, ao atingir o limite, os avisos continuam por e-mail e painel.',
+    answer: 'No limite, o WhatsApp pausa. Avisos seguem por e-mail; o painel continua para acompanhar os agendamentos.',
   },
   {
     question: 'Posso trocar de plano ou de ciclo?',

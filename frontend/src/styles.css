@@ -659,6 +659,11 @@ a:hover { opacity: 1; text-decoration: underline; }
   .contato-page{ gap:36px; padding:32px 0 48px; }
   .contact-hero{ padding:32px 0; }
   .contact-form-card{ padding:24px; }
+  /* o wrapper do card/section onde está o tooltip */
+  .pricing, .pricing-card, .planCard, .planGrid {
+    transform: none !important;
+    filter: none !important;
+  }
 }
 
 /* =======================
@@ -3802,14 +3807,17 @@ body.planos-no-scrollbar .container--wide{
   -ms-overflow-style:none;
 }
 body.planos-no-scrollbar{
-  overflow:visible;
+  overflow-y:auto;
+  overflow-x:visible;
 }
 body.planos-no-scrollbar .app-shell{
-  height:100dvh;
+  min-height:100dvh;
+  height:auto;
 }
 body.planos-no-scrollbar .app-main{
-  height:100dvh;
-  overflow-y:auto;
+  min-height:100dvh;
+  height:auto;
+  overflow:visible;
 }
 body.planos-no-scrollbar *{
   scrollbar-width:none;
@@ -3838,7 +3846,7 @@ body.planos-no-scrollbar .container--wide::-webkit-scrollbar{
   gap:36px;
   padding-bottom:48px;
   position:relative;
-  overflow-x:hidden;
+  overflow:visible;
   --muted: #4b5563;
 }
 .planos-landing::before,
@@ -3861,8 +3869,56 @@ body.planos-no-scrollbar .container--wide::-webkit-scrollbar{
 }
 .planos-landing section{ position:relative; }
 
+@media (max-width: 768px){
+  .planos-landing{
+    gap:28px;
+    padding:0 0 32px;
+  }
+  .planos-landing section{
+    width:100%;
+  }
+  .hero{
+    padding:24px;
+  }
+  .hero__actions{
+    flex-direction:column;
+    align-items:stretch;
+  }
+  .hero__actions .btn{
+    width:100%;
+  }
+  .pricing-grid{
+    grid-template-columns:1fr;
+  }
+  .pricing-card{
+    padding:20px;
+  }
+  .pricing-card .btn,
+  .pricing-card .btn--outline,
+  .pricing-card .btn--primary,
+  .pricing-card .btn--outline-brand{
+    width:100%;
+  }
+  .pricing-card .price{
+    gap:2px;
+  }
+  .pricing-card .features{
+    gap:6px;
+  }
+  .pricing-extras{
+    padding:16px;
+  }
+  .planos-footer,
+  .planos-footer__inner{
+    flex-direction:column;
+    gap:8px;
+    text-align:center;
+  }
+}
+
 .section-shell{
-  width:min(1080px, 94vw);
+  width:100%;
+  max-width:1080px;
   margin:0 auto;
   display:flex;
   flex-direction:column;
@@ -4107,6 +4163,9 @@ body.planos-no-scrollbar .container--wide::-webkit-scrollbar{
 .feature-item__label{
   display:inline;
 }
+
+
+
 .pricing-tooltip{
   position:relative;
   display:inline-flex;
@@ -4130,8 +4189,13 @@ body.planos-no-scrollbar .container--wide::-webkit-scrollbar{
   line-height:1;
 }
 .pricing-tooltip__content{
+  z-index: 9999;
+  max-width: min(340px, calc(100vw - 24px));
+  white-space: normal;
+  overflow-wrap: anywhere;
   position:absolute;
-  left:0;
+  left:auto;
+  right:0;
   top:calc(100% + 8px);
   z-index:30;
   width:min(340px, 78vw);
