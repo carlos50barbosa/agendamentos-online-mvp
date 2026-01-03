@@ -183,6 +183,8 @@ export const Api = {
   billingWhatsAppPacks: () => req('/billing/whatsapp/packs'),
   billingWhatsAppWallet: () => req('/billing/whatsapp/wallet'),
   billingWhatsAppPix: (payload) => req('/billing/whatsapp/pix', { method: 'POST', body: JSON.stringify(payload || {}) }),
+  billingWhatsAppPixStatus: (paymentId) =>
+    req(`/billing/whatsapp/pix/status${toQuery({ payment_id: paymentId })}`),
 
   // ServiÃ§os (rotas existentes)
   servicosList: () => req('/servicos'),

@@ -280,7 +280,7 @@ function useAppPreferences() {
   };
 }
 
-function Sidebar({ open, user }) {
+function Sidebar({ open, user, isDesktop, isDark, isPlanos, toggleTheme }) {
   const nav = useNavigate();
   const resolvedUser = user ?? getUser();
   const navigation = useMemo(() => buildNavigation(resolvedUser), [resolvedUser]);
@@ -385,6 +385,21 @@ function Sidebar({ open, user }) {
             </>
           )}
         </nav>
+        {navigation.isAuthenticated && isDesktop && (
+          <div className="sidebar__actions">
+            <button
+              type="button"
+              className={`theme-toggle theme-toggle--text sidebar__theme-toggle${isPlanos ? ' is-disabled' : ''}`}
+              onClick={isPlanos ? undefined : toggleTheme}
+              disabled={isPlanos}
+              aria-label={isPlanos ? 'Tema fixo no modo claro' : `Ativar tema ${isDark ? 'claro' : 'escuro'}`}
+              title={isPlanos ? 'Tema fixo no modo claro' : isDark ? 'Alternar para tema claro' : 'Alternar para tema escuro'}
+            >
+              {isPlanos ? <IconSun aria-hidden="true" /> : isDark ? <IconSun aria-hidden="true" /> : <IconMoon aria-hidden="true" />}
+              <span className="app-topbar__theme-label">{isPlanos ? 'Tema claro' : isDark ? 'Tema escuro' : 'Tema claro'}</span>
+            </button>
+          </div>
+        )}
       </div>
     </aside>
   );
@@ -400,11 +415,16 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [planBarInfo, setPlanBarInfo] = useState({ plan: '', status: '', trialEnd: null, trialDaysLeft: null });
   const isPlanos = (loc?.pathname || '') === '/planos';
+  const isConfiguracoes = (loc?.pathname || '').startsWith('/configuracoes');
   const hideShell = false;
   const topbarRef = useRef(null);
   const topbarMenuButtonRef = useRef(null);
   const topbarMenuPanelRef = useRef(null);
   const [topbarMenuOpen, setTopbarMenuOpen] = useState(false);
+  const [isDesktop, setIsDesktop] = useState(() => {
+    if (typeof window === 'undefined' || !window.matchMedia) return false;
+    return window.matchMedia('(min-width: 1024px)').matches;
+  });
   const [topbarLogoutOpen, setTopbarLogoutOpen] = useState(false);
   const topbarNavigation = useMemo(() => buildNavigation(currentUser), [currentUser]);
   const showTopbarActive = !topbarNavigation.isEstab;
@@ -507,7 +527,7 @@ export default function App() {
     if (!root) return undefined;
 
     const previousTheme = root.getAttribute('data-theme');
-    root.setAttribute('data-theme', 'dark');
+    root.setAttribute('data-theme', 'light');
 
     return () => {
       if (preferences?.theme) {
@@ -605,6 +625,33 @@ const topbarAlert = useMemo(() => {
   }, [loc?.pathname]);
 
   useEffect(() => {
+    if (typeof window === 'undefined' || !window.matchMedia) return undefined;
+    const media = window.matchMedia('(min-width: 1024px)');
+    const handleChange = (event) => setIsDesktop(event.matches);
+    if (media.addEventListener) media.addEventListener('change', handleChange);
+    else media.addListener(handleChange);
+    return () => {
+      if (media.removeEventListener) media.removeEventListener('change', handleChange);
+      else media.removeListener(handleChange);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (isDesktop && topbarMenuOpen) setTopbarMenuOpen(false);
+  }, [isDesktop, topbarMenuOpen]);
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return undefined;
+    if (!topbarMenuOpen || isDesktop) return undefined;
+    const { style } = document.body;
+    const previousOverflow = style.overflow;
+    style.overflow = 'hidden';
+    return () => {
+      style.overflow = previousOverflow;
+    };
+  }, [topbarMenuOpen, isDesktop]);
+
+  useEffect(() => {
     if (!topbarMenuOpen) return undefined;
     const handleClickOutside = (event) => {
       const buttonEl = topbarMenuButtonRef.current;
@@ -629,7 +676,16 @@ const topbarAlert = useMemo(() => {
   return (
     <>
       <div className={`app-shell ${sidebarOpen ? 'sidebar-open' : 'is-collapsed'}`}>
-        {!hideShell && <Sidebar open={sidebarOpen} user={currentUser} />}
+        {!hideShell && (
+          <Sidebar
+            open={sidebarOpen}
+            user={currentUser}
+            isDesktop={isDesktop}
+            isDark={isDark}
+            isPlanos={isPlanos}
+            toggleTheme={toggleTheme}
+          />
+        )}
         {!hideShell && (
           <>
             <button
@@ -657,85 +713,87 @@ const topbarAlert = useMemo(() => {
                 </span>
               </NavLink>
               {topbarNavigation.isAuthenticated ? (
-                <div className="app-topbar__menu">
-                  <button
-                    type="button"
-                    className="app-topbar__menu-toggle"
-                    onClick={() => setTopbarMenuOpen((open) => !open)}
-                    aria-expanded={topbarMenuOpen}
-                    aria-controls="app-topbar-menu"
-                    aria-label="Abrir menu"
-                    ref={topbarMenuButtonRef}
-                  >
-                    <IconMenu aria-hidden="true" />
-                  </button>
-                  {topbarMenuOpen && (
-                    <div
-                      className="app-topbar__menu-panel"
-                      id="app-topbar-menu"
-                      role="menu"
-                      aria-label="Menu principal"
-                      ref={topbarMenuPanelRef}
+                !isDesktop && (
+                  <div className="app-topbar__menu">
+                    <button
+                      type="button"
+                      className="app-topbar__menu-toggle"
+                      onClick={() => setTopbarMenuOpen((open) => !open)}
+                      aria-expanded={topbarMenuOpen}
+                      aria-controls="app-topbar-menu"
+                      aria-label="Abrir menu"
+                      ref={topbarMenuButtonRef}
                     >
-                      <nav className="app-topbar__menu-nav" aria-label="Navegacao principal">
-                        <div className="sidelist">
-                          {topbarNavigation.sections.map((section) => (
-                            <div key={section.key} className="sidelist__section">
-                              {section.heading && <div className="sidelist__heading">{section.heading}</div>}
-                              {section.items.map((item) => {
-                                if (item.type === 'action') {
+                      <IconMenu aria-hidden="true" />
+                    </button>
+                    {topbarMenuOpen && (
+                      <div
+                        className="app-topbar__menu-panel"
+                        id="app-topbar-menu"
+                        role="menu"
+                        aria-label="Menu principal"
+                        ref={topbarMenuPanelRef}
+                      >
+                        <nav className="app-topbar__menu-nav" aria-label="Navegacao principal">
+                          <div className="sidelist">
+                            {topbarNavigation.sections.map((section) => (
+                              <div key={section.key} className="sidelist__section">
+                                {section.heading && <div className="sidelist__heading">{section.heading}</div>}
+                                {section.items.map((item) => {
+                                  if (item.type === 'action') {
+                                    return (
+                                      <button
+                                        key={item.key}
+                                        type="button"
+                                        className="sidelist__item sidelist__item--danger"
+                                        onClick={() => {
+                                          setTopbarMenuOpen(false);
+                                          setTopbarLogoutOpen(true);
+                                        }}
+                                      >
+                                        <item.icon className="sidelist__icon" aria-hidden="true" />
+                                        <span>{item.label}</span>
+                                      </button>
+                                    );
+                                  }
                                   return (
-                                    <button
+                                    <NavLink
                                       key={item.key}
-                                      type="button"
-                                      className="sidelist__item sidelist__item--danger"
-                                      onClick={() => {
-                                        setTopbarMenuOpen(false);
-                                        setTopbarLogoutOpen(true);
-                                      }}
+                                      to={item.to}
+                                      className={({ isActive }) => `sidelist__item${showTopbarActive && isActive ? ' active' : ''}`}
+                                      onClick={() => setTopbarMenuOpen(false)}
                                     >
                                       <item.icon className="sidelist__icon" aria-hidden="true" />
                                       <span>{item.label}</span>
-                                    </button>
+                                    </NavLink>
                                   );
-                                }
-                                return (
-                                  <NavLink
-                                    key={item.key}
-                                    to={item.to}
-                                    className={({ isActive }) => `sidelist__item${showTopbarActive && isActive ? ' active' : ''}`}
-                                    onClick={() => setTopbarMenuOpen(false)}
-                                  >
-                                    <item.icon className="sidelist__icon" aria-hidden="true" />
-                                    <span>{item.label}</span>
-                                  </NavLink>
-                                );
-                              })}
-                            </div>
-                          ))}
-                        </div>
-                      </nav>
-                      {topbarNavigation.isAuthenticated && (
-                        <>
-                          <div className="app-topbar__menu-divider" />
-                          <div className="app-topbar__actions">
-                            <button
-                              type="button"
-                              className={`theme-toggle${isPlanos ? ' is-disabled' : ''}`}
-                              onClick={isPlanos ? undefined : toggleTheme}
-                              disabled={isPlanos}
-                              aria-label={isPlanos ? 'Tema fixo no modo escuro' : `Ativar tema ${isDark ? 'claro' : 'escuro'}`}
-                              title={isPlanos ? 'Tema fixo no modo escuro' : isDark ? 'Alternar para tema claro' : 'Alternar para tema escuro'}
-                            >
-                              {(isPlanos || !isDark) ? <IconMoon aria-hidden="true" /> : <IconSun aria-hidden="true" />}
-                            </button>
-                            <span className="app-topbar__theme-label">{(isPlanos || isDark) ? 'Tema escuro' : 'Tema claro'}</span>
+                                })}
+                              </div>
+                            ))}
                           </div>
-                        </>
-                      )}
-                    </div>
-                  )}
-                </div>
+                        </nav>
+                        {topbarNavigation.isAuthenticated && (
+                          <>
+                            <div className="app-topbar__menu-divider" />
+                            <div className="app-topbar__actions">
+                              <button
+                                type="button"
+                                className={`theme-toggle theme-toggle--text${isPlanos ? ' is-disabled' : ''}`}
+                                onClick={isPlanos ? undefined : toggleTheme}
+                                disabled={isPlanos}
+                                aria-label={isPlanos ? 'Tema fixo no modo claro' : `Ativar tema ${isDark ? 'claro' : 'escuro'}`}
+                                title={isPlanos ? 'Tema fixo no modo claro' : isDark ? 'Alternar para tema claro' : 'Alternar para tema escuro'}
+                              >
+                                {isPlanos ? <IconSun aria-hidden="true" /> : isDark ? <IconSun aria-hidden="true" /> : <IconMoon aria-hidden="true" />}
+                                <span className="app-topbar__theme-label">{isPlanos ? 'Tema claro' : isDark ? 'Tema escuro' : 'Tema claro'}</span>
+                              </button>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )
               ) : (
                 <NavLink to="/login" className="btn btn--primary btn--sm app-topbar__login">
                   Login | Cadastro
@@ -751,6 +809,13 @@ const topbarAlert = useMemo(() => {
               </div>
             )}
           </div>
+          {topbarMenuOpen && !isDesktop && (
+            <div
+              className="app-topbar__menu-overlay"
+              onClick={() => setTopbarMenuOpen(false)}
+              aria-hidden="true"
+            />
+          )}
           {topbarLogoutOpen && (
             <Modal
               title="Sair da conta"
@@ -764,7 +829,7 @@ const topbarAlert = useMemo(() => {
             </Modal>
           )}
           <BillingStatusBanner status={billingStatus} user={currentUser} planInfo={planBarInfo} />
-          <div className="container">
+          <div className={`container${isConfiguracoes ? ' container--wide' : ''}`}>
             <Suspense
               fallback={
                 <div className="card" role="status" aria-live="polite">

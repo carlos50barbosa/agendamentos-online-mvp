@@ -1,6 +1,6 @@
 import React from 'react';
 
-function Feature({ icon = 'ƒo.', children }) {
+function Feature({ icon = '-', children }) {
   return (
     <li className="feature-line">
       <span className="feature-line__icon" aria-hidden>{icon}</span>
@@ -14,68 +14,38 @@ function BenefitCard({ title, description, items }) {
     <article className="benefit-card">
       <h3>{title}</h3>
       <p>{description}</p>
-      <ul>{items.map((item, index) => <Feature key={index}>{item}</Feature>)}</ul>
+      <ul>{items.map((item) => <Feature key={item}>{item}</Feature>)}</ul>
     </article>
   );
 }
 
-function TestimonialCard({ quote, name, role }) {
-  return (
-    <figure className="testimonial-card">
-      <blockquote>ƒ?o{quote}ƒ??</blockquote>
-      <figcaption>
-        <strong>{name}</strong>
-        <span>{role}</span>
-      </figcaption>
-    </figure>
-  );
-}
-
-const CORE_BENEFITS = [
+const PLAN_GUIDE = [
   {
-    title: 'Transforme o primeiro contato em fidelizaÇõÇœo',
-    description: 'Centralize WhatsApp, Instagram, Google e seu site em uma agenda inteligente que responde sozinha e nunca esquece um cliente.',
+    title: 'Profissionais por plano',
+    description: 'Escolha o limite de equipe que faz sentido para o seu atendimento.',
     items: [
-      'Link de agendamento personalizado para divulgar nas redes sociais',
-      'ConfirmaÇõÇæes automÇ­ticas por WhatsApp, SMS e e-mail',
-      'Lista de espera inteligente para ocupar horÇ­rios cancelados',
+      'Starter: até 2 profissionais',
+      'Pro: até 5 profissionais',
+      'Premium: até 10 profissionais',
     ],
   },
   {
-    title: 'OperaÇõÇœo eficiente do balcÇœo ao financeiro',
-    description: 'Otimize o tempo da sua equipe com fluxos automatizados e relatÇürios que mostram onde concentrar esforÇõos.',
+    title: 'WhatsApp incluído por mês',
+    description: 'Pacotes mensais de mensagens do WhatsApp.',
     items: [
-      'Painel em tempo real com profissionais, salas e recursos',
-      'RelatÇürios de receita, cancelamentos e ticket mÇ¸dio',
-      'ExportaÇõÇœo contÇ­bil com um clique (CSV, Excel e API)',
+      'Starter: 250 mensagens/mês (confirmações, lembretes e avisos)',
+      'Pro: 500 mensagens/mês (confirmações, lembretes e avisos)',
+      'Premium: 1.500 mensagens/mês (confirmações, lembretes e avisos)',
     ],
   },
   {
-    title: 'ExperiÇ¦ncia premium para seus clientes',
-    description: 'Encante em todas as etapas com lembretes gentis, confirmaÇõÇæes instantÇ½neas e um checkout sem fricÇõÇœo.',
+    title: 'Relatórios e suporte',
+    description: 'Itens adicionais que mudam conforme o plano.',
     items: [
-      'Chat de prÇ¸-atendimento com roteiros salvos para cada serviÇõo',
-      'Pesquisa de satisfaÇõÇœo pÇüs-atendimento automÇ­tica',
-      'IntegraÇõÇœo com carteiras digitais e pagamento na reserva',
+      'Starter: relatórios básicos',
+      'Pro: relatórios avançados, indicadores em tempo real e suporte prioritário via WhatsApp Business',
+      'Premium: suporte prioritário e onboarding do time',
     ],
-  },
-];
-
-const TESTIMONIALS = [
-  {
-    quote: 'Triplicamos a base de clientes recorrentes sem contratar mais recepcionistas. A agenda online virou nosso melhor vendedor.',
-    name: 'Vanessa Moura',
-    role: 'Diretora do EspaÇõo EssÇ¦ncia (SP)',
-  },
-  {
-    quote: 'Os lembretes automÇ­ticos reduziram faltas em 63%. Hoje temos previsibilidade para investir em mÇðdia e equipe.',
-    name: 'Paulo Martins',
-    role: 'Fundador do Studio Barber Pro (BH)',
-  },
-  {
-    quote: 'Organizamos 14 unidades com o mesmo padrÇœo de atendimento. Os relatÇürios deram clareza para acelerar a expansÇœo.',
-    name: 'Luciana Pereira',
-    role: 'COO da rede SunNails',
   },
 ];
 
@@ -85,11 +55,11 @@ export default function PlanosUpperExtras({ onContactPremium = () => {} }) {
       <section className="benefits">
         <div className="section-shell">
           <header className="section-header">
-            <h2>Resultados previsÇðveis em cada etapa da jornada</h2>
-            <p>Do primeiro contato atÇ¸ o pÇüs-atendimento, o Agendamentos Online cuida da experiÇ¦ncia para vocÇ¦ focar no crescimento.</p>
+            <h2>Entenda o que muda em cada plano</h2>
+            <p>Em todos: agendamentos ilimitados e até 5 mensagens por agendamento (confirmações, lembretes e avisos).</p>
           </header>
           <div className="benefits-grid">
-            {CORE_BENEFITS.map((benefit) => (
+            {PLAN_GUIDE.map((benefit) => (
               <BenefitCard key={benefit.title} {...benefit} />
             ))}
           </div>
@@ -99,24 +69,10 @@ export default function PlanosUpperExtras({ onContactPremium = () => {} }) {
       <section className="cta-band">
         <div className="section-shell cta-band__inner">
           <div className="cta-band__content">
-            <h2>Seu time no controle, seus clientes encantados</h2>
-            <p>ImplantaÇõÇœo guiada, suporte humano e insights diÇ­rios para acelerar decisÇæes.</p>
+            <h2>Precisa de ajuda para escolher?</h2>
+            <p>Tire dúvidas rápidas e escolha o plano certo para o seu volume.</p>
           </div>
-          <button className="btn btn--primary btn--lg" onClick={onContactPremium}>Quero falar com o time</button>
-        </div>
-      </section>
-
-      <section className="testimonials">
-        <div className="section-shell">
-          <header className="section-header">
-            <h2>HistÇürias de estabelecimentos que decidiram crescer com a gente</h2>
-            <p>Mais escala, menos improviso e uma experiÇ¦ncia de agendamento que os clientes realmente amam.</p>
-          </header>
-          <div className="testimonials-grid">
-            {TESTIMONIALS.map((item) => (
-              <TestimonialCard key={item.name} {...item} />
-            ))}
-          </div>
+          <button className="btn btn--primary btn--lg" onClick={onContactPremium}>Falar com o time</button>
         </div>
       </section>
     </>

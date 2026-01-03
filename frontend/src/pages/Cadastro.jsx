@@ -1,6 +1,6 @@
 
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import LogoAO from '../components/LogoAO.jsx';
 import { Api } from '../utils/api';
 import { saveToken, saveUser } from '../utils/auth';
@@ -45,6 +45,7 @@ const formatCpfCnpj = (value = '') => {
 
 export default function Cadastro() {
   const nav = useNavigate();
+  const loc = useLocation();
   const [form, setForm] = useState({
     nome: '',
     email: '',
@@ -72,6 +73,10 @@ export default function Cadastro() {
   const [successMsg, setSuccessMsg] = useState('');
   const [showOptionalFields, setShowOptionalFields] = useState(false);
   const legalMeta = useMemo(() => LEGAL_METADATA, []);
+  const tipoParam = useMemo(
+    () => new URLSearchParams(loc.search).get('tipo') || '',
+    [loc.search]
+  );
 
   const phoneDigits = (form.telefone || '').replace(/\D/g, '');
   const cepDigits = form.cep.replace(/\D/g, '');
@@ -135,6 +140,19 @@ export default function Cadastro() {
     !form.tipo ||
     !addressOk ||
     !acceptPolicies;
+
+  useEffect(() => {
+    if (form.tipo) return;
+    const normalized = String(tipoParam || '').toLowerCase();
+    if (!normalized) return;
+    if (normalized === 'cliente') {
+      setForm((prev) => ({ ...prev, tipo: 'cliente' }));
+      return;
+    }
+    if (['estab', 'estabelecimento', 'empresa', 'business'].includes(normalized)) {
+      setForm((prev) => ({ ...prev, tipo: 'estabelecimento' }));
+    }
+  }, [tipoParam, form.tipo]);
 
   useEffect(() => {
     if (!isCliente) {

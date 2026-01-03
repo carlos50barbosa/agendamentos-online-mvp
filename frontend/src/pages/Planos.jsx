@@ -1,12 +1,12 @@
 // src/pages/Planos.jsx
-import React, { Suspense, useState } from 'react';
+import React, { Suspense, useEffect, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { getUser } from '../utils/auth';
 
 const PlanosUpperExtras = React.lazy(() => import('./PlanosUpperExtras.jsx'));
 const PlanosLowerExtras = React.lazy(() => import('./PlanosLowerExtras.jsx'));
 
-function Feature({ icon = '✅', children }) {
+function Feature({ icon = '-', children }) {
   return (
     <li className="feature-line">
       <span className="feature-line__icon" aria-hidden>{icon}</span>
@@ -25,9 +25,9 @@ function Stat({ value, label }) {
 }
 
 const HERO_STATS = [
-  { value: '+12k', label: 'agendamentos confirmados todos os meses' },
-  { value: '72%', label: 'dos clientes retornam em menos de 3 meses' },
-  { value: '3x', label: 'mais agendamentos vindos de canais digitais' },
+  { value: '2 a 10', label: 'profissionais por plano' },
+  { value: '50 a 300', label: 'agendamentos com WhatsApp/mês' },
+  { value: 'até 5', label: 'mensagens por agendamento' },
 ];
 
 const BILLING_CYCLES = {
@@ -35,20 +35,37 @@ const BILLING_CYCLES = {
   anual: { label: 'Anual', periodLabel: '/ano' },
 };
 
+const WHATSAPP_LIMIT_FOOTNOTE = '* Ao atingir o limite de WhatsApp, continua por e-mail e painel.';
+const WHATSAPP_TOOLTIP = {
+  title: 'Como funciona?',
+  items: [
+    'As mensagens do WhatsApp são usadas para confirmações, lembretes e avisos do agendamento.',
+    'Cada agendamento pode enviar até 5 mensagens (ex.: confirmação + lembrete + aviso).',
+    'O plano inclui um limite mensal de mensagens. Ao atingir o limite, você continua por e-mail e painel, ou pode adicionar pacotes extras.',
+  ],
+};
+
+
 const PRICING_PLANS = [
   {
     key: 'starter',
     title: 'Starter',
     subtitle: 'Para começar com o essencial',
+    badge: 'Agendamentos ilimitados',
     prices: { mensal: '14,90', anual: '149,00' },
+    annualEquivalent: '12,40',
     features: [
-      'Agendamentos ilimitados no sistema',
-      'Até 2 profissionais',
-      'Inclui 50 agendamentos com WhatsApp/mês (250 mensagens/mês)',
-      'Até 5 mensagens por agendamento (confirmações/lembretes/avisos)',
-      'Ao atingir o limite de WhatsApp, continua por e-mail e painel',
-      'Relatórios básicos',
+      { key: 'starter-pros', label: 'Até 2 profissionais' },
+      {
+        key: 'starter-whatsapp',
+        label: 'WhatsApp incluso: 250 mensagens/mês (confirmações, lembretes e avisos)*',
+        tooltip: WHATSAPP_TOOLTIP,
+      },
+      { key: 'starter-extras', label: 'Pacotes extras de WhatsApp via PIX (opcional)' },
+      { key: 'starter-msgs', label: 'Até 5 mensagens por agendamento (confirmações, lembretes e avisos)' },
+      { key: 'starter-reports', label: 'Relatórios básicos' },
     ],
+    footnote: WHATSAPP_LIMIT_FOOTNOTE,
     annualNote: 'Economize o equivalente a 2 meses no plano anual.',
     ctaVariant: 'btn',
     ctaLabel: 'Testar grátis por 7 dias',
@@ -58,15 +75,22 @@ const PRICING_PLANS = [
     key: 'pro',
     title: 'Pro',
     subtitle: 'O melhor custo-benefício',
+    badge: 'Agendamentos ilimitados',
     prices: { mensal: '29,90', anual: '299,00' },
+    annualEquivalent: '24,90',
     features: [
-      'Agendamentos ilimitados no sistema',
-      'Até 5 profissionais',
-      'Inclui 100 agendamentos com WhatsApp/mês (500 mensagens/mês)',
-      'Até 5 mensagens por agendamento (confirmações/lembretes/avisos)',
-      'Relatórios avançados e indicadores em tempo real',
-      'Suporte prioritário via WhatsApp Business',
+      { key: 'pro-pros', label: 'Até 5 profissionais' },
+      {
+        key: 'pro-whatsapp',
+        label: 'WhatsApp incluso: 500 mensagens/mês (confirmações, lembretes e avisos)*',
+        tooltip: WHATSAPP_TOOLTIP,
+      },
+      { key: 'pro-extras', label: 'Pacotes extras de WhatsApp via PIX (opcional)' },
+      { key: 'pro-msgs', label: 'Até 5 mensagens por agendamento (confirmações, lembretes e avisos)' },
+      { key: 'pro-reports', label: 'Relatórios avançados e indicadores em tempo real' },
+      { key: 'pro-support', label: 'Suporte prioritário via WhatsApp Business' },
     ],
+    footnote: WHATSAPP_LIMIT_FOOTNOTE,
     annualNote: 'Economize o equivalente a 2 meses no plano anual.',
     ctaVariant: 'btn btn--primary',
     ctaLabel: 'Testar grátis por 7 dias',
@@ -77,14 +101,21 @@ const PRICING_PLANS = [
     key: 'premium',
     title: 'Premium',
     subtitle: 'Para alto volume e franquias',
+    badge: 'Agendamentos ilimitados',
     prices: { mensal: '99,90', anual: '999,00' },
+    annualEquivalent: '83,25',
     features: [
-      'Agendamentos ilimitados no sistema',
-      'Até 10 profissionais',
-      'Inclui 300 agendamentos com WhatsApp/mês (1500 mensagens/mês)',
-      'Até 5 mensagens por agendamento (confirmações/lembretes/avisos)',
-      'Suporte prioritário e onboarding do time',
+      { key: 'premium-pros', label: 'Até 10 profissionais' },
+      {
+        key: 'premium-whatsapp',
+        label: 'WhatsApp incluso: 1.500 mensagens/mês (confirmações, lembretes e avisos)*',
+        tooltip: WHATSAPP_TOOLTIP,
+      },
+      { key: 'premium-extras', label: 'Pacotes extras de WhatsApp via PIX (opcional)' },
+      { key: 'premium-msgs', label: 'Até 5 mensagens por agendamento (confirmações, lembretes e avisos)' },
+      { key: 'premium-support', label: 'Suporte prioritário e onboarding do time' },
     ],
+    footnote: WHATSAPP_LIMIT_FOOTNOTE,
     annualNote: 'Economize o equivalente a 2 meses no plano anual.',
     ctaVariant: 'btn btn--outline',
     ctaLabel: 'Assinar Premium',
@@ -92,10 +123,29 @@ const PRICING_PLANS = [
   },
 ];
 
+
 export default function Planos() {
   const user = getUser();
   const nav = useNavigate();
   const [billingCycle, setBillingCycle] = useState('mensal');
+
+  useEffect(() => {
+    const root = typeof document !== 'undefined' ? document.documentElement : null;
+    const body = typeof document !== 'undefined' ? document.body : null;
+    if (!root && !body) return undefined;
+    if (root) root.classList.add('planos-no-scrollbar');
+    if (body) body.classList.add('planos-no-scrollbar');
+    return () => {
+      if (root) root.classList.remove('planos-no-scrollbar');
+      if (body) body.classList.remove('planos-no-scrollbar');
+    };
+  }, []);
+
+  const scrollToPlans = () => {
+    if (typeof document === 'undefined') return;
+    const section = document.getElementById('planos');
+    if (section) section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
 
   const goCheckout = (plano, ciclo = 'mensal') => () => {
     try {
@@ -106,13 +156,29 @@ export default function Planos() {
     if (u && u.tipo === 'estabelecimento') {
       nav('/configuracoes');
     } else {
-      nav('/login?next=/configuracoes');
+      nav('/login?next=/configuracoes&tipo=estabelecimento');
     }
   };
 
-  const planCtaTarget = user?.tipo === 'estabelecimento' ? '/configuracoes' : '/login?next=/configuracoes';
-  const handlePlanCta = (plan, ciclo) => (event) => {
-    event.preventDefault();
+  const goTrial = (plano, ciclo = 'mensal') => () => {
+    try {
+      localStorage.setItem('intent_plano', plano);
+      localStorage.setItem('intent_plano_ciclo', ciclo);
+    } catch {}
+    const u = getUser();
+    if (u && u.tipo === 'estabelecimento') {
+      nav('/configuracoes');
+    } else {
+      nav('/cadastro?tipo=estabelecimento');
+    }
+  };
+
+  const handlePlanCta = (plan, ciclo, kind) => (event) => {
+    if (event?.preventDefault) event.preventDefault();
+    if (kind === 'trial') {
+      goTrial(plan, ciclo)();
+      return;
+    }
     goCheckout(plan, ciclo)();
   };
 
@@ -120,25 +186,22 @@ export default function Planos() {
     <div className="planos-landing">
       <section className="hero">
         <div className="hero__content">
-          <span className="tag tag--accent">Feito para clínicas, salões, estúdios e academias</span>
-          <h1>Transforme seu agendamento em uma máquina de clientes fiéis</h1>
-          <p>Automatize confirmações, reduza faltas e dê superpoderes ao seu time de atendimento em uma plataforma simples, segura e pronta para crescer com o seu negócio.</p>
+          <span className="tag tag--accent">Planos para estabelecimentos</span>
+          <h1>Planos simples, limites claros</h1>
+          <p>Todos os planos têm agendamentos ilimitados no sistema. Compare limites de profissionais, pacote de WhatsApp e itens adicionais de cada plano.</p>
           <div className="hero__badge-row">
-            <span className="hero__badge">Implementação guiada em 7 dias</span>
-            <span className="hero__badge hero__badge--outline">Sem fidelidade</span>
-            <span className="hero__badge hero__badge--outline">Suporte humano 7-12</span>
+            <span className="hero__badge">Mensal ou anual</span>
+            <span className="hero__badge hero__badge--outline">Starter e Pro com 7 dias grátis</span>
+            <span className="hero__badge hero__badge--outline">WhatsApp incluído por mês</span>
           </div>
           <div className="hero__actions">
-            <button className="btn btn--primary btn--lg" onClick={goCheckout('pro')}>Começar teste de 7 dias</button>
-            <button className="btn btn--outline btn--lg" onClick={() => nav('/ajuda')}>Ver tour guiado</button>
+            <button className="btn btn--primary btn--lg" onClick={goTrial('pro')}>Testar Pro por 7 dias</button>
+            <button className="btn btn--outline btn--lg" onClick={scrollToPlans}>Ver detalhes dos planos</button>
           </div>
+          <div className="planos-highlight">Teste grátis por 7 dias sem cartão.</div>
           {user?.tipo !== 'estabelecimento' && (
-            <div className="alert-inline" role="status">Página pensada para estabelecimentos. Faça login como estabelecimento para contratar um plano.</div>
+            <div className="alert-inline" role="status">Para contratar um plano, acesse com uma conta de estabelecimento.</div>
           )}
-          <div className="hero__footnote">
-            <span>7 dias grátis — sem cartão de crédito</span>
-            <span>Integrações com WhatsApp, Instagram e Google</span>
-          </div>
           <div className="stats-grid">
             {HERO_STATS.map((stat) => <Stat key={stat.label} {...stat} />)}
           </div>
@@ -146,31 +209,23 @@ export default function Planos() {
         <div className="hero__illustration" aria-hidden>
           <div className="hero__pulse" />
           <div className="hero__card hero__card--primary">
-            <strong>Agenda cheia</strong>
-            <span>+38 novos agendamentos essa semana</span>
+            <strong>WhatsApp mensal</strong>
+            <span>50/100/300 agendamentos por mês</span>
           </div>
           <div className="hero__card hero__card--secondary">
-            <strong>Zero faltas</strong>
-            <span>Lembretes enviados automaticamente</span>
-          </div>
-          <div className="hero__avatar-stack">
-            <span className="hero__avatar" aria-hidden>AO</span>
-            <span className="hero__avatar" aria-hidden>DG</span>
-            <span className="hero__avatar" aria-hidden>RS</span>
-            <span className="hero__avatar hero__avatar--more" aria-hidden>+120</span>
+            <strong>Profissionais</strong>
+            <span>2, 5 ou 10 por plano</span>
           </div>
         </div>
       </section>
 
       <section className="social-proof">
         <div className="section-shell">
-          <span className="eyebrow">Confiança de redes e marcas que lideram atendimento</span>
+          <span className="eyebrow">Resumo do que está em todos os planos</span>
           <div className="logos">
-            <span>Studio Barber Pro</span>
-            <span>Essência Spa</span>
-            <span>SunNails</span>
-            <span>Flow Pilates</span>
-            <span>Clínica Persona</span>
+            <span>Agendamentos ilimitados no sistema</span>
+            <span>Até 5 mensagens por agendamento</span>
+            <span>WhatsApp incluído por mês</span>
           </div>
         </div>
       </section>
@@ -182,10 +237,10 @@ export default function Planos() {
         <div className="section-shell">
           <header className="section-header">
             <h2>Planos e preços</h2>
-            <p>Escolha o plano ideal hoje e faça upgrade quando for hora de expandir.</p>
+            <p>Veja o que cada plano inclui e compare os limites.</p>
           </header>
           <div className="small muted" style={{ marginTop: -8, marginBottom: 12 }}>
-            Política de cobrança: upgrades liberam recursos imediatamente e a cobrança do novo valor ocorre no próximo ciclo. Downgrades passam a valer no ciclo seguinte, desde que os limites do plano sejam atendidos.
+            Política de cobrança: upgrades liberam recursos imediatamente e o novo valor é cobrado no próximo ciclo. Downgrades valem no ciclo seguinte, desde que os limites do plano sejam atendidos.
           </div>
           <div
             className="segmented billing-toggle"
@@ -213,24 +268,20 @@ export default function Planos() {
               const periodLabel = BILLING_CYCLES[billingCycle].periodLabel;
               const cardClass = `pricing-card${plan.featured ? ' is-featured' : ''}`;
               const isSales = plan.ctaKind === 'sales';
-              const linkTo = isSales
-                ? (() => {
-                    const base = plan.ctaHref || `/contato?plano=${plan.key}`;
-                    const separator = base.includes('?') ? '&' : '?';
-                    return `${base}${separator}ciclo=${billingCycle}`;
-                  })()
-                : planCtaTarget;
-              const linkOnClick = isSales ? undefined : handlePlanCta(plan.key, billingCycle);
+              const showAnnualEquivalent = billingCycle === 'anual' && plan.annualEquivalent;
+              const ctaLabel = plan.ctaLabel || 'Saiba mais';
+              const ctaClass = plan.ctaVariant || 'btn';
+              const ctaLink = (() => {
+                if (!isSales) return null;
+                const base = plan.ctaHref || `/contato?plano=${plan.key}`;
+                const separator = base.includes('?') ? '&' : '?';
+                return `${base}${separator}ciclo=${billingCycle}`;
+              })();
               return (
-                <Link
-                  key={plan.key}
-                  className={cardClass}
-                  to={linkTo}
-                  onClick={linkOnClick}
-                  style={{ textDecoration: 'none', color: 'inherit' }}
-                >
+                <div key={plan.key} className={cardClass}>
+                  {plan.badge && <span className="pricing-badge">{plan.badge}</span>}
                   <div className="pricing-header">
-                    <div className="pricing-title" style={{ cursor: 'pointer' }}>{plan.title}</div>
+                    <div className="pricing-title">{plan.title}</div>
                     <div className="pricing-subtitle muted">{plan.subtitle}</div>
                   </div>
                   <div className="price">
@@ -238,28 +289,94 @@ export default function Planos() {
                     <span className="amount">{price}</span>
                     <span className="period">{periodLabel}</span>
                   </div>
+                  {showAnnualEquivalent && (
+                    <div className="price-equivalent">equivale a R$ {plan.annualEquivalent}/mês</div>
+                  )}
                   <ul className="features">
-                    {plan.features.map((item) => (
-                      <Feature key={item}>{item}</Feature>
-                    ))}
+                    {plan.features.map((item) => {
+                      if (typeof item === 'string') {
+                        return <Feature key={item}>{item}</Feature>;
+                      }
+                      const label = item?.label || '';
+                      return (
+                        <Feature key={item?.key || label}>
+                          <span className="feature-item">
+                            <span className="feature-item__label">
+                              {label}{item?.tooltip ? (
+                                <span className="pricing-tooltip">
+                                  <span className="pricing-tooltip__icon" aria-hidden="true">i</span>
+                                  <span className="pricing-tooltip__content" role="note">
+                                    <span className="pricing-tooltip__title">{item.tooltip.title}</span>
+                                    <ul>
+                                      {item.tooltip.items.map((text) => (
+                                        <li key={text}>{text}</li>
+                                      ))}
+                                    </ul>
+                                  </span>
+                                </span>
+                              ) : null}
+                            </span>
+                          </span>
+                        </Feature>
+                      );
+                    })}
                   </ul>
+                  {plan.footnote && (
+                    <div className="pricing-footnote">{plan.footnote}</div>
+                  )}
                   {billingCycle === 'anual' && plan.annualNote && (
                     <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>{plan.annualNote}</div>
                   )}
-                  <span className={plan.ctaVariant || 'btn'}>{plan.ctaLabel || 'Saiba mais'}</span>
-                </Link>
+                  {isSales ? (
+                    <Link className={ctaClass} to={ctaLink}>
+                      {ctaLabel}
+                    </Link>
+                  ) : (
+                    <button
+                      type="button"
+                      className={ctaClass}
+                      onClick={handlePlanCta(plan.key, billingCycle, plan.ctaKind)}
+                    >
+                      {ctaLabel}
+                    </button>
+                  )}
+                </div>
               );
             })}
+          </div>
+          <div className="pricing-extras">
+            <h3>Pacotes extras de WhatsApp (opcional)</h3>
+            <ul>
+              <li>Passou do limite? Adicione mensagens via PIX.</li>
+              <li>Saldo extra é usado quando o limite do plano termina.</li>
+              <li>Confirmação rápida via PIX.</li>
+            </ul>
           </div>
         </div>
       </section>
       <Suspense fallback={null}>
         <PlanosLowerExtras
-          onStartTrial={goCheckout('pro')}
+          onStartTrial={goTrial('pro')}
           onTalkSpecialist={() => nav('/contato')}
         />
       </Suspense>
+
+      <footer className="planos-footer">
+        <div className="section-shell planos-footer__inner">
+          <div className="planos-footer__meta">
+            <span>Agendamentos Online © 2025 Todos os direitos reservados</span>
+            <span className="planos-footer__separator" aria-hidden="true">|</span>
+            <a href="mailto:servicos.negocios.digital@gmail.com">servicos.negocios.digital@gmail.com</a>
+            <span className="planos-footer__separator" aria-hidden="true">|</span>
+            <a href="https://www.instagram.com/agendamentos.online/" target="_blank" rel="noreferrer">instagram.com/agendamentos.online</a>
+          </div>
+          <div className="planos-footer__links">
+            <Link to="/termos">Termos de Uso</Link>
+            <span className="planos-footer__separator" aria-hidden="true">|</span>
+            <Link to="/politica-privacidade">Política de Privacidade</Link>
+          </div>
+        </div>
+      </footer>
     </div>
   );
 }
-

@@ -40,6 +40,10 @@ export default function Login() {
     const fallback = tipo === 'CLIENTE' ? '/cliente' : '/estab';
     return nextParam || storedNext || fallback;
   }, [nextParam, storedNext, tipo]);
+  const cadastroTarget = useMemo(
+    () => (tipo === 'ESTABELECIMENTO' ? '/cadastro?tipo=estabelecimento' : '/cadastro?tipo=cliente'),
+    [tipo]
+  );
 
   useEffect(() => {
     try {
@@ -293,7 +297,7 @@ export default function Login() {
                 </div>
 
                 <div className="login-preview__actions">
-                  <Link to="/cadastro" className="login-preview__ghost">
+                  <Link to={cadastroTarget} className="login-preview__ghost">
                     Criar conta
                   </Link>
                   <Link to="/" className="login-preview__ghost">

@@ -675,6 +675,35 @@ router.get('/whatsapp/wallet', auth, isEstabelecimento, async (req, res) => {
   }
 });
 
+router.get('/whatsapp/pix/status', auth, isEstabelecimento, async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  try {
+    const estabelecimentoId = req.user.id;
+    const paymentId = String(req.query.payment_id || '').trim();
+    if (!paymentId) {
+      return res.status(400).json({ ok: false, error: 'missing_payment_id' });
+    }
+
+    const [rows] = await pool.query(
+      `SELECT id, created_at
+         FROM whatsapp_wallet_transactions
+        WHERE estabelecimento_id = ?
+          AND payment_id = ?
+          AND kind = 'topup_credit'
+        ORDER BY id DESC
+        LIMIT 1`,
+      [estabelecimentoId, paymentId]
+    );
+
+    const credited = Array.isArray(rows) && rows.length > 0;
+    const creditedAt = credited && rows[0]?.created_at ? new Date(rows[0].created_at).toISOString() : null;
+    return res.json({ ok: true, credited, credited_at: creditedAt });
+  } catch (err) {
+    console.error('GET /billing/whatsapp/pix/status', err);
+    return res.status(500).json({ ok: false, error: 'status_failed' });
+  }
+});
+
 // Checkout PIX para pacote extra de mensagens WhatsApp
 router.post('/whatsapp/pix', auth, isEstabelecimento, async (req, res) => {
   try {
