@@ -149,6 +149,7 @@ export default function Planos() {
 
   const goCheckout = (plano, ciclo = 'mensal') => () => {
     try {
+      localStorage.setItem('intent_kind', 'checkout');
       localStorage.setItem('intent_plano', plano);
       localStorage.setItem('intent_plano_ciclo', ciclo);
     } catch {}
@@ -156,27 +157,31 @@ export default function Planos() {
     if (u && u.tipo === 'estabelecimento') {
       nav('/configuracoes');
     } else {
-      nav('/login?next=/configuracoes&tipo=estabelecimento');
+      nav('/cadastro?next=/configuracoes&tipo=estabelecimento');
     }
   };
 
-  const goTrial = (plano, ciclo = 'mensal') => () => {
+  const goTrial = (plano) => () => {
     try {
-      localStorage.setItem('intent_plano', plano);
-      localStorage.setItem('intent_plano_ciclo', ciclo);
+      localStorage.removeItem('intent_plano');
+      localStorage.removeItem('intent_plano_ciclo');
+      localStorage.setItem('intent_kind', 'trial');
     } catch {}
     const u = getUser();
     if (u && u.tipo === 'estabelecimento') {
       nav('/configuracoes');
     } else {
-      nav('/cadastro?tipo=estabelecimento');
+      const trialNext = encodeURIComponent('/estab?trial=sucesso');
+      nav(
+        `/cadastro?trial_plan=${encodeURIComponent(plano)}&next=${trialNext}&tipo=estabelecimento`
+      );
     }
   };
 
   const handlePlanCta = (plan, ciclo, kind) => (event) => {
     if (event?.preventDefault) event.preventDefault();
     if (kind === 'trial') {
-      goTrial(plan, ciclo)();
+      goTrial(plan)();
       return;
     }
     goCheckout(plan, ciclo)();

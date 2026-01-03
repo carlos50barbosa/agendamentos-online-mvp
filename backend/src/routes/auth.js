@@ -12,6 +12,8 @@ import { saveAvatarFromDataUrl, removeAvatarFile } from '../lib/avatar.js';
 import { MAX_TRIAL_DAYS } from '../lib/plans.js';
 
 const router = Router();
+const DAY_MS = 86400000;
+const TRIAL_PLANS = new Set(['starter', 'pro']);
 
 const toBool = (value) => {
   if (value === true || value === false) return Boolean(value);
@@ -142,9 +144,11 @@ router.post('/register', async (req, res) => {
     if (rows.length) return res.status(400).json({ error: 'email_exists' });
 
     const now = new Date();
+    const normalizedRequestedPlan = String(req.body?.trial_plan || req.body?.plan || '').trim().toLowerCase();
+    const planForTrial = TRIAL_PLANS.has(normalizedRequestedPlan) ? normalizedRequestedPlan : 'starter';
     const trialEndsAt =
       tipo === 'estabelecimento' && MAX_TRIAL_DAYS > 0
-        ? new Date(now.getTime() + MAX_TRIAL_DAYS * 86400000)
+        ? new Date(now.getTime() + MAX_TRIAL_DAYS * DAY_MS)
         : null;
 
     const hash = await bcrypt.hash(String(senha), 10);
@@ -171,7 +175,10 @@ router.post('/register', async (req, res) => {
 
     if (trialEndsAt) {
       try {
-        await pool.query('UPDATE usuarios SET plan_trial_ends_at=? WHERE id=?', [trialEndsAt, r.insertId]);
+        await pool.query(
+          'UPDATE usuarios SET plan=?, plan_status=?, plan_trial_ends_at=? WHERE id=?',
+          [planForTrial, 'trialing', trialEndsAt, r.insertId]
+        );
       } catch (err) {
         console.error('[auth/register] failed to set trial end', err);
       }
@@ -195,7 +202,7 @@ router.post('/register', async (req, res) => {
       cidade: cidadeTrim || null,
       estado: estadoTrim || null,
       tipo,
-      plan: 'starter',
+      plan: planForTrial,
       notify_email_estab: tipo === 'estabelecimento',
       notify_whatsapp_estab: tipo === 'estabelecimento',
       plan_status: 'trialing',

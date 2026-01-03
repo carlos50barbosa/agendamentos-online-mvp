@@ -73,10 +73,22 @@ export default function Cadastro() {
   const [successMsg, setSuccessMsg] = useState('');
   const [showOptionalFields, setShowOptionalFields] = useState(false);
   const legalMeta = useMemo(() => LEGAL_METADATA, []);
-  const tipoParam = useMemo(
-    () => new URLSearchParams(loc.search).get('tipo') || '',
-    [loc.search]
-  );
+  const tipoParam = useMemo(() => new URLSearchParams(loc.search).get('tipo') || '', [loc.search]);
+  const trialPlanChoice = useMemo(() => {
+    const rawPlan = new URLSearchParams(loc.search).get('trial_plan') || '';
+    const normalized = String(rawPlan || '').trim().toLowerCase();
+    return ['starter', 'pro'].includes(normalized) ? normalized : '';
+  }, [loc.search]);
+  const nextParam = useMemo(() => new URLSearchParams(loc.search).get('next') || '', [loc.search]);
+
+  useEffect(() => {
+    if (!trialPlanChoice) return;
+    try {
+      localStorage.removeItem('intent_kind');
+      localStorage.removeItem('intent_plano');
+      localStorage.removeItem('intent_plano_ciclo');
+    } catch {}
+  }, [trialPlanChoice]);
 
   const phoneDigits = (form.telefone || '').replace(/\D/g, '');
   const cepDigits = form.cep.replace(/\D/g, '');
@@ -233,12 +245,17 @@ export default function Cadastro() {
         privacyAcceptedAt: acceptanceTimestamp,
         dataProcessingConsent: true,
       };
+      if (isEstab && trialPlanChoice) {
+        payload.trial_plan = trialPlanChoice;
+      }
       const { token, user } = await Api.register(payload);
       saveToken(token);
       saveUser(user);
       setSuccessMsg('Cadastro realizado com sucesso! Redirecionando...');
       try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch {}
-      setTimeout(() => nav(user?.tipo === 'cliente' ? '/cliente' : '/estab'), 1200);
+      const fallback = user?.tipo === 'cliente' ? '/cliente' : '/estab';
+      const destination = nextParam || fallback;
+      setTimeout(() => nav(destination), 1200);
     } catch (e) {
       const message = e?.message || '';
       const friendly =

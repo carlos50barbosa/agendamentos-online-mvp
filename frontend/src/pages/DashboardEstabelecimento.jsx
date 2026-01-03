@@ -5,6 +5,8 @@ import 'react-big-calendar/lib/css/react-big-calendar.css'
 import { Calendar as BigCalendar, momentLocalizer, Views } from 'react-big-calendar'
 import { Api, resolveAssetUrl } from '../utils/api'
 import { getUser, USER_EVENT } from '../utils/auth'
+import Modal from '../components/Modal.jsx'
+import { useSearchParams } from 'react-router-dom'
 
 moment.locale('pt-br')
 moment.updateLocale('pt-br', {
@@ -503,6 +505,8 @@ export default function DashboardEstabelecimento() {
   const [currentUser, setCurrentUser] = useState(() => getUser())
   const [showProAgenda, setShowProAgenda] = useState(true)
   const [professionals, setProfessionals] = useState([])
+  const [searchParams, setSearchParams] = useSearchParams()
+  const [trialModalOpen, setTrialModalOpen] = useState(false)
   const establishmentId =
     currentUser && currentUser.tipo === 'estabelecimento' ? currentUser.id : null
 
@@ -527,6 +531,15 @@ export default function DashboardEstabelecimento() {
       window.removeEventListener('storage', handleStorage)
     }
   }, [])
+
+  useEffect(() => {
+    const trialParam = searchParams.get('trial')
+    if (trialParam !== 'sucesso') return
+    setTrialModalOpen(true)
+    const updatedParams = new URLSearchParams(searchParams)
+    updatedParams.delete('trial')
+    setSearchParams(updatedParams, { replace: true })
+  }, [searchParams, setSearchParams])
 
   useEffect(() => {
     if (!establishmentId) {
@@ -692,17 +705,19 @@ export default function DashboardEstabelecimento() {
             </div>
           </div>
         </div>
-        <div className="pro-agenda__wrap">
-          <ProfessionalAgendaView
-            items={filtered}
-            professionals={professionals}
-            onForceCancel={handleForceCancel}
-            onUpdateAppointment={handleUpdateAppointment}
-            onAddAppointment={handleAddAppointment}
-            establishmentId={establishmentId}
-            currentUser={currentUser}
-          />
-        </div>
+          <div className="pro-agenda__wrap">
+            <ProfessionalAgendaView
+              items={filtered}
+              professionals={professionals}
+              onForceCancel={handleForceCancel}
+              onUpdateAppointment={handleUpdateAppointment}
+              onAddAppointment={handleAddAppointment}
+              establishmentId={establishmentId}
+              currentUser={currentUser}
+              trialModalOpen={trialModalOpen}
+              onDismissTrialModal={() => setTrialModalOpen(false)}
+            />
+          </div>
       </div>
     </div>
   )
@@ -813,6 +828,8 @@ function ProfessionalAgendaView({
   professionals,
   establishmentId,
   currentUser,
+  trialModalOpen,
+  onDismissTrialModal,
 }) {
   const getResourceId = (item) =>
     item?.profissional_id ??
@@ -2430,6 +2447,26 @@ function ProfessionalAgendaView({
             </div>
           </div>
         </div>
+      )}
+      {trialModalOpen && (
+        <Modal
+          title="Teste grátis ativado com sucesso!"
+          onClose={onDismissTrialModal}
+          actions={[
+            <button
+              key="entendi"
+              type="button"
+              className="btn btn--primary"
+              onClick={onDismissTrialModal}
+            >
+              Entendi
+            </button>,
+          ]}
+        >
+          <p>
+            Seu período de teste já começou. Configure seus serviços e horários para receber agendamentos.
+          </p>
+        </Modal>
       )}
     </div>
   )

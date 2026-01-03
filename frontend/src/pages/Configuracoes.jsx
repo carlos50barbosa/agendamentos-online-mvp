@@ -561,6 +561,13 @@ export default function Configuracoes() {
   const [checkoutError, setCheckoutError] = useState('');
   const checkoutIntentRef = useRef(false);
   const purchaseEventRef = useRef(null);
+  const cleanupIntentStorage = useCallback(() => {
+    try {
+      localStorage.removeItem('intent_kind');
+      localStorage.removeItem('intent_plano');
+      localStorage.removeItem('intent_plano_ciclo');
+    } catch {}
+  }, []);
   // Mensagens pós-checkout (retorno do Mercado Pago)
   const [checkoutNotice, setCheckoutNotice] = useState({ kind: '', message: '', syncing: false });
   // Contagem simples para pré-validação de downgrade (serviços)
@@ -1201,14 +1208,11 @@ export default function Configuracoes() {
       setCheckoutError(err?.data?.message || err?.message || 'Falha ao gerar cobranca PIX.');
     } finally {
       setCheckoutLoading(false);
+      cleanupIntentStorage();
       checkoutIntentRef.current = false;
-      try {
-        localStorage.removeItem('intent_plano');
-        localStorage.removeItem('intent_plano_ciclo');
-      } catch {}
     }
     return success;
-  }, [fetchBilling, isEstab, user?.id, clearPixCache, resetPixState]);
+  }, [fetchBilling, isEstab, user?.id, clearPixCache, resetPixState, cleanupIntentStorage]);
 
   const handleWhatsAppTopup = useCallback(
     async (packOverride = null) => {
@@ -1437,30 +1441,6 @@ export default function Configuracoes() {
     return 'Confirmação obrigatória com senha. Upgrades liberam na hora; downgrades valem na próxima renovação.';
   }, [changePlanTarget]);
 
-  useEffect(() => {
-    if (!isEstab) return;
-    let storedPlan = null;
-    let storedCycle = 'mensal';
-    try { storedPlan = localStorage.getItem('intent_plano'); } catch {}
-    try {
-      const rawCycle = localStorage.getItem('intent_plano_ciclo');
-      if (rawCycle) storedCycle = rawCycle;
-    } catch {}
-    if (storedPlan && !checkoutIntentRef.current) {
-      checkoutIntentRef.current = true;
-      (async () => {
-        try {
-          await handleCheckout(storedPlan, storedCycle);
-        } finally {
-          try {
-            localStorage.removeItem('intent_plano');
-            localStorage.removeItem('intent_plano_ciclo');
-          } catch {}
-          checkoutIntentRef.current = false;
-        }
-      })();
-    }
-  }, [handleCheckout, isEstab]);
   const daysLeft = useMemo(() => {
     if (planInfo.trialDaysLeft != null) return planInfo.trialDaysLeft;
     if (!planInfo.trialEnd) return 0;
@@ -1481,6 +1461,58 @@ export default function Configuracoes() {
     if (!Number.isFinite(endTs)) return false;
     return endTs < Date.now();
   }, [planInfo.status, planInfo.trialDaysLeft, planInfo.trialEnd]);
+
+  useEffect(() => {
+    if (!isEstab) return;
+    const statusKey = String(planInfo.status || '').toLowerCase();
+    const hasTrialInfo = Boolean(planInfo.trialEnd) || planInfo.trialDaysLeft != null;
+    const planReady =
+      !!statusKey &&
+      (statusKey !== 'trialing' || hasTrialInfo || trialExpired || daysLeft > 0);
+    if (!planReady) return;
+
+    let storedPlan = null;
+    let storedCycle = 'mensal';
+    let storedKind = null;
+    try { storedPlan = localStorage.getItem('intent_plano'); } catch {}
+    try {
+      const rawCycle = localStorage.getItem('intent_plano_ciclo');
+      if (rawCycle) storedCycle = rawCycle;
+    } catch {}
+    try { storedKind = localStorage.getItem('intent_kind'); } catch {}
+    const normalizedIntentKind = (storedKind || '').trim().toLowerCase();
+    const intentKind = normalizedIntentKind || 'checkout';
+
+    if (storedPlan && !checkoutIntentRef.current) {
+      checkoutIntentRef.current = true;
+      (async () => {
+        try {
+          const trialActive = statusKey === 'trialing' && !trialExpired && daysLeft > 0;
+          if (intentKind === 'trial' && trialActive) {
+            setCheckoutNotice({
+              kind: 'info',
+              message: 'Você está em teste grátis. Gere o PIX quando quiser ativar antes do fim do teste.',
+              syncing: false,
+            });
+            return;
+          }
+          await handleCheckout(storedPlan, storedCycle);
+        } finally {
+          cleanupIntentStorage();
+          checkoutIntentRef.current = false;
+        }
+      })();
+    }
+  }, [
+    handleCheckout,
+    isEstab,
+    planInfo.status,
+    planInfo.trialEnd,
+    planInfo.trialDaysLeft,
+    trialExpired,
+    daysLeft,
+    cleanupIntentStorage,
+  ]);
 
   useEffect(() => {
     reopenCachedPixIfValid();
