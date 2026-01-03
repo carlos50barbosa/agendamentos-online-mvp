@@ -200,7 +200,7 @@ export default function Planos() {
           </div>
           <div className="planos-highlight">Teste grátis por 7 dias sem cartão.</div>
           {user?.tipo !== 'estabelecimento' && (
-            <div className="alert-inline" role="status">Para contratar um plano, acesse com uma conta de estabelecimento.</div>
+            <div className="alert-inline" role="status">*Para estabelecimentos e profissionais.</div>
           )}
           <div className="stats-grid">
             {HERO_STATS.map((stat) => <Stat key={stat.label} {...stat} />)}
