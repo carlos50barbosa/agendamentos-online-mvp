@@ -4233,6 +4233,48 @@ body.planos-no-scrollbar .container--wide::-webkit-scrollbar{
   transform:translateY(0);
   pointer-events:auto;
 }
+.pricing-tooltip__content{
+  z-index: 9999;
+  max-width: min(340px, calc(100vw - 24px));
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.pricing-tooltip__content{
+  position:absolute;
+  left:auto;
+  right:0;
+  top:calc(100% + 8px);
+  z-index:30;
+  width:min(340px, 78vw);
+  padding:12px 14px;
+  border-radius:12px;
+  border:1px solid rgba(148,163,184,0.25);
+  background:var(--surface);
+  color:var(--text);
+  font-size:12px;
+  line-height:1.5;
+  box-shadow:var(--shadow-soft);
+  opacity:0;
+  transform:translateY(-4px);
+  pointer-events:none;
+  transition:opacity .18s ease,transform .18s ease;
+}
+.pricing-tooltip__content ul{
+  margin:0;
+  padding-left:16px;
+  display:grid;
+  gap:6px;
+  color:var(--muted);
+}
+.pricing-card:last-child .pricing-tooltip__content{
+  left:auto;
+  right:0;
+}
+.pricing-tooltip:hover .pricing-tooltip__content{
+  opacity:1;
+  transform:translateY(0);
+  pointer-events:auto;
+}
 .pricing-footnote{
   font-size:12px;
   color:var(--muted);
@@ -4349,6 +4391,34 @@ body.planos-no-scrollbar .container--wide::-webkit-scrollbar{
 .planos-footer__links a:hover,
 .planos-footer__meta a:hover{ color:var(--text); text-decoration:underline; }
 .planos-footer__separator{ color:var(--muted); }
+
+/* =======================
+   Tooltips (final override)
+   ======================= */
+.pricing-tooltip__content{
+  z-index: 9999;
+  max-width: min(340px, calc(100vw - 24px));
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 480px){
+  .pricing-tooltip__content{
+    position: fixed !important;
+    left: 12px;
+    right: 12px;
+    top: auto;
+    bottom: 12px;
+    max-width: none;
+    transform: none !important;
+    margin-top: env(safe-area-inset-top);
+    margin-bottom: env(safe-area-inset-bottom);
+  }
+  .pricing, .pricing-grid, .pricing-card{
+    transform: none !important;
+    filter: none !important;
+  }
+}
 
 @media (max-width:960px){
   .hero{ padding:28px; }
