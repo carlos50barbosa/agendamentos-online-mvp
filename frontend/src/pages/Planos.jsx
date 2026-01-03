@@ -364,7 +364,8 @@ export default function Planos() {
       <footer className="planos-footer">
         <div className="section-shell planos-footer__inner">
           <div className="planos-footer__meta">
-            <p>Agendamentos Online © 2025 Todos os direitos reservados</p>
+            <p>© 2025 Agendamentos Online</p>
+            <p>Todos os direitos reservados.</p>
             <a href="mailto:servicos.negocios.digital@gmail.com">servicos.negocios.digital@gmail.com</a>
             <p className="planos-footer__meta-links">
               <Link to="/termos">Termos de Uso</Link> e <Link to="/politica-privacidade">Política de Privacidade</Link>
