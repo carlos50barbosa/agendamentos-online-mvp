@@ -227,12 +227,15 @@ router.post('/register', async (req, res) => {
     // Emails de boas-vindas/alerta
     try {
       const adminEmail = process.env.NEW_USER_ALERT_EMAIL || 'servicos.negocios.digital@gmail.com';
+      const planKey = (planForTrial || 'starter').toString().toLowerCase();
+      const planLabel = (planForTrial || 'starter').toString().toLowerCase() === 'pro' ? 'Pro' : 'Starter';
+
       const subjectUser = 'Bem-vindo(a) ao Agendamentos Online';
       const htmlUser = `
         <p>Oi, ${nomeTrim}!</p>
         <p>Seu cadastro foi criado com sucesso.</p>
         <ul>
-          <li>Plano: Starter (teste grátis habilitado para estabelecimentos)</li>
+          <li>Plano: ${planLabel} (teste grátis habilitado para estabelecimentos)</li>
           <li>Email: ${emailTrim}</li>
           <li>Telefone: ${telefoneDisplay}</li>
         </ul>
