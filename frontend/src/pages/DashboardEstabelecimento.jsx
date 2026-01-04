@@ -2404,11 +2404,6 @@ function ProfessionalAgendaView({
                   )}
                 </div>
               )}
-              {selectedEventHasStarted && !selectedEventStatus?.isCancelled && (
-                <div className="pro-agenda__modal-note">
-                  Cancelamento indisponível: horário já iniciado.
-                </div>
-              )}
             </div>
             <div className="modal__actions pro-agenda__modal-actions">
               {rescheduleOpen && (
