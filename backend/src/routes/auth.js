@@ -211,6 +211,19 @@ router.post('/register', async (req, res) => {
       plan_subscription_id: null,
     };
 
+    const maskPhoneForDisplay = (value) => {
+      if (!value) return '-';
+      const digits = String(value).replace(/\D/g, '');
+      if (!digits) return '-';
+      if (digits.length <= 4) return '*'.repeat(digits.length);
+      const prefix = digits.slice(0, 2);
+      const suffix = digits.slice(-2);
+      const middleLength = digits.length - prefix.length - suffix.length;
+      const middleMasked = '*'.repeat(Math.max(0, middleLength));
+      return `${prefix}${middleMasked}${suffix}`;
+    };
+    const telefoneDisplay = maskPhoneForDisplay(telefoneTrim);
+
     // Emails de boas-vindas/alerta
     try {
       const adminEmail = process.env.NEW_USER_ALERT_EMAIL || 'servicos.negocios.digital@gmail.com';
@@ -221,12 +234,16 @@ router.post('/register', async (req, res) => {
         <ul>
           <li>Plano: Starter (teste grátis habilitado para estabelecimentos)</li>
           <li>Email: ${emailTrim}</li>
-          <li>Telefone: ${telefoneTrim || '-'}</li>
+          <li>Telefone: ${telefoneDisplay}</li>
         </ul>
+        <p><strong>Acesse o painel e siga estes passos:</strong></p>
+        <ol>
+          <li>Cadastre seus profissionais</li>
+          <li>Cadastre seus serviços</li>
+          <li>Compartilhe seu link de agendamento com seus clientes</li>
+        </ol>
         <p>Conte com a gente para agilizar seus agendamentos.</p>
       `;
-      notifyEmail(emailTrim, subjectUser, htmlUser);
-
       const subjectAdmin = 'Novo cadastro no Agendamentos Online';
       const htmlAdmin = `
         <p>Um novo usuário se cadastrou.</p>
@@ -239,7 +256,23 @@ router.post('/register', async (req, res) => {
           <li>Cidade/UF: ${cidadeTrim || '-'} / ${estadoTrim || '-'}</li>
         </ul>
       `;
-      if (adminEmail) notifyEmail(adminEmail, subjectAdmin, htmlAdmin);
+
+      const emailJobs = [
+        { name: 'user', promise: notifyEmail(emailTrim, subjectUser, htmlUser) },
+      ];
+      if (adminEmail) {
+        emailJobs.push({ name: 'admin', promise: notifyEmail(adminEmail, subjectAdmin, htmlAdmin) });
+      }
+
+      const results = await Promise.allSettled(emailJobs.map((job) => job.promise));
+      results.forEach((result, index) => {
+        const job = emailJobs[index];
+        if (result.status === 'rejected') {
+          console.warn(`[welcome_email][${job.name}] falhou`, result.reason?.message || result.reason);
+        } else {
+          console.log(`[welcome_email][${job.name}] ok`);
+        }
+      });
     } catch (err) {
       console.warn('[auth/register][welcome_email] falhou', err?.message || err);
     }
