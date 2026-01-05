@@ -543,6 +543,11 @@ export default function Configuracoes() {
   const [avatarRemove, setAvatarRemove] = useState(false);
   const [avatarError, setAvatarError] = useState('');
   const avatarInputRef = useRef(null);
+  const [pendingEmailConfirmation, setPendingEmailConfirmation] = useState(null);
+  const [emailConfirmationModalOpen, setEmailConfirmationModalOpen] = useState(false);
+  const [emailConfirmationCode, setEmailConfirmationCode] = useState('');
+  const [emailConfirmationError, setEmailConfirmationError] = useState('');
+  const [emailConfirmationBusy, setEmailConfirmationBusy] = useState(false);
 
   const cepLookupRef = useRef('');
 
@@ -1734,6 +1739,25 @@ export default function Configuracoes() {
     handleSaveProfile(null, value);
   };
 
+  const showEmailConfirmationModal = useCallback(() => {
+    setEmailConfirmationModalOpen(true);
+    setEmailConfirmationCode('');
+    setEmailConfirmationError('');
+    setEmailConfirmationBusy(false);
+  }, []);
+
+  const closeEmailConfirmationModal = useCallback(() => {
+    setEmailConfirmationModalOpen(false);
+    setEmailConfirmationCode('');
+    setEmailConfirmationError('');
+    setEmailConfirmationBusy(false);
+  }, []);
+
+  const openEmailConfirmationModal = useCallback(() => {
+    if (!pendingEmailConfirmation?.pending) return;
+    showEmailConfirmationModal();
+  }, [pendingEmailConfirmation?.pending, showEmailConfirmationModal]);
+
   const handleSaveProfile = async (event, passwordOverride) => {
     event?.preventDefault?.();
     setProfileStatus({ type: '', message: '' });
@@ -1800,12 +1824,18 @@ export default function Configuracoes() {
       resetPasswordFields();
       setConfirmPasswordInput('');
       setConfirmPasswordModal(false);
-      setProfileStatus({ type: 'success', message: 'Perfil atualizado com sucesso.' });
-      if (response?.emailConfirmation?.pending) {
+      const emailConfirmation = response?.emailConfirmation;
+      if (emailConfirmation?.pending) {
+        setPendingEmailConfirmation(emailConfirmation);
+        showEmailConfirmationModal();
         setProfileStatus({
           type: 'success',
           message: 'Perfil atualizado. Confirme o novo email com o codigo enviado.',
         });
+      } else {
+        setPendingEmailConfirmation(null);
+        closeEmailConfirmationModal();
+        setProfileStatus({ type: 'success', message: 'Perfil atualizado com sucesso.' });
       }
       setHasUnsavedChanges(false);
     } catch (e) {
@@ -1832,6 +1862,47 @@ export default function Configuracoes() {
       setProfileSaving(false);
     }
   };
+
+  const handleConfirmEmailSubmit = useCallback(
+    async (event) => {
+      event.preventDefault();
+      if (!pendingEmailConfirmation?.pending) return;
+      const code = String(emailConfirmationCode || '').trim();
+      if (!code) {
+        setEmailConfirmationError('Informe o código de confirmação.');
+        return;
+      }
+
+      try {
+        setEmailConfirmationBusy(true);
+        setEmailConfirmationError('');
+        const result = await Api.confirmEmailChange({ code });
+        if (!result?.user) {
+          throw new Error('Não foi possível confirmar o novo email.');
+        }
+        const confirmedUser = result.user;
+        saveUser(confirmedUser);
+        setProfileForm((prev) => ({
+          ...prev,
+          email: confirmedUser.email || prev.email,
+          avatar_url: confirmedUser.avatar_url || prev.avatar_url,
+          notifyEmailEstab: Boolean(confirmedUser.notify_email_estab ?? prev.notifyEmailEstab),
+          notifyWhatsappEstab: Boolean(confirmedUser.notify_whatsapp_estab ?? prev.notifyWhatsappEstab),
+        }));
+        setAvatarPreview(resolveAssetUrl(confirmedUser.avatar_url || ''));
+        setPendingEmailConfirmation(null);
+        closeEmailConfirmationModal();
+        setProfileStatus({ type: 'success', message: 'Novo email confirmado com sucesso.' });
+        setHasUnsavedChanges(false);
+      } catch (err) {
+        const msg = err?.data?.message || err?.message || 'Não foi possível confirmar o novo email.';
+        setEmailConfirmationError(msg);
+      } finally {
+        setEmailConfirmationBusy(false);
+      }
+    },
+    [closeEmailConfirmationModal, emailConfirmationCode, pendingEmailConfirmation?.pending]
+  );
 
   const handleSavePublicProfile = useCallback(async (event) => {
     event?.preventDefault();
@@ -1874,6 +1945,12 @@ export default function Configuracoes() {
 
   const sections = useMemo(() => {
     const list = [];
+    const emailConfirmationExpiresAtLabel = pendingEmailConfirmation?.expiresAt
+      ? new Date(pendingEmailConfirmation.expiresAt).toLocaleString('pt-BR', {
+          dateStyle: 'short',
+          timeStyle: 'short',
+        })
+      : null;
 
     const statusLabelMap = {
       trialing: 'Teste gratuito',
@@ -2064,6 +2141,21 @@ export default function Configuracoes() {
           )}
           {profileStatus.message && (
             <div className={`notice notice--${profileStatus.type}`} role="alert">{profileStatus.message}</div>
+          )}
+          {pendingEmailConfirmation?.pending && (
+            <div className="notice notice--info" role="status" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <span>
+                Enviamos um código para <strong>{pendingEmailConfirmation.newEmail}</strong>.
+                {emailConfirmationExpiresAtLabel ? ` Expira em ${emailConfirmationExpiresAtLabel}.` : ' O código vale 30 minutos.'}
+              </span>
+              <button
+                type="button"
+                className="btn btn--ghost btn--sm"
+                onClick={openEmailConfirmationModal}
+              >
+                Informar código agora
+              </button>
+            </div>
           )}
           <div className="row" style={{ justifyContent: 'flex-end', gap: 8 }}>
             <button type="submit" className="btn btn--primary" disabled={profileSaving}>
@@ -2928,6 +3020,8 @@ export default function Configuracoes() {
     showPasswordFields,
     profileSaving,
     profileStatus,
+    pendingEmailConfirmation,
+    openEmailConfirmationModal,
     avatarPreview,
     avatarError,
     billing,
@@ -3087,6 +3181,47 @@ export default function Configuracoes() {
             {confirmPasswordError && (
               <div className="notice notice--error" role="alert" style={{ margin: 0 }}>
                 {confirmPasswordError}
+              </div>
+            )}
+          </form>
+        </Modal>
+      )}
+      {emailConfirmationModalOpen && pendingEmailConfirmation?.pending && (
+        <Modal
+          title="Confirmar novo e-mail"
+          onClose={closeEmailConfirmationModal}
+          actions={[
+            <button key="cancel" type="button" className="btn btn--outline" onClick={closeEmailConfirmationModal} disabled={emailConfirmationBusy}>
+              Cancelar
+            </button>,
+            <button key="confirm" form="confirm-email-form" type="submit" className="btn btn--primary" disabled={emailConfirmationBusy}>
+              {emailConfirmationBusy ? <span className="spinner" /> : 'Confirmar e-mail'}
+            </button>,
+          ]}
+        >
+          <form id="confirm-email-form" onSubmit={handleConfirmEmailSubmit} className="grid" style={{ gap: 10 }}>
+            <p className="muted" style={{ margin: 0 }}>
+              Informe o código de 6 dígitos que enviamos para <strong>{pendingEmailConfirmation.newEmail}</strong>.
+            </p>
+            <label className="label" style={{ marginBottom: 0 }}>
+              <span>Código de confirmação</span>
+              <input
+                className="input"
+                type="text"
+                inputMode="numeric"
+                maxLength={6}
+                value={emailConfirmationCode}
+                onChange={(e) => {
+                  setEmailConfirmationCode(e.target.value.replace(/\D/g, '').slice(0, 6));
+                  setEmailConfirmationError('');
+                }}
+                autoFocus
+                disabled={emailConfirmationBusy}
+              />
+            </label>
+            {emailConfirmationError && (
+              <div className="notice notice--error" role="alert" style={{ margin: 0 }}>
+                {emailConfirmationError}
               </div>
             )}
           </form>

@@ -272,7 +272,7 @@ router.put('/me', auth, async (req, res) => {
 
     const [emailRows] = await pool.query('SELECT id FROM usuarios WHERE LOWER(email)=? AND id<>? LIMIT 1', [emailNorm, userId]);
     if (emailRows.length) {
-      return res.status(400).json({ error: 'email_exists', message: 'Este email ja esta em uso.' });
+      return res.status(400).json({ error: 'email_exists', message: 'Este email já esta em uso.' });
     }
 
     const atual = String(senhaAtual || '').trim();

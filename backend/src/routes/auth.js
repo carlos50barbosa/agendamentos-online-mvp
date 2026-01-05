@@ -231,20 +231,27 @@ router.post('/register', async (req, res) => {
       const planLabel = (planForTrial || 'starter').toString().toLowerCase() === 'pro' ? 'Pro' : 'Starter';
 
       const subjectUser = 'Bem-vindo(a) ao Agendamentos Online';
+      const isEstabelecimento = tipo === 'estabelecimento';
       const htmlUser = `
         <p>Oi, ${nomeTrim}!</p>
         <p>Seu cadastro foi criado com sucesso.</p>
         <ul>
-          <li>Plano: ${planLabel} (teste grátis habilitado para estabelecimentos)</li>
+          ${isEstabelecimento ? `<li>Plano: ${planLabel} (teste grátis habilitado para estabelecimentos)</li>` : ''}
           <li>Email: ${emailTrim}</li>
           <li>Telefone: ${telefoneDisplay}</li>
         </ul>
+        ${
+          isEstabelecimento
+            ? `
         <p><strong>Acesse o painel e siga estes passos:</strong></p>
         <ol>
           <li>Cadastre seus profissionais</li>
           <li>Cadastre seus serviços</li>
           <li>Compartilhe seu link de agendamento com seus clientes</li>
         </ol>
+        `
+            : ''
+        }
         <p>Conte com a gente para agilizar seus agendamentos.</p>
       `;
       const subjectAdmin = 'Novo cadastro no Agendamentos Online';
@@ -488,7 +495,7 @@ router.put('/me', auth, async (req, res) => {
 
     const [emailRows] = await pool.query('SELECT id FROM usuarios WHERE LOWER(email)=? AND id<>? LIMIT 1', [emailNorm, userId]);
     if (emailRows.length) {
-      return res.status(400).json({ error: 'email_exists', message: 'Este email ja esta em uso.' });
+      return res.status(400).json({ error: 'email_exists', message: 'Este email já esta em uso.' });
     }
 
     const atual = String(senhaAtual || '').trim();
@@ -571,7 +578,7 @@ router.put('/me', auth, async (req, res) => {
       const expiresAt = new Date(Date.now() + 30 * 60 * 1000);
       await pool.query('INSERT INTO email_change_tokens (user_id, new_email, code_hash, expires_at) VALUES (?,?,?,?)', [userId, emailNorm, codeHash, expiresAt]);
       const subject = 'Confirme seu novo email';
-      const html = `<p>Ola!</p><p>Use o codigo <strong>${code}</strong> para confirmar seu novo email.</p><p>O codigo expira em 30 minutos.</p>`;
+      const html = `<p>Ola!</p><p>Use o código <strong>${code}</strong> para confirmar seu novo email.</p><p>O código expira em 30 minutos.</p>`;
       try { await notifyEmail(emailNorm, subject, html); } catch (err) { console.error('[auth/me][email]', err); }
 
       const [[userRow]] = await pool.query("SELECT id, nome, email, telefone, data_nascimento, cpf_cnpj, cep, endereco, numero, complemento, bairro, cidade, estado, avatar_url, tipo, notify_email_estab, notify_whatsapp_estab, plan, plan_status, plan_trial_ends_at, plan_active_until, plan_subscription_id FROM usuarios WHERE id=? LIMIT 1", [userId]);
