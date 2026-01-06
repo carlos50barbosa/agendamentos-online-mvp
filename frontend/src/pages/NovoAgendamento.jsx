@@ -1389,7 +1389,7 @@ export default function NovoAgendamento() {
   // Passo da grade
   const stepMinutes = useMemo(() => {
     const d = ServiceHelpers.duration(selectedService);
-    if (d && d % 5 === 0) return Math.max(15, Math.min(120, d));
+    if (d && d % 5 === 0) return Math.max(15, Math.min(480, d));
     return 30;
   }, [selectedService]);
   // Persistência leve (filtros/densidade)

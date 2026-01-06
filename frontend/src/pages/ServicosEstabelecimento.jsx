@@ -3,6 +3,15 @@ import { Link } from "react-router-dom";
 import { Api, resolveAssetUrl } from "../utils/api";
 
 const MAX_SERVICE_IMAGE_SIZE = 2 * 1024 * 1024; // 2MB
+const SERVICE_DURATION_STEP = 15;
+const SERVICE_DURATION_MAX = 480;
+const SERVICE_DURATION_OPTIONS = (() => {
+  const values = [];
+  for (let minutes = SERVICE_DURATION_STEP; minutes <= SERVICE_DURATION_MAX; minutes += SERVICE_DURATION_STEP) {
+    values.push(minutes);
+  }
+  return values;
+})();
 
 function readFileAsDataUrl(file) {
   return new Promise((resolve, reject) => {
@@ -605,7 +614,7 @@ export default function ServicosEstabelecimento() {
                   }
                   title="Duração (min)"
                 >
-                  {[15, 30, 45, 60, 75, 90, 120].map((m) => (
+                  {SERVICE_DURATION_OPTIONS.map((m) => (
                     <option key={m} value={m}>
                       {m} min
                     </option>
@@ -734,7 +743,7 @@ export default function ServicosEstabelecimento() {
               onChange={(e)=> setEditForm(f => ({ ...f, duracao_min: parseInt(e.target.value,10) }))}
               title="Duracao (min)"
             >
-              {[15, 30, 45, 60, 75, 90, 120].map(m => (
+              {SERVICE_DURATION_OPTIONS.map(m => (
                 <option key={m} value={m}>{m} min</option>
               ))}
             </select>
