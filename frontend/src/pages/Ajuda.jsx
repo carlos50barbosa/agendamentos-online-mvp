@@ -8,7 +8,7 @@ const SUPPORT_CHANNELS = [
     key: 'whatsapp',
     title: 'WhatsApp',
     description: 'Atendimento em dias úteis das 9h às 18h. Informe CNPJ ou e-mail de login para agilizar a conversa.',
-    href: 'https://wa.me/5511959929380?text=Olá%20Time%20Agendamentos%20Online%20Preciso%20de%20ajuda%20com%20o%20painel',
+    href: 'https://wa.me/5511915155349?text=Olá%20Time%20Agendamentos%20Online%20Preciso%20de%20ajuda%20com%20o%20painel',
     action: 'Abrir conversa',
     external: true,
   },
@@ -273,7 +273,7 @@ export default function Ajuda() {
           </Link>
           <a
             className="btn btn--ghost btn--sm"
-            href="https://wa.me/5511959929380?text=Olá%20Time%20Agendamentos%20Online%20Preciso%20de%20ajuda%20com%20o%20painel"
+            href="https://wa.me/5511915155349?text=Olá%20Time%20Agendamentos%20Online%20Preciso%20de%20ajuda%20com%20o%20painel"
             target="_blank"
             rel="noreferrer"
           >

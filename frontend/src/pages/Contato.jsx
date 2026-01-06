@@ -19,7 +19,7 @@ const CONTACT_CHANNELS = [
     description: 'Atendimento rápido com nosso time comercial.',
     primary: true,
     actionLabel: 'Abrir WhatsApp',
-    href: 'https://wa.me/5511959929380?text=Ol%C3%A1%20Time%20Agendamentos%20Online!%20Quero%20conhecer%20os%20planos.',
+    href: 'https://wa.me/5511915155349?text=Ol%C3%A1%20Time%20Agendamentos%20Online!%20Quero%20conhecer%20os%20planos.',
   },
   {
     icon: '📧',

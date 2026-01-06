@@ -4,7 +4,7 @@ import { Api } from '../utils/api';
 import LogoAO from '../components/LogoAO.jsx';
 
 const WHATSAPP_SUPPORT_URL =
-  'https://wa.me/5511959929380?text=Ol%C3%A1%20Time%20Agendamentos%20Online!%20Esqueci%20meu%20e-mail%20de%20login%20e%20preciso%20recuperar%20o%20acesso.';
+  'https://wa.me/5511915155349?text=Ol%C3%A1%20Time%20Agendamentos%20Online!%20Esqueci%20meu%20e-mail%20de%20login%20e%20preciso%20recuperar%20o%20acesso.';
 
 export default function RecuperarSenha(){
   const [email, setEmail] = useState('');

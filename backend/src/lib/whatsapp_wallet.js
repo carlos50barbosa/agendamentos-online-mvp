@@ -13,6 +13,70 @@ export const WHATSAPP_TOPUP_PACKAGES = [
   { messages: 2500, priceCents: 19990 },
 ];
 
+const WALLET_RETRY_ERRNOS = new Set([1213, 1205]);
+const WALLET_RETRY_CODES = new Set(['ER_LOCK_DEADLOCK', 'ER_LOCK_WAIT_TIMEOUT']);
+
+function shouldRetryWalletSnapshotError(err) {
+  if (!err) return false;
+  if (WALLET_RETRY_ERRNOS.has(err.errno) || WALLET_RETRY_CODES.has(err.code)) return true;
+  const message = String(err.message || '').toLowerCase();
+  return message.includes('deadlock') || message.includes('lock wait timeout');
+}
+
+function getWalletRetryDelay(attempt) {
+  const base = 75;
+  const exponential = Math.min(1200, base * Math.pow(2, attempt - 1));
+  const jitter = Math.round(Math.random() * base);
+  return exponential + jitter;
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function logWalletRetry(opName, estId, attempt, delayMs, err) {
+  console.warn('[whatsapp_wallet] retry', {
+    op: opName,
+    estabelecimentoId: estId,
+    attempt,
+    delayMs,
+    errno: err?.errno,
+    code: err?.code,
+  });
+}
+
+async function safeRollback(conn) {
+  try {
+    await conn.rollback();
+  } catch {}
+}
+
+async function withWalletTransaction(estId, operation, { opName = 'wallet', maxAttempts = 3 } = {}) {
+  // Retry lock-related errors by rolling back and opening a fresh transaction per attempt.
+  const conn = await pool.getConnection();
+  try {
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      await conn.beginTransaction();
+      try {
+        const result = await operation(conn);
+        await conn.commit();
+        return result;
+      } catch (err) {
+        await safeRollback(conn);
+        if (attempt >= maxAttempts || !shouldRetryWalletSnapshotError(err)) {
+          throw err;
+        }
+        const delayMs = getWalletRetryDelay(attempt);
+        logWalletRetry(opName, estId, attempt, delayMs, err);
+        await sleep(delayMs);
+      }
+    }
+  } finally {
+    conn.release();
+  }
+  return null;
+}
+
 const toInt = (value, fallback = 0) => {
   const n = Number(value);
   if (!Number.isFinite(n)) return fallback;
@@ -92,13 +156,14 @@ async function ensureWalletExists(conn, estabelecimentoId, cycle, includedLimit)
   );
 }
 
-async function ensureWalletCycleAndPlan(conn, estabelecimentoId, cycle, includedLimit) {
+async function ensureWalletCycleAndPlan(conn, estabelecimentoId, cycle, includedLimit, { lock = true } = {}) {
+  // The lock flag lets snapshot paths skip FOR UPDATE while credit/debit still serialize wallet updates first.
+  const lockClause = lock ? '\n     FOR UPDATE' : '';
   const [[row]] = await conn.query(
     `SELECT estabelecimento_id, cycle_start, cycle_end, included_limit, included_balance, extra_balance
      FROM whatsapp_wallets
      WHERE estabelecimento_id=?
-     LIMIT 1
-     FOR UPDATE`,
+     LIMIT 1${lockClause}`,
     [estabelecimentoId]
   );
   if (!row) return null;
@@ -185,37 +250,31 @@ export async function getWhatsAppWalletSnapshot(estabelecimentoId, { now = new D
   const includedLimit = resolveIncludedLimit(ctx);
   const cycle = computeMonthCycle(now);
 
-  const conn = await pool.getConnection();
-  try {
-    await conn.beginTransaction();
-    await ensureWalletExists(conn, estId, cycle, includedLimit);
-    const wallet = await ensureWalletCycleAndPlan(conn, estId, cycle, includedLimit);
-    await conn.commit();
+  const wallet = await withWalletTransaction(
+    estId,
+    async (conn) => {
+      await ensureWalletExists(conn, estId, cycle, includedLimit);
+      return ensureWalletCycleAndPlan(conn, estId, cycle, includedLimit, { lock: false });
+    },
+    { opName: 'snapshot' }
+  );
 
-    if (!wallet) return null;
-    const includedBalance = toInt(wallet.included_balance, 0);
-    const extraBalance = toInt(wallet.extra_balance, 0);
-    const includedLimitOut = toInt(wallet.included_limit, 0);
-    return {
-      estabelecimento_id: estId,
-      month_label: cycle.label,
-      cycle_start: wallet.cycle_start ? new Date(wallet.cycle_start).toISOString() : null,
-      cycle_end: wallet.cycle_end ? new Date(wallet.cycle_end).toISOString() : null,
-      included_limit: includedLimitOut,
-      included_balance: includedBalance,
-      extra_balance: extraBalance,
-      total_balance: includedBalance + extraBalance,
-      plan: ctx?.plan || 'starter',
-      plan_status: ctx?.status || null,
-    };
-  } catch (err) {
-    try {
-      await conn.rollback();
-    } catch {}
-    throw err;
-  } finally {
-    conn.release();
-  }
+  if (!wallet) return null;
+  const includedBalance = toInt(wallet.included_balance, 0);
+  const extraBalance = toInt(wallet.extra_balance, 0);
+  const includedLimitOut = toInt(wallet.included_limit, 0);
+  return {
+    estabelecimento_id: estId,
+    month_label: cycle.label,
+    cycle_start: wallet.cycle_start ? new Date(wallet.cycle_start).toISOString() : null,
+    cycle_end: wallet.cycle_end ? new Date(wallet.cycle_end).toISOString() : null,
+    included_limit: includedLimitOut,
+    included_balance: includedBalance,
+    extra_balance: extraBalance,
+    total_balance: includedBalance + extraBalance,
+    plan: ctx?.plan || 'starter',
+    plan_status: ctx?.status || null,
+  };
 }
 
 export async function recordWhatsAppBlocked({
@@ -255,58 +314,58 @@ export async function creditWhatsAppTopup({
   const includedLimit = resolveIncludedLimit(ctx);
   const cycle = computeMonthCycle(new Date());
 
-  const conn = await pool.getConnection();
-  try {
-    await conn.beginTransaction();
-    await ensureWalletExists(conn, estId, cycle, includedLimit);
-    await ensureWalletCycleAndPlan(conn, estId, cycle, includedLimit);
+  const result = await withWalletTransaction(
+    estId,
+    async (conn) => {
+      // Touch the wallet row first so we hold its lock before recording ledger entries.
+      await ensureWalletExists(conn, estId, cycle, includedLimit);
+      await ensureWalletCycleAndPlan(conn, estId, cycle, includedLimit);
 
-    const [ins] = await conn.query(
-      `INSERT IGNORE INTO whatsapp_wallet_transactions
-        (estabelecimento_id, kind, delta, included_delta, extra_delta, subscription_id, payment_id, reason, metadata)
-       VALUES (?, 'topup_credit', ?, 0, ?, ?, ?, ?, ?)`,
-      [
-        estId,
-        pkg.messages,
-        pkg.messages,
-        subscriptionId != null ? toInt(subscriptionId, 0) || null : null,
-        String(paymentId),
-        reason,
-        safeJson({
-          ...(metadata || {}),
+      const [ins] = await conn.query(
+        `INSERT IGNORE INTO whatsapp_wallet_transactions
+          (estabelecimento_id, kind, delta, included_delta, extra_delta, subscription_id, payment_id, reason, metadata)
+         VALUES (?, 'topup_credit', ?, 0, ?, ?, ?, ?, ?)`,
+        [
+          estId,
+          pkg.messages,
+          pkg.messages,
+          subscriptionId != null ? toInt(subscriptionId, 0) || null : null,
+          String(paymentId),
+          reason,
+          safeJson({
+            ...(metadata || {}),
           pack_code: pkg.code || metadata?.pack_code || null,
           pack_id: pkg.id ?? metadata?.pack_id ?? null,
-          pack_name: pkg.name || metadata?.pack_name || null,
-          messages: pkg.messages,
-          price_cents: pkg.priceCents,
-        }),
-      ]
-    );
+          pack_name: (pkg.name || metadata?.pack_name) ?? null,
+            messages: pkg.messages,
+            price_cents: pkg.priceCents,
+          }),
+        ]
+      );
 
-    if (!ins.affectedRows) {
-      await conn.rollback();
-      return { ok: true, idempotent: true };
-    }
+      if (!ins.affectedRows) {
+        return { idempotent: true };
+      }
 
-    await conn.query(
-      `UPDATE whatsapp_wallets
-       SET extra_balance=extra_balance+?, updated_at=CURRENT_TIMESTAMP
-       WHERE estabelecimento_id=?
-       LIMIT 1`,
-      [pkg.messages, estId]
-    );
-    await conn.commit();
+      await conn.query(
+        `UPDATE whatsapp_wallets
+         SET extra_balance=extra_balance+?, updated_at=CURRENT_TIMESTAMP
+         WHERE estabelecimento_id=?
+         LIMIT 1`,
+        [pkg.messages, estId]
+      );
 
-    const wallet = await getWhatsAppWalletSnapshot(estId, { planContext: ctx });
-    return { ok: true, wallet };
-  } catch (err) {
-    try {
-      await conn.rollback();
-    } catch {}
-    throw err;
-  } finally {
-    conn.release();
+      return { idempotent: false };
+    },
+    { opName: 'topup_credit' }
+  );
+
+  if (result?.idempotent) {
+    return { ok: true, idempotent: true };
   }
+
+  const wallet = await getWhatsAppWalletSnapshot(estId, { planContext: ctx });
+  return { ok: true, wallet };
 }
 
 export async function debitWhatsAppMessage({
@@ -323,75 +382,76 @@ export async function debitWhatsAppMessage({
   const includedLimit = resolveIncludedLimit(ctx);
   const cycle = computeMonthCycle(new Date());
 
-  const conn = await pool.getConnection();
-  try {
-    await conn.beginTransaction();
-    await ensureWalletExists(conn, estId, cycle, includedLimit);
-    const wallet = await ensureWalletCycleAndPlan(conn, estId, cycle, includedLimit);
-    if (!wallet) {
-      await conn.rollback();
-      return { ok: false, error: 'wallet_not_found' };
-    }
+  const result = await withWalletTransaction(
+    estId,
+    async (conn) => {
+      // Lock the wallet row before inserting the debit ledger to enforce a predictable lock ordering.
+      await ensureWalletExists(conn, estId, cycle, includedLimit);
+      const wallet = await ensureWalletCycleAndPlan(conn, estId, cycle, includedLimit);
+      if (!wallet) {
+        return { error: 'wallet_not_found' };
+      }
 
-    const includedBalance = toInt(wallet.included_balance, 0);
-    const extraBalance = toInt(wallet.extra_balance, 0);
-    const bucket = includedBalance > 0 ? 'included' : extraBalance > 0 ? 'extra' : null;
+      const includedBalance = toInt(wallet.included_balance, 0);
+      const extraBalance = toInt(wallet.extra_balance, 0);
+      const bucket = includedBalance > 0 ? 'included' : extraBalance > 0 ? 'extra' : null;
+      if (!bucket) {
+        return { error: 'insufficient_balance' };
+      }
 
-    const includedDelta = bucket === 'included' ? -1 : 0;
-    const extraDelta = bucket === 'extra' ? -1 : 0;
+      const includedDelta = bucket === 'included' ? -1 : 0;
+      const extraDelta = bucket === 'extra' ? -1 : 0;
 
-    const [ins] = await conn.query(
-      `INSERT IGNORE INTO whatsapp_wallet_transactions
-        (estabelecimento_id, kind, delta, included_delta, extra_delta, agendamento_id, provider_message_id, metadata)
-       VALUES (?, 'debit', -1, ?, ?, ?, ?, ?)`,
-      [
-        estId,
-        includedDelta,
-        extraDelta,
-        agendamentoId != null ? toInt(agendamentoId, 0) || null : null,
-        String(providerMessageId),
-        safeJson(metadata),
-      ]
-    );
-
-    if (!ins.affectedRows) {
-      await conn.rollback();
-      return { ok: true, idempotent: true };
-    }
-
-    if (!bucket) {
-      await conn.commit();
-      return { ok: false, error: 'insufficient_balance' };
-    }
-
-    if (bucket === 'included') {
-      await conn.query(
-        `UPDATE whatsapp_wallets
-         SET included_balance=GREATEST(included_balance-1, 0), updated_at=CURRENT_TIMESTAMP
-         WHERE estabelecimento_id=?
-         LIMIT 1`,
-        [estId]
+      const [ins] = await conn.query(
+        `INSERT IGNORE INTO whatsapp_wallet_transactions
+          (estabelecimento_id, kind, delta, included_delta, extra_delta, agendamento_id, provider_message_id, metadata)
+         VALUES (?, 'debit', -1, ?, ?, ?, ?, ?)`,
+        [
+          estId,
+          includedDelta,
+          extraDelta,
+          agendamentoId != null ? toInt(agendamentoId, 0) || null : null,
+          String(providerMessageId),
+          safeJson(metadata),
+        ]
       );
-    } else {
-      await conn.query(
-        `UPDATE whatsapp_wallets
-         SET extra_balance=GREATEST(extra_balance-1, 0), updated_at=CURRENT_TIMESTAMP
-         WHERE estabelecimento_id=?
-         LIMIT 1`,
-        [estId]
-      );
-    }
 
-    await conn.commit();
-    return { ok: true, bucket };
-  } catch (err) {
-    try {
-      await conn.rollback();
-    } catch {}
-    throw err;
-  } finally {
-    conn.release();
+      if (!ins.affectedRows) {
+        return { idempotent: true };
+      }
+
+      if (bucket === 'included') {
+        await conn.query(
+          `UPDATE whatsapp_wallets
+           SET included_balance=GREATEST(included_balance-1, 0), updated_at=CURRENT_TIMESTAMP
+           WHERE estabelecimento_id=?
+           LIMIT 1`,
+          [estId]
+        );
+      } else {
+        await conn.query(
+          `UPDATE whatsapp_wallets
+           SET extra_balance=GREATEST(extra_balance-1, 0), updated_at=CURRENT_TIMESTAMP
+           WHERE estabelecimento_id=?
+           LIMIT 1`,
+          [estId]
+        );
+      }
+
+      return { bucket };
+    },
+    { opName: 'debit' }
+  );
+
+  if (result?.error) {
+    return { ok: false, error: result.error };
   }
+
+  if (result?.idempotent) {
+    return { ok: true, idempotent: true };
+  }
+
+  return { ok: true, bucket: result?.bucket || null };
 }
 
 export async function listWhatsAppTopups(estabelecimentoId, { limit = 5 } = {}) {

@@ -540,4 +540,3 @@ export async function syncMercadoPagoPayment(paymentId, eventPayload = null) {
 
   return { ok: true, payment, plan: effectivePlan, cycle: effectiveCycle, active_until: activeUntil }
 }
-
