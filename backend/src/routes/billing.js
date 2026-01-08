@@ -103,36 +103,63 @@ function verifyWebhookSignature(req, resourceId) {
   const signature = String(headerData.v1 || '').trim()
   if (!ts || !signature) return { valid: false, reason: 'invalid_signature_header' }
 
-  const xRequestId = String(req.headers['x-request-id'] || '').trim()
-  if (!xRequestId) return { valid: false, reason: 'missing_x_request_id' }
+  const requestId = String(req.headers['x-request-id'] || '').trim()
+  if (!requestId) return { valid: false, reason: 'missing_request_id', ts }
+
+  const canonicalId = String(
+    req.body?.data?.id ?? req.query?.['data.id'] ?? req.query?.id ?? resourceId ?? ''
+  ).trim()
+  if (!canonicalId) {
+    return { valid: false, reason: 'missing_id', request_id: requestId, ts }
+  }
 
   let signatureBuffer
   try {
     signatureBuffer = Buffer.from(signature, 'hex')
   } catch (error) {
-    return { valid: false, reason: 'invalid_signature_header' }
+    return { valid: false, reason: 'invalid_signature_header', request_id: requestId, ts }
   }
-  if (!signatureBuffer.length) return { valid: false, reason: 'invalid_signature_header' }
+  if (!signatureBuffer.length) {
+    return { valid: false, reason: 'invalid_signature_header', request_id: requestId, ts }
+  }
 
-  const normalizedResourceId = String(resourceId || '').trim()
-  const manifest = `id:${normalizedResourceId};request-id:${xRequestId};ts:${ts};`
+  const manifestVariants = [
+    { variant: 'request-id', manifest: `id:${canonicalId};request-id:${requestId};ts:${ts};` },
+    { variant: 'request_id', manifest: `id:${canonicalId};request_id:${requestId};ts:${ts};` },
+  ]
+
+  let lastManifest = null
 
   for (let index = 0; index < secrets.length; index++) {
     const secret = secrets[index]
-    const digest = createHmac('sha256', secret).update(manifest).digest('hex')
-    let expectedBuffer
-    try {
-      expectedBuffer = Buffer.from(digest, 'hex')
-    } catch (error) {
-      continue
-    }
-    if (expectedBuffer.length !== signatureBuffer.length) continue
-    if (timingSafeEqual(expectedBuffer, signatureBuffer)) {
-      return { valid: true, method: 'hmac', using_secret_index: index }
+    for (const candidate of manifestVariants) {
+      const manifest = candidate.manifest
+      lastManifest = manifest
+      const expectedBuffer = createHmac('sha256', secret).update(manifest).digest()
+      if (expectedBuffer.length !== signatureBuffer.length) continue
+      if (timingSafeEqual(expectedBuffer, signatureBuffer)) {
+        return {
+          valid: true,
+          using_variant: candidate.variant,
+          id: canonicalId,
+          request_id: requestId,
+          ts,
+          manifest,
+          method: 'hmac',
+          using_secret_index: index,
+        }
+      }
     }
   }
 
-  return { valid: false, reason: 'signature_mismatch', meta: { ts, hasRequestId: true } }
+  return {
+    valid: false,
+    reason: 'signature_mismatch',
+    id: canonicalId,
+    request_id: requestId,
+    ts,
+    manifest: lastManifest,
+  }
 }
 
 function normalizeId(value) {
@@ -556,9 +583,17 @@ router.post('/webhook', async (req, res) => {
 
   const verification = verifyWebhookSignature(req, resourceId)
   if (!verification.valid) {
+    const idFromBody = event?.data?.id ?? null
+    const idFromQueryData = req.query?.['data.id'] ?? null
+    const idFromQueryId = req.query?.id ?? null
     console.warn('[billing:webhook] invalid signature', {
       reason: verification.reason,
       url: req.originalUrl,
+      id_from_body: idFromBody,
+      id_from_query_data: idFromQueryData,
+      id_from_query_id: idFromQueryId,
+      ts: verification.ts,
+      manifest: verification.manifest,
     })
     return res.status(401).send('INVALID')
   }
