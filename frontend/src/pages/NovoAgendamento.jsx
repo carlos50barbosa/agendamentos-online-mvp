@@ -2010,7 +2010,7 @@ useEffect(() => {
               });
             }
           } else {
-            showToast("error", "Este horario acabou de ficar indisponivel. Escolha outro.");
+            showToast("error", "Este horário acabou de ficar indisponível. Escolha outro.");
           }
         } else if (Number(code) === 500) {
           if (slotIndisponivel || meu) {

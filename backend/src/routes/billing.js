@@ -1,6 +1,6 @@
 ﻿// backend/src/routes/billing.js
 import { Router } from 'express'
-import { createHmac, createHash } from 'node:crypto'
+import { createHmac, timingSafeEqual } from 'node:crypto'
 import { auth, isEstabelecimento } from '../middleware/auth.js'
 import { createMercadoPagoPixCheckout, createMercadoPagoPixTopupCheckout, syncMercadoPagoPayment } from '../lib/billing.js'
 import { notifyEmail } from '../lib/notifications.js'
@@ -86,306 +86,53 @@ function verifyWebhookSignature(req, resourceId) {
   const header = req.headers['x-signature'] || req.headers['x-mercadopago-signature']
   if (!header) return { valid: false, reason: 'missing_signature' }
 
-  const parts = String(header)
-    .split(/[;,]/g) // aceita "," e ";"
-    .map((segment) => segment.trim())
-    .filter(Boolean)
-    .map((segment) => segment.split('='))
-    .filter((pair) => pair.length === 2)
+  const normalizeHeaderValue = (value) =>
+    String(value || '').trim().replace(/^"|"$/g, '').replace(/^'|'$/g, '')
 
-  const normalizeHeaderVal = (v) => String(v || '').trim().replace(/^"|"$/g, '').replace(/^'|'$/g, '')
-  const headerData = Object.fromEntries(parts.map(([k, v]) => [k.trim().toLowerCase(), normalizeHeaderVal(v)]))
-
-  const tsRaw = headerData.ts || headerData.t || headerData.time || headerData.timestamp || ''
-  const tsCandidates = []
-  const pushTsCandidate = (value) => {
-    const normalized = String(value || '').trim()
-    if (!normalized) return
-    if (!tsCandidates.includes(normalized)) tsCandidates.push(normalized)
-  }
-  if (tsRaw) {
-    pushTsCandidate(tsRaw)
-    if (/^\d{13,}$/.test(tsRaw)) {
-      try { pushTsCandidate(String(Math.floor(Number(tsRaw) / 1000))) } catch {}
-    }
-    if (/^\d{10}$/.test(tsRaw)) {
-      try { pushTsCandidate(String(Math.floor(Number(tsRaw) * 1000))) } catch {}
-    }
+  const headerData = {}
+  for (const segment of String(header).split(',')) {
+    const [rawKey, ...rawValue] = segment.split('=')
+    const key = String(rawKey || '').trim().toLowerCase()
+    if (!key) continue
+    const value = normalizeHeaderValue(rawValue.join('='))
+    if (!value) continue
+    headerData[key] = value
   }
 
-  const signatureRaw = headerData.v1 || headerData.sign || headerData.signature || ''
-  const signature = String(signatureRaw || '').trim().toLowerCase()
-  if (!tsCandidates.length || !signature) return { valid: false, reason: 'invalid_signature_header' }
+  const ts = String(headerData.ts || '').trim()
+  const signature = String(headerData.v1 || '').trim()
+  if (!ts || !signature) return { valid: false, reason: 'invalid_signature_header' }
 
-  const body = req.body && typeof req.body === 'object' && !Buffer.isBuffer(req.body) ? req.body : {}
-  const rawBody = Buffer.isBuffer(req.rawBody) ? req.rawBody : null
-  const rawBodyHash = rawBody?.length ? createHash('sha256').update(rawBody).digest('hex') : null
+  const xRequestId = String(req.headers['x-request-id'] || '').trim()
+  if (!xRequestId) return { valid: false, reason: 'missing_x_request_id' }
 
-  const collectTopics = () => {
-    const rawValues = [
-      req.query?.topic,
-      req.query?.type,
-      req.query?.entity,
-      req.query?.action,
-      req.headers['x-topic'],
-      body?.topic,
-      body?.type,
-      body?.entity,
-      body?.action,
-    ]
-    const seen = new Set()
-    for (const value of rawValues) {
-      if (typeof value !== 'string') continue
-      const trimmed = value.trim()
-      if (!trimmed) continue
-      seen.add(trimmed)
-      seen.add(trimmed.toLowerCase())
-      if (trimmed.includes('.')) {
-        const base = trimmed.split('.')[0]
-        if (base) {
-          seen.add(base)
-          seen.add(base.toLowerCase())
-        }
-      }
-    }
-    return Array.from(seen)
+  let signatureBuffer
+  try {
+    signatureBuffer = Buffer.from(signature, 'hex')
+  } catch (error) {
+    return { valid: false, reason: 'invalid_signature_header' }
   }
+  if (!signatureBuffer.length) return { valid: false, reason: 'invalid_signature_header' }
 
-  const topicCandidates = collectTopics()
-
-  const requestIdCandidates = [
-    req.headers['x-request-id'],
-    req.headers['x-mercadopago-request-id'],
-    req.headers['x-idempotency-key'],
-    req.query?.['request-id'],
-    req.query?.request_id,
-    body?.['request-id'],
-    body?.request_id,
-  ]
-  const requestId = requestIdCandidates.map(normalizeId).find(Boolean) || ''
-
-  const candidateIds = new Set()
-  const addIdCandidate = (...values) => {
-    for (const value of values) {
-      const raw = normalizeId(value)
-      if (!raw) continue
-      candidateIds.add(raw)
-      const compact = normalizeResourceCandidate(raw)
-      if (compact && compact !== raw) candidateIds.add(compact)
-    }
-  }
-  addIdCandidate(resourceId)
-  addIdCandidate(req.query?.['data.id'], req.query?.id)
-  addIdCandidate(body?.data?.id, body?.id, body?.resource, body?.resource_id, body?.payment_id)
-  addIdCandidate(req.headers['x-resource-id'])
-  const idCandidates = Array.from(candidateIds).filter(Boolean)
-
-  const payloadCandidates = []
-  const payloadSeen = new Set()
-  const registerPayload = (payload, meta) => {
-    if (!payload) return
-    const key = `str:${payload}`
-    if (payloadSeen.has(key)) return
-    payloadSeen.add(key)
-    payloadCandidates.push({ payload, meta })
-  }
-  const registerWithSemicolon = (payload, meta) => {
-    if (!payload) return
-    registerPayload(payload, meta)
-    if (!payload.endsWith(';')) registerPayload(`${payload};`, { ...meta, appended_semicolon: true })
-  }
-  const composeSegments = (segments) => {
-    const partsOut = []
-    for (const [label, value] of segments) {
-      const normalized = normalizeId(value)
-      if (!normalized) continue
-      partsOut.push(`${label}:${normalized}`)
-    }
-    return partsOut.join(';')
-  }
-  const addCandidate = (segments, meta) => {
-    const payload = composeSegments(segments)
-    if (payload) registerWithSemicolon(payload, meta)
-  }
-
-  for (const ts of tsCandidates) {
-    for (const id of idCandidates) {
-      addCandidate(
-        [
-          ['id', id],
-          ['ts', ts],
-        ],
-        { strategy: 'id_ts', id, ts }
-      )
-      addCandidate(
-        [
-          ['ts', ts],
-          ['id', id],
-        ],
-        { strategy: 'ts_id', id, ts }
-      )
-      if (requestId) {
-        addCandidate(
-          [
-            ['id', id],
-            ['request-id', requestId],
-            ['ts', ts],
-          ],
-          { strategy: 'id_request-id_ts', id, ts, requestId }
-        )
-        addCandidate(
-          [
-            ['id', id],
-            ['request_id', requestId],
-            ['ts', ts],
-          ],
-          { strategy: 'id_request_id_ts', id, ts, requestId }
-        )
-        addCandidate(
-          [
-            ['request-id', requestId],
-            ['id', id],
-            ['ts', ts],
-          ],
-          { strategy: 'request-id_id_ts', id, ts, requestId }
-        )
-        addCandidate(
-          [
-            ['ts', ts],
-            ['id', id],
-            ['request-id', requestId],
-          ],
-          { strategy: 'ts_id_request-id', id, ts, requestId }
-        )
-      }
-      for (const topic of topicCandidates) {
-        addCandidate(
-          [
-            ['id', id],
-            ['topic', topic],
-            ['ts', ts],
-          ],
-          { strategy: 'id_topic_ts', id, ts, topic }
-        )
-        addCandidate(
-          [
-            ['topic', topic],
-            ['id', id],
-            ['ts', ts],
-          ],
-          { strategy: 'topic_id_ts', id, ts, topic }
-        )
-        addCandidate(
-          [
-            ['id', id],
-            ['type', topic],
-            ['ts', ts],
-          ],
-          { strategy: 'id_type_ts', id, ts, topic }
-        )
-      }
-      if (rawBodyHash) {
-        addCandidate(
-          [
-            ['id', id],
-            ['ts', ts],
-            ['body', rawBodyHash],
-          ],
-          { strategy: 'id_ts_bodyhash', id, ts }
-        )
-        if (requestId) {
-          addCandidate(
-            [
-              ['id', id],
-              ['request-id', requestId],
-              ['ts', ts],
-              ['body', rawBodyHash],
-            ],
-            { strategy: 'id_request_bodyhash', id, ts, requestId }
-          )
-        }
-      }
-    }
-
-    if (requestId) {
-      addCandidate(
-        [
-          ['id', requestId],
-          ['ts', ts],
-        ],
-        { strategy: 'request-id_ts', requestId, ts }
-      )
-      addCandidate(
-        [
-          ['ts', ts],
-          ['id', requestId],
-        ],
-        { strategy: 'ts_request-id', requestId, ts }
-      )
-      addCandidate(
-        [
-          ['request-id', requestId],
-          ['ts', ts],
-        ],
-        { strategy: 'request-id_only', requestId, ts }
-      )
-    }
-  }
-
-  if (!payloadCandidates.length) {
-    return { valid: false, reason: 'no_payload_candidates', signature, ts: tsRaw, request_id: requestId, topics_tried: topicCandidates }
-  }
-
-  const variants = []
-  let matched = null
+  const normalizedResourceId = String(resourceId || '').trim()
+  const manifest = `id:${normalizedResourceId};request-id:${xRequestId};ts:${ts};`
 
   for (let index = 0; index < secrets.length; index++) {
     const secret = secrets[index]
-    for (const candidate of payloadCandidates) {
-      const digest = createHmac('sha256', secret).update(candidate.payload).digest('hex')
-      if (variants.length < 60) {
-        variants.push({
-          index,
-          payload: candidate.payload,
-          digest,
-          meta: candidate.meta,
-        })
-      }
-      if (digest === signature) {
-        matched = { index, candidate, digest }
-        break
-      }
+    const digest = createHmac('sha256', secret).update(manifest).digest('hex')
+    let expectedBuffer
+    try {
+      expectedBuffer = Buffer.from(digest, 'hex')
+    } catch (error) {
+      continue
     }
-    if (matched) break
-  }
-
-  if (matched) {
-    return {
-      valid: true,
-      method: matched.candidate?.meta?.strategy || 'matched',
-      using_secret_index: matched.index,
-      ts: tsRaw,
-      ts_used: matched.candidate?.meta?.ts || tsRaw,
-      signature,
-      request_id: requestId,
-      topics_tried: topicCandidates,
-      raw_body_len: rawBody?.length || 0,
-      matched_payload: matched.candidate.payload,
-      variants,
+    if (expectedBuffer.length !== signatureBuffer.length) continue
+    if (timingSafeEqual(expectedBuffer, signatureBuffer)) {
+      return { valid: true, method: 'hmac', using_secret_index: index }
     }
   }
 
-  return {
-    valid: false,
-    reason: 'signature_mismatch',
-    signature,
-    ts: tsRaw,
-    ts_candidates_tried: tsCandidates,
-    request_id: requestId,
-    topics_tried: topicCandidates,
-    raw_body_len: rawBody?.length || 0,
-    variants,
-  }
+  return { valid: false, reason: 'signature_mismatch', meta: { ts, hasRequestId: true } }
 }
 
 function normalizeId(value) {
@@ -784,7 +531,14 @@ router.post('/whatsapp/pix', auth, isEstabelecimento, async (req, res) => {
 })
 
 router.post('/webhook', async (req, res) => {
-  const event = req.body || {};
+  console.log('[billing:webhook][hdr]', {
+    url: req.originalUrl,
+    x_request_id: req.headers['x-request-id'],
+    x_signature: req.headers['x-signature'] || req.headers['x-mercadopago-signature'],
+    query: req.query,
+  })
+
+  const event = req.body || {}
 
   // MP pode mandar o id como body.data.id ou query data.id ou query id
   const resourceId =
@@ -793,19 +547,20 @@ router.post('/webhook', async (req, res) => {
     req.query?.id ||
     event?.resource ||
     event?.id ||
-    null;
+    null
 
   if (!resourceId) {
-    console.warn('[billing:webhook] evento sem resource id', { query: req.query, body: event });
-    // Sempre 200/ok pra evitar retries
-    return res.status(200).json({ ok: true, ignored: 'missing_resource' });
+    console.warn('[billing:webhook] evento sem resource id', { query: req.query })
+    return res.status(400).send('MISSING_ID')
   }
 
-  const verification = verifyWebhookSignature(req, resourceId);
+  const verification = verifyWebhookSignature(req, resourceId)
   if (!verification.valid) {
-    console.warn('[billing:webhook] assinatura invalida (ignored)', verification);
-    // Evita retries infinitos do MP. Apenas ignora.
-    return res.status(200).json({ ok: true, ignored: 'invalid_signature' });
+    console.warn('[billing:webhook] invalid signature', {
+      reason: verification.reason,
+      url: req.originalUrl,
+    })
+    return res.status(401).send('INVALID')
   }
 
   try {

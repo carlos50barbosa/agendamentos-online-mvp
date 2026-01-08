@@ -26,7 +26,14 @@ export function mountWebhooks(app, withApiPrefix = false) {
         b.resource ||
         null;
 
-      console.log('[MP] webhook hit', { path: paths, query: q, headers: req.headers });
+      // console.log('[MP] webhook hit', { path: paths, query: q, headers: req.headers });
+      console.log('[MP] webhook hit', {
+        url: req.originalUrl,
+        x_request_id: req.headers['x-request-id'],
+        x_signature: req.headers['x-signature'],
+        query: q,
+      });
+
 
       if (!resourceId) {
         console.warn('[MP] webhook without resource id; skipping sync');
