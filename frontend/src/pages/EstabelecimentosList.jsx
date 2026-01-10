@@ -89,7 +89,6 @@ export default function EstabelecimentosList() {
   const [pendingScroll, setPendingScroll] = useState(false);
   const searchInputRef = useRef(null);
   const resultsSectionRef = useRef(null);
-  const [promoOpen, setPromoOpen] = useState(false);
   const [favoritesOnly, setFavoritesOnly] = useState(false);
   const [favoriteIds, setFavoriteIds] = useState(() => {
     try {
@@ -102,8 +101,6 @@ export default function EstabelecimentosList() {
       return new Set();
     }
   });
-  const PROMO_KEY = 'home_promo_dismissed_at';
-
   useEffect(() => {
     const q = getQueryFromSearch(location.search);
     setQuery((prev) => (prev === q ? prev : q));
@@ -185,26 +182,6 @@ export default function EstabelecimentosList() {
     };
   }, [debouncedQuery, page, showResults, pageSize]);
 
-  useEffect(() => {
-    try {
-      const dismissed = localStorage.getItem(PROMO_KEY);
-      if (!dismissed) {
-        setPromoOpen(true);
-      } else {
-        const ts = Number(dismissed);
-        if (!Number.isFinite(ts)) {
-          setPromoOpen(true);
-        } else {
-          const oneDay = 24 * 60 * 60 * 1000;
-          const now = Date.now();
-          if (now - ts > oneDay) setPromoOpen(true);
-        }
-      }
-    } catch {
-      setPromoOpen(true);
-    }
-  }, []);
-
   const normalizedQuery = useMemo(() => normalize(debouncedQuery.trim()), [debouncedQuery]);
   const queryTokens = useMemo(
     () => (normalizedQuery ? normalizedQuery.split(/\s+/).filter(Boolean) : []),
@@ -264,11 +241,6 @@ export default function EstabelecimentosList() {
     setPage(1);
   }, [query]);
 
-  const handleClosePromo = useCallback(() => {
-    setPromoOpen(false);
-    try { localStorage.setItem(PROMO_KEY, String(Date.now())); } catch {}
-  }, []);
-
   const handleToggleFavorites = useCallback(() => {
     setFavoritesOnly((prev) => !prev);
     setShowResults(true);
@@ -277,69 +249,6 @@ export default function EstabelecimentosList() {
 
   return (
     <div className="home">
-      {promoOpen && (
-        <Modal
-          title="Novidades"
-          onClose={handleClosePromo}
-          closeButton
-          disableOutsideClick
-          actions={[
-            <button
-              key="ok"
-              type="button"
-              className="btn btn--primary"
-              onClick={handleClosePromo}
-              style={{ margin: '0 auto' }}
-            >
-              Continuar
-            </button>,
-          ]}
-        >
-          <div
-            style={{
-              position: 'relative',
-              overflow: 'hidden',
-              borderRadius: 14,
-              padding: 16,
-              background: 'linear-gradient(135deg, #1f1408, #3a220c)',
-              color: '#fef3c7',
-              boxShadow: '0 18px 36px rgba(0,0,0,0.28)',
-            }}
-          >
-            <div
-              aria-hidden
-              style={{
-                position: 'absolute',
-                inset: 0,
-                background:
-                  'radial-gradient(280px at 12% 18%, rgba(251,191,36,0.35), transparent 50%), radial-gradient(220px at 82% 18%, rgba(245,158,11,0.28), transparent 50%), radial-gradient(320px at 52% 90%, rgba(252,211,77,0.22), transparent 55%)',
-              }}
-            />
-            <div style={{ position: 'relative', display: 'grid', gap: 10 }}>
-              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '6px 10px', borderRadius: 12, background: 'rgba(251,191,36,0.18)', width: 'fit-content', fontSize: 12, letterSpacing: '.04em', textTransform: 'uppercase' }}>
-                <span style={{ width: 10, height: 10, borderRadius: '50%', background: '#fbbf24', boxShadow: '0 0 0 6px rgba(251,191,36,0.2)' }} />
-                Feliz Ano Novo
-              </div>
-              <h3 style={{ margin: 0, fontSize: 20, lineHeight: 1.3, color: '#fff7d1' }}>
-                Feliz Ano Novo! Que 2026 traga agenda cheia e muito sucesso.
-              </h3>
-              <p style={{ margin: 0, fontSize: 14, lineHeight: 1.6, color: '#fde68a' }}>
-                Obrigado por fazer parte. Estamos preparando novidades douradas para deixar seus horários ainda mais práticos.
-              </p>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 4 }}>
-                <div style={{ width: 52, height: 52, borderRadius: 14, background: 'rgba(251,191,36,0.16)', display: 'grid', placeItems: 'center', boxShadow: '0 12px 28px rgba(0,0,0,0.24)' }}>
-                  <LogoAO size={28} />
-                </div>
-                <div style={{ display: 'grid', gap: 4 }}>
-                  <strong style={{ color: '#fff7d1', fontSize: 14 }}>Acompanhe por aqui</strong>
-                  <span style={{ color: '#fde68a', fontSize: 12 }}>Novos recursos para 2026 aparecem primeiro neste espaço.</span>
-                </div>
-              </div>
-            </div>
-          </div>
-        </Modal>
-      )}
-
       <EstablishmentsHero
         heading={HEADLINE_TEXT}
         subtitle="Descubra estabelecimentos perto de você, escolha o horário ideal e confirme em segundos."
