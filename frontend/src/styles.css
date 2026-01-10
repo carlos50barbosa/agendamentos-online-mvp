@@ -4510,8 +4510,9 @@ body.planos-no-scrollbar .container--wide::-webkit-scrollbar{
 .home-results__grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;}
 
 @media (max-width:520px){
-  .home{padding:24px 12px 40px;}
-  .home-hero{padding:36px 0 16px;}
+  .container{margin-top:4px;}
+  .home{padding:calc(12px + env(safe-area-inset-top, 0px)) 12px 40px;}
+  .home-hero{padding:24px 0 16px;}
   .home-hero__heading{font-size:1.75rem;}
   .home-search-box__field{padding:10px 14px;}
 }
