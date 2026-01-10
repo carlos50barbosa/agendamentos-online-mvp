@@ -3048,7 +3048,7 @@ useEffect(() => {
                       )}
                     </section>
                     <section className="estab-info__section">
-                      <h4>horários de atendimento</h4>
+                      <h4>Horários de atendimento</h4>
                       {horariosList.length ? (
                         <ul className="estab-info__list">
                           {horariosList.map((item, index) => (

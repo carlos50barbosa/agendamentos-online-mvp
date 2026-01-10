@@ -172,17 +172,40 @@ export default function Login() {
   const hasTipo = Boolean(tipo);
   const Tab = ({ value, title, hint }) => {
     const active = tipo === value;
+    const isCliente = value === 'CLIENTE';
     return (
       <button
         type="button"
         onClick={() => handleTipoSelect(value)}
-        className={`login-preview__tab${active ? ' is-active' : ''}`}
+        className={`login-preview__tab login-preview__tab--${isCliente ? 'cliente' : 'estab'}${active ? ' is-active' : ''}`}
         role="tab"
         aria-selected={active}
         tabIndex={active || !hasTipo ? 0 : -1}
       >
-        <div className="login-preview__tab-title">{title}</div>
-        <div className="login-preview__tab-hint">{hint}</div>
+        <span className="login-preview__tab-icon" aria-hidden="true">
+          {isCliente ? (
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="12" cy="8" r="4" />
+              <path d="M4 20c0-3.3 3.6-6 8-6s8 2.7 8 6" />
+            </svg>
+          ) : (
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M4 20h16" />
+              <path d="M6 20V7l6-3 6 3v13" />
+              <path d="M9 10h2M13 10h2M9 14h2M13 14h2" />
+            </svg>
+          )}
+        </span>
+        <span className="login-preview__tab-body">
+          <span className="login-preview__tab-title">{title}</span>
+          <span className="login-preview__tab-hint">{hint}</span>
+        </span>
+        <span className="login-preview__tab-arrow" aria-hidden="true">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M5 12h14" />
+            <path d="M13 6l6 6-6 6" />
+          </svg>
+        </span>
       </button>
     );
   };
@@ -243,7 +266,14 @@ export default function Login() {
                     onClick={() => handleTipoSelect(lastProfileValue)}
                     aria-label={`Continuar como ${lastProfileLabel}`}
                   >
-                    <div className="login-preview__continue-title">Continuar como {lastProfileLabel}</div>
+                    <div className="login-preview__continue-title">
+                      Continuar como{' '}
+                      <span
+                        className={`login-preview__continue-highlight login-preview__continue-highlight--${lastProfileValue === 'ESTABELECIMENTO' ? 'estab' : 'cliente'}`}
+                      >
+                        {lastProfileLabel}
+                      </span>
+                    </div>
                     <div className="login-preview__continue-hint">Usar o último perfil selecionado.</div>
                   </button>
                   <button
@@ -262,7 +292,18 @@ export default function Login() {
                 </div>
               ) : null}
               {!tipo && (showChooser || !lastProfileValue) ? (
-                <div className="login-preview__hint">Selecione um perfil para continuar.</div>
+                <>
+                  <div className="login-preview__hint">Selecione um perfil para continuar.</div>
+                  <div className="login-preview__chooser-note">Você pode trocar depois.</div>
+                  <div className="login-preview__chooser-links">
+                    <Link to="/cadastro" className="login-preview__chooser-link">
+                      Não tenho conta
+                    </Link>
+                    <Link to="/recuperar-senha" className="login-preview__chooser-link">
+                      Esqueci minha senha
+                    </Link>
+                  </div>
+                </>
               ) : null}
 
               {sessionMsg ? (
@@ -315,7 +356,7 @@ export default function Login() {
                       aria-invalid={email ? !isValidEmail(email) : false}
                     />
                     <div className={`login-preview__hint${emailInvalid ? ' is-error' : ''}`}>
-                      {emailInvalid ? 'Digite um e-mail valido.' : 'Use o e-mail cadastrado.'}
+                      {emailInvalid ? 'Digite um e-mail válido.' : 'Use o e-mail cadastrado.'}
                     </div>
                   </div>
 
@@ -348,7 +389,7 @@ export default function Login() {
                     <div className={`login-preview__hint${senhaInvalid ? ' is-error' : ''}`}>
                       {senhaInvalid
                         ? 'A senha deve ter pelo menos 6 caracteres.'
-                        : 'Não compartilhe sua senha com ninguem.'}
+                        : 'Não compartilhe sua senha com ninguém.'}
                     </div>
                   </div>
 

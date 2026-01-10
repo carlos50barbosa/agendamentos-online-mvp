@@ -371,7 +371,7 @@ export default function Cadastro() {
                     onClick={() => handleTipoSelect('cliente')}
                   >
                     <div className="login-preview__tab-title">Sou Cliente</div>
-                    <div className="login-preview__tab-hint">Acesse seus agendamentos e historico</div>
+                    <div className="login-preview__tab-hint">Acesse seus agendamentos e histórico</div>
                   </button>
                   <button
                     type="button"
@@ -382,7 +382,7 @@ export default function Cadastro() {
                     onClick={() => handleTipoSelect('estabelecimento')}
                   >
                     <div className="login-preview__tab-title">Sou Estabelecimento</div>
-                    <div className="login-preview__tab-hint">Gerencie agenda, servicos e clientes</div>
+                    <div className="login-preview__tab-hint">Gerencie agenda, serviços e clientes</div>
                   </button>
                 </div>
                 {!showForm && (
