@@ -72,6 +72,7 @@ export default function Cadastro() {
   const [confirmEmail, setConfirmEmail] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
   const [showOptionalFields, setShowOptionalFields] = useState(false);
+  const [hasChosen, setHasChosen] = useState(false);
   const legalMeta = useMemo(() => LEGAL_METADATA, []);
   const tipoParam = useMemo(() => new URLSearchParams(loc.search).get('tipo') || '', [loc.search]);
   const trialPlanChoice = useMemo(() => {
@@ -94,6 +95,7 @@ export default function Cadastro() {
   const cepDigits = form.cep.replace(/\D/g, '');
   const isEstab = form.tipo === 'estabelecimento';
   const isCliente = form.tipo === 'cliente';
+  const showForm = Boolean(form.tipo) && hasChosen;
 
   const emailReady = useMemo(() => {
     const email = form.email.trim();
@@ -167,6 +169,10 @@ export default function Cadastro() {
   }, [tipoParam, form.tipo]);
 
   useEffect(() => {
+    if (!form.tipo) setHasChosen(false);
+  }, [form.tipo]);
+
+  useEffect(() => {
     if (!isCliente) {
       setShowOptionalFields(false);
     }
@@ -213,6 +219,25 @@ export default function Cadastro() {
   const updateField = useCallback((key, value) => {
     setForm((prev) => ({ ...prev, [key]: value }));
   }, []);
+
+  const handleTipoSelect = useCallback((value) => {
+    if (!value) return;
+    updateField('tipo', value);
+    setHasChosen(true);
+    setErr('');
+    setSuccessMsg('');
+    if (typeof window === 'undefined') return;
+    setTimeout(() => {
+      try {
+        const target = document.getElementById('cadastro-nome') || document.getElementById('cadastro-form');
+        if (!target) return;
+        const rect = target.getBoundingClientRect();
+        const y = rect.top + window.scrollY - 80;
+        window.scrollTo({ top: y, behavior: 'smooth' });
+        setTimeout(() => target.focus?.(), 300);
+      } catch {}
+    }, 120);
+  }, [updateField]);
 
   const submit = async (event) => {
     event.preventDefault();
@@ -331,366 +356,346 @@ export default function Cadastro() {
                 </div>
               ) : null}
 
-              <form id="cadastro-form" onSubmit={submit} className="login-preview__form">
-                <div className="signup-chooser">
-                  <div className="signup-chooser__label">Como deseja usar?</div>
-                  <div className="signup-chooser__hint">
-                    Cliente agenda serviços. Estabelecimento recebe e organiza agendamentos.
-                  </div>
-                  <div className="login-preview__tabs signup-chooser__tabs" role="tablist" aria-label="Tipo de conta">
-                    <button
-                      type="button"
-                      className={`login-preview__tab${form.tipo === 'cliente' ? ' is-active' : ''}`}
-                      role="tab"
-                      aria-selected={form.tipo === 'cliente'}
-                      tabIndex={form.tipo === 'cliente' ? 0 : -1}
-                      onClick={() => {
-                        updateField('tipo', 'cliente');
-                        try {
-                          const target = document.getElementById('cadastro-nome') || document.getElementById('cadastro-form');
-                          if (target) {
-                            const rect = target.getBoundingClientRect();
-                            const y = rect.top + window.scrollY - 80;
-                            window.scrollTo({ top: y, behavior: 'smooth' });
-                            setTimeout(() => target.focus?.(), 300);
-                          }
-                        } catch {}
-                      }}
-                    >
-                      <div className="login-preview__tab-title">Sou Cliente</div>
-                      <div className="login-preview__tab-hint">Acesse seus agendamentos e histórico</div>
-                    </button>
-                    <button
-                      type="button"
-                      className={`login-preview__tab${form.tipo === 'estabelecimento' ? ' is-active' : ''}`}
-                      role="tab"
-                      aria-selected={form.tipo === 'estabelecimento'}
-                      tabIndex={form.tipo === 'estabelecimento' ? 0 : -1}
-                      onClick={() => {
-                        updateField('tipo', 'estabelecimento');
-                        try {
-                          const target = document.getElementById('cadastro-nome') || document.getElementById('cadastro-form');
-                          if (target) {
-                            const rect = target.getBoundingClientRect();
-                            const y = rect.top + window.scrollY - 80;
-                            window.scrollTo({ top: y, behavior: 'smooth' });
-                            setTimeout(() => target.focus?.(), 300);
-                          }
-                        } catch {}
-                      }}
-                    >
-                      <div className="login-preview__tab-title">Sou Estabelecimento</div>
-                      <div className="login-preview__tab-hint">Gerencie agenda, serviços e clientes</div>
-                    </button>
-                  </div>
-                  {!form.tipo && (
-                    <div className="login-preview__hint is-error">Selecione uma opção para continuar.</div>
-                  )}
+              <div className="signup-chooser">
+                <div className="signup-chooser__label">Como deseja usar?</div>
+                <div className="signup-chooser__hint">
+                  Cliente agenda servicos. Estabelecimento recebe e organiza agendamentos.
                 </div>
-
-                <div className="login-preview__field">
-                  <label className="login-preview__label" htmlFor="cadastro-nome">Nome</label>
-                  <input
-                    className="login-preview__input"
-                    id="cadastro-nome"
-                    placeholder="Seu nome ou Estabelecimento"
-                    value={form.nome}
-                    onChange={(e) => updateField('nome', e.target.value)}
-                    required
-                  />
-                  {form.nome && !nomeOk ? (
-                    <div className="login-preview__hint is-error">Informe um nome válido.</div>
-                  ) : null}
+                <div className="login-preview__tabs signup-chooser__tabs" role="tablist" aria-label="Tipo de conta">
+                  <button
+                    type="button"
+                    className={`login-preview__tab${form.tipo === 'cliente' ? ' is-active' : ''}`}
+                    role="tab"
+                    aria-selected={form.tipo === 'cliente'}
+                    tabIndex={form.tipo === 'cliente' || !hasChosen ? 0 : -1}
+                    onClick={() => handleTipoSelect('cliente')}
+                  >
+                    <div className="login-preview__tab-title">Sou Cliente</div>
+                    <div className="login-preview__tab-hint">Acesse seus agendamentos e historico</div>
+                  </button>
+                  <button
+                    type="button"
+                    className={`login-preview__tab${form.tipo === 'estabelecimento' ? ' is-active' : ''}`}
+                    role="tab"
+                    aria-selected={form.tipo === 'estabelecimento'}
+                    tabIndex={form.tipo === 'estabelecimento' || !hasChosen ? 0 : -1}
+                    onClick={() => handleTipoSelect('estabelecimento')}
+                  >
+                    <div className="login-preview__tab-title">Sou Estabelecimento</div>
+                    <div className="login-preview__tab-hint">Gerencie agenda, servicos e clientes</div>
+                  </button>
                 </div>
-
-                <div className="login-preview__field">
-                  <label className="login-preview__label" htmlFor="cadastro-email">E-mail</label>
-                  <input
-                    className="login-preview__input"
-                    id="cadastro-email"
-                    type="email"
-                    placeholder="voce@exemplo.com"
-                    value={form.email}
-                    onChange={(e) => updateField('email', e.target.value)}
-                    autoComplete="email"
-                    onPaste={(e) => e.preventDefault()}
-                    required
-                  />
-                  <div className={`login-preview__hint${form.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim()) ? ' is-error' : ''}`}>
-                    {form.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())
-                      ? 'Informe um e-mail válido.'
-                      : 'Use um e-mail válido para acesso.'}
-                  </div>
-                </div>
-
-                <div className="login-preview__field">
-                  <label className="login-preview__label" htmlFor="cadastro-email-confirm">Confirmar e-mail</label>
-                  <input
-                    className="login-preview__input"
-                    id="cadastro-email-confirm"
-                    type="email"
-                    placeholder="Repita seu e-mail"
-                    value={confirmEmail}
-                    onChange={(e) => setConfirmEmail(e.target.value)}
-                    autoComplete="off"
-                    onPaste={(e) => e.preventDefault()}
-                    required
-                  />
-                  {!!confirmEmail && form.email && form.email.trim().toLowerCase() !== confirmEmail.trim().toLowerCase() ? (
-                    <div className="login-preview__hint is-error">O e-mail precisa ser igual ao campo anterior.</div>
-                  ) : (
-                    <div className="login-preview__hint">Repita o mesmo e-mail.</div>
-                  )}
-                </div>
-
-                <div className="login-preview__field">
-                  <label className="login-preview__label" htmlFor="cadastro-telefone">Telefone WhatsApp</label>
-                  <input
-                    className="login-preview__input"
-                    id="cadastro-telefone"
-                    type="tel"
-                    inputMode="tel"
-                    placeholder="WhatsApp com DDD (11) 99999-9999"
-                    value={formatBRPhone(form.telefone)}
-                    onChange={(e) => {
-                      const digits = e.target.value.replace(/\D/g, '').slice(0, 13);
-                      updateField('telefone', digits);
-                    }}
-                    autoComplete="tel"
-                    required
-                  />
-                  <div className={`login-preview__hint${!phoneOk && phoneDigits ? ' is-error' : ''}`}>
-                    {!phoneOk && phoneDigits
-                      ? 'Digite todos os dígitos (DDD + número). Ex.: (11) 99999-9999'
-                      : 'Usado para confirmar o agendamento.'}
-                  </div>
-                </div>
-
-                <div className="login-preview__field">
-                  <label className="login-preview__label" htmlFor="cadastro-senha">Senha</label>
-                  <div className="login-preview__pass-row">
-                    <input
-                      className="login-preview__input"
-                      id="cadastro-senha"
-                      type={showPass ? 'text' : 'password'}
-                      placeholder="********"
-                      value={form.senha}
-                      onChange={(e) => updateField('senha', e.target.value)}
-                      autoComplete="new-password"
-                      required
-                    />
-                    <button
-                      type="button"
-                      className="login-preview__toggle"
-                      onClick={() => setShowPass((v) => !v)}
-                      aria-pressed={showPass}
-                    >
-                      {showPass ? 'Ocultar' : 'Mostrar'}
-                    </button>
-                  </div>
-                  {form.senha ? (
-                    <div className={`login-preview__hint strength strength--${senhaLabel?.toLowerCase() || 'fraca'}`}>
-                      Forca: {senhaLabel}
-                    </div>
-                  ) : (
-                    <div className="login-preview__hint">Use no minimo 8 caracteres e 1 especial.</div>
-                  )}
-                  {form.senha && !senhaOk ? (
-                    <div className="login-preview__hint is-error">Use pelo menos 8 caracteres e 1 especial.</div>
-                  ) : null}
-                </div>
-
-                <div className="login-preview__field">
-                  <label className="login-preview__label" htmlFor="cadastro-confirmar-senha">Confirmar senha</label>
-                  <div className="login-preview__pass-row">
-                    <input
-                      className="login-preview__input"
-                      id="cadastro-confirmar-senha"
-                      type={showConfirm ? 'text' : 'password'}
-                      placeholder="Repita a senha"
-                      value={confirm}
-                      onChange={(e) => setConfirm(e.target.value)}
-                      autoComplete="new-password"
-                      required
-                    />
-                    <button
-                      type="button"
-                      className="login-preview__toggle"
-                      onClick={() => setShowConfirm((v) => !v)}
-                      aria-pressed={showConfirm}
-                    >
-                      {showConfirm ? 'Ocultar' : 'Mostrar'}
-                    </button>
-                  </div>
-                  {!!confirm && !matchOk ? (
-                    <div className="login-preview__hint is-error">As senhas não coincidem.</div>
-                  ) : null}
-                </div>
-
-                {isCliente && (
-                  <div style={{ marginTop: 6 }}>
-                    <button
-                      type="button"
-                      className="login-preview__ghost"
-                      onClick={() => setShowOptionalFields((v) => !v)}
-                      aria-expanded={showOptionalFields}
-                      aria-controls="cadastro-campos-opcionais"
-                    >
-                      {showOptionalFields ? 'Ocultar campos opcionais' : 'Ver campos opcionais'}
-                    </button>
-                  </div>
+                {!showForm && (
+                  <div className="login-preview__hint is-error">Clique em um perfil para continuar.</div>
                 )}
-
-                {(isEstab || (isCliente && showOptionalFields)) && (
-                  <div className="login-preview__field-group" id="cadastro-campos-opcionais">
-                    {isCliente && (
-                      <div className="login-preview__field">
-                        <label className="login-preview__label" htmlFor="cadastro-data-nascimento">Data de nascimento (opcional)</label>
-                        <input
-                          className="login-preview__input"
-                          id="cadastro-data-nascimento"
-                          type="date"
-                          value={form.data_nascimento}
-                          onChange={(e) => updateField("data_nascimento", e.target.value)}
-                        />
-                      </div>
+              </div>
+              {showForm ? (
+                <form id="cadastro-form" onSubmit={submit} className="login-preview__form">
+  
+                  <div className="login-preview__field">
+                    <label className="login-preview__label" htmlFor="cadastro-nome">Nome</label>
+                    <input
+                      className="login-preview__input"
+                      id="cadastro-nome"
+                      placeholder="Seu nome ou Estabelecimento"
+                      value={form.nome}
+                      onChange={(e) => updateField('nome', e.target.value)}
+                      required
+                    />
+                    {form.nome && !nomeOk ? (
+                      <div className="login-preview__hint is-error">Informe um nome válido.</div>
+                    ) : null}
+                  </div>
+  
+                  <div className="login-preview__field">
+                    <label className="login-preview__label" htmlFor="cadastro-email">E-mail</label>
+                    <input
+                      className="login-preview__input"
+                      id="cadastro-email"
+                      type="email"
+                      placeholder="voce@exemplo.com"
+                      value={form.email}
+                      onChange={(e) => updateField('email', e.target.value)}
+                      autoComplete="email"
+                      onPaste={(e) => e.preventDefault()}
+                      required
+                    />
+                    <div className={`login-preview__hint${form.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim()) ? ' is-error' : ''}`}>
+                      {form.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())
+                        ? 'Informe um e-mail válido.'
+                        : 'Use um e-mail válido para acesso.'}
+                    </div>
+                  </div>
+  
+                  <div className="login-preview__field">
+                    <label className="login-preview__label" htmlFor="cadastro-email-confirm">Confirmar e-mail</label>
+                    <input
+                      className="login-preview__input"
+                      id="cadastro-email-confirm"
+                      type="email"
+                      placeholder="Repita seu e-mail"
+                      value={confirmEmail}
+                      onChange={(e) => setConfirmEmail(e.target.value)}
+                      autoComplete="off"
+                      onPaste={(e) => e.preventDefault()}
+                      required
+                    />
+                    {!!confirmEmail && form.email && form.email.trim().toLowerCase() !== confirmEmail.trim().toLowerCase() ? (
+                      <div className="login-preview__hint is-error">O e-mail precisa ser igual ao campo anterior.</div>
+                    ) : (
+                      <div className="login-preview__hint">Repita o mesmo e-mail.</div>
                     )}
-                    <div className="login-preview__field">
-                      <label className="login-preview__label" htmlFor="cadastro-cpf-cnpj">CPF/CNPJ (opcional)</label>
-                      <input
-                        className="login-preview__input"
-                        id="cadastro-cpf-cnpj"
-                        placeholder="000.000.000-00 ou 00.000.000/0000-00"
-                        value={formatCpfCnpj(form.cpf_cnpj)}
-                        onChange={(e) => updateField("cpf_cnpj", e.target.value.replace(/\D/g, '').slice(0, 14))}
-                        inputMode="numeric"
-                      />
-                      <div className={`login-preview__hint${!cpfCnpjOk && cpfCnpjDigits ? ' is-error' : ''}`}>
-                        {!cpfCnpjOk && cpfCnpjDigits
-                          ? 'Informe 11 ou 14 digitos.'
-                          : 'Opcional para identificacao fiscal.'}
-                      </div>
-                    </div>
-                    <div className="login-preview__field">
-                      <label className="login-preview__label" htmlFor="cadastro-cep">{isEstab ? "CEP" : "CEP (opcional)"}</label>
-                      <input
-                        className="login-preview__input"
-                        id="cadastro-cep"
-                        placeholder="00000-000"
-                        value={form.cep}
-                        onChange={(e) => updateField("cep", formatCep(e.target.value))}
-                        required={isEstab}
-                        inputMode="numeric"
-                      />
-                      {cepStatus.error ? (
-                        <div className="login-preview__hint is-error">{cepStatus.error}</div>
-                      ) : null}
-                    </div>
-                    <div className="login-preview__field">
-                      <label className="login-preview__label" htmlFor="cadastro-endereco">Endereco</label>
-                      <input
-                        className="login-preview__input"
-                        id="cadastro-endereco"
-                        value={form.endereco}
-                        onChange={(e) => updateField("endereco", e.target.value)}
-                        required={isEstab}
-                      />
-                    </div>
-                    <div className="login-preview__field-row">
-                      <div className="login-preview__field">
-                        <label className="login-preview__label" htmlFor="cadastro-numero">Numero</label>
-                        <input
-                          className="login-preview__input"
-                          id="cadastro-numero"
-                          value={form.numero}
-                          onChange={(e) => updateField("numero", e.target.value)}
-                          required={isEstab}
-                        />
-                      </div>
-                      <div className="login-preview__field">
-                        <label className="login-preview__label" htmlFor="cadastro-complemento">Complemento</label>
-                        <input
-                          className="login-preview__input"
-                          id="cadastro-complemento"
-                          value={form.complemento}
-                          onChange={(e) => updateField("complemento", e.target.value)}
-                        />
-                      </div>
-                    </div>
-                    <div className="login-preview__field">
-                      <label className="login-preview__label" htmlFor="cadastro-bairro">Bairro</label>
-                      <input
-                        className="login-preview__input"
-                        id="cadastro-bairro"
-                        value={form.bairro}
-                        onChange={(e) => updateField("bairro", e.target.value)}
-                        required={isEstab}
-                      />
-                    </div>
-                    <div className="login-preview__field-row">
-                      <div className="login-preview__field">
-                        <label className="login-preview__label" htmlFor="cadastro-cidade">Cidade</label>
-                        <input
-                          className="login-preview__input"
-                          id="cadastro-cidade"
-                          value={form.cidade}
-                          onChange={(e) => updateField("cidade", e.target.value)}
-                          required={isEstab}
-                        />
-                      </div>
-                      <div className="login-preview__field login-preview__field--compact">
-                        <label className="login-preview__label" htmlFor="cadastro-estado">Estado</label>
-                        <input
-                          className="login-preview__input"
-                          id="cadastro-estado"
-                          value={form.estado}
-                          onChange={(e) => updateField("estado", e.target.value.toUpperCase().slice(0, 2))}
-                          required={isEstab}
-                        />
-                      </div>
+                  </div>
+  
+                  <div className="login-preview__field">
+                    <label className="login-preview__label" htmlFor="cadastro-telefone">Telefone WhatsApp</label>
+                    <input
+                      className="login-preview__input"
+                      id="cadastro-telefone"
+                      type="tel"
+                      inputMode="tel"
+                      placeholder="WhatsApp com DDD (11) 99999-9999"
+                      value={formatBRPhone(form.telefone)}
+                      onChange={(e) => {
+                        const digits = e.target.value.replace(/\D/g, '').slice(0, 13);
+                        updateField('telefone', digits);
+                      }}
+                      autoComplete="tel"
+                      required
+                    />
+                    <div className={`login-preview__hint${!phoneOk && phoneDigits ? ' is-error' : ''}`}>
+                      {!phoneOk && phoneDigits
+                        ? 'Digite todos os dígitos (DDD + número). Ex.: (11) 99999-9999'
+                        : 'Usado para confirmar o agendamento.'}
                     </div>
                   </div>
-                )}
-                <label className="terms-check">
-                  <input
-                    type="checkbox"
-                    checked={acceptPolicies}
-                    onChange={(e) => setAcceptPolicies(e.target.checked)}
-                    required
-                  />
-                  <span>
-                    Li e concordo com os <Link to="/termos" target="_blank" rel="noreferrer">Termos de Uso</Link> e com a{' '}
-                    <Link to="/politica-privacidade" target="_blank" rel="noreferrer">Política de Privacidade</Link>.
-                  </span>
-                </label>
-                <div className="auth-legal__version">
-                  Versões vigentes: Termos {legalMeta.terms?.version} - Política {legalMeta.privacy?.version}
-                </div>
-
-                <button type="submit" className={`login-preview__submit${!disabled ? ' is-ready' : ''}`} disabled={disabled}>
-                  {loading ? (
-                    <span className="login-preview__submit-content">
-                      <span className="login-preview__spinner" aria-hidden="true" />
-                      Criando...
-                    </span>
-                  ) : (
-                    'Criar conta'
+  
+                  <div className="login-preview__field">
+                    <label className="login-preview__label" htmlFor="cadastro-senha">Senha</label>
+                    <div className="login-preview__pass-row">
+                      <input
+                        className="login-preview__input"
+                        id="cadastro-senha"
+                        type={showPass ? 'text' : 'password'}
+                        placeholder="********"
+                        value={form.senha}
+                        onChange={(e) => updateField('senha', e.target.value)}
+                        autoComplete="new-password"
+                        required
+                      />
+                      <button
+                        type="button"
+                        className="login-preview__toggle"
+                        onClick={() => setShowPass((v) => !v)}
+                        aria-pressed={showPass}
+                      >
+                        {showPass ? 'Ocultar' : 'Mostrar'}
+                      </button>
+                    </div>
+                    {form.senha ? (
+                      <div className={`login-preview__hint strength strength--${senhaLabel?.toLowerCase() || 'fraca'}`}>
+                        Forca: {senhaLabel}
+                      </div>
+                    ) : (
+                      <div className="login-preview__hint">Use no minimo 8 caracteres e 1 especial.</div>
+                    )}
+                    {form.senha && !senhaOk ? (
+                      <div className="login-preview__hint is-error">Use pelo menos 8 caracteres e 1 especial.</div>
+                    ) : null}
+                  </div>
+  
+                  <div className="login-preview__field">
+                    <label className="login-preview__label" htmlFor="cadastro-confirmar-senha">Confirmar senha</label>
+                    <div className="login-preview__pass-row">
+                      <input
+                        className="login-preview__input"
+                        id="cadastro-confirmar-senha"
+                        type={showConfirm ? 'text' : 'password'}
+                        placeholder="Repita a senha"
+                        value={confirm}
+                        onChange={(e) => setConfirm(e.target.value)}
+                        autoComplete="new-password"
+                        required
+                      />
+                      <button
+                        type="button"
+                        className="login-preview__toggle"
+                        onClick={() => setShowConfirm((v) => !v)}
+                        aria-pressed={showConfirm}
+                      >
+                        {showConfirm ? 'Ocultar' : 'Mostrar'}
+                      </button>
+                    </div>
+                    {!!confirm && !matchOk ? (
+                      <div className="login-preview__hint is-error">As senhas não coincidem.</div>
+                    ) : null}
+                  </div>
+  
+                  {isCliente && (
+                    <div style={{ marginTop: 6 }}>
+                      <button
+                        type="button"
+                        className="login-preview__ghost"
+                        onClick={() => setShowOptionalFields((v) => !v)}
+                        aria-expanded={showOptionalFields}
+                        aria-controls="cadastro-campos-opcionais"
+                      >
+                        {showOptionalFields ? 'Ocultar campos opcionais' : 'Ver campos opcionais'}
+                      </button>
+                    </div>
                   )}
-                </button>
-
-                <div className="login-preview__actions">
-                  <Link to="/login" className="login-preview__ghost">
-                    Já tenho conta
-                  </Link>
-                  <Link to="/" className="login-preview__ghost">
-                    Voltar ao site
-                  </Link>
-                </div>
-
-                <div className="login-preview__note">
-                  Ao criar a conta, você concorda com os termos e políticas da plataforma.
-                </div>
-              </form>
+  
+                  {(isEstab || (isCliente && showOptionalFields)) && (
+                    <div className="login-preview__field-group" id="cadastro-campos-opcionais">
+                      {isCliente && (
+                        <div className="login-preview__field">
+                          <label className="login-preview__label" htmlFor="cadastro-data-nascimento">Data de nascimento (opcional)</label>
+                          <input
+                            className="login-preview__input"
+                            id="cadastro-data-nascimento"
+                            type="date"
+                            value={form.data_nascimento}
+                            onChange={(e) => updateField("data_nascimento", e.target.value)}
+                          />
+                        </div>
+                      )}
+                      <div className="login-preview__field">
+                        <label className="login-preview__label" htmlFor="cadastro-cpf-cnpj">CPF/CNPJ (opcional)</label>
+                        <input
+                          className="login-preview__input"
+                          id="cadastro-cpf-cnpj"
+                          placeholder="000.000.000-00 ou 00.000.000/0000-00"
+                          value={formatCpfCnpj(form.cpf_cnpj)}
+                          onChange={(e) => updateField("cpf_cnpj", e.target.value.replace(/\D/g, '').slice(0, 14))}
+                          inputMode="numeric"
+                        />
+                        <div className={`login-preview__hint${!cpfCnpjOk && cpfCnpjDigits ? ' is-error' : ''}`}>
+                          {!cpfCnpjOk && cpfCnpjDigits
+                            ? 'Informe 11 ou 14 digitos.'
+                            : 'Opcional para identificacao fiscal.'}
+                        </div>
+                      </div>
+                      <div className="login-preview__field">
+                        <label className="login-preview__label" htmlFor="cadastro-cep">{isEstab ? "CEP" : "CEP (opcional)"}</label>
+                        <input
+                          className="login-preview__input"
+                          id="cadastro-cep"
+                          placeholder="00000-000"
+                          value={form.cep}
+                          onChange={(e) => updateField("cep", formatCep(e.target.value))}
+                          required={isEstab}
+                          inputMode="numeric"
+                        />
+                        {cepStatus.error ? (
+                          <div className="login-preview__hint is-error">{cepStatus.error}</div>
+                        ) : null}
+                      </div>
+                      <div className="login-preview__field">
+                        <label className="login-preview__label" htmlFor="cadastro-endereco">Endereco</label>
+                        <input
+                          className="login-preview__input"
+                          id="cadastro-endereco"
+                          value={form.endereco}
+                          onChange={(e) => updateField("endereco", e.target.value)}
+                          required={isEstab}
+                        />
+                      </div>
+                      <div className="login-preview__field-row">
+                        <div className="login-preview__field">
+                          <label className="login-preview__label" htmlFor="cadastro-numero">Numero</label>
+                          <input
+                            className="login-preview__input"
+                            id="cadastro-numero"
+                            value={form.numero}
+                            onChange={(e) => updateField("numero", e.target.value)}
+                            required={isEstab}
+                          />
+                        </div>
+                        <div className="login-preview__field">
+                          <label className="login-preview__label" htmlFor="cadastro-complemento">Complemento</label>
+                          <input
+                            className="login-preview__input"
+                            id="cadastro-complemento"
+                            value={form.complemento}
+                            onChange={(e) => updateField("complemento", e.target.value)}
+                          />
+                        </div>
+                      </div>
+                      <div className="login-preview__field">
+                        <label className="login-preview__label" htmlFor="cadastro-bairro">Bairro</label>
+                        <input
+                          className="login-preview__input"
+                          id="cadastro-bairro"
+                          value={form.bairro}
+                          onChange={(e) => updateField("bairro", e.target.value)}
+                          required={isEstab}
+                        />
+                      </div>
+                      <div className="login-preview__field-row">
+                        <div className="login-preview__field">
+                          <label className="login-preview__label" htmlFor="cadastro-cidade">Cidade</label>
+                          <input
+                            className="login-preview__input"
+                            id="cadastro-cidade"
+                            value={form.cidade}
+                            onChange={(e) => updateField("cidade", e.target.value)}
+                            required={isEstab}
+                          />
+                        </div>
+                        <div className="login-preview__field login-preview__field--compact">
+                          <label className="login-preview__label" htmlFor="cadastro-estado">Estado</label>
+                          <input
+                            className="login-preview__input"
+                            id="cadastro-estado"
+                            value={form.estado}
+                            onChange={(e) => updateField("estado", e.target.value.toUpperCase().slice(0, 2))}
+                            required={isEstab}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  <label className="terms-check">
+                    <input
+                      type="checkbox"
+                      checked={acceptPolicies}
+                      onChange={(e) => setAcceptPolicies(e.target.checked)}
+                      required
+                    />
+                    <span>
+                      Li e concordo com os <Link to="/termos" target="_blank" rel="noreferrer">Termos de Uso</Link> e com a{' '}
+                      <Link to="/politica-privacidade" target="_blank" rel="noreferrer">Política de Privacidade</Link>.
+                    </span>
+                  </label>
+                  <div className="auth-legal__version">
+                    Versões vigentes: Termos {legalMeta.terms?.version} - Política {legalMeta.privacy?.version}
+                  </div>
+  
+                  <button type="submit" className={`login-preview__submit${!disabled ? ' is-ready' : ''}`} disabled={disabled}>
+                    {loading ? (
+                      <span className="login-preview__submit-content">
+                        <span className="login-preview__spinner" aria-hidden="true" />
+                        Criando...
+                      </span>
+                    ) : (
+                      'Criar conta'
+                    )}
+                  </button>
+  
+                  <div className="login-preview__actions">
+                    <Link to="/login" className="login-preview__ghost">
+                      Já tenho conta
+                    </Link>
+                    <Link to="/" className="login-preview__ghost">
+                      Voltar ao site
+                    </Link>
+                  </div>
+  
+                  <div className="login-preview__note">
+                    Ao criar a conta, você concorda com os termos e políticas da plataforma.
+                  </div>
+                </form>
+              ) : null}
             </div>
           </div>
         </section>

@@ -226,7 +226,7 @@ export default function Login() {
 
             <div className="login-preview__panel">
               <header className="login-preview__header">
-                <h1>Como você entrar?</h1>
+                <h1>Como você quer entrar?</h1>
                 <p>Escolha o perfil e acesse sua conta.</p>
               </header>
 
