@@ -4478,11 +4478,11 @@ body.planos-no-scrollbar .container--wide::-webkit-scrollbar{
 .establishments__results{display:flex;flex-direction:column;gap:12px;}
 .establishments__grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;}
 .home{display:flex;flex-direction:column;gap:32px;padding:16px 16px 48px;}
-.home-hero{display:flex;align-items:center;justify-content:flex-start;text-align:center;padding:24px 0 calc(24px + env(safe-area-inset-bottom, 0px));min-height:calc((var(--vh, 1vh) * 100) - var(--header-h, 72px));}
+.home-hero{display:flex;align-items:center;justify-content:flex-start;text-align:center;padding:16px 0 calc(16px + env(safe-area-inset-bottom, 0px));min-height:min(360px, calc((var(--vh, 1vh) * 100) - var(--header-h, 72px)));}
 @supports (height: 100svh){
-  .home-hero{min-height:calc(100svh - var(--header-h, 72px));}
+  .home-hero{min-height:min(360px, calc(100svh - var(--header-h, 72px)));}
 }
-.home-hero__inner{display:flex;flex-direction:column;align-items:center;gap:18px;max-width:520px;width:100%;}
+.home-hero__inner{display:flex;flex-direction:column;align-items:center;gap:12px;max-width:520px;width:100%;}
 .home-hero__logo{width:68px!important;height:68px!important;display:inline-flex;align-items:center;justify-content:center;}
 .home-hero__heading{margin:0;font-size:2rem;font-weight:600;line-height:1.2;color:var(--text);display:inline-flex;align-items:center;gap:6px;}
 .home-hero__heading-text{display:inline-block;min-height:1.2em;white-space:pre-wrap;}
@@ -4516,14 +4516,14 @@ body.planos-no-scrollbar .container--wide::-webkit-scrollbar{
 @media (max-width:520px){
   .container{margin-top:4px;}
   .home{padding:calc(12px + env(safe-area-inset-top, 0px)) 12px 40px;}
-  .home-hero{padding:16px 0 calc(16px + env(safe-area-inset-bottom, 0px));}
+  .home-hero{padding:12px 0 calc(12px + env(safe-area-inset-bottom, 0px));}
   .home-hero__heading{font-size:1.75rem;}
   .home-search-box__field{padding:10px 14px;}
 }
 
 @media (min-width:768px){
   .home{padding:24px 24px 72px;}
-  .home-hero{padding:24px 0 calc(32px + env(safe-area-inset-bottom, 0px));}
+  .home-hero{padding:20px 0 calc(20px + env(safe-area-inset-bottom, 0px));}
   .home-hero__heading{font-size:2.4rem;}
   .home-hero__subtitle{font-size:1.1rem;}
 }
