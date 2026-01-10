@@ -244,7 +244,7 @@ export default function Login() {
                     aria-label={`Continuar como ${lastProfileLabel}`}
                   >
                     <div className="login-preview__continue-title">Continuar como {lastProfileLabel}</div>
-                    <div className="login-preview__continue-hint">Usar o ultimo perfil selecionado.</div>
+                    <div className="login-preview__continue-hint">Usar o último perfil selecionado.</div>
                   </button>
                   <button
                     type="button"
@@ -257,8 +257,8 @@ export default function Login() {
               ) : null}
               {showChooser || !lastProfileValue ? (
                 <div className="login-preview__tabs" role="tablist" aria-label="Escolher perfil">
-                  <Tab value="CLIENTE" title="Cliente" hint="Acesse seus agendamentos e historico" />
-                  <Tab value="ESTABELECIMENTO" title="Estabelecimento" hint="Gerencie agenda, servicos e clientes" />
+                  <Tab value="CLIENTE" title="Cliente" hint="Acesse seus agendamentos e histórico" />
+                  <Tab value="ESTABELECIMENTO" title="Estabelecimento" hint="Gerencie agenda, serviços e clientes" />
                 </div>
               ) : null}
               {!tipo && (showChooser || !lastProfileValue) ? (
