@@ -386,7 +386,13 @@ router.delete('/:id', auth, isEstabelecimento, async (req, res) => {
     }
 
     const [[lockedAppointment]] = await pool.query(
-      "SELECT id FROM agendamentos WHERE servico_id=? AND estabelecimento_id=? AND status IN ('confirmado','pendente') LIMIT 1",
+      `SELECT a.id
+         FROM agendamentos a
+         JOIN agendamento_itens ai ON ai.agendamento_id = a.id
+        WHERE ai.servico_id=?
+          AND a.estabelecimento_id=?
+          AND a.status IN ('confirmado','pendente')
+        LIMIT 1`,
       [serviceId, estId]
     );
     if (lockedAppointment) {

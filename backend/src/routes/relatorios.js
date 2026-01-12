@@ -164,7 +164,7 @@ router.get('/estabelecimento', authRequired, isEstabelecimento, async (req, res)
     let servicePlaceholders = '';
     if (serviceIds.length) {
       servicePlaceholders = serviceIds.map(() => '?').join(', ');
-      filters.push(`a.servico_id IN (${servicePlaceholders})`);
+      filters.push(`ai.servico_id IN (${servicePlaceholders})`);
       baseParams.push(...serviceIds);
     }
 
@@ -173,17 +173,17 @@ router.get('/estabelecimento', authRequired, isEstabelecimento, async (req, res)
     const totalsParams = [...baseParams];
     const [totalsRows] = await pool.query(
       `SELECT
-         COUNT(*) AS total,
-         SUM(CASE WHEN a.status='confirmado' THEN 1 ELSE 0 END) AS confirmados,
-         SUM(CASE WHEN a.status='cancelado' THEN 1 ELSE 0 END) AS cancelados,
-         SUM(CASE WHEN a.status='confirmado' AND a.fim < NOW() THEN 1 ELSE 0 END) AS concluidos,
-         SUM(CASE WHEN a.status='confirmado' AND a.inicio >= NOW() THEN 1 ELSE 0 END) AS futuros,
-         COALESCE(SUM(CASE WHEN a.status='confirmado' THEN s.preco_centavos ELSE 0 END), 0) AS receita_confirmada,
-         COALESCE(SUM(CASE WHEN a.status='confirmado' AND a.fim < NOW() THEN s.preco_centavos ELSE 0 END), 0) AS receita_concluida,
-         COALESCE(SUM(CASE WHEN a.status='confirmado' AND a.inicio >= NOW() THEN s.preco_centavos ELSE 0 END), 0) AS receita_futura,
-         COALESCE(SUM(CASE WHEN a.status='cancelado' THEN s.preco_centavos ELSE 0 END), 0) AS receita_perdida
+         COUNT(DISTINCT a.id) AS total,
+         COUNT(DISTINCT CASE WHEN a.status='confirmado' THEN a.id END) AS confirmados,
+         COUNT(DISTINCT CASE WHEN a.status='cancelado' THEN a.id END) AS cancelados,
+         COUNT(DISTINCT CASE WHEN a.status='confirmado' AND a.fim < NOW() THEN a.id END) AS concluidos,
+         COUNT(DISTINCT CASE WHEN a.status='confirmado' AND a.inicio >= NOW() THEN a.id END) AS futuros,
+         COALESCE(SUM(CASE WHEN a.status='confirmado' THEN ai.preco_snapshot ELSE 0 END), 0) AS receita_confirmada,
+         COALESCE(SUM(CASE WHEN a.status='confirmado' AND a.fim < NOW() THEN ai.preco_snapshot ELSE 0 END), 0) AS receita_concluida,
+         COALESCE(SUM(CASE WHEN a.status='confirmado' AND a.inicio >= NOW() THEN ai.preco_snapshot ELSE 0 END), 0) AS receita_futura,
+         COALESCE(SUM(CASE WHEN a.status='cancelado' THEN ai.preco_snapshot ELSE 0 END), 0) AS receita_perdida
        FROM agendamentos a
-       JOIN servicos s ON s.id = a.servico_id
+       JOIN agendamento_itens ai ON ai.agendamento_id = a.id
        WHERE ${whereClause}`,
       totalsParams
     );
@@ -192,11 +192,11 @@ router.get('/estabelecimento', authRequired, isEstabelecimento, async (req, res)
     const [dailyRows] = await pool.query(
       `SELECT
          DATE(a.inicio) AS dia,
-         SUM(CASE WHEN a.status='confirmado' THEN 1 ELSE 0 END) AS confirmados,
-         SUM(CASE WHEN a.status='cancelado' THEN 1 ELSE 0 END) AS cancelados,
-         COALESCE(SUM(CASE WHEN a.status='confirmado' THEN s.preco_centavos ELSE 0 END), 0) AS receita_centavos
+         COUNT(DISTINCT CASE WHEN a.status='confirmado' THEN a.id END) AS confirmados,
+         COUNT(DISTINCT CASE WHEN a.status='cancelado' THEN a.id END) AS cancelados,
+         COALESCE(SUM(CASE WHEN a.status='confirmado' THEN ai.preco_snapshot ELSE 0 END), 0) AS receita_centavos
        FROM agendamentos a
-       JOIN servicos s ON s.id = a.servico_id
+       JOIN agendamento_itens ai ON ai.agendamento_id = a.id
        WHERE ${whereClause}
        GROUP BY dia
        ORDER BY dia`,
@@ -213,9 +213,10 @@ router.get('/estabelecimento', authRequired, isEstabelecimento, async (req, res)
          COUNT(*) AS total,
          SUM(CASE WHEN a.status='confirmado' THEN 1 ELSE 0 END) AS confirmados,
          SUM(CASE WHEN a.status='cancelado' THEN 1 ELSE 0 END) AS cancelados,
-         COALESCE(SUM(CASE WHEN a.status='confirmado' THEN s.preco_centavos ELSE 0 END), 0) AS receita_centavos
+         COALESCE(SUM(CASE WHEN a.status='confirmado' THEN ai.preco_snapshot ELSE 0 END), 0) AS receita_centavos
        FROM agendamentos a
-       JOIN servicos s ON s.id = a.servico_id
+       JOIN agendamento_itens ai ON ai.agendamento_id = a.id
+       JOIN servicos s ON s.id = ai.servico_id
        WHERE ${whereClause}
        GROUP BY s.id, s.nome${orderClause}${limitClause}`,
       servicesParams

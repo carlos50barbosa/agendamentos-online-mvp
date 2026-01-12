@@ -1,6 +1,7 @@
 // backend/src/routes/agendamentos.js
 import { Router } from 'express';
 import { pool } from '../lib/db.js';
+import { EST_TZ_OFFSET_MIN, minutesOfDayInTZ, weekDayIndexInTZ } from '../lib/datetime_tz.js';
 import { getPlanContext, isDelinquentStatus, formatPlanLimitExceeded } from '../lib/plans.js';
 import { auth as authRequired, isCliente, isEstabelecimento } from '../middleware/auth.js';
 import { notifyEmail } from '../lib/notifications.js';
@@ -67,16 +68,191 @@ const formatCancelLimitLabel = (minutes) => {
   }
   return `${minutes} minutos`;
 };
+const APPOINTMENT_BUFFER_MIN = (() => {
+  const raw = process.env.AGENDAMENTO_BUFFER_MIN ?? process.env.APPOINTMENT_BUFFER_MIN;
+  if (raw === undefined || raw === null || String(raw).trim() === '') return 0;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.round(parsed) : 0;
+})();
+const DEFAULT_START_MIN = 7 * 60;
+const DEFAULT_END_MIN = 22 * 60;
 
-/** Valida horario do payload (apenas sanity check; regras finas via slots/agenda) */
-function inBusinessHours(dateISO) {
-  const d = new Date(dateISO);
-  if (Number.isNaN(d.getTime())) return false;
-  // Usamos janela ampla (00:00-23:59) para não bloquear horários válidos configurados no estabelecimento.
-  const h = d.getHours(), m = d.getMinutes();
-  const afterStart = h >= 0;
-  const beforeEnd = h < 24 || (h === 23 && m <= 59);
-  return afterStart && beforeEnd;
+const normalizeServiceIds = (value) => {
+  const ids = [];
+  const pushId = (entry) => {
+    const num = Number(entry);
+    if (Number.isFinite(num) && num > 0) ids.push(num);
+  };
+  if (Array.isArray(value)) {
+    value.forEach((entry) => {
+      if (!entry) return;
+      if (typeof entry === 'object') {
+        pushId(entry.id ?? entry.servico_id ?? entry.service_id ?? entry.servicoId ?? entry.serviceId);
+      } else {
+        pushId(entry);
+      }
+    });
+  } else if (value !== undefined && value !== null && String(value).trim() !== '') {
+    String(value)
+      .split(',')
+      .map((part) => part.trim())
+      .filter(Boolean)
+      .forEach(pushId);
+  }
+  const seen = new Set();
+  return ids.filter((id) => {
+    if (seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
+};
+
+const extractServiceIds = (body) => {
+  if (!body || typeof body !== 'object') return [];
+  const rawList =
+    body.servico_ids ??
+    body.servicos ??
+    body.service_ids ??
+    body.services ??
+    body.serviceIds ??
+    body.servicoIds ??
+    null;
+  const parsed = normalizeServiceIds(rawList);
+  if (parsed.length) return parsed;
+  if (body.servico_id != null) {
+    return normalizeServiceIds([body.servico_id]);
+  }
+  return [];
+};
+
+const summarizeServices = (items) => {
+  const serviceNames = items.map((item) => item?.nome).filter(Boolean);
+  const duracaoTotal = items.reduce((sum, item) => sum + Number(item?.duracao_min || 0), 0);
+  const precoTotal = items.reduce(
+    (sum, item) =>
+      sum +
+      Number(
+        item?.preco_centavos ??
+          item?.preco_centavos_snapshot ??
+          item?.preco_snapshot ??
+          0
+      ),
+    0
+  );
+  return {
+    serviceIds: items.map((item) => item.id),
+    serviceNames,
+    serviceLabel: serviceNames.join(' + '),
+    duracaoTotal,
+    precoTotal,
+  };
+};
+
+const fetchServicesForAppointment = async (db, estabelecimentoId, serviceIds) => {
+  if (!serviceIds.length) return { items: [], missing: serviceIds };
+  const placeholders = serviceIds.map(() => '?').join(', ');
+  const [rows] = await db.query(
+    `SELECT id, nome, duracao_min, preco_centavos
+       FROM servicos
+      WHERE id IN (${placeholders})
+        AND estabelecimento_id=?
+        AND ativo=1`,
+    [...serviceIds, estabelecimentoId]
+  );
+  const map = new Map(rows.map((row) => [Number(row.id), row]));
+  const missing = serviceIds.filter((id) => !map.has(Number(id)));
+  if (missing.length) return { items: [], missing };
+  const items = serviceIds.map((id) => {
+    const svc = map.get(Number(id));
+    return {
+      id: Number(svc.id),
+      nome: svc.nome,
+      duracao_min: Number(svc.duracao_min || 0),
+      preco_centavos: Number(svc.preco_centavos || 0),
+    };
+  });
+  return { items, missing: [] };
+};
+
+const fetchServiceProfessionalMap = async (db, serviceIds) => {
+  if (!serviceIds.length) return new Map();
+  const placeholders = serviceIds.map(() => '?').join(', ');
+  const [rows] = await db.query(
+    `SELECT servico_id, profissional_id
+       FROM servico_profissionais
+      WHERE servico_id IN (${placeholders})`,
+    serviceIds
+  );
+  const map = new Map();
+  rows.forEach((row) => {
+    const key = Number(row.servico_id);
+    if (!map.has(key)) map.set(key, new Set());
+    map.get(key).add(Number(row.profissional_id));
+  });
+  return map;
+};
+
+const fetchAppointmentItems = async (db, appointmentIds) => {
+  if (!appointmentIds.length) return new Map();
+  const placeholders = appointmentIds.map(() => '?').join(', ');
+  const [rows] = await db.query(
+    `SELECT ai.agendamento_id,
+            ai.servico_id,
+            ai.ordem,
+            ai.duracao_min,
+            ai.preco_snapshot,
+            s.nome AS servico_nome
+       FROM agendamento_itens ai
+       JOIN servicos s ON s.id = ai.servico_id
+      WHERE ai.agendamento_id IN (${placeholders})
+      ORDER BY ai.agendamento_id, ai.ordem`,
+    appointmentIds
+  );
+  const byAppointment = new Map();
+  rows.forEach((row) => {
+    const key = Number(row.agendamento_id);
+    if (!byAppointment.has(key)) byAppointment.set(key, []);
+    const precoCentavosSnapshot = Number(row.preco_snapshot || 0);
+    byAppointment.get(key).push({
+      id: Number(row.servico_id),
+      nome: row.servico_nome,
+      ordem: Number(row.ordem) || 0,
+      duracao_min: Number(row.duracao_min || 0),
+      preco_centavos_snapshot: precoCentavosSnapshot,
+      preco_snapshot: precoCentavosSnapshot,
+    });
+  });
+  return byAppointment;
+};
+
+const hydrateAppointmentsWithItems = async (db, rows) => {
+  const ids = (rows || [])
+    .map((row) => Number(row?.id))
+    .filter((id) => Number.isFinite(id) && id > 0);
+  if (!ids.length) return rows;
+  const itemsByAppointment = await fetchAppointmentItems(db, ids);
+  rows.forEach((row) => {
+    const items = itemsByAppointment.get(Number(row.id)) || [];
+    const summary = summarizeServices(items.map((item) => ({
+      id: item.id,
+      nome: item.nome,
+      duracao_min: item.duracao_min,
+      preco_centavos: item.preco_centavos_snapshot ?? item.preco_snapshot,
+    })));
+    row.servicos = items;
+    row.servico_ids = summary.serviceIds;
+    row.servico_nome = summary.serviceLabel || row.servico_nome || '';
+    row.duracao_total = summary.duracaoTotal;
+    row.preco_total = summary.precoTotal;
+  });
+  return rows;
+};
+
+/** Valida horário do payload em horário local (UTC-3). */
+function inBusinessHours(dateUtc) {
+  const minutes = minutesOfDayInTZ(dateUtc, EST_TZ_OFFSET_MIN);
+  if (minutes == null) return false;
+  return minutes >= DEFAULT_START_MIN && minutes < DEFAULT_END_MIN;
 }
 
 const DAY_SLUG_TO_INDEX = Object.freeze({
@@ -298,19 +474,29 @@ const buildWorkingRules = (horariosJson) => {
 };
 
 const isWithinWorkingHours = (startDate, endDate, workingRules) => {
-  if (!workingRules) return true;
-  const rule = workingRules[startDate.getDay()];
-  if (!rule || !rule.enabled) return false;
-  const sameDay =
-    startDate.getFullYear() === endDate.getFullYear() &&
-    startDate.getMonth() === endDate.getMonth() &&
-    startDate.getDate() === endDate.getDate();
-  if (!sameDay) return false;
-  const startMinutes = startDate.getHours() * 60 + startDate.getMinutes();
-  const endMinutes = endDate.getHours() * 60 + endDate.getMinutes();
+  const startMs = startDate instanceof Date ? startDate.getTime() : NaN;
+  const endMs = endDate instanceof Date ? endDate.getTime() : NaN;
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) return false;
+  if (endMs <= startMs) return false;
+
+  const startDay = weekDayIndexInTZ(startDate, EST_TZ_OFFSET_MIN);
+  const endDay = weekDayIndexInTZ(endDate, EST_TZ_OFFSET_MIN);
+  if (startDay == null || endDay == null || startDay !== endDay) return false;
+
+  const startMinutes = minutesOfDayInTZ(startDate, EST_TZ_OFFSET_MIN);
+  const endMinutes = minutesOfDayInTZ(endDate, EST_TZ_OFFSET_MIN);
+  if (startMinutes == null || endMinutes == null) return false;
+
+  const rule = workingRules
+    ? workingRules[startDay]
+    : { enabled: true, startMinutes: DEFAULT_START_MIN, endMinutes: DEFAULT_END_MIN, breaks: [] };
+  if (!rule || rule.enabled === false) return false;
   if (startMinutes < rule.startMinutes) return false;
   if (endMinutes > rule.endMinutes) return false;
-  if (Array.isArray(rule.breaks) && rule.breaks.some(([start, end]) => startMinutes >= start && startMinutes < end)) {
+  if (
+    Array.isArray(rule.breaks) &&
+    rule.breaks.some(([start, end]) => startMinutes < end && endMinutes > start)
+  ) {
     return false;
   }
   return true;
@@ -346,17 +532,16 @@ router.get('/', authRequired, isCliente, async (req, res) => {
   const clienteId = req.user.id;
   const [rows] = await pool.query(`
     SELECT a.*,
-           s.nome AS servico_nome,
            u.nome AS estabelecimento_nome,
            p.nome AS profissional_nome,
            p.avatar_url AS profissional_avatar_url
     FROM agendamentos a
-    JOIN servicos s   ON s.id=a.servico_id
     JOIN usuarios u   ON u.id=a.estabelecimento_id
     LEFT JOIN profissionais p ON p.id = a.profissional_id
     WHERE a.cliente_id=?
     ORDER BY a.inicio DESC
   `, [clienteId]);
+  await hydrateAppointmentsWithItems(pool, rows);
   res.json(rows);
 });
 
@@ -378,19 +563,18 @@ router.get('/estabelecimento', authRequired, isEstabelecimento, async (req, res)
 
   const [rows] = await pool.query(
     `SELECT a.*,
-            s.nome AS servico_nome,
             u.nome AS cliente_nome,
             u.telefone AS cliente_telefone,
             p.nome AS profissional_nome,
             p.avatar_url AS profissional_avatar_url
      FROM agendamentos a
-     JOIN servicos s ON s.id=a.servico_id
      JOIN usuarios u ON u.id=a.cliente_id
      LEFT JOIN profissionais p ON p.id = a.profissional_id
      WHERE ${where}
      ORDER BY a.inicio DESC`,
     params
   );
+  await hydrateAppointmentsWithItems(pool, rows);
   res.json(rows);
 });
 
@@ -400,7 +584,8 @@ router.get('/estabelecimento', authRequired, isEstabelecimento, async (req, res)
 router.post('/', authRequired, isCliente, async (req, res) => {
   let conn;
   try {
-    const { estabelecimento_id, servico_id, inicio, profissional_id: profissionalIdRaw, profissionalId } = req.body || {};
+    const { estabelecimento_id, inicio, profissional_id: profissionalIdRaw, profissionalId } = req.body || {};
+    const serviceIds = extractServiceIds(req.body || {});
     const professionalCandidate = profissionalIdRaw != null ? profissionalIdRaw : profissionalId;
     const profissional_id = professionalCandidate == null ? null : Number(professionalCandidate);
 
@@ -409,10 +594,10 @@ router.post('/', authRequired, isCliente, async (req, res) => {
     }
 
     // 1) validacao basica
-    if (!estabelecimento_id || !servico_id || !inicio) {
+    if (!estabelecimento_id || !serviceIds.length || !inicio) {
       return res.status(400).json({
         error: 'invalid_payload',
-        message: 'Campos obrigatorios: estabelecimento_id, servico_id, inicio (ISO).'
+        message: 'Campos obrigatorios: estabelecimento_id, servico_ids, inicio (ISO).'
       });
     }
 
@@ -423,7 +608,7 @@ router.post('/', authRequired, isCliente, async (req, res) => {
     if (inicioDate.getTime() <= Date.now()) {
       return res.status(400).json({ error: 'past_datetime', message: 'Não é possível agendar no passado.' });
     }
-    if (!inBusinessHours(inicioDate.toISOString())) {
+    if (!inBusinessHours(inicioDate)) {
       return res.status(400).json({ error: 'outside_business_hours', message: 'Horário fora do expediente (07:00-22:00).' });
     }
 
@@ -436,23 +621,24 @@ router.post('/', authRequired, isCliente, async (req, res) => {
       return res.status(403).json({ error: 'plan_delinquent', message: 'Este estabelecimento esta com o plano em atraso. Agendamentos temporariamente suspensos.' });
     }
 
-    const [[svc]] = await pool.query(
-      'SELECT duracao_min, nome FROM servicos WHERE id=? AND estabelecimento_id=? AND ativo=1',
-      [servico_id, estabelecimento_id]
-    );
-    if (!svc) {
+    const { items: serviceItems, missing } = await fetchServicesForAppointment(pool, estabelecimento_id, serviceIds);
+    if (missing.length) {
       return res.status(400).json({ error: 'servico_invalido', message: 'Servico invalido ou inativo para este estabelecimento.' });
     }
+    if (serviceItems.some((item) => !Number.isFinite(item.duracao_min) || item.duracao_min <= 0)) {
+      return res.status(400).json({ error: 'duracao_invalida', message: 'Duracao do servico invalida.' });
+    }
+    const summary = summarizeServices(serviceItems);
+    const primaryServiceId = summary.serviceIds[0] || serviceIds[0];
+    const serviceLabel = summary.serviceLabel || serviceItems[0]?.nome || 'servico';
 
-    const [serviceProfessionals] = await pool.query(
-      'SELECT profissional_id FROM servico_profissionais WHERE servico_id=?',
-      [servico_id]
-    );
-    const linkedProfessionalIds = serviceProfessionals.map((row) => row.profissional_id);
+    const professionalMap = await fetchServiceProfessionalMap(pool, serviceIds);
+    const servicesRequiringProfessional = serviceIds.filter((id) => (professionalMap.get(id)?.size || 0) > 0);
+    const requiresProfessional = servicesRequiringProfessional.length > 0;
     let profissionalRow = null;
 
-    if (linkedProfessionalIds.length && profissional_id == null) {
-      return res.status(400).json({ error: 'profissional_obrigatorio', message: 'Escolha um profissional para este servico.' });
+    if (requiresProfessional && profissional_id == null) {
+      return res.status(400).json({ error: 'profissional_obrigatorio', message: 'Escolha um profissional para estes servicos.' });
     }
 
     if (profissional_id != null) {
@@ -461,22 +647,25 @@ router.post('/', authRequired, isCliente, async (req, res) => {
         [profissional_id, estabelecimento_id]
       );
       if (!profRow) {
-        return res.status(400).json({ error: 'profissional_invalido', message: 'Profissional não encontrado para este estabelecimento.' });
+        return res.status(400).json({ error: 'profissional_invalido', message: 'Profissional nao encontrado para este estabelecimento.' });
       }
       if (!profRow.ativo) {
         return res.status(400).json({ error: 'profissional_inativo', message: 'Profissional inativo.' });
       }
-      if (linkedProfessionalIds.length && !linkedProfessionalIds.includes(profissional_id)) {
-        return res.status(400).json({ error: 'profissional_servico', message: 'Profissional não esta associado a este serviço.' });
+      if (requiresProfessional) {
+        const valid = servicesRequiringProfessional.every((id) => professionalMap.get(id)?.has(profissional_id));
+        if (!valid) {
+          return res.status(400).json({ error: 'profissional_servico', message: 'Profissional nao esta associado a todos os servicos selecionados.' });
+        }
       }
       profissionalRow = profRow;
     }
 
-    const dur = Number(svc.duracao_min || 0);
-    if (!Number.isFinite(dur) || dur <= 0) {
-      return res.status(400).json({ error: 'duracao_invalida', message: 'Duração do serviço invalida.' });
+    const duracaoTotalComBuffer = summary.duracaoTotal + APPOINTMENT_BUFFER_MIN;
+    if (!Number.isFinite(duracaoTotalComBuffer) || duracaoTotalComBuffer <= 0) {
+      return res.status(400).json({ error: 'duracao_invalida', message: 'Duracao do servico invalida.' });
     }
-    const fimDate = new Date(inicioDate.getTime() + dur * 60_000);
+    const fimDate = new Date(inicioDate.getTime() + duracaoTotalComBuffer * 60_000);
     let workingRules = null;
     try {
       const [[profile]] = await pool.query(
@@ -525,7 +714,7 @@ router.post('/', authRequired, isCliente, async (req, res) => {
         AND (inicio < ? AND fim > ?)
     `;
     const conflictParams = [estabelecimento_id, fimDate, inicioDate];
-    if (profissional_id != null && linkedProfessionalIds.length) {
+    if (profissional_id != null && requiresProfessional) {
       conflictSql += ' AND (profissional_id IS NULL OR profissional_id=?)';
       conflictParams.push(profissional_id);
     }
@@ -536,14 +725,28 @@ router.post('/', authRequired, isCliente, async (req, res) => {
     if (conf.length) {
       await conn.rollback();
       conn.release();
-      return res.status(409).json({ error: 'slot_ocupado', message: 'Horario indisponivel.' });
+      return res.status(409).json({ error: 'slot_ocupado', message: 'Horário indisponível.' });
     }
 
     // 4) insere (status usa default 'confirmado')
     const [r] = await conn.query(
       'INSERT INTO agendamentos (cliente_id, estabelecimento_id, servico_id, profissional_id, inicio, fim) VALUES (?,?,?,?,?,?)',
-      [req.user.id, estabelecimento_id, servico_id, profissional_id || null, inicioDate, fimDate]
+      [req.user.id, estabelecimento_id, primaryServiceId, profissional_id || null, inicioDate, fimDate]
     );
+    const itemValues = serviceItems.map((item, idx) => ([
+      r.insertId,
+      item.id,
+      idx + 1,
+      Math.max(0, Math.round(item.duracao_min || 0)),
+      Math.max(0, Math.round(item.preco_centavos || 0)),
+    ]));
+    if (itemValues.length) {
+      const placeholders = itemValues.map(() => '(?,?,?,?,?)').join(',');
+      await conn.query(
+        `INSERT INTO agendamento_itens (agendamento_id, servico_id, ordem, duracao_min, preco_snapshot) VALUES ${placeholders}`,
+        itemValues.flat()
+      );
+    }
 
     // 5) le dados consistentes ainda na transacao
     const [[novo]] = await conn.query('SELECT * FROM agendamentos WHERE id=?', [r.insertId]);
@@ -580,14 +783,14 @@ router.post('/', authRequired, isCliente, async (req, res) => {
         await notifyEmail(
           cli.email,
           'Agendamento confirmado',
-          `<p>Olá, <b>${cli?.nome ?? 'cliente'}</b>! Seu agendamento de <b>${svc.nome}</b>${profLabel ? ` com <b>${profNome}</b>` : ''} foi confirmado para <b>${inicioBR}</b>.</p>${appointmentLinkHtml}`
+          `<p>Olá, <b>${cli?.nome ?? 'cliente'}</b>! Seu agendamento de <b>${serviceLabel}</b>${profLabel ? ` com <b>${profNome}</b>` : ''} foi confirmado para <b>${inicioBR}</b>.</p>${appointmentLinkHtml}`
         );
       }
       if (!blockEstabNotifications && est?.email && canEmailEst) {
         await notifyEmail(
           est.email,
           'Novo agendamento recebido',
-          `<p>Você recebeu um novo agendamento de <b>${svc.nome}</b>${profLabel ? ` com <b>${profNome}</b>` : ''} em <b>${inicioBR}</b> para o cliente <b>${cli?.nome ?? ''}</b>.</p>`
+          `<p>Você recebeu um novo agendamento de <b>${serviceLabel}</b>${profLabel ? ` com <b>${profNome}</b>` : ''} em <b>${inicioBR}</b> para o cliente <b>${cli?.nome ?? ''}</b>.</p>`
         );
       }
     });
@@ -606,7 +809,7 @@ router.post('/', authRequired, isCliente, async (req, res) => {
             agendamentoId: novo.id,
             to: telCli,
             kind: 'confirm_cli',
-            template: { name: tplName, lang: tplLang, bodyParams: [svc.nome, inicioBR, estNomeLabel] },
+            template: { name: tplName, lang: tplLang, bodyParams: [serviceLabel, inicioBR, estNomeLabel] },
           });
         } else {
           await sendAppointmentWhatsApp({
@@ -614,7 +817,7 @@ router.post('/', authRequired, isCliente, async (req, res) => {
             agendamentoId: novo.id,
             to: telCli,
             kind: 'confirm_cli',
-            message: `✅ - Novo agendamento registrado: ${svc.nome}${profNome ? ' / ' + profNome : ''} em ${inicioBR} — ${estNomeLabel}. — Obrigado!`,
+            message: `✅ - Novo agendamento registrado: ${serviceLabel}${profNome ? ' / ' + profNome : ''} em ${inicioBR} — ${estNomeLabel}. — Obrigado!`,
           });
         }
       }
@@ -625,7 +828,7 @@ router.post('/', authRequired, isCliente, async (req, res) => {
             agendamentoId: novo.id,
             to: telEst,
             kind: 'confirm_est',
-            template: { name: tplName, lang: tplLang, bodyParams: [svc.nome, inicioBR, estNomeLabel] },
+            template: { name: tplName, lang: tplLang, bodyParams: [serviceLabel, inicioBR, estNomeLabel] },
           });
         } else {
           await sendAppointmentWhatsApp({
@@ -633,7 +836,7 @@ router.post('/', authRequired, isCliente, async (req, res) => {
             agendamentoId: novo.id,
             to: telEst,
             kind: 'confirm_est',
-            message: `✅ - Novo agendamento registrado: ${svc.nome}${profNome ? ' / ' + profNome : ''} em ${inicioBR} — ${estNomeLabel}. — Obrigado!`,
+            message: `✅ - Novo agendamento registrado: ${serviceLabel}${profNome ? ' / ' + profNome : ''} em ${inicioBR} — ${estNomeLabel}. — Obrigado!`,
           });
         }
       }
@@ -647,6 +850,23 @@ router.post('/', authRequired, isCliente, async (req, res) => {
       cliente_id: novo.cliente_id,
       estabelecimento_id: novo.estabelecimento_id,
       servico_id: novo.servico_id,
+      servico_ids: summary.serviceIds,
+      servico_nome: serviceLabel,
+      servicos: serviceItems.map((item, idx) => {
+        const precoCentavosSnapshot = Math.max(0, Math.round(item.preco_centavos || 0));
+        return {
+          id: item.id,
+          nome: item.nome,
+          duracao_min: item.duracao_min,
+          preco_centavos_snapshot: precoCentavosSnapshot,
+          preco_snapshot: precoCentavosSnapshot,
+          ordem: idx + 1,
+        };
+      }),
+      buffer_min: APPOINTMENT_BUFFER_MIN,
+      duracao_total: summary.duracaoTotal,
+      duracao_total_com_buffer: duracaoTotalComBuffer,
+      preco_total: summary.precoTotal,
       profissional_id: novo.profissional_id,
       profissional_nome: profissionalRow?.nome || null,
       profissional_avatar_url: profissionalRow?.avatar_url || null,
@@ -662,7 +882,7 @@ router.post('/', authRequired, isCliente, async (req, res) => {
     // Se for erro de chave/unique/conflito que porventura escapou:
     const msg = String(e?.message || '');
     if (/duplicate|unique|constraint/i.test(msg)) {
-      return res.status(409).json({ error: 'slot_ocupado', message: 'Horario indisponivel.' });
+      return res.status(409).json({ error: 'slot_ocupado', message: 'Horário indisponível.' });
     }
     return res.status(500).json({ error: 'server_error' });
   }
@@ -676,7 +896,6 @@ router.post('/estabelecimento', authRequired, isEstabelecimento, async (req, res
   try {
     const {
       estabelecimento_id: estabelecimentoIdRaw,
-      servico_id,
       inicio,
       nome,
       email,
@@ -693,6 +912,7 @@ router.post('/estabelecimento', authRequired, isEstabelecimento, async (req, res
       data_nascimento,
       dataNascimento,
     } = req.body || {};
+    const serviceIds = extractServiceIds(req.body || {});
 
     const estabelecimento_id = req.user?.id;
     if (!estabelecimento_id) {
@@ -708,10 +928,10 @@ router.post('/estabelecimento', authRequired, isEstabelecimento, async (req, res
       return res.status(400).json({ error: 'profissional_invalido', message: 'Profissional invalido.' });
     }
 
-    if (!servico_id || !inicio || !nome || !email || !telefone) {
+    if (!serviceIds.length || !inicio || !nome || !email || !telefone) {
       return res.status(400).json({
         error: 'invalid_payload',
-        message: 'Campos obrigatorios: servico_id, inicio, nome, email, telefone.'
+        message: 'Campos obrigatorios: servico_ids, inicio, nome, email, telefone.'
       });
     }
 
@@ -739,10 +959,10 @@ router.post('/estabelecimento', authRequired, isEstabelecimento, async (req, res
       return res.status(400).json({ error: 'invalid_date', message: 'Formato de data/hora invalido.' });
     }
     if (inicioDate.getTime() <= Date.now()) {
-      return res.status(400).json({ error: 'past_datetime', message: 'Nao e possivel agendar no passado.' });
+      return res.status(400).json({ error: 'past_datetime', message: 'Não é possível agendar no passado.' });
     }
-    if (!inBusinessHours(inicioDate.toISOString())) {
-      return res.status(400).json({ error: 'outside_business_hours', message: 'Horario fora do expediente.' });
+    if (!inBusinessHours(inicioDate)) {
+      return res.status(400).json({ error: 'outside_business_hours', message: 'Horário fora do expediente (07:00-22:00).' });
     }
 
     const planContext = await getPlanContext(estabelecimento_id);
@@ -753,21 +973,22 @@ router.post('/estabelecimento', authRequired, isEstabelecimento, async (req, res
       return res.status(403).json({ error: 'plan_delinquent', message: 'Este estabelecimento esta com o plano em atraso. Agendamentos temporariamente suspensos.' });
     }
 
-    const [[svc]] = await pool.query(
-      'SELECT duracao_min, nome FROM servicos WHERE id=? AND estabelecimento_id=? AND ativo=1',
-      [servico_id, estabelecimento_id]
-    );
-    if (!svc) return res.status(400).json({ error: 'servico_invalido' });
+    const { items: serviceItems, missing } = await fetchServicesForAppointment(pool, estabelecimento_id, serviceIds);
+    if (missing.length) return res.status(400).json({ error: 'servico_invalido' });
+    if (serviceItems.some((item) => !Number.isFinite(item.duracao_min) || item.duracao_min <= 0)) {
+      return res.status(400).json({ error: 'duracao_invalida' });
+    }
+    const summary = summarizeServices(serviceItems);
+    const primaryServiceId = summary.serviceIds[0] || serviceIds[0];
+    const serviceLabel = summary.serviceLabel || serviceItems[0]?.nome || 'servico';
 
-    const [serviceProfessionals] = await pool.query(
-      'SELECT profissional_id FROM servico_profissionais WHERE servico_id=?',
-      [servico_id]
-    );
-    const linkedProfessionalIds = serviceProfessionals.map((row) => row.profissional_id);
+    const professionalMap = await fetchServiceProfessionalMap(pool, serviceIds);
+    const servicesRequiringProfessional = serviceIds.filter((id) => (professionalMap.get(id)?.size || 0) > 0);
+    const requiresProfessional = servicesRequiringProfessional.length > 0;
     let profissionalRow = null;
 
-    if (linkedProfessionalIds.length && profissional_id == null) {
-      return res.status(400).json({ error: 'profissional_obrigatorio', message: 'Escolha um profissional para este servico.' });
+    if (requiresProfessional && profissional_id == null) {
+      return res.status(400).json({ error: 'profissional_obrigatorio', message: 'Escolha um profissional para estes servicos.' });
     }
 
     if (profissional_id != null) {
@@ -781,15 +1002,18 @@ router.post('/estabelecimento', authRequired, isEstabelecimento, async (req, res
       if (!profRow.ativo) {
         return res.status(400).json({ error: 'profissional_inativo', message: 'Profissional inativo.' });
       }
-      if (linkedProfessionalIds.length && !linkedProfessionalIds.includes(profissional_id)) {
-        return res.status(400).json({ error: 'profissional_servico', message: 'Profissional nao esta associado a este servico.' });
+      if (requiresProfessional) {
+        const valid = servicesRequiringProfessional.every((id) => professionalMap.get(id)?.has(profissional_id));
+        if (!valid) {
+          return res.status(400).json({ error: 'profissional_servico', message: 'Profissional nao esta associado a todos os servicos selecionados.' });
+        }
       }
       profissionalRow = profRow;
     }
 
-    const dur = Number(svc.duracao_min || 0);
-    if (!Number.isFinite(dur) || dur <= 0) return res.status(400).json({ error: 'duracao_invalida' });
-    const fimDate = new Date(inicioDate.getTime() + dur * 60_000);
+    const duracaoTotalComBuffer = summary.duracaoTotal + APPOINTMENT_BUFFER_MIN;
+    if (!Number.isFinite(duracaoTotalComBuffer) || duracaoTotalComBuffer <= 0) return res.status(400).json({ error: 'duracao_invalida' });
+    const fimDate = new Date(inicioDate.getTime() + duracaoTotalComBuffer * 60_000);
     let workingRules = null;
     try {
       const [[profile]] = await pool.query(
@@ -799,7 +1023,7 @@ router.post('/estabelecimento', authRequired, isEstabelecimento, async (req, res
       workingRules = buildWorkingRules(profile?.horarios_json || null);
     } catch {}
     if (!isWithinWorkingHours(inicioDate, fimDate, workingRules)) {
-      return res.status(400).json({ error: 'outside_business_hours', message: 'Horario fora do expediente do estabelecimento.' });
+      return res.status(400).json({ error: 'outside_business_hours', message: 'Horário fora do expediente do estabelecimento.' });
     }
 
     const planConfig = planContext?.config;
@@ -950,7 +1174,7 @@ router.post('/estabelecimento', authRequired, isEstabelecimento, async (req, res
          AND (status <> 'pendente' OR public_confirm_expires_at IS NULL OR public_confirm_expires_at >= NOW())
          AND (inicio < ? AND fim > ?)`;
     const conflictParams = [estabelecimento_id, fimDate, inicioDate];
-    if (profissional_id != null && linkedProfessionalIds.length) {
+    if (profissional_id != null && requiresProfessional) {
       conflictSql += ' AND (profissional_id IS NULL OR profissional_id=?)';
       conflictParams.push(profissional_id);
     }
@@ -960,8 +1184,22 @@ router.post('/estabelecimento', authRequired, isEstabelecimento, async (req, res
 
     const [ins] = await conn.query(
       'INSERT INTO agendamentos (cliente_id, estabelecimento_id, servico_id, profissional_id, inicio, fim) VALUES (?,?,?,?,?,?)',
-      [userId, estabelecimento_id, servico_id, profissional_id || null, inicioDate, fimDate]
+      [userId, estabelecimento_id, primaryServiceId, profissional_id || null, inicioDate, fimDate]
     );
+    const itemValues = serviceItems.map((item, idx) => ([
+      ins.insertId,
+      item.id,
+      idx + 1,
+      Math.max(0, Math.round(item.duracao_min || 0)),
+      Math.max(0, Math.round(item.preco_centavos || 0)),
+    ]));
+    if (itemValues.length) {
+      const placeholders = itemValues.map(() => '(?,?,?,?,?)').join(',');
+      await conn.query(
+        `INSERT INTO agendamento_itens (agendamento_id, servico_id, ordem, duracao_min, preco_snapshot) VALUES ${placeholders}`,
+        itemValues.flat()
+      );
+    }
 
     const [[novo]] = await conn.query('SELECT * FROM agendamentos WHERE id=?', [ins.insertId]);
     const [[cli]] = await conn.query('SELECT email, telefone, nome FROM usuarios WHERE id=?', [userId]);
@@ -991,14 +1229,14 @@ router.post('/estabelecimento', authRequired, isEstabelecimento, async (req, res
         await notifyEmail(
           cli.email,
           'Agendamento confirmado',
-          `<p>Ola, <b>${cli?.nome ?? 'cliente'}</b>! Seu agendamento de <b>${svc.nome}</b>${profLabel ? ` com <b>${profNome}</b>` : ''} foi confirmado para <b>${inicioBR}</b>.</p>${appointmentLinkHtml}`
+          `<p>Ola, <b>${cli?.nome ?? 'cliente'}</b>! Seu agendamento de <b>${serviceLabel}</b>${profLabel ? ` com <b>${profNome}</b>` : ''} foi confirmado para <b>${inicioBR}</b>.</p>${appointmentLinkHtml}`
         );
       }
       if (!blockEstabNotifications && est?.email && canEmailEst) {
         await notifyEmail(
           est.email,
           'Novo agendamento recebido',
-          `<p>Voce recebeu um novo agendamento de <b>${svc.nome}</b>${profLabel ? ` com <b>${profNome}</b>` : ''} em <b>${inicioBR}</b> para o cliente <b>${cli?.nome ?? ''}</b>.</p>`
+          `<p>Voce recebeu um novo agendamento de <b>${serviceLabel}</b>${profLabel ? ` com <b>${profNome}</b>` : ''} em <b>${inicioBR}</b> para o cliente <b>${cli?.nome ?? ''}</b>.</p>`
         );
       }
     });
@@ -1016,7 +1254,7 @@ router.post('/estabelecimento', authRequired, isEstabelecimento, async (req, res
             agendamentoId: novo.id,
             to: telCli,
             kind: 'confirm_cli',
-            template: { name: tplName, lang: tplLang, bodyParams: [svc.nome, inicioBR, estNomeLabel] },
+            template: { name: tplName, lang: tplLang, bodyParams: [serviceLabel, inicioBR, estNomeLabel] },
           });
         } else {
           await sendAppointmentWhatsApp({
@@ -1024,7 +1262,7 @@ router.post('/estabelecimento', authRequired, isEstabelecimento, async (req, res
             agendamentoId: novo.id,
             to: telCli,
             kind: 'confirm_cli',
-            message: `Novo agendamento registrado: ${svc.nome}${profNome ? ' / ' + profNome : ''} em ${inicioBR} - ${estNomeLabel}.`,
+            message: `Novo agendamento registrado: ${serviceLabel}${profNome ? ' / ' + profNome : ''} em ${inicioBR} - ${estNomeLabel}.`,
           });
         }
       }
@@ -1035,7 +1273,7 @@ router.post('/estabelecimento', authRequired, isEstabelecimento, async (req, res
             agendamentoId: novo.id,
             to: telEst,
             kind: 'confirm_est',
-            template: { name: tplName, lang: tplLang, bodyParams: [svc.nome, inicioBR, estNomeLabel] },
+            template: { name: tplName, lang: tplLang, bodyParams: [serviceLabel, inicioBR, estNomeLabel] },
           });
         } else {
           await sendAppointmentWhatsApp({
@@ -1043,7 +1281,7 @@ router.post('/estabelecimento', authRequired, isEstabelecimento, async (req, res
             agendamentoId: novo.id,
             to: telEst,
             kind: 'confirm_est',
-            message: `Novo agendamento registrado: ${svc.nome}${profNome ? ' / ' + profNome : ''} em ${inicioBR} - ${estNomeLabel}.`,
+            message: `Novo agendamento registrado: ${serviceLabel}${profNome ? ' / ' + profNome : ''} em ${inicioBR} - ${estNomeLabel}.`,
           });
         }
       }
@@ -1054,6 +1292,23 @@ router.post('/estabelecimento', authRequired, isEstabelecimento, async (req, res
       cliente_id: novo.cliente_id,
       estabelecimento_id: novo.estabelecimento_id,
       servico_id: novo.servico_id,
+      servico_ids: summary.serviceIds,
+      servico_nome: serviceLabel,
+      servicos: serviceItems.map((item, idx) => {
+        const precoCentavosSnapshot = Math.max(0, Math.round(item.preco_centavos || 0));
+        return {
+          id: item.id,
+          nome: item.nome,
+          duracao_min: item.duracao_min,
+          preco_centavos_snapshot: precoCentavosSnapshot,
+          preco_snapshot: precoCentavosSnapshot,
+          ordem: idx + 1,
+        };
+      }),
+      buffer_min: APPOINTMENT_BUFFER_MIN,
+      duracao_total: summary.duracaoTotal,
+      duracao_total_com_buffer: duracaoTotalComBuffer,
+      preco_total: summary.precoTotal,
       profissional_id: novo.profissional_id,
       profissional_nome: profissionalRow?.nome || null,
       profissional_avatar_url: profissionalRow?.avatar_url || null,
@@ -1087,10 +1342,10 @@ router.put('/:id/reschedule-estab', authRequired, isEstabelecimento, async (req,
       return res.status(400).json({ error: 'invalid_date', message: 'Formato de data/hora invalido.' });
     }
     if (inicioDate.getTime() <= Date.now()) {
-      return res.status(400).json({ error: 'past_datetime', message: 'Não e possível reagendar no passado.' });
+      return res.status(400).json({ error: 'past_datetime', message: 'Não é possível reagendar no passado.' });
     }
-    if (!inBusinessHours(inicioDate.toISOString())) {
-      return res.status(400).json({ error: 'outside_business_hours', message: 'Horário fora do expediente (00:00-23:59).' });
+    if (!inBusinessHours(inicioDate)) {
+      return res.status(400).json({ error: 'outside_business_hours', message: 'Horário fora do expediente (07:00-22:00).' });
     }
 
     const planContext = await getPlanContext(estId);
@@ -1139,29 +1394,35 @@ router.put('/:id/reschedule-estab', authRequired, isEstabelecimento, async (req,
       conn = null;
       return res.status(409).json({
         error: 'reschedule_forbidden_time_limit',
-        message: 'Reagendamento indisponivel: horario ja iniciado.',
+        message: 'Reagendamento indisponível: horário já iniciado.',
       });
     }
 
-    const [[svc]] = await conn.query(
-      'SELECT duracao_min, nome FROM servicos WHERE id=? AND estabelecimento_id=? AND ativo=1',
-      [ag.servico_id, estId]
-    );
-    if (!svc) {
-      await conn.rollback();
-      conn.release();
-      conn = null;
-      return res.status(400).json({ error: 'servico_invalido', message: 'Serviço inválido ou inativo.' });
+    const itemsByAppointment = await fetchAppointmentItems(conn, [ag.id]);
+    let serviceItems = itemsByAppointment.get(Number(ag.id)) || [];
+    if (!serviceItems.length && ag.servico_id) {
+      const fallback = await fetchServicesForAppointment(conn, estId, [ag.servico_id]);
+      serviceItems = fallback.items || [];
     }
-    const dur = Number(svc.duracao_min || 0);
-    if (!Number.isFinite(dur) || dur <= 0) {
+    if (!serviceItems.length) {
       await conn.rollback();
       conn.release();
       conn = null;
-      return res.status(400).json({ error: 'duracao_invalida', message: 'Duração do serviço inválida.' });
+      return res.status(400).json({ error: 'servico_invalido', message: 'Servico invalido ou inativo.' });
+    }
+    const summary = summarizeServices(serviceItems);
+    const serviceIds = summary.serviceIds.length ? summary.serviceIds : (ag.servico_id ? [ag.servico_id] : []);
+    const serviceLabel = summary.serviceLabel || serviceItems[0]?.nome || 'servico';
+
+    const duracaoTotalComBuffer = summary.duracaoTotal + APPOINTMENT_BUFFER_MIN;
+    if (!Number.isFinite(duracaoTotalComBuffer) || duracaoTotalComBuffer <= 0) {
+      await conn.rollback();
+      conn.release();
+      conn = null;
+      return res.status(400).json({ error: 'duracao_invalida', message: 'Duracao do servico invalida.' });
     }
 
-    const fimDate = new Date(inicioDate.getTime() + dur * 60_000);
+    const fimDate = new Date(inicioDate.getTime() + duracaoTotalComBuffer * 60_000);
 
     let workingRules = null;
     try {
@@ -1181,11 +1442,9 @@ router.put('/:id/reschedule-estab', authRequired, isEstabelecimento, async (req,
       });
     }
 
-    const [serviceProfessionals] = await conn.query(
-      'SELECT profissional_id FROM servico_profissionais WHERE servico_id=?',
-      [ag.servico_id]
-    );
-    const linkedProfessionalIds = serviceProfessionals.map((row) => row.profissional_id);
+    const professionalMap = await fetchServiceProfessionalMap(conn, serviceIds);
+    const servicesRequiringProfessional = serviceIds.filter((id) => (professionalMap.get(id)?.size || 0) > 0);
+    const requiresProfessional = servicesRequiringProfessional.length > 0;
 
     let conflictSql = `SELECT id FROM agendamentos
        WHERE estabelecimento_id=? AND status IN ('confirmado','pendente')
@@ -1193,7 +1452,7 @@ router.put('/:id/reschedule-estab', authRequired, isEstabelecimento, async (req,
          AND id<>?
          AND (inicio < ? AND fim > ?)`;
     const conflictParams = [estId, ag.id, fimDate, inicioDate];
-    if (ag.profissional_id != null && linkedProfessionalIds.length) {
+    if (ag.profissional_id != null && requiresProfessional) {
       conflictSql += ' AND (profissional_id IS NULL OR profissional_id=?)';
       conflictParams.push(ag.profissional_id);
     }
@@ -1203,7 +1462,7 @@ router.put('/:id/reschedule-estab', authRequired, isEstabelecimento, async (req,
       await conn.rollback();
       conn.release();
       conn = null;
-      return res.status(409).json({ error: 'slot_ocupado', message: 'Horario indisponivel.' });
+      return res.status(409).json({ error: 'slot_ocupado', message: 'Horário indisponível.' });
     }
 
     const oldInicioIso = ag?.inicio ? new Date(ag.inicio).toISOString() : null;
@@ -1244,7 +1503,7 @@ router.put('/:id/reschedule-estab', authRequired, isEstabelecimento, async (req,
         if (Number.isFinite(oldMs) && Number.isFinite(newMs) && oldMs === newMs) return;
       }
       const clientName = cli?.nome || 'cliente';
-      const serviceName = svc?.nome || 'servico';
+      const serviceName = serviceLabel || 'servico';
       const estName = est?.nome || 'estabelecimento';
       const oldLabel = oldInicioIso ? brDateTime(oldInicioIso) : '';
       const newLabel = brDateTime(updatedInicioIso);
@@ -1316,7 +1575,13 @@ router.put('/:id/cancel', authRequired, isCliente, async (req, res) => {
 
     // contatos para notificar (opcional)
     const [[a]]   = await pool.query('SELECT estabelecimento_id, servico_id, profissional_id, inicio FROM agendamentos WHERE id=?', [id]);
-    const [[svc]] = await pool.query('SELECT nome FROM servicos WHERE id=?', [a?.servico_id || 0]);
+    const itemsByAppointment = await fetchAppointmentItems(pool, [Number(id)]);
+    let serviceItems = itemsByAppointment.get(Number(id)) || [];
+    if (!serviceItems.length && a?.servico_id) {
+      const fallback = await fetchServicesForAppointment(pool, a?.estabelecimento_id || 0, [a.servico_id]);
+      serviceItems = fallback.items || [];
+    }
+    const summary = summarizeServices(serviceItems);
     const [[cli]] = await pool.query('SELECT nome, telefone FROM usuarios WHERE id=?', [req.user.id]);
     const [[est]] = await pool.query('SELECT nome, email, telefone, notify_email_estab, notify_whatsapp_estab FROM usuarios WHERE id=?', [a?.estabelecimento_id || 0]);
     const [[pro]] = await pool.query('SELECT nome FROM profissionais WHERE id=?', [a?.profissional_id || 0]);
@@ -1331,7 +1596,7 @@ router.put('/:id/cancel', authRequired, isCliente, async (req, res) => {
     const canEmailEst = boolPref(est?.notify_email_estab, true);
     const canWhatsappEst = boolPref(est?.notify_whatsapp_estab, true);
     const estNome = est?.nome || '';
-    const serviceName = svc?.nome || '';
+    const serviceName = summary.serviceLabel || '';
     const clientName = cli?.nome || 'cliente';
     const profName = pro?.nome || '';
     const profLabel = profName ? ` com ${profName}` : '';
@@ -1420,6 +1685,15 @@ router.put('/:id/cancel-estab', authRequired, isEstabelecimento, async (req, res
       return res.status(404).json({ error: 'not_found', message: 'Agendamento não encontrado.' });
     }
 
+    const itemsByAppointment = await fetchAppointmentItems(pool, [Number(id)]);
+    let serviceItems = itemsByAppointment.get(Number(id)) || [];
+    if (!serviceItems.length && ag?.servico_id) {
+      const fallback = await fetchServicesForAppointment(pool, estId, [ag.servico_id]);
+      serviceItems = fallback.items || [];
+    }
+    const summary = summarizeServices(serviceItems);
+    const serviceLabel = summary.serviceLabel || serviceItems[0]?.nome || 'servico';
+
     const statusNorm = String(ag.status || '').toLowerCase();
     if (statusNorm === 'cancelado') {
       return res.status(400).json({ error: 'already_cancelled', message: 'Agendamento já está cancelado.' });
@@ -1453,7 +1727,6 @@ router.put('/:id/cancel-estab', authRequired, isEstabelecimento, async (req, res
       return res.status(404).json({ error: 'not_found', message: 'Agendamento não encontrado.' });
     }
 
-    const [[svc]] = await pool.query('SELECT nome FROM servicos WHERE id=?', [ag?.servico_id || 0]);
     const [[cli]] = await pool.query('SELECT nome, telefone FROM usuarios WHERE id=?', [ag?.cliente_id || 0]);
     const [[est]] = await pool.query(
       'SELECT nome, telefone, notify_whatsapp_estab FROM usuarios WHERE id=?',
@@ -1482,8 +1755,8 @@ router.put('/:id/cancel-estab', authRequired, isEstabelecimento, async (req, res
       const tplName = process.env.WA_TEMPLATE_NAME_CANCEL || process.env.WA_TEMPLATE_NAME || 'confirmacao_agendamento';
       const tplLang = process.env.WA_TEMPLATE_LANG || 'pt_BR';
       // Ajuste de ordem: em {{3}} -> estabelecimento; às {{4}} -> hora+data
-      const params3 = [svc?.nome || '', `${hora} de ${data}`.trim(), est?.nome || ''];
-      const params4 = [cli?.nome || 'cliente', svc?.nome || '', est?.nome || '', `${hora} de ${data}`.trim()];
+      const params3 = [serviceLabel || '', `${hora} de ${data}`.trim(), est?.nome || ''];
+      const params4 = [cli?.nome || 'cliente', serviceLabel || '', est?.nome || '', `${hora} de ${data}`.trim()];
 
       let paramMode = paramModeEnv;
       const tplNameLower = String(tplName || '').toLowerCase();
@@ -1531,7 +1804,7 @@ router.put('/:id/cancel-estab', authRequired, isEstabelecimento, async (req, res
             agendamentoId: id,
             to: telCli,
             kind: 'cancel_cli',
-            message: `Seu agendamento ${id} (${svc?.nome ?? 'servico'}) em ${inicioBR} foi cancelado pelo estabelecimento.`,
+            message: `Seu agendamento ${id} (${serviceLabel ?? 'servico'}) em ${inicioBR} foi cancelado pelo estabelecimento.`,
           });
         }
       }

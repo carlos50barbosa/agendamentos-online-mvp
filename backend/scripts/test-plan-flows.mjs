@@ -42,6 +42,7 @@ const state = {
   usuarios: new Map(),
   servicos: [],
   agendamentos: [],
+  agendamentoItens: [],
   profissionais: [],
   servicoProfissionais: new Map(),
   bloqueios: [],
@@ -171,30 +172,54 @@ function seedScenario({ user = {}, services = null, professionals = [], serviceP
     fim: new Date(item.fim)
   }))
 
-  state.agendamentos = appointments.map((item, index) => ({
-    id: item.id ?? index + 1,
-    cliente_id: item.cliente_id ?? item.clienteId ?? null,
-    estabelecimento_id: item.estabelecimento_id ?? 1,
-    servico_id: item.servico_id ?? item.servicoId ?? null,
-    profissional_id: item.profissional_id ?? item.profissionalId ?? null,
-    inicio: (() => {
-      const d = item.inicio ? new Date(item.inicio) : new Date()
-      return Number.isNaN(d.getTime()) ? new Date() : d
-    })(),
-    fim: (() => {
-      if (item.fim) {
-        const d = new Date(item.fim)
-        if (!Number.isNaN(d.getTime())) return d
-      }
-      const start = item.inicio ? new Date(item.inicio) : new Date()
-      const base = Number.isNaN(start.getTime()) ? new Date() : start
-      const durMin = Number(item.duracao_min || item.duracaoMin || 60) || 60
-      return new Date(base.getTime() + durMin * 60_000)
-    })(),
-    public_confirm_expires_at: item.public_confirm_expires_at ? new Date(item.public_confirm_expires_at) : null,
-    status: item.status || 'confirmado',
-    wa_messages_sent: item.wa_messages_sent ?? item.waMessagesSent ?? 0,
-  }))
+  const agendamentoItens = []
+  state.agendamentos = appointments.map((item, index) => {
+    const id = item.id ?? index + 1
+    const rawServiceIds = Array.isArray(item.servico_ids)
+      ? item.servico_ids
+      : Array.isArray(item.servicos)
+      ? item.servicos.map((svc) => svc?.id).filter(Boolean)
+      : (item.servico_id ?? item.servicoId ?? null) != null
+      ? [item.servico_id ?? item.servicoId]
+      : []
+    const serviceIds = rawServiceIds.map((svcId) => Number(svcId)).filter((svcId) => Number.isFinite(svcId))
+    const primaryServiceId = serviceIds[0] ?? (item.servico_id ?? item.servicoId ?? null)
+    serviceIds.forEach((svcId, idx) => {
+      const svc = state.servicos.find((row) => row.id === svcId)
+      agendamentoItens.push({
+        agendamento_id: id,
+        servico_id: svcId,
+        ordem: idx + 1,
+        duracao_min: svc?.duracao_min ?? 0,
+        preco_snapshot: svc?.preco_centavos ?? 0,
+      })
+    })
+    return {
+      id,
+      cliente_id: item.cliente_id ?? item.clienteId ?? null,
+      estabelecimento_id: item.estabelecimento_id ?? 1,
+      servico_id: primaryServiceId,
+      profissional_id: item.profissional_id ?? item.profissionalId ?? null,
+      inicio: (() => {
+        const d = item.inicio ? new Date(item.inicio) : new Date()
+        return Number.isNaN(d.getTime()) ? new Date() : d
+      })(),
+      fim: (() => {
+        if (item.fim) {
+          const d = new Date(item.fim)
+          if (!Number.isNaN(d.getTime())) return d
+        }
+        const start = item.inicio ? new Date(item.inicio) : new Date()
+        const base = Number.isNaN(start.getTime()) ? new Date() : start
+        const durMin = Number(item.duracao_min || item.duracaoMin || 60) || 60
+        return new Date(base.getTime() + durMin * 60_000)
+      })(),
+      public_confirm_expires_at: item.public_confirm_expires_at ? new Date(item.public_confirm_expires_at) : null,
+      status: item.status || 'confirmado',
+      wa_messages_sent: item.wa_messages_sent ?? item.waMessagesSent ?? 0,
+    }
+  })
+  state.agendamentoItens = agendamentoItens
 
   state.subscriptions = Array.isArray(subscriptions) ? clone(subscriptions) : []
 
@@ -510,6 +535,21 @@ pool.query = async (sql, params = []) => {
     return [[{ total }], []]
   }
 
+  if (norm.startsWith("SELECT id, nome, duracao_min, preco_centavos FROM servicos WHERE id IN (")) {
+    const estId = Number(params[params.length - 1])
+    const serviceIds = params.slice(0, -1).map(Number)
+    const rows = serviceIds
+      .map((id) => state.servicos.find((s) => s.id === id && s.estabelecimento_id === estId && s.ativo))
+      .filter(Boolean)
+      .map((svc) => ({
+        id: svc.id,
+        nome: svc.nome,
+        duracao_min: svc.duracao_min,
+        preco_centavos: svc.preco_centavos ?? 0,
+      }))
+    return [rows, []]
+  }
+
   if (norm.startsWith("SELECT duracao_min, nome FROM servicos WHERE id=? AND estabelecimento_id=?")) {
     const [svcId, estId] = params
     const svc = state.servicos.find((s) => s.id === svcId && s.estabelecimento_id === estId && s.ativo)
@@ -707,6 +747,18 @@ pool.query = async (sql, params = []) => {
     const [id, estId] = params
     const svc = state.servicos.find((s) => s.id === id && s.estabelecimento_id === estId)
     return [svc ? [clone(svc)] : [], []]
+  }
+
+  if (norm.startsWith('SELECT servico_id, profissional_id FROM servico_profissionais WHERE servico_id IN (')) {
+    const serviceIds = params.map(Number)
+    const rows = []
+    for (const svcId of serviceIds) {
+      const set = state.servicoProfissionais.get(Number(svcId)) || new Set()
+      for (const profId of set) {
+        rows.push({ servico_id: svcId, profissional_id: profId })
+      }
+    }
+    return [rows, []]
   }
 
   if (norm.startsWith('SELECT sp.servico_id, p.id, p.nome, p.descricao, p.avatar_url FROM servico_profissionais sp JOIN profissionais p ON p.id = sp.profissional_id WHERE sp.servico_id IN (')) {
@@ -1045,6 +1097,44 @@ pool.query = async (sql, params = []) => {
     return [{ insertId: nextId, affectedRows: 1 }, []]
   }
 
+  if (norm.startsWith('INSERT INTO agendamento_itens (agendamento_id, servico_id, ordem, duracao_min, preco_snapshot)')) {
+    const chunkSize = 5
+    for (let i = 0; i < params.length; i += chunkSize) {
+      const [agendamentoId, servicoId, ordem, duracaoMin, precoSnapshot] = params.slice(i, i + chunkSize)
+      state.agendamentoItens.push({
+        agendamento_id: Number(agendamentoId),
+        servico_id: Number(servicoId),
+        ordem: Number(ordem),
+        duracao_min: Number(duracaoMin),
+        preco_snapshot: Number(precoSnapshot),
+      })
+    }
+    return [{ affectedRows: params.length / chunkSize, insertId: null }, []]
+  }
+
+  if (norm.startsWith('SELECT ai.agendamento_id, ai.servico_id, ai.ordem, ai.duracao_min, ai.preco_snapshot, s.nome AS servico_nome FROM agendamento_itens ai JOIN servicos s ON s.id = ai.servico_id WHERE ai.agendamento_id IN (')) {
+    const appointmentIds = params.map(Number)
+    const rows = []
+    state.agendamentoItens
+      .filter((item) => appointmentIds.includes(Number(item.agendamento_id)))
+      .sort((a, b) => {
+        if (a.agendamento_id !== b.agendamento_id) return a.agendamento_id - b.agendamento_id
+        return (a.ordem || 0) - (b.ordem || 0)
+      })
+      .forEach((item) => {
+        const svc = state.servicos.find((s) => s.id === Number(item.servico_id))
+        rows.push({
+          agendamento_id: item.agendamento_id,
+          servico_id: item.servico_id,
+          ordem: item.ordem,
+          duracao_min: item.duracao_min,
+          preco_snapshot: item.preco_snapshot,
+          servico_nome: svc?.nome || null,
+        })
+      })
+    return [rows, []]
+  }
+
   if (norm.startsWith('SELECT * FROM agendamentos WHERE id=?')) {
     const id = params[0]
     const row = state.agendamentos.find((a) => Number(a.id) === Number(id)) || null
@@ -1153,7 +1243,7 @@ future.setHours(14, 0, 0, 0)
 const res2 = await callHandler(createAppointmentHandler, {
   body: {
     estabelecimento_id: 1,
-    servico_id: 10,
+    servico_ids: [10],
     inicio: future.toISOString()
   },
   user: { id: 42, tipo: 'cliente' }
@@ -1327,7 +1417,7 @@ limitAttempt.setHours(15, 0, 0, 0)
 const res13 = await callHandler(createAppointmentHandler, {
   body: {
     estabelecimento_id: 1,
-    servico_id: 10,
+    servico_ids: [10],
     inicio: limitAttempt.toISOString(),
   },
   user: { id: 77, tipo: 'cliente' }

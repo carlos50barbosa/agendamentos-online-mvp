@@ -125,10 +125,16 @@ export default function DashboardCliente() {
                   : i.status;
                 const canCancel = String(i.status||'').toLowerCase() === 'confirmado' && !past;
                 const { cls, label } = statusMeta(effective);
+                const serviceNames = Array.isArray(i.servicos)
+                  ? i.servicos.map((svc) => svc?.nome).filter(Boolean)
+                  : [];
+                const serviceLabel = serviceNames.length
+                  ? serviceNames.join(' + ')
+                  : (i.servico_nome || i.service_name || 'Servico');
                 return (
                   <tr key={i.id}>
                     <td>
-                      <div style={{ fontWeight: 600, lineHeight: 1.05 }}>{i.servico_nome}</div>
+                      <div style={{ fontWeight: 600, lineHeight: 1.05 }}>{serviceLabel}</div>
                       <div className="small muted" style={{ lineHeight: 1.05 }}>
                         <span className="name-short" title={i.estabelecimento_nome}>{i.estabelecimento_nome}</span>
                       </div>

@@ -186,8 +186,8 @@ export function startEstabReminders(pool, { intervalMs } = {}) {
 
       const [rows] = await pool.query(
         `
-        SELECT a.id, a.inicio, a.servico_id, a.estabelecimento_id, a.cliente_id, a.profissional_id,
-               s.nome AS servico_nome,
+        SELECT a.id, a.inicio, a.estabelecimento_id, a.cliente_id, a.profissional_id,
+               COALESCE(NULLIF(GROUP_CONCAT(s.nome ORDER BY ai.ordem SEPARATOR ' + '), ''), s0.nome) AS servico_nome,
                c.nome AS cliente_nome,
                e.nome AS estabelecimento_nome, e.email AS estabelecimento_email, e.telefone AS estabelecimento_telefone,
                e.notify_email_estab, e.notify_whatsapp_estab,
@@ -195,12 +195,17 @@ export function startEstabReminders(pool, { intervalMs } = {}) {
         FROM agendamentos a
         JOIN usuarios e ON e.id = a.estabelecimento_id
         JOIN usuarios c ON c.id = a.cliente_id
-        JOIN servicos s ON s.id = a.servico_id
+        LEFT JOIN agendamento_itens ai ON ai.agendamento_id = a.id
+        LEFT JOIN servicos s ON s.id = ai.servico_id
+        LEFT JOIN servicos s0 ON s0.id = a.servico_id
         LEFT JOIN profissionais p ON p.id = a.profissional_id
         WHERE a.status='confirmado'
           AND a.inicio > NOW()
           AND a.estab_reminder_5h_sent_at IS NULL
           AND TIMESTAMPDIFF(MINUTE, NOW(), a.inicio) <= 300
+        GROUP BY a.id, a.inicio, a.estabelecimento_id, a.cliente_id, a.profissional_id,
+                 c.nome, e.nome, e.email, e.telefone, e.notify_email_estab, e.notify_whatsapp_estab,
+                 p.nome, s0.nome
         ORDER BY a.inicio ASC
         LIMIT 50
         `

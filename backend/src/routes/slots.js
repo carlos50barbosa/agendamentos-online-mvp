@@ -1,6 +1,7 @@
 ﻿// src/routes/slots.js
 import { Router } from 'express';
 import { pool } from '../lib/db.js';
+import { EST_TZ_OFFSET_MIN, makeUtcFromLocalYMDHM, weekDayIndexInTZ } from '../lib/datetime_tz.js';
 import { getPlanContext, isDelinquentStatus } from '../lib/plans.js';
 import { auth, isEstabelecimento } from '../middleware/auth.js';
 
@@ -12,14 +13,90 @@ const CLOSE_HOUR = 22;    // ate 22:00 (ultimo slot termina as 22:00)
 const INTERVAL_MIN = 30;  // intervalo de 30min
 const DEFAULT_START_MIN = OPEN_HOUR * 60;
 const DEFAULT_END_MIN = CLOSE_HOUR * 60;
+const APPOINTMENT_BUFFER_MIN = (() => {
+  const raw = process.env.AGENDAMENTO_BUFFER_MIN ?? process.env.APPOINTMENT_BUFFER_MIN;
+  if (raw === undefined || raw === null || String(raw).trim() === '') return 0;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.round(parsed) : 0;
+})();
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 // Helpers
-const addDays = (d, n) => {
-  const x = new Date(d);
-  x.setDate(x.getDate() + n);
-  return x;
+const parseLocalYmd = (value) => {
+  const match = String(value || '').trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const check = new Date(Date.UTC(year, month - 1, day));
+  if (
+    !Number.isFinite(check.getTime()) ||
+    check.getUTCFullYear() !== year ||
+    check.getUTCMonth() + 1 !== month ||
+    check.getUTCDate() !== day
+  ) {
+    return null;
+  }
+  return { year, month, day };
 };
-const toISO = (d) => new Date(d).toISOString();
+
+const addDaysLocal = (year, month, day, offset) => {
+  const d = new Date(Date.UTC(year, month - 1, day + offset));
+  return {
+    year: d.getUTCFullYear(),
+    month: d.getUTCMonth() + 1,
+    day: d.getUTCDate(),
+    weekday: d.getUTCDay(),
+  };
+};
+
+const normalizeServiceIds = (value) => {
+  const ids = [];
+  const pushId = (entry) => {
+    const num = Number(entry);
+    if (Number.isFinite(num) && num > 0) ids.push(num);
+  };
+  if (Array.isArray(value)) {
+    value.forEach((entry) => {
+      if (!entry) return;
+      if (typeof entry === 'object') {
+        pushId(entry.id ?? entry.servico_id ?? entry.service_id ?? entry.servicoId ?? entry.serviceId);
+      } else {
+        pushId(entry);
+      }
+    });
+  } else if (value !== undefined && value !== null && String(value).trim() !== '') {
+    String(value)
+      .split(',')
+      .map((part) => part.trim())
+      .filter(Boolean)
+      .forEach(pushId);
+  }
+  const seen = new Set();
+  return ids.filter((id) => {
+    if (seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
+};
+
+const extractServiceIds = (query) => {
+  if (!query || typeof query !== 'object') return [];
+  const rawList =
+    query.servico_ids ??
+    query.servicos ??
+    query.service_ids ??
+    query.services ??
+    query.serviceIds ??
+    query.servicoIds ??
+    null;
+  const parsed = normalizeServiceIds(rawList);
+  if (parsed.length) return parsed;
+  if (query.servico_id != null) {
+    return normalizeServiceIds([query.servico_id]);
+  }
+  return [];
+};
 
 const DAY_SLUG_TO_INDEX = Object.freeze({
   sunday: 0,
@@ -252,9 +329,65 @@ router.get('/', async (req, res) => {
   }
 
   try {
-    // Define o range da semana [weekStart .. weekStart+6]
-    const start = new Date(`${weekStart}T00:00:00`);
-    const end = addDays(start, 6);
+    const weekStartLocal = parseLocalYmd(weekStart);
+    if (!weekStartLocal) {
+      return res.status(400).json({ error: 'invalid_week_start' });
+    }
+
+    const serviceIds = extractServiceIds(req.query);
+    let durationMinutes = null;
+    const durationRaw =
+      req.query.duracao_total ??
+      req.query.duracaoTotal ??
+      req.query.duration_min ??
+      req.query.duration ??
+      null;
+    if (!serviceIds.length && durationRaw !== null && durationRaw !== undefined && String(durationRaw).trim() !== '') {
+      const parsed = Number(durationRaw);
+      if (!Number.isFinite(parsed) || parsed <= 0) {
+        return res.status(400).json({ error: 'duracao_invalida' });
+      }
+      durationMinutes = parsed;
+    }
+
+    if (serviceIds.length) {
+      const placeholders = serviceIds.map(() => '?').join(', ');
+      const [rows] = await pool.query(
+        `SELECT id, duracao_min
+           FROM servicos
+          WHERE id IN (${placeholders})
+            AND estabelecimento_id=?
+            AND ativo=1`,
+        [...serviceIds, establishmentId]
+      );
+      const map = new Map(rows.map((row) => [Number(row.id), Number(row.duracao_min || 0)]));
+      const missing = serviceIds.filter((id) => !map.has(Number(id)));
+      if (missing.length) {
+        return res.status(400).json({ error: 'servico_invalido' });
+      }
+      const total = serviceIds.reduce((sum, id) => sum + (map.get(Number(id)) || 0), 0);
+      if (!Number.isFinite(total) || total <= 0) {
+        return res.status(400).json({ error: 'duracao_invalida' });
+      }
+      durationMinutes = total;
+    }
+
+    if (durationMinutes == null) {
+      durationMinutes = INTERVAL_MIN;
+    }
+    // durationMinutes é sempre sem buffer; o buffer entra apenas no cálculo final.
+    const effectiveDuration = Math.max(1, Math.round(durationMinutes + APPOINTMENT_BUFFER_MIN));
+
+    // Semana local (UTC-3) convertida para instantes UTC
+    const rangeStartUtc = makeUtcFromLocalYMDHM(
+      weekStartLocal.year,
+      weekStartLocal.month,
+      weekStartLocal.day,
+      0,
+      0,
+      EST_TZ_OFFSET_MIN
+    );
+    const rangeEndUtcExclusive = new Date(rangeStartUtc.getTime() + 7 * DAY_MS);
 
     // Carrega agendamentos confirmados e bloqueios no periodo
     const [ags] = await pool.query(
@@ -264,9 +397,10 @@ router.get('/', async (req, res) => {
        WHERE estabelecimento_id = ?
          AND status IN ('confirmado','pendente')
          AND (status <> 'pendente' OR public_confirm_expires_at IS NULL OR public_confirm_expires_at >= NOW())
-         AND DATE(inicio) BETWEEN DATE(?) AND DATE(?)
+         AND inicio < ?
+         AND fim > ?
       `,
-      [establishmentId, start, end]
+      [establishmentId, rangeEndUtcExclusive, rangeStartUtc]
     );
 
     const [blq] = await pool.query(
@@ -274,9 +408,10 @@ router.get('/', async (req, res) => {
       SELECT inicio, fim
         FROM bloqueios
        WHERE estabelecimento_id = ?
-         AND DATE(inicio) BETWEEN DATE(?) AND DATE(?)
+         AND inicio < ?
+         AND fim > ?
       `,
-      [establishmentId, start, end]
+      [establishmentId, rangeEndUtcExclusive, rangeStartUtc]
     );
 
     const [profileRows] = await pool.query(
@@ -286,12 +421,27 @@ router.get('/', async (req, res) => {
     const horariosJson = profileRows?.[0]?.horarios_json || null;
     const workingRules = buildWorkingRules(horariosJson);
 
+    const toIntervals = (rows) =>
+      (rows || [])
+        .map((row) => [new Date(row.inicio).getTime(), new Date(row.fim).getTime()])
+        .filter(([startMs, endMs]) => Number.isFinite(startMs) && Number.isFinite(endMs));
+    const agIntervals = toIntervals(ags);
+    const blqIntervals = toIntervals(blq);
+
     // Monta grade da semana em passos de 30min
     const slots = [];
     for (let d = 0; d < 7; d++) {
-      const day = addDays(start, d);
-      const weekDayIndex = day.getDay();
-      const rule = workingRules ? workingRules[weekDayIndex] : null;
+      const localDay = addDaysLocal(weekStartLocal.year, weekStartLocal.month, weekStartLocal.day, d);
+      const dayStartUtc = makeUtcFromLocalYMDHM(
+        localDay.year,
+        localDay.month,
+        localDay.day,
+        0,
+        0,
+        EST_TZ_OFFSET_MIN
+      );
+      const weekDayIndex = weekDayIndexInTZ(dayStartUtc, EST_TZ_OFFSET_MIN);
+      const rule = workingRules ? workingRules[weekDayIndex ?? localDay.weekday] : null;
       if (rule && rule.enabled === false) {
         continue;
       }
@@ -302,19 +452,29 @@ router.get('/', async (req, res) => {
       for (let minute = dayStartMinutes; minute < dayEndMinutes; minute += INTERVAL_MIN) {
         const hour = Math.floor(minute / 60);
         const minuteOfHour = minute % 60;
-        const s = new Date(day.getFullYear(), day.getMonth(), day.getDate(), hour, minuteOfHour, 0);
-        const e = new Date(s.getTime() + INTERVAL_MIN * 60000);
+        const slotStartUtc = makeUtcFromLocalYMDHM(
+          localDay.year,
+          localDay.month,
+          localDay.day,
+          hour,
+          minuteOfHour,
+          EST_TZ_OFFSET_MIN
+        );
+        const sMs = slotStartUtc.getTime();
+        const eMs = sMs + effectiveDuration * 60_000;
+        const slotEndMinutes = minute + effectiveDuration;
 
-        const ocupado = ags.some(a => new Date(a.inicio) < e && new Date(a.fim) > s);
-        const bloqueadoDb = blq.some(b => new Date(b.inicio) < e && new Date(b.fim) > s);
-        const bloqueadoHorario = dayBreaks.some(([startMin, endMin]) => minute >= startMin && minute < endMin);
-        const bloqueado = bloqueadoDb || bloqueadoHorario;
+        const ultrapassaFim = slotEndMinutes > dayEndMinutes;
+        const ocupado = !ultrapassaFim && agIntervals.some(([start, end]) => start < eMs && end > sMs);
+        const bloqueadoDb = !ultrapassaFim && blqIntervals.some(([start, end]) => start < eMs && end > sMs);
+        const bloqueadoHorario = dayBreaks.some(([startMin, endMin]) => minute < endMin && slotEndMinutes > startMin);
+        const bloqueado = ultrapassaFim || bloqueadoDb || bloqueadoHorario;
 
         const label = ocupado ? 'agendado' : (bloqueado ? 'bloqueado' : 'disponivel');
         const status = ocupado ? 'booked' : (bloqueado ? 'unavailable' : 'free');
 
         slots.push({
-          datetime: toISO(s), // ISO-8601 (evita ambiguidade de timezone no front)
+          datetime: slotStartUtc.toISOString(), // ISO-8601 em UTC equivalente ao horário local
           label,
           status
         });

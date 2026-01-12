@@ -129,6 +129,21 @@ CREATE TABLE IF NOT EXISTS agendamentos (
   INDEX idx_ag_reminder_estab_5h (estab_reminder_5h_sent_at, inicio)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
+CREATE TABLE IF NOT EXISTS agendamento_itens (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  agendamento_id INT NOT NULL,
+  servico_id INT NOT NULL,
+  ordem INT NOT NULL DEFAULT 1,
+  duracao_min INT NOT NULL DEFAULT 0,
+  preco_snapshot INT NOT NULL DEFAULT 0,
+  criado_em TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_agendamento_itens_agendamento (agendamento_id),
+  INDEX idx_agendamento_itens_servico (servico_id),
+  UNIQUE KEY uniq_agendamento_item_ordem (agendamento_id, ordem),
+  CONSTRAINT fk_ag_itens_agendamento FOREIGN KEY (agendamento_id) REFERENCES agendamentos(id) ON DELETE CASCADE,
+  CONSTRAINT fk_ag_itens_servico FOREIGN KEY (servico_id) REFERENCES servicos(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
 -- Bloqueios de horarios (slots indisponiveis)
 CREATE TABLE IF NOT EXISTS bloqueios (
   id                 INT AUTO_INCREMENT PRIMARY KEY,

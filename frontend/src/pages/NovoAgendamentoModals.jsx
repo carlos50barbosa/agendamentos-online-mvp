@@ -63,7 +63,7 @@ export default function NovoAgendamentoModals(props) {
     showGuestOptional,
     setShowGuestOptional,
     selectedSlot,
-    selectedService,
+    serviceLabel,
     DateHelpers,
     ServiceHelpers,
     endTimeLabel,
@@ -636,7 +636,9 @@ export default function NovoAgendamentoModals(props) {
                     </div>
                     <h3>Agendamento realizado</h3>
                     <p style={{ marginTop: 6 }}>
-                      Enviamos um email de confirmação. Confirme em até 10 minutos. Se não aparecer em alguns minutos, confira o spam ou reencontre o link mais tarde.
+                      Enviamos um email de confirmação. Confirme em até 10 minutos,
+                      <strong> senão o agendamento será cancelado automaticamente.</strong>
+                      {' '}Se não aparecer em alguns minutos, confira o spam ou reencontre o link mais tarde.
                     </p>
                     <div className="row" style={{ justifyContent: 'flex-end', gap: 8, marginTop: 12 }}>
                       <button type="button" className="btn btn--primary" onClick={handleCloseGuestModal}>
@@ -691,7 +693,7 @@ export default function NovoAgendamentoModals(props) {
                       <p className="muted" style={{ marginTop: 0, fontStyle: 'italic', fontSize: 12 }}>
                         Agendaremos e criaremos sua conta com estes dados. Vamos mandar a confirmação por email.
                       </p>
-                      {selectedSlot && selectedService && (
+                      {selectedSlot && serviceLabel && (
                         <dl className="confirmation-details">
                           <div className="confirmation-details__item">
                             <dt>Estabelecimento</dt>
@@ -699,7 +701,7 @@ export default function NovoAgendamentoModals(props) {
                           </div>
                           <div className="confirmation-details__item">
                             <dt>Serviço</dt>
-                            <dd>{ServiceHelpers.title(selectedService)}</dd>
+                            <dd>{serviceLabel}</dd>
                           </div>
                           <div className="confirmation-details__item">
                             <dt>Data</dt>
@@ -895,12 +897,12 @@ export default function NovoAgendamentoModals(props) {
                 )}
               </Modal>
             )}
-            {modal.isOpen && selectedSlot && selectedService && (
+            {modal.isOpen && selectedSlot && serviceLabel && (
               <Modal onClose={() => setModal((m) => ({ ...m, isOpen: false }))} closeButton>
                 <h3>Confirmar agendamento?</h3>
                 <div className="confirmation-details">
                   <div className="confirmation-details__item"><span className="confirmation-details__label">Estabelecimento: </span><span className="confirmation-details__value">{selectedEstablishmentName}</span></div>
-                  <div className="confirmation-details__item"><span className="confirmation-details__label">Serviço: </span><span className="confirmation-details__value">{ServiceHelpers.title(selectedService)}</span></div>
+                  <div className="confirmation-details__item"><span className="confirmation-details__label">Serviço: </span><span className="confirmation-details__value">{serviceLabel}</span></div>
                   {selectedProfessional && (
                     <div className="confirmation-details__item"><span className="confirmation-details__label">Profissional: </span><span className="confirmation-details__value">{selectedProfessional?.nome || selectedProfessional?.name}</span></div>
                   )}

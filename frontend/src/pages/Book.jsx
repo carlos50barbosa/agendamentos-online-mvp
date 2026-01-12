@@ -16,6 +16,11 @@ function formatTimeBR(iso) {
   try { return new Date(iso).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }); } catch { return iso; }
 }
 function genIdemKey() { return 'idem_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2,8); }
+function formatBRLFromCentavos(value) {
+  const cents = Number(value || 0);
+  if (!Number.isFinite(cents)) return 'R$ 0,00';
+  return (cents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+}
 
 function formatPhone(input) {
   const digits = String(input || '').replace(/\D/g, '').slice(0, 11);
@@ -41,7 +46,7 @@ export default function Book(){
 
   const [estab, setEstab] = useState(null);
   const [services, setServices] = useState([]);
-  const [selService, setSelService] = useState(null);
+  const [selectedServiceIds, setSelectedServiceIds] = useState([]);
   const [selDate, setSelDate] = useState('');
   const [times, setTimes] = useState([]); // [{iso,label}]
   const [selTimeIso, setSelTimeIso] = useState('');
@@ -55,18 +60,58 @@ export default function Book(){
   const [otpMsg, setOtpMsg] = useState('');
   const [done, setDone] = useState(false);
 
+  const selectedServices = useMemo(
+    () => services.filter((svc) => selectedServiceIds.includes(Number(svc.id))),
+    [services, selectedServiceIds]
+  );
+  const serviceSummary = useMemo(() => {
+    const names = selectedServices
+      .map((svc) => svc?.nome || svc?.title || svc?.name)
+      .filter(Boolean);
+    const label =
+      names.length <= 3
+        ? names.join(' + ')
+        : `${names[0] || 'Serviço'} + mais ${names.length - 1}`;
+    const duration = selectedServices.reduce(
+      (sum, svc) => sum + Number(svc?.duracao_min || svc?.duration || 0),
+      0
+    );
+    const price = selectedServices.reduce(
+      (sum, svc) =>
+        sum +
+        Number(
+          svc?.preco_centavos ??
+            svc?.preco_centavos_snapshot ??
+            svc?.preco_snapshot ??
+            0
+        ),
+      0
+    );
+    return { label, duration, price };
+  }, [selectedServices]);
   const canSubmit = useMemo(() => {
     const phoneDigits = String(phone || '');
     return !!(
       estab &&
-      selService &&
+      selectedServices.length &&
       selDate &&
       selTimeIso &&
       nome.trim() &&
       email.trim() &&
       /^\d{10,11}$/.test(phoneDigits)
     );
-  }, [estab, selService, selDate, selTimeIso, nome, email, phone]);
+  }, [estab, selectedServices.length, selDate, selTimeIso, nome, email, phone]);
+
+  const toggleService = (svc) => {
+    const id = Number(svc?.id);
+    if (!Number.isFinite(id)) return;
+    setSelectedServiceIds((prev) => {
+      const exists = prev.includes(id);
+      return exists ? prev.filter((value) => value !== id) : [...prev, id];
+    });
+    setTimes([]);
+    setSelTimeIso('');
+  };
 
   useEffect(() => {
     (async () => {
@@ -85,10 +130,13 @@ export default function Book(){
   }, [id]);
 
   async function fetchTimes(dateStr){
-    if (!estab || !dateStr) return;
+    if (!estab || !dateStr || !selectedServiceIds.length) return;
     try {
       setLoading(true); setError('');
-      const data = await Api.getSlots(estab.id, dateStr, { includeBusy: false });
+      const data = await Api.getSlots(estab.id, dateStr, {
+        includeBusy: false,
+        serviceIds: selectedServiceIds,
+      });
       const slots = Array.isArray(data?.slots) ? data.slots : [];
       const filtered = slots
         .filter(s => {
@@ -114,7 +162,7 @@ export default function Book(){
       const idem = genIdemKey();
       const payload = {
         estabelecimento_id: estab.id,
-        servico_id: selService.id,
+        servico_ids: selectedServiceIds,
         inicio: selTimeIso,
         nome, email, telefone: phone,
       };
@@ -230,12 +278,23 @@ export default function Book(){
 
           {!done && (
             <div className="chatpanel">
-              <div className="chatmsg chatmsg--bot">Olá! Vou te ajudar a agendar neste estabelecimento. Escolha um serviço:</div>
+              <div className="chatmsg chatmsg--bot">Olá! Vou te ajudar a agendar neste estabelecimento. Escolha os serviços:</div>
               <div className="chatlist">
                 {loading && <div className="chatmsg">Carregando…</div>}
                 {!loading && services.map(sv => (
-                  <button key={sv.id} className="chatbtn" onClick={() => setSelService(sv)}>
-                    {sv.nome || `Serviço #${sv.id}`}
+                  <button
+                    key={sv.id}
+                    type="button"
+                    className={`chatbtn ${selectedServiceIds.includes(Number(sv.id)) ? '' : 'chatbtn--muted'}`}
+                    aria-pressed={selectedServiceIds.includes(Number(sv.id))}
+                    onClick={() => toggleService(sv)}
+                  >
+                    <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 2 }}>
+                      <span>{sv.nome || `Serviço #${sv.id}`}</span>
+                      <small className="muted" style={{ fontSize: 11 }}>
+                        {Number(sv?.duracao_min || sv?.duration || 0) || 0} min • {formatBRLFromCentavos(sv?.preco_centavos ?? sv?.preco_centavos_snapshot ?? sv?.preco_snapshot ?? 0)}
+                      </small>
+                    </span>
                   </button>
                 ))}
                 {!loading && !services.length && (
@@ -243,8 +302,15 @@ export default function Book(){
                 )}
               </div>
 
-              {selService && (
+              {!!selectedServices.length && (
                 <>
+                  <div className="chatmsg chatmsg--bot">
+                    <div style={{ fontWeight: 600 }}>Resumo</div>
+                    <div>{serviceSummary.label || 'Serviços selecionados'}</div>
+                    <div className="muted">
+                      {serviceSummary.duration} min • {formatBRLFromCentavos(serviceSummary.price)}
+                    </div>
+                  </div>
                   <div className="chatmsg chatmsg--bot">Qual dia?</div>
                   <div className="chatrow">
                     <input type="date" className="chatinput" value={selDate} onChange={e => setSelDate(e.target.value)} />
@@ -295,12 +361,15 @@ export default function Book(){
 
           {done && (
             <div className="chatpanel" style={{ marginTop: 8 }}>
-              <div className="chatmsg chatmsg--bot">Prontinho! Seu agendamento foi criado. Confirme por email em até 10 minutos.</div>
+              <div className="chatmsg chatmsg--bot">
+                Prontinho! Seu agendamento foi criado. Confirme por email em até 10 minutos,
+                <strong> senão ele será cancelado automaticamente.</strong>
+              </div>
               <div className="chatrow" style={{ marginTop: 8 }}>
                 <button className="chatbtn" onClick={() => nav('/', { replace: true })}>Fechar</button>
                 <button className="chatbtn chatbtn--muted" onClick={() => {
                   setDone(false);
-                  setSelService(null);
+                  setSelectedServiceIds([]);
                   setSelDate('');
                   setTimes([]);
                   setSelTimeIso('');

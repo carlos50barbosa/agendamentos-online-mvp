@@ -194,8 +194,17 @@ export const Api = {
 
   // Slots
   // Obs.: includeBusy Ã© opcional; se o backend suportar, retorna tambÃ©m ocupados/bloqueados.
-  getSlots: (establishmentId, weekStart, { includeBusy } = {}) =>
-    req(`/slots${toQuery({ establishmentId, weekStart, includeBusy: includeBusy ? 1 : undefined })}`),
+  getSlots: (establishmentId, weekStart, { includeBusy, durationMinutes, duration, serviceIds } = {}) => {
+    const servicoIdsParam = Array.isArray(serviceIds) ? serviceIds.join(',') : serviceIds;
+    const duracaoTotalParam = durationMinutes ?? duration;
+    return req(`/slots${toQuery({
+      establishmentId,
+      weekStart,
+      includeBusy: includeBusy ? 1 : undefined,
+      duracao_total: duracaoTotalParam,
+      servico_ids: servicoIdsParam,
+    })}`);
+  },
 
   toggleSlot: (slotDatetime) => req('/slots/toggle', { method: 'POST', body: JSON.stringify({ slotDatetime }) }),
 

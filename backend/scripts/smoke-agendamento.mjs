@@ -13,7 +13,7 @@ const agendamentosRouter = (await import('../src/routes/agendamentos.js')).defau
 
 const state = {
   usuarios: new Map([[1, { id: 1, tipo: 'estabelecimento', plan: 'starter', plan_status: 'active' }], [123, { id: 123, tipo: 'cliente' }]]),
-  servicos: new Map([[10, { id: 10, estabelecimento_id: 1, nome: 'Consulta', duracao_min: 60, ativo: 1 }]]),
+  servicos: new Map([[10, { id: 10, estabelecimento_id: 1, nome: 'Consulta', duracao_min: 60, preco_centavos: 10000, ativo: 1 }]]),
   agendamentos: [],
   servicoProf: new Map(),
 }
@@ -43,17 +43,22 @@ pool.query = async (sql, params = []) => {
     return [[{ total }], []]
   }
   // service
-  if (norm.startsWith('SELECT duracao_min, nome FROM servicos WHERE id=? AND estabelecimento_id=? AND ativo=1')) {
-    const [id, estId] = params
-    const s = state.servicos.get(Number(id))
-    if (s && s.estabelecimento_id === Number(estId) && s.ativo) return [[{ duracao_min: s.duracao_min, nome: s.nome }], []]
-    return [[], []]
+  if (norm.startsWith('SELECT id, nome, duracao_min, preco_centavos FROM servicos WHERE id IN (')) {
+    const estId = Number(params[params.length - 1])
+    const serviceIds = params.slice(0, -1).map(Number)
+    const rows = serviceIds
+      .map((id) => state.servicos.get(Number(id)))
+      .filter((s) => s && s.estabelecimento_id === estId && s.ativo)
+      .map((s) => ({
+        id: s.id,
+        nome: s.nome,
+        duracao_min: s.duracao_min,
+        preco_centavos: s.preco_centavos || 0,
+      }))
+    return [rows, []]
   }
-  // linked professionals
-  if (norm.startsWith('SELECT profissional_id FROM servico_profissionais WHERE servico_id=?')) {
-    const [svcId] = params
-    const set = state.servicoProf.get(Number(svcId)) || new Set()
-    return [Array.from(set).map((id) => ({ profissional_id: id })), []]
+  if (norm.startsWith('SELECT servico_id, profissional_id FROM servico_profissionais WHERE servico_id IN (')) {
+    return [[], []]
   }
   // after commit reads
   if (norm.startsWith('SELECT * FROM agendamentos WHERE id=?')) {
@@ -102,6 +107,9 @@ pool.getConnection = async () => {
         state.agendamentos.push({ id: nextId, cliente_id, estabelecimento_id, servico_id, profissional_id, inicio, fim, status: 'confirmado' })
         return [{ insertId: nextId, affectedRows: 1 }, []]
       }
+      if (norm.startsWith('INSERT INTO agendamento_itens (agendamento_id, servico_id, ordem, duracao_min, preco_snapshot) VALUES')) {
+        return [{ affectedRows: 1 }, []]
+      }
       throw new Error('Unhandled conn.query: ' + norm)
     },
   }
@@ -142,7 +150,7 @@ async function callHandler(handler, { params = {}, body = {}, query = {}, user =
 const createAppointmentHandler = getRouteHandler(agendamentosRouter, '/', 'post')
 const future = new Date(Date.now() + 24 * 60 * 60 * 1000); future.setHours(14, 0, 0, 0)
 const res = await callHandler(createAppointmentHandler, {
-  body: { estabelecimento_id: 1, servico_id: 10, inicio: future.toISOString() },
+  body: { estabelecimento_id: 1, servico_ids: [10], inicio: future.toISOString() },
   user: { id: 123, tipo: 'cliente' }
 })
 

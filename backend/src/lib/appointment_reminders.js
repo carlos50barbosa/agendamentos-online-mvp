@@ -318,20 +318,24 @@ export function startAppointmentReminders(pool, { intervalMs } = {}) {
     try {
       const [rows] = await pool.query(
         `
-        SELECT a.id, a.inicio, a.servico_id, a.estabelecimento_id, a.profissional_id,
+        SELECT a.id, a.inicio, a.estabelecimento_id, a.profissional_id,
                c.nome AS cliente_nome, c.telefone AS cliente_telefone, c.email AS cliente_email,
                e.nome AS estabelecimento_nome, e.telefone AS estabelecimento_telefone,
-               s.nome AS servico_nome,
+               COALESCE(NULLIF(GROUP_CONCAT(s.nome ORDER BY ai.ordem SEPARATOR ' + '), ''), s0.nome) AS servico_nome,
                p.nome AS profissional_nome
         FROM agendamentos a
         JOIN usuarios c ON c.id = a.cliente_id
         JOIN usuarios e ON e.id = a.estabelecimento_id
-        JOIN servicos s ON s.id = a.servico_id
+        LEFT JOIN agendamento_itens ai ON ai.agendamento_id = a.id
+        LEFT JOIN servicos s ON s.id = ai.servico_id
+        LEFT JOIN servicos s0 ON s0.id = a.servico_id
         LEFT JOIN profissionais p ON p.id = a.profissional_id
         WHERE a.status='confirmado'
           AND a.reminder_8h_sent_at IS NULL
           AND a.inicio > NOW()
           AND TIMESTAMPDIFF(MINUTE, NOW(), a.inicio) <= 480
+        GROUP BY a.id, a.inicio, a.estabelecimento_id, a.profissional_id,
+                 c.nome, c.telefone, c.email, e.nome, e.telefone, p.nome, s0.nome
         ORDER BY a.inicio ASC
         LIMIT 50
       `

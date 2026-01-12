@@ -21,6 +21,151 @@ const PUBLIC_CONFIRM_MINUTES = (() => {
   const parsed = Number(raw);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 10;
 })();
+const APPOINTMENT_BUFFER_MIN = (() => {
+  const raw = process.env.AGENDAMENTO_BUFFER_MIN ?? process.env.APPOINTMENT_BUFFER_MIN;
+  if (raw === undefined || raw === null || String(raw).trim() === '') return 0;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.round(parsed) : 0;
+})();
+
+const normalizeServiceIds = (value) => {
+  const ids = [];
+  const pushId = (entry) => {
+    const num = Number(entry);
+    if (Number.isFinite(num) && num > 0) ids.push(num);
+  };
+  if (Array.isArray(value)) {
+    value.forEach((entry) => {
+      if (!entry) return;
+      if (typeof entry === 'object') {
+        pushId(entry.id ?? entry.servico_id ?? entry.service_id ?? entry.servicoId ?? entry.serviceId);
+      } else {
+        pushId(entry);
+      }
+    });
+  } else if (value !== undefined && value !== null && String(value).trim() !== '') {
+    String(value)
+      .split(',')
+      .map((part) => part.trim())
+      .filter(Boolean)
+      .forEach(pushId);
+  }
+  const seen = new Set();
+  return ids.filter((id) => {
+    if (seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
+};
+
+const extractServiceIds = (body) => {
+  if (!body || typeof body !== 'object') return [];
+  const rawList =
+    body.servico_ids ??
+    body.servicos ??
+    body.service_ids ??
+    body.services ??
+    body.serviceIds ??
+    body.servicoIds ??
+    null;
+  const parsed = normalizeServiceIds(rawList);
+  if (parsed.length) return parsed;
+  if (body.servico_id != null) {
+    return normalizeServiceIds([body.servico_id]);
+  }
+  return [];
+};
+
+const summarizeServices = (items) => {
+  const serviceNames = items.map((item) => item?.nome).filter(Boolean);
+  const duracaoTotal = items.reduce((sum, item) => sum + Number(item?.duracao_min || 0), 0);
+  const precoTotal = items.reduce(
+    (sum, item) => sum + Number(item?.preco_centavos ?? item?.preco_snapshot ?? 0),
+    0
+  );
+  return {
+    serviceIds: items.map((item) => item.id),
+    serviceNames,
+    serviceLabel: serviceNames.join(' + '),
+    duracaoTotal,
+    precoTotal,
+  };
+};
+
+const fetchServicesForAppointment = async (db, estabelecimentoId, serviceIds) => {
+  if (!serviceIds.length) return { items: [], missing: serviceIds };
+  const placeholders = serviceIds.map(() => '?').join(', ');
+  const [rows] = await db.query(
+    `SELECT id, nome, duracao_min, preco_centavos
+       FROM servicos
+      WHERE id IN (${placeholders})
+        AND estabelecimento_id=?
+        AND ativo=1`,
+    [...serviceIds, estabelecimentoId]
+  );
+  const map = new Map(rows.map((row) => [Number(row.id), row]));
+  const missing = serviceIds.filter((id) => !map.has(Number(id)));
+  if (missing.length) return { items: [], missing };
+  const items = serviceIds.map((id) => {
+    const svc = map.get(Number(id));
+    return {
+      id: Number(svc.id),
+      nome: svc.nome,
+      duracao_min: Number(svc.duracao_min || 0),
+      preco_centavos: Number(svc.preco_centavos || 0),
+    };
+  });
+  return { items, missing: [] };
+};
+
+const fetchServiceProfessionalMap = async (db, serviceIds) => {
+  if (!serviceIds.length) return new Map();
+  const placeholders = serviceIds.map(() => '?').join(', ');
+  const [rows] = await db.query(
+    `SELECT servico_id, profissional_id
+       FROM servico_profissionais
+      WHERE servico_id IN (${placeholders})`,
+    serviceIds
+  );
+  const map = new Map();
+  rows.forEach((row) => {
+    const key = Number(row.servico_id);
+    if (!map.has(key)) map.set(key, new Set());
+    map.get(key).add(Number(row.profissional_id));
+  });
+  return map;
+};
+
+const fetchAppointmentItems = async (db, appointmentIds) => {
+  if (!appointmentIds.length) return new Map();
+  const placeholders = appointmentIds.map(() => '?').join(', ');
+  const [rows] = await db.query(
+    `SELECT ai.agendamento_id,
+            ai.servico_id,
+            ai.ordem,
+            ai.duracao_min,
+            ai.preco_snapshot,
+            s.nome AS servico_nome
+       FROM agendamento_itens ai
+       JOIN servicos s ON s.id = ai.servico_id
+      WHERE ai.agendamento_id IN (${placeholders})
+      ORDER BY ai.agendamento_id, ai.ordem`,
+    appointmentIds
+  );
+  const byAppointment = new Map();
+  rows.forEach((row) => {
+    const key = Number(row.agendamento_id);
+    if (!byAppointment.has(key)) byAppointment.set(key, []);
+    byAppointment.get(key).push({
+      id: Number(row.servico_id),
+      nome: row.servico_nome,
+      ordem: Number(row.ordem) || 0,
+      duracao_min: Number(row.duracao_min || 0),
+      preco_snapshot: Number(row.preco_snapshot || 0),
+    });
+  });
+  return byAppointment;
+};
 
 function inBusinessHours(dateISO) {
   const d = new Date(dateISO);
@@ -375,8 +520,15 @@ async function notifyPublicConfirmedAppointment(appointmentId) {
       [appointmentId]
     );
     if (!ag) return;
-    const [[svc]] = await pool.query('SELECT nome FROM servicos WHERE id=?', [ag.servico_id]);
-    if (!svc) return;
+
+    const itemsByAppointment = await fetchAppointmentItems(pool, [Number(ag.id)]);
+    let serviceItems = itemsByAppointment.get(Number(ag.id)) || [];
+    if (!serviceItems.length && ag.servico_id) {
+      const fallback = await fetchServicesForAppointment(pool, ag.estabelecimento_id, [ag.servico_id]);
+      serviceItems = fallback.items || [];
+    }
+    const summary = summarizeServices(serviceItems);
+    const serviceLabel = summary.serviceLabel || serviceItems[0]?.nome || 'servico';
     const [[est]] = await pool.query(
       'SELECT email, telefone, nome, notify_email_estab, notify_whatsapp_estab FROM usuarios WHERE id=?',
       [ag.estabelecimento_id]
@@ -418,7 +570,7 @@ async function notifyPublicConfirmedAppointment(appointmentId) {
         const hasLinkPlaceholder = /{{\s*link_agendamento\s*}}/i.test(rawTemplate);
         let html = rawTemplate
           .replace(/{{\s*cliente_nome\s*}}/g, firstName(ag.cliente_nome) || 'cliente')
-          .replace(/{{\s*servico_nome\s*}}/g, svc.nome)
+          .replace(/{{\s*servico_nome\s*}}/g, serviceLabel)
           .replace(/{{\s*data_hora\s*}}/g, inicioBR)
           .replace(/{{\s*estabelecimento_nome\s*}}/g, est?.nome || '')
           .replace(/{{\s*profissional_nome\s*}}/g, profNome ? ` com <b>${profNome}</b>` : '')
@@ -436,29 +588,29 @@ async function notifyPublicConfirmedAppointment(appointmentId) {
           const tplName = process.env.WA_TEMPLATE_NAME_CONFIRM || process.env.WA_TEMPLATE_NAME || 'confirmacao_agendamento_v2';
           const tplLang = process.env.WA_TEMPLATE_LANG || 'pt_BR';
           if (/^triple|3$/.test(paramMode)) {
-          await sendAppointmentWhatsApp({
-            estabelecimentoId: ag.estabelecimento_id,
-            agendamentoId: ag.id,
-            to: telCli,
-            kind: 'confirm_cli',
-            template: { name: tplName, lang: tplLang, bodyParams: [svc.nome, inicioBR, est?.nome || ''] },
-          });
-        } else {
-          const waMsg = (tmpl.wa_template || `Novo agendamento registrado: {{servico_nome}} em {{data_hora}} - {{estabelecimento_nome}}.`)
-            .replace(/{{\s*cliente_nome\s*}}/g, firstName(ag.cliente_nome) || 'cliente')
-            .replace(/{{\s*servico_nome\s*}}/g, svc.nome)
-            .replace(/{{\s*data_hora\s*}}/g, inicioBR)
-            .replace(/{{\s*estabelecimento_nome\s*}}/g, est?.nome || '')
-            .replace(/{{\s*profissional_nome\s*}}/g, profNome ? ` com ${profNome}` : '');
-          await sendAppointmentWhatsApp({
-            estabelecimentoId: ag.estabelecimento_id,
-            agendamentoId: ag.id,
-            to: telCli,
-            kind: 'confirm_cli',
-            message: waMsg,
-          });
+            await sendAppointmentWhatsApp({
+              estabelecimentoId: ag.estabelecimento_id,
+              agendamentoId: ag.id,
+              to: telCli,
+              kind: 'confirm_cli',
+              template: { name: tplName, lang: tplLang, bodyParams: [serviceLabel, inicioBR, est?.nome || ''] },
+            });
+          } else {
+            const waMsg = (tmpl.wa_template || `Novo agendamento registrado: {{servico_nome}} em {{data_hora}} - {{estabelecimento_nome}}.`)
+              .replace(/{{\s*cliente_nome\s*}}/g, firstName(ag.cliente_nome) || 'cliente')
+              .replace(/{{\s*servico_nome\s*}}/g, serviceLabel)
+              .replace(/{{\s*data_hora\s*}}/g, inicioBR)
+              .replace(/{{\s*estabelecimento_nome\s*}}/g, est?.nome || '')
+              .replace(/{{\s*profissional_nome\s*}}/g, profNome ? ` com ${profNome}` : '');
+            await sendAppointmentWhatsApp({
+              estabelecimentoId: ag.estabelecimento_id,
+              agendamentoId: ag.id,
+              to: telCli,
+              kind: 'confirm_cli',
+              message: waMsg,
+            });
+          }
         }
-      }
     } catch {}
 
     try {
@@ -468,7 +620,7 @@ async function notifyPublicConfirmedAppointment(appointmentId) {
           agendamentoId: ag.id,
           to: telEst,
           kind: 'confirm_est',
-          message: `Novo agendamento: ${svc.nome}${profLabel} em ${inicioBR} - Cliente: ${String(ag.cliente_nome) || ''}`,
+          message: `Novo agendamento: ${serviceLabel}${profLabel} em ${inicioBR} - Cliente: ${String(ag.cliente_nome) || ''}`,
         });
       }
     } catch {}
@@ -483,7 +635,6 @@ router.post('/', async (req, res) => {
   try {
     const {
       estabelecimento_id,
-      servico_id,
       inicio,
       nome,
       email,
@@ -508,8 +659,12 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ error: 'profissional_invalido', message: 'Profissional invalido.' });
     }
 
-    if (!estabelecimento_id || !servico_id || !inicio || !nome || !email || !telefone) {
-      return res.status(400).json({ error: 'invalid_payload', message: 'Campos obrigatorios: estabelecimento_id, servico_id, inicio, nome, email, telefone.' });
+    const serviceIds = extractServiceIds(req.body || {});
+    if (!estabelecimento_id || !serviceIds.length || !inicio || !nome || !email || !telefone) {
+      return res.status(400).json({
+        error: 'invalid_payload',
+        message: 'Campos obrigatorios: estabelecimento_id, servico_ids, inicio, nome, email, telefone.'
+      });
     }
 
     const cepDigits = (cep ? String(cep) : '').replace(/[^0-9]/g, '').slice(0, 8);
@@ -544,22 +699,24 @@ router.post('/', async (req, res) => {
     if (inicioDate.getTime() <= Date.now()) return res.status(400).json({ error: 'past_datetime' });
     if (!inBusinessHours(inicioDate.toISOString())) return res.status(400).json({ error: 'outside_business_hours' });
 
-    // valida servico/estab
-    const [[svc]] = await pool.query(
-      'SELECT duracao_min, nome FROM servicos WHERE id=? AND estabelecimento_id=? AND ativo=1',
-      [servico_id, estabelecimento_id]
-    );
-    if (!svc) return res.status(400).json({ error: 'servico_invalido' });
+    const { items: serviceItems, missing } = await fetchServicesForAppointment(pool, estabelecimento_id, serviceIds);
+    if (missing.length) {
+      return res.status(400).json({ error: 'servico_invalido', message: 'Servico invalido ou inativo para este estabelecimento.' });
+    }
+    if (serviceItems.some((item) => !Number.isFinite(item.duracao_min) || item.duracao_min <= 0)) {
+      return res.status(400).json({ error: 'duracao_invalida' });
+    }
+    const summary = summarizeServices(serviceItems);
+    const primaryServiceId = summary.serviceIds[0] || serviceIds[0];
+    const serviceLabel = summary.serviceLabel || serviceItems[0]?.nome || 'servico';
 
-    const [serviceProfessionals] = await pool.query(
-      'SELECT profissional_id FROM servico_profissionais WHERE servico_id=?',
-      [servico_id]
-    );
-    const linkedProfessionalIds = serviceProfessionals.map((row) => row.profissional_id);
+    const professionalMap = await fetchServiceProfessionalMap(pool, summary.serviceIds);
+    const servicesRequiringProfessional = summary.serviceIds.filter((id) => (professionalMap.get(id)?.size || 0) > 0);
+    const requiresProfessional = servicesRequiringProfessional.length > 0;
     let profissionalRow = null;
 
-    if (linkedProfessionalIds.length && profissional_id == null) {
-      return res.status(400).json({ error: 'profissional_obrigatorio', message: 'Escolha um profissional para este servico.' });
+    if (requiresProfessional && profissional_id == null) {
+      return res.status(400).json({ error: 'profissional_obrigatorio', message: 'Escolha um profissional para estes servicos.' });
     }
 
     if (profissional_id != null) {
@@ -573,15 +730,18 @@ router.post('/', async (req, res) => {
       if (!profRow.ativo) {
         return res.status(400).json({ error: 'profissional_inativo', message: 'Profissional inativo.' });
       }
-      if (linkedProfessionalIds.length && !linkedProfessionalIds.includes(profissional_id)) {
-        return res.status(400).json({ error: 'profissional_servico', message: 'Profissional nao esta associado a este servico.' });
+      if (requiresProfessional) {
+        const valid = servicesRequiringProfessional.every((id) => professionalMap.get(id)?.has(profissional_id));
+        if (!valid) {
+          return res.status(400).json({ error: 'profissional_servico', message: 'Profissional nao esta associado a todos os servicos selecionados.' });
+        }
       }
       profissionalRow = profRow;
     }
 
-    const dur = Number(svc.duracao_min || 0);
-    if (!Number.isFinite(dur) || dur <= 0) return res.status(400).json({ error: 'duracao_invalida' });
-    const fimDate = new Date(inicioDate.getTime() + dur * 60_000);
+    const duracaoTotal = summary.duracaoTotal + APPOINTMENT_BUFFER_MIN;
+    if (!Number.isFinite(duracaoTotal) || duracaoTotal <= 0) return res.status(400).json({ error: 'duracao_invalida' });
+    const fimDate = new Date(inicioDate.getTime() + duracaoTotal * 60_000);
     let workingRules = null;
     try {
       const [[profile]] = await pool.query(
@@ -762,7 +922,7 @@ router.post('/', async (req, res) => {
          AND (status <> 'pendente' OR public_confirm_expires_at IS NULL OR public_confirm_expires_at >= NOW())
          AND (inicio < ? AND fim > ?)`;
     const conflictParams = [estabelecimento_id, fimDate, inicioDate];
-    if (profissional_id != null && linkedProfessionalIds.length) {
+    if (profissional_id != null && requiresProfessional) {
       conflictSql += ' AND (profissional_id IS NULL OR profissional_id=?)';
       conflictParams.push(profissional_id);
     }
@@ -777,8 +937,22 @@ router.post('/', async (req, res) => {
       `INSERT INTO agendamentos
         (cliente_id, estabelecimento_id, servico_id, profissional_id, inicio, fim, status, public_confirm_token_hash, public_confirm_expires_at)
        VALUES (?,?,?,?,?,?, 'pendente', ?, ?)`,
-      [userId, estabelecimento_id, servico_id, profissional_id || null, inicioDate, fimDate, confirmTokenHash, confirmExpiresAt]
+      [userId, estabelecimento_id, primaryServiceId, profissional_id || null, inicioDate, fimDate, confirmTokenHash, confirmExpiresAt]
     );
+    const itemValues = serviceItems.map((item, idx) => ([
+      ins.insertId,
+      item.id,
+      idx + 1,
+      Math.max(0, Math.round(item.duracao_min || 0)),
+      Math.max(0, Math.round(item.preco_centavos || 0)),
+    ]));
+    if (itemValues.length) {
+      const placeholders = itemValues.map(() => '(?,?,?,?,?)').join(',');
+      await conn.query(
+        `INSERT INTO agendamento_itens (agendamento_id, servico_id, ordem, duracao_min, preco_snapshot) VALUES ${placeholders}`,
+        itemValues.flat()
+      );
+    }
 
     await conn.commit(); conn.release(); conn = null;
 
@@ -790,7 +964,7 @@ router.post('/', async (req, res) => {
         await sendPublicConfirmEmail({
           email: emailNorm,
           nome,
-          servicoNome: svc.nome,
+          servicoNome: serviceLabel,
           inicioISO,
           profNome,
           confirmToken,
@@ -802,7 +976,12 @@ router.post('/', async (req, res) => {
       id: ins.insertId,
       cliente_id: userId,
       estabelecimento_id,
-      servico_id,
+      servico_id: primaryServiceId,
+      servico_ids: summary.serviceIds,
+      servico_nome: summary.serviceLabel || serviceLabel,
+      servicos: serviceItems,
+      duracao_total: summary.duracaoTotal,
+      preco_total: summary.precoTotal,
       profissional_id: profissional_id || null,
       inicio: inicioDate,
       fim: fimDate,

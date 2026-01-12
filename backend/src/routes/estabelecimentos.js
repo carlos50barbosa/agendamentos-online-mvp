@@ -1327,9 +1327,8 @@ router.get('/:id/clients', auth, isEstabelecimento, async (req, res) => {
         SUM(a.status='cancelado') AS total_cancelled,
         MAX(a.inicio) AS last_appointment_at,
         SUBSTRING_INDEX(GROUP_CONCAT(a.status ORDER BY a.inicio DESC SEPARATOR ','), ',', 1) AS last_status,
-        SUBSTRING_INDEX(GROUP_CONCAT(s.nome ORDER BY a.inicio DESC SEPARATOR ','), ',', 1) AS last_service
+        SUBSTRING_INDEX(GROUP_CONCAT(a.id ORDER BY a.inicio DESC SEPARATOR ','), ',', 1) AS last_appointment_id
       FROM agendamentos a
-      LEFT JOIN servicos s ON s.id = a.servico_id
       WHERE a.estabelecimento_id=?
       GROUP BY a.cliente_id
     `;
@@ -1361,7 +1360,7 @@ router.get('/:id/clients', auth, isEstabelecimento, async (req, res) => {
         stats.total_cancelled,
         stats.last_appointment_at,
         stats.last_status,
-        stats.last_service
+        stats.last_appointment_id
       FROM (${statsSql}) stats
       JOIN usuarios u ON u.id = stats.cliente_id
       ${searchWhere}
@@ -1369,9 +1368,39 @@ router.get('/:id/clients', auth, isEstabelecimento, async (req, res) => {
       LIMIT ? OFFSET ?
     `;
     const [rows] = await pool.query(dataSql, [estabelecimentoId, ...searchParams, pageSize, offset]);
+    const lastAppointmentIds = Array.from(
+      new Set(
+        (rows || [])
+          .map((row) => Number(row.last_appointment_id))
+          .filter((id) => Number.isFinite(id) && id > 0)
+      )
+    );
+    let serviceMap = new Map();
+    if (lastAppointmentIds.length) {
+      const placeholders = lastAppointmentIds.map(() => '?').join(', ');
+      const [serviceRows] = await pool.query(
+        `SELECT a.id AS agendamento_id,
+                COALESCE(NULLIF(GROUP_CONCAT(s.nome ORDER BY ai.ordem SEPARATOR ' + '), ''), s0.nome) AS service_label
+           FROM agendamentos a
+           LEFT JOIN agendamento_itens ai ON ai.agendamento_id = a.id
+           LEFT JOIN servicos s ON s.id = ai.servico_id
+           LEFT JOIN servicos s0 ON s0.id = a.servico_id
+          WHERE a.id IN (${placeholders})
+          GROUP BY a.id, s0.nome`,
+        lastAppointmentIds
+      );
+      serviceMap = new Map(
+        (serviceRows || []).map((row) => [Number(row.agendamento_id), row.service_label || ''])
+      );
+    }
+    const items = (rows || []).map((row) => {
+      const serviceLabel = serviceMap.get(Number(row.last_appointment_id)) || '';
+      const { last_appointment_id, ...rest } = row;
+      return { ...rest, last_service: serviceLabel };
+    });
 
     return res.json({
-      items: rows || [],
+      items,
       page,
       pageSize,
       total,
@@ -2224,9 +2253,6 @@ router.get('/:id/stats', auth, isEstabelecimento, async (req, res) => {
 
 
 export default router;
-
-
-
 
 
 

@@ -148,6 +148,17 @@ const ServiceHelpers = {
   formatPrice: (centavos) =>
     (Number(centavos || 0) / 100).toLocaleString("pt-BR", { style: "currency", currency: "BRL" }),
 };
+const summarizeServices = (list = []) => {
+  const names = list.map((svc) => ServiceHelpers.title(svc)).filter(Boolean);
+  const duration = list.reduce((sum, svc) => sum + ServiceHelpers.duration(svc), 0);
+  const price = list.reduce((sum, svc) => sum + ServiceHelpers.price(svc), 0);
+  return {
+    names,
+    label: names.join(" + "),
+    duration,
+    price,
+  };
+};
 const SOCIAL_LINK_FIELDS = [
   { key: "site_url", label: "Site" },
   { key: "instagram_url", label: "Instagram" },
@@ -926,7 +937,8 @@ export default function NovoAgendamento() {
     establishments: [],
     services: [],
     establishmentId: "",
-    serviceId: "",
+    serviceIds: [],
+    serviceSelectionConfirmed: false,
     professionalId: "",
     currentWeek: DateHelpers.weekStartISO(),
     slots: [],
@@ -1060,7 +1072,7 @@ export default function NovoAgendamento() {
     return () => document.removeEventListener('pointerdown', handleOutside);
   }, [professionalMenuOpen]);
   const {
-    establishments, services, establishmentId, serviceId,
+    establishments, services, establishmentId, serviceIds,
     currentWeek, slots, loading, error, selectedSlot, filters, density, forceBusy,
   } = state;
   const isOwnerViewing = Boolean(
@@ -1073,25 +1085,64 @@ export default function NovoAgendamento() {
     [slots, selectedSlot]
   );
   // Derivados
-  const selectedService = useMemo(() => services.find((s) => String(s.id) === serviceId), [services, serviceId]);
-  const serviceDuration = ServiceHelpers.duration(selectedService);
-  const serviceProfessionals = useMemo(
-    () => (Array.isArray(selectedService?.professionals) ? selectedService.professionals : []),
-    [selectedService]
+  const normalizedServiceIds = useMemo(
+    () => (Array.isArray(serviceIds) ? serviceIds.map((id) => String(id)).filter(Boolean) : []),
+    [serviceIds]
   );
+  const selectedServices = useMemo(() => {
+    if (!normalizedServiceIds.length) return [];
+    const byId = new Map(services.map((svc) => [String(svc.id), svc]));
+    return normalizedServiceIds.map((id) => byId.get(String(id))).filter(Boolean);
+  }, [services, normalizedServiceIds]);
+  const selectedService = selectedServices[0] || null;
+  const serviceSummary = useMemo(() => summarizeServices(selectedServices), [selectedServices]);
+  const serviceDuration = serviceSummary.duration;
+  const servicePrice = ServiceHelpers.formatPrice(serviceSummary.price);
+  const serviceLabel = serviceSummary.label || (selectedService ? ServiceHelpers.title(selectedService) : '');
+  const serviceProfessionalSets = useMemo(
+    () =>
+      selectedServices
+        .map((svc) => (Array.isArray(svc?.professionals) ? svc.professionals : []))
+        .filter((list) => list.length),
+    [selectedServices]
+  );
+  const serviceProfessionals = useMemo(() => {
+    if (!serviceProfessionalSets.length) return [];
+    let map = new Map(serviceProfessionalSets[0].map((p) => [String(p.id), p]));
+    for (const list of serviceProfessionalSets.slice(1)) {
+      const next = new Map();
+      list.forEach((p) => {
+        const key = String(p.id);
+        if (map.has(key)) next.set(key, map.get(key));
+      });
+      map = next;
+    }
+    return Array.from(map.values());
+  }, [serviceProfessionalSets]);
+  const requiresProfessional = serviceProfessionalSets.length > 0;
   const selectedProfessional = useMemo(() => {
     if (!serviceProfessionals.length || !state.professionalId) return null;
     return serviceProfessionals.find((p) => String(p.id) === String(state.professionalId)) || null;
   }, [serviceProfessionals, state.professionalId]);
   useEffect(() => {
+    if (!serviceProfessionals.length && state.professionalId) {
+      setState((p) => ({ ...p, professionalId: "" }));
+      setProfessionalMenuOpen(false);
+      return;
+    }
     if (serviceProfessionals.length === 1) {
       const only = String(serviceProfessionals[0]?.id || "");
       if (state.professionalId !== only) {
         setState((p) => ({ ...p, professionalId: only }));
       }
       setProfessionalMenuOpen(false);
+      return;
     }
-  }, [serviceProfessionals, state.professionalId]);
+    if (state.professionalId && !selectedProfessional) {
+      setState((p) => ({ ...p, professionalId: "" }));
+      setProfessionalMenuOpen(false);
+    }
+  }, [serviceProfessionals, selectedProfessional, state.professionalId]);
   const selectedEstablishment = useMemo(
     () => establishments.find((e) => String(e.id) === establishmentId),
     [establishments, establishmentId]
@@ -1388,10 +1439,10 @@ export default function NovoAgendamento() {
   }, [filteredEstablishments]);
   // Passo da grade
   const stepMinutes = useMemo(() => {
-    const d = ServiceHelpers.duration(selectedService);
+    const d = Number(serviceDuration || 0);
     if (d && d % 5 === 0) return Math.max(15, Math.min(480, d));
     return 30;
-  }, [selectedService]);
+  }, [serviceDuration]);
   // Persistência leve (filtros/densidade)
   useEffect(() => {
     try {
@@ -1528,14 +1579,30 @@ export default function NovoAgendamento() {
   useEffect(() => {
     const estParam = (searchParams.get('estabelecimento') || '').trim();
     if (establishments.length && estParam && estParam !== state.establishmentId) {
-      setState((p) => ({ ...p, establishmentId: estParam, serviceId: "", professionalId: "", slots: [], selectedSlot: null }));
+      setState((p) => ({
+        ...p,
+        establishmentId: estParam,
+        serviceIds: [],
+        serviceSelectionConfirmed: false,
+        professionalId: "",
+        slots: [],
+        selectedSlot: null
+      }));
     }
   }, [establishments, searchParams, state.establishmentId]);
   /* ====== Carregar Serviços quando escolher Estabelecimento ====== */
   useEffect(() => {
     (async () => {
       if (!establishmentId) {
-        setState((p) => ({ ...p, services: [], serviceId: "", professionalId: "", slots: [], selectedSlot: null }));
+        setState((p) => ({
+          ...p,
+          services: [],
+          serviceIds: [],
+          serviceSelectionConfirmed: false,
+          professionalId: "",
+          slots: [],
+          selectedSlot: null,
+        }));
         try{
           const sp = new URLSearchParams(searchParams);
           sp.delete('servico');
@@ -1548,24 +1615,45 @@ export default function NovoAgendamento() {
         setState((p) => ({
           ...p,
           services: list || [],
-          serviceId: "",
-    professionalId: "", // aguarda o clique do usuário
+          serviceIds: [],
+          serviceSelectionConfirmed: false,
+          professionalId: "", // aguarda o clique do usuário
           slots: [],
           selectedSlot: null,
         }));
         // Se veio ?servico= na URL e existir na lista, seleciona automaticamente
         try{
           const svcParam = (searchParams.get('servico') || '').trim();
-          if (svcParam && Array.isArray(list) && list.some((s) => String(s.id) === svcParam)) {
-            setState((p) => ({ ...p, serviceId: svcParam }));
-          } else {
+          if (svcParam && Array.isArray(list)) {
+            const available = new Set(list.map((s) => String(s.id)));
+            const parsed = svcParam
+              .split(',')
+              .map((part) => part.trim())
+              .filter(Boolean)
+              .filter((id) => available.has(String(id)));
+            if (parsed.length) {
+              setState((p) => ({ ...p, serviceIds: parsed, serviceSelectionConfirmed: false }));
+            } else {
+              const sp = new URLSearchParams(searchParams);
+              sp.delete('servico');
+              setSearchParams(sp, { replace: true });
+            }
+          } else if (svcParam) {
             const sp = new URLSearchParams(searchParams);
             sp.delete('servico');
             setSearchParams(sp, { replace: true });
           }
         }catch{}
       } catch {
-        setState((p) => ({ ...p, services: [], serviceId: "", professionalId: "", slots: [], selectedSlot: null }));
+        setState((p) => ({
+          ...p,
+          services: [],
+          serviceIds: [],
+          serviceSelectionConfirmed: false,
+          professionalId: "",
+          slots: [],
+          selectedSlot: null,
+        }));
         showToast("error", "Não foi possível carregar os serviços.");
       }
     })();
@@ -1669,12 +1757,23 @@ useEffect(() => {
       const key = minuteISO(iso);
       counts.set(key, (counts.get(key) || 0) + 1);
     };
+    const matchesSelectedServices = (appt) => {
+      if (!normalizedServiceIds.length) return true;
+      const apptServiceIds = Array.isArray(appt?.servico_ids)
+        ? appt.servico_ids
+        : Array.isArray(appt?.servicos)
+        ? appt.servicos.map((svc) => svc?.id).filter(Boolean)
+        : appt?.servico_id
+        ? [appt.servico_id]
+        : [];
+      return apptServiceIds.some((id) => normalizedServiceIds.includes(String(id)));
+    };
     try {
       if (isAuthenticated && typeof Api.meusAgendamentos === 'function') {
         const mine = await Api.meusAgendamentos();
         (mine || []).forEach((a) => {
           if (!isActiveStatus(a.status)) return;
-          if (serviceId && a.servico_id && String(a.servico_id) !== String(serviceId)) return;
+          if (!matchesSelectedServices(a)) return;
           if (state.professionalId && a.profissional_id != null && String(a.profissional_id) !== String(state.professionalId)) return;
           const t = +new Date(a.inicio);
           if (t >= start && t < end) add(a.inicio);
@@ -1686,7 +1785,7 @@ useEffect(() => {
         const est = await Api.agendamentosEstabelecimento();
         (est || []).forEach((a) => {
           if (!isActiveStatus(a.status)) return;
-          if (serviceId && a.servico_id && String(a.servico_id) !== String(serviceId)) return;
+          if (!matchesSelectedServices(a)) return;
           if (state.professionalId && a.profissional_id != null && String(a.profissional_id) !== String(state.professionalId)) return;
           const t = +new Date(a.inicio);
           if (t >= start && t < end) add(a.inicio);
@@ -1694,17 +1793,20 @@ useEffect(() => {
       }
     } catch {}
     return counts;
-  }, [currentWeek, isOwnerViewing, serviceId, state.professionalId]);
+  }, [currentWeek, isOwnerViewing, normalizedServiceIds, state.professionalId]);
   /* ====== Carregar Slots ====== */
   const loadSlots = useCallback(async () => {
-    if (!establishmentId || !serviceId) {
+    if (!establishmentId || !selectedServices.length) {
       setState((p) => ({ ...p, slots: [], selectedSlot: null }));
       return;
     }
     try {
       setState((p) => ({ ...p, loading: true, error: "" }));
       // A) slots reais (pedindo ocupados/bloqueados)
-      const slotsData = await Api.getSlots(establishmentId, currentWeek, { includeBusy: true });
+      const slotsData = await Api.getSlots(establishmentId, currentWeek, {
+        includeBusy: true,
+        serviceIds: selectedServices.map((svc) => svc.id),
+      });
       const normalized = normalizeSlots(slotsData);
       // B) grade completa
       const grid = fillBusinessGrid({ currentWeek, slots: normalized, stepMinutes, workingSchedule });
@@ -1736,7 +1838,7 @@ useEffect(() => {
         const forcedSet = new Set(filteredForced);
         const capacity = state.professionalId
           ? 1
-          : Math.max(1, Array.isArray(selectedService?.professionals) ? selectedService.professionals.length : 1);
+          : Math.max(1, serviceProfessionals.length || 0);
         const overlayed = grid.map((s) => {
           const k = minuteISO(s.datetime);
           if (normalizeSlotLabel(s.label) === 'bloqueado') {
@@ -1779,7 +1881,7 @@ useEffect(() => {
         error: "Não foi possível carregar os horários.",
       }));
     }
-  }, [establishmentId, serviceId, currentWeek, normalizeSlots, stepMinutes, getBusyFromAppointments, selectedService, state.professionalId, workingSchedule, serviceDuration]);
+  }, [establishmentId, selectedServices, currentWeek, normalizeSlots, stepMinutes, getBusyFromAppointments, serviceProfessionals.length, state.professionalId, workingSchedule, serviceDuration]);
   useEffect(() => {
     loadSlots();
   }, [loadSlots]);
@@ -1791,7 +1893,7 @@ useEffect(() => {
   }, [selectedSlot, workingSchedule, serviceDuration]);
   useEffect(() => {
     setProfessionalMenuOpen(false);
-  }, [serviceId]);
+  }, [serviceIds]);
   // Teclas semana
   useEffect(() => {
     const onKey = (e) => {
@@ -1922,7 +2024,10 @@ useEffect(() => {
   );
 
   const validateBookingSelection = useCallback(() => {
-    if (!selectedSlot || !serviceId || !selectedService) {
+    if (!selectedServices.length) {
+      return "Selecione os servicos para continuar.";
+    }
+    if (!selectedSlot) {
       return "Selecione um horá­rio para continuar.";
     }
     if (bookingBlocked) {
@@ -1936,18 +2041,21 @@ useEffect(() => {
         ? "Este horário está fora do horário de atendimento do estabelecimento."
         : "Este horário está fora do período de 07:00-22:00.";
     }
-    if (serviceProfessionals.length && !state.professionalId) {
+    if (requiresProfessional && !serviceProfessionals.length) {
+      return "Nenhum profissional atende todos os servicos selecionados.";
+    }
+    if (requiresProfessional && !state.professionalId) {
       return "Selecione um profissional para continuar.";
     }
     return "";
   }, [
     bookingBlocked,
     bookingBlockedMessage,
+    selectedServices.length,
     selectedSlot,
-    serviceId,
-    selectedService,
     workingSchedule,
     serviceDuration,
+    requiresProfessional,
     serviceProfessionals.length,
     state.professionalId,
   ]);
@@ -1963,10 +2071,10 @@ useEffect(() => {
     try {
       const payload = {
         estabelecimento_id: Number(establishmentId),
-        servico_id: Number(serviceId),
+        servico_ids: selectedServices.map((svc) => Number(svc.id)),
         inicio: selectedSlot.datetime,
       };
-      if (serviceProfessionals.length && state.professionalId) {
+      if (requiresProfessional && state.professionalId) {
         payload.profissional_id = Number(state.professionalId);
       }
       await Api.agendar(payload);
@@ -1974,7 +2082,7 @@ useEffect(() => {
       setModal((p) => ({ ...p, isOpen: false }));
       await scheduleWhatsAppReminders({
         inicioISO: selectedSlot.datetime,
-        servicoNome: ServiceHelpers.title(selectedService),
+        servicoNome: serviceLabel || "servico",
         estabelecimentoNome: selectedEstablishment?.name || "seu estabelecimento",
       });
       showToast("success", "Agendado com sucesso!");
@@ -2039,15 +2147,16 @@ useEffect(() => {
     }
   }, [
     validateBookingSelection,
+    selectedServices,
+    serviceLabel,
     selectedSlot,
-    serviceId,
-    selectedService,
     selectedEstablishment,
     establishmentId,
     scheduleWhatsAppReminders,
     loadSlots,
     showToast,
     verifyBookingCreated,
+    requiresProfessional,
     serviceProfessionals.length,
     state.professionalId,
     currentWeek,
@@ -2117,7 +2226,7 @@ useEffect(() => {
       try {
         const payload = {
           estabelecimento_id: Number(establishmentId),
-          servico_id: Number(serviceId),
+          servico_ids: selectedServices.map((svc) => Number(svc.id)),
           inicio: selectedSlot.datetime,
           nome: name,
           email,
@@ -2138,7 +2247,7 @@ useEffect(() => {
         const cidadeTrim = (guestModal.cidade || "").trim();
         if (cidadeTrim) payload.cidade = cidadeTrim;
         if (estadoTrim) payload.estado = estadoTrim;
-        if (serviceProfessionals.length && state.professionalId) {
+        if (requiresProfessional && state.professionalId) {
           payload.profissional_id = Number(state.professionalId);
         }
         if (otpToken) payload.otp_token = otpToken;
@@ -2150,9 +2259,9 @@ useEffect(() => {
           loading: false,
           step: "success",
           error: "",
-          info: "Enviamos um email de confirmação. Confirme em até 10 minutos.",
+        info: "Enviamos um email de confirmação. Confirme em até 10 minutos, senão o agendamento será cancelado automaticamente.",
         }));
-        showToast("success", "Agendamento realizado! Confira seu email e confirme em até 10 minutos.");
+        showToast("success", "Agendamento realizado! Confira seu email e confirme em até 10 minutos para evitar o cancelamento automático.");
       } catch (e) {
         if (e?.data?.error === 'plan_limit_agendamentos') {
           const message = e?.data?.message || 'Limite de agendamentos do plano atingido.';
@@ -2209,8 +2318,9 @@ useEffect(() => {
       guestModal.cidade,
       guestModal.estado,
       establishmentId,
-      serviceId,
+      selectedServices,
       selectedSlot,
+      requiresProfessional,
       serviceProfessionals.length,
       state.professionalId,
       loadSlots,
@@ -2306,7 +2416,15 @@ useEffect(() => {
     );
   }, []);
   const handleEstablishmentClick = (est) => {
-    setState((p) => ({ ...p, establishmentId: String(est.id), serviceId: "", professionalId: "", slots: [], selectedSlot: null }));
+    setState((p) => ({
+      ...p,
+      establishmentId: String(est.id),
+      serviceIds: [],
+      serviceSelectionConfirmed: false,
+      professionalId: "",
+      slots: [],
+      selectedSlot: null
+    }));
     try{
       const sp = new URLSearchParams(searchParams);
       sp.set('estabelecimento', String(est.id));
@@ -2314,7 +2432,14 @@ useEffect(() => {
     }catch{}
   };
   const handleChangeService = () => {
-    setState((p) => ({ ...p, serviceId: '', professionalId: '', slots: [], selectedSlot: null }));
+    setState((p) => ({
+      ...p,
+      serviceIds: [],
+      serviceSelectionConfirmed: false,
+      professionalId: '',
+      slots: [],
+      selectedSlot: null,
+    }));
     setProfessionalMenuOpen(false);
     try {
       const sp = new URLSearchParams(searchParams);
@@ -2327,13 +2452,34 @@ useEffect(() => {
     }
   };
   const handleServiceClick = (svc) => {
-    setState((p) => ({ ...p, serviceId: String(svc.id), professionalId: "", slots: [], selectedSlot: null }));
+    const nextId = String(svc.id);
+    setState((p) => {
+      const current = Array.isArray(p.serviceIds) ? p.serviceIds.map((id) => String(id)) : [];
+      const exists = current.includes(nextId);
+      const next = exists ? current.filter((id) => id !== nextId) : [...current, nextId];
+      return {
+        ...p,
+        serviceIds: next,
+        serviceSelectionConfirmed: false,
+        professionalId: "",
+        slots: [],
+        selectedSlot: null,
+      };
+    });
     setProfessionalMenuOpen(false);
     try{
       const sp = new URLSearchParams(searchParams);
-      sp.set('servico', String(svc.id));
+      const current = Array.isArray(state.serviceIds) ? state.serviceIds.map((id) => String(id)) : [];
+      const exists = current.includes(nextId);
+      const next = exists ? current.filter((id) => id !== nextId) : [...current, nextId];
+      if (next.length) sp.set('servico', next.join(','));
+      else sp.delete('servico');
       setSearchParams(sp, { replace: true });
     }catch{}
+  };
+  const handleContinueFromServices = () => {
+    if (!selectedServices.length) return;
+    setState((p) => ({ ...p, serviceSelectionConfirmed: true }));
   };
   const handleWeekChange = (newWeek) => {
     let norm = newWeek;
@@ -2696,13 +2842,12 @@ useEffect(() => {
   const contactPhone = profileData?.contato_telefone || selectedEstablishment?.telefone || null;
   const infoLoading = Boolean(selectedExtras?.loading);
   const professionalsError = selectedProfessionals?.error || infoModalError || '';
-  const servicePrice = ServiceHelpers.formatPrice(ServiceHelpers.price(selectedService));
   const endTimeLabel = useMemo(() => {
     if (!selectedSlot || !serviceDuration) return null;
     const end = DateHelpers.addMinutes(new Date(selectedSlot.datetime), serviceDuration);
     return DateHelpers.formatTime(end.toISOString());
   }, [selectedSlot, serviceDuration]);
-  const confirmModalOpen = modal.isOpen && selectedSlot && selectedService;
+  const confirmModalOpen = modal.isOpen && selectedSlot && selectedServices.length;
   const shouldRenderModals = infoModalOpen || galleryModalOpen || profileImageModalOpen || ratingModal.open || guestModal.open || planLimitModal.open || confirmModalOpen;
   const weekLabel = DateHelpers.formatWeekLabel(currentWeek);
   // Reordenar colunas da semana para começar pelo dia atual (se pertencer à semana atual)
@@ -2713,7 +2858,11 @@ useEffect(() => {
     return idx > 0 ? [...list.slice(idx), ...list.slice(0, idx)] : list;
   }, [currentWeek]);
   /* ====== UI por passos ====== */
-  const step = !establishmentId ? 1 : !serviceId ? 2 : 3;
+  const step = !establishmentId
+    ? 1
+    : !selectedServices.length || !state.serviceSelectionConfirmed
+    ? 2
+    : 3;
   // Ao clicar num dia do Mês, define a semana correspondente e marca o dia
   const handlePickDay = useCallback((isoDay) => {
     setSelectedDate(isoDay);
@@ -2781,28 +2930,64 @@ useEffect(() => {
       </>
     );
   };
-  const renderServiceStep = () => (
-    <>
-      <div ref={servicesSectionRef} className="novo-agendamento__services">
-        {services.length === 0 ? (
-          <div className="empty small">Sem serviços cadastrados.</div>
-        ) : (
-          services.map((s) => (
-            <ServiceCard
-              key={s.id}
-              service={s}
-              selected={String(s.id) === serviceId}
-              onSelect={handleServiceClick}
-            />
-          ))
+  const renderServiceStep = () => {
+    const summaryNames = serviceSummary.names || [];
+    const summaryLabel =
+      summaryNames.length <= 3
+        ? summaryNames.join(' + ')
+        : `${summaryNames[0] || 'Serviço'} + mais ${summaryNames.length - 1}`;
+    return (
+      <>
+        <p className="muted" style={{ margin: '0 0 8px' }}>Selecione um ou mais serviços.</p>
+        <div ref={servicesSectionRef} className="novo-agendamento__services">
+          {services.length === 0 ? (
+            <div className="empty small">Sem serviços cadastrados.</div>
+          ) : (
+            services.map((s) => (
+              <ServiceCard
+                key={s.id}
+                service={s}
+                selected={normalizedServiceIds.includes(String(s.id))}
+                onSelect={handleServiceClick}
+              />
+            ))
+          )}
+        </div>
+        {selectedServices.length > 0 && (
+          <div className="novo-agendamento__section" style={{ marginTop: 12 }}>
+            <div className="novo-agendamento__inline-summary">
+              <div className="inline-summary__item inline-summary__item--service">
+                <span className="inline-summary__value">{summaryLabel}</span>
+                <div className="inline-summary__meta">
+                  <span>{serviceSummary.duration} min</span>
+                  <span>{ServiceHelpers.formatPrice(serviceSummary.price)}</span>
+                </div>
+              </div>
+            </div>
+          </div>
         )}
-      </div>
-    </>
-  );
+        <div style={{ marginTop: 12, display: 'flex', justifyContent: 'flex-end' }}>
+          <button
+            type="button"
+            className="btn btn--primary"
+            disabled={!selectedServices.length}
+            onClick={handleContinueFromServices}
+          >
+            Continuar
+          </button>
+        </div>
+      </>
+    );
+  };
   const renderScheduleContent = () => {
     const todayIso = DateHelpers.toISODate(new Date());
     return (
       <>
+      {requiresProfessional && !serviceProfessionals.length && (
+        <div className="notice notice--warn" role="alert">
+          Nenhum profissional atende todos os serviços selecionados.
+        </div>
+      )}
       {serviceProfessionals.length > 0 && (
         <div className="novo-agendamento__section">
           <div className="grid" style={{ gap: 6 }}>
@@ -2859,7 +3044,7 @@ useEffect(() => {
         <div className="row spread novo-agendamento__summary-row" style={{ alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 6 }}>
           <div className="novo-agendamento__inline-summary">
             <div className="inline-summary__item inline-summary__item--service">
-              <span className="inline-summary__value">{ServiceHelpers.title(selectedService)}</span>
+              <span className="inline-summary__value">{serviceLabel || 'Selecione os servicos'}</span>
               {(serviceDuration || servicePrice !== 'R$ 0,00') && (
                 <div className="inline-summary__meta">
                   {serviceDuration ? <span>{serviceDuration} min</span> : null}
@@ -2869,7 +3054,7 @@ useEffect(() => {
             </div>
           </div>
           <div className="novo-agendamento__summary-actions-row">
-            <button type="button" className="novo-agendamento__change-service" onClick={handleChangeService}>Trocar serviço</button>
+            <button type="button" className="novo-agendamento__change-service" onClick={handleChangeService}>Alterar serviços</button>
             <details className="filters">
               <summary className="filters__summary" aria-label="Filtros" title="Filtros">
                 <span className="sr-only">Filtros</span>
@@ -3031,8 +3216,9 @@ useEffect(() => {
               className="btn btn--primary"
               onClick={handleConfirmClick}
               disabled={
-                !selectedSlot || !serviceId || modal.isSaving ||
-                (serviceProfessionals.length && !state.professionalId) ||
+                !selectedSlot || !selectedServices.length || modal.isSaving ||
+                (requiresProfessional && !serviceProfessionals.length) ||
+                (requiresProfessional && !state.professionalId) ||
                 (selectedSlotNow && !isAvailableLabel(selectedSlotNow.label)) ||
                 DateHelpers.isPastSlot(selectedSlot.datetime) ||
                 !inBusinessHours(selectedSlot.datetime, workingSchedule, serviceDuration) ||
@@ -3323,7 +3509,7 @@ useEffect(() => {
             showGuestOptional={showGuestOptional}
             setShowGuestOptional={setShowGuestOptional}
             selectedSlot={selectedSlot}
-            selectedService={selectedService}
+            serviceLabel={serviceLabel}
             DateHelpers={DateHelpers}
             ServiceHelpers={ServiceHelpers}
             endTimeLabel={endTimeLabel}

@@ -1021,7 +1021,12 @@ function ProfessionalAgendaView({
           end = new Date(start.getTime() + 30 * 60000)
         }
         const resourceId = getResourceId(item)
-        const service = item?.servico_nome || item?.service_name || 'Servico'
+        const serviceNames = Array.isArray(item?.servicos)
+          ? item.servicos.map((svc) => svc?.nome).filter(Boolean)
+          : []
+        const service = serviceNames.length
+          ? serviceNames.join(' + ')
+          : (item?.servico_nome || item?.service_name || 'Servico')
         const client = item?.cliente_nome || item?.client_name || ''
         const clientPhone =
           item?.cliente_whatsapp ||
@@ -1317,7 +1322,10 @@ function ProfessionalAgendaView({
     let cancelled = false
     setSelfBookingSlotsLoading(true)
     setSelfBookingSlotsError('')
-    Api.getSlots(establishmentId, selfBookingWeekStart, { includeBusy: true })
+    Api.getSlots(establishmentId, selfBookingWeekStart, {
+      includeBusy: true,
+      serviceIds: selfBookingServiceId ? [Number(selfBookingServiceId)] : undefined,
+    })
       .then((data) => {
         if (cancelled) return
         const list = Array.isArray(data?.slots) ? data.slots : []
@@ -1333,7 +1341,7 @@ function ProfessionalAgendaView({
     return () => {
       cancelled = true
     }
-  }, [selfBookingOpen, establishmentId, selfBookingWeekStart])
+  }, [selfBookingOpen, establishmentId, selfBookingWeekStart, selfBookingServiceId])
 
 
   const breakBackgroundEvents = useMemo(() => {
@@ -1739,7 +1747,7 @@ function ProfessionalAgendaView({
         : null
     const payload = {
       estabelecimento_id: establishmentId,
-      servico_id: servicoIdNum,
+      servico_ids: [servicoIdNum],
       inicio: localDateTime.toISOString(),
       nome,
       email,
@@ -1788,7 +1796,7 @@ function ProfessionalAgendaView({
         inicio: startIso,
         fim: endIso || startIso,
         status: created?.status || 'confirmado',
-        servico_id: servicoIdNum,
+        servico_ids: [servicoIdNum],
         servico_nome: serviceName,
         profissional_id: profId,
         profissional_nome: profName,
