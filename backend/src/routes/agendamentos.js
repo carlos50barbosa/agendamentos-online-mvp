@@ -1229,14 +1229,14 @@ router.post('/estabelecimento', authRequired, isEstabelecimento, async (req, res
         await notifyEmail(
           cli.email,
           'Agendamento confirmado',
-          `<p>Ola, <b>${cli?.nome ?? 'cliente'}</b>! Seu agendamento de <b>${serviceLabel}</b>${profLabel ? ` com <b>${profNome}</b>` : ''} foi confirmado para <b>${inicioBR}</b>.</p>${appointmentLinkHtml}`
+          `<p>Olá, <b>${cli?.nome ?? 'cliente'}</b>! Seu agendamento de <b>${serviceLabel}</b>${profLabel ? ` com <b>${profNome}</b>` : ''} foi confirmado para <b>${inicioBR}</b>.</p>${appointmentLinkHtml}`
         );
       }
       if (!blockEstabNotifications && est?.email && canEmailEst) {
         await notifyEmail(
           est.email,
           'Novo agendamento recebido',
-          `<p>Voce recebeu um novo agendamento de <b>${serviceLabel}</b>${profLabel ? ` com <b>${profNome}</b>` : ''} em <b>${inicioBR}</b> para o cliente <b>${cli?.nome ?? ''}</b>.</p>`
+          `<p>Você recebeu um novo agendamento de <b>${serviceLabel}</b>${profLabel ? ` com <b>${profNome}</b>` : ''} em <b>${inicioBR}</b> para o cliente <b>${cli?.nome ?? ''}</b>.</p>`
         );
       }
     });
@@ -1508,7 +1508,7 @@ router.put('/:id/reschedule-estab', authRequired, isEstabelecimento, async (req,
       const oldLabel = oldInicioIso ? brDateTime(oldInicioIso) : '';
       const newLabel = brDateTime(updatedInicioIso);
       const oldLine = oldLabel ? `Horário anterior: <b>${oldLabel}</b>.<br/>` : '';
-      const html = `<p>Ola, <b>${clientName}</b>!</p>` +
+      const html = `<p>Olá, <b>${clientName}</b>!</p>` +
         `<p>Seu agendamento de <b>${serviceName}</b> no ${estName} foi reagendado.</p>` +
         `<p>${oldLine}Novo horário: <b>${newLabel}</b>.</p>${appointmentLinkHtml}`;
       await notifyEmail(cli.email, 'Agendamento reagendado', html);

@@ -501,7 +501,7 @@ async function sendPublicConfirmEmail({ email, nome, servicoNome, inicioISO, pro
   const profLabel = profNome ? ` com ${profNome}` : '';
   const confirmLink = buildConfirmLink(confirmToken);
   const html = `
-    <p>Ola, <b>${firstName(nome) || 'cliente'}</b>!</p>
+    <p>Olá, <b>${firstName(nome) || 'cliente'}</b>!</p>
     <p>Confirme seu agendamento de <b>${servicoNome}</b>${profLabel} para <b>${inicioBR}</b>.</p>
     <p><a href="${confirmLink}">Confirmar agendamento</a></p>
     <p class="muted">Este link expira em ${PUBLIC_CONFIRM_MINUTES} minutos.</p>
@@ -566,7 +566,7 @@ async function notifyPublicConfirmedAppointment(appointmentId) {
         const subject = tmpl.email_subject || 'Agendamento confirmado';
         const rawTemplate =
           tmpl.email_html ||
-          `<p>Ola, <b>{{cliente_nome}}</b>! Seu agendamento de <b>{{servico_nome}}</b>{{profissional_nome}} foi confirmado para <b>{{data_hora}}</b>.</p>`;
+          `<p>Olá, <b>{{cliente_nome}}</b>! Seu agendamento de <b>{{servico_nome}}</b>{{profissional_nome}} foi confirmado para <b>{{data_hora}}</b>.</p>`;
         const hasLinkPlaceholder = /{{\s*link_agendamento\s*}}/i.test(rawTemplate);
         let html = rawTemplate
           .replace(/{{\s*cliente_nome\s*}}/g, firstName(ag.cliente_nome) || 'cliente')

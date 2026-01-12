@@ -57,11 +57,21 @@ export async function auth(req, res, next) {
 }
 
 export function isCliente(req, res, next) {
-  if (req.user?.tipo !== 'cliente') return res.status(403).json({ error: 'forbidden_cliente' });
+  if (req.user?.tipo !== 'cliente') {
+    return res.status(403).json({
+      error: 'forbidden_cliente',
+      message: 'Acesso permitido apenas para clientes. Faça login como cliente.',
+    });
+  }
   next();
 }
 
 export function isEstabelecimento(req, res, next) {
-  if (req.user?.tipo !== 'estabelecimento') return res.status(403).json({ error: 'forbidden_estabelecimento' });
+  if (req.user?.tipo !== 'estabelecimento') {
+    return res.status(403).json({
+      error: 'forbidden_estabelecimento',
+      message: 'Acesso permitido apenas para estabelecimentos. Faça login como estabelecimento.',
+    });
+  }
   next();
 }
