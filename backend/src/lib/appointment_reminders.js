@@ -94,7 +94,7 @@ async function sendReminder(pool, row) {
     process.env.WA_TEMPLATE_NAME_REMINDER ||
     process.env.WA_TEMPLATE_NAME_CONFIRM ||
     process.env.WA_TEMPLATE_NAME ||
-    'confirmacao_agendamento';
+    'confirmacao_agendamento_v2';
   const tplLang = process.env.WA_TEMPLATE_LANG || 'pt_BR';
   const tplNameLower = String(tplName || '').toLowerCase();
   const tplHeaderImage =

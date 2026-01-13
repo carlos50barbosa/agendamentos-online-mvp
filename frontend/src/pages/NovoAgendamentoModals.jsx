@@ -636,8 +636,7 @@ export default function NovoAgendamentoModals(props) {
                     </div>
                     <h3>Agendamento realizado</h3>
                     <p style={{ marginTop: 6 }}>
-                      Enviamos um email de confirmação. Confirme em até 10 minutos,
-                      <strong> senão o agendamento será cancelado automaticamente.</strong>
+                      Enviamos um email com os detalhes do agendamento.
                       {' '}Se não aparecer em alguns minutos, confira o spam ou reencontre o link mais tarde.
                     </p>
                     <div className="row" style={{ justifyContent: 'flex-end', gap: 8, marginTop: 12 }}>

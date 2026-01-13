@@ -14,6 +14,50 @@ if (!TOKEN)   throw new Error('ENV WA_TOKEN ausente');
 const API_URL = `https://graph.facebook.com/${VERSION}/${PHONE_ID}/messages`;
 const toDigits = (s) => String(s || '').replace(/\D/g, '');
 
+function maskPhone(phone) {
+  const digits = toDigits(phone);
+  if (!digits) return '';
+  if (digits.length <= 4) return '*'.repeat(digits.length);
+  return `${'*'.repeat(digits.length - 4)}${digits.slice(-4)}`;
+}
+
+function summarizePayload(payload) {
+  if (!payload || typeof payload !== 'object') return null;
+  const type = payload.type || 'unknown';
+  if (type === 'template') {
+    const tpl = payload.template || {};
+    const components = Array.isArray(tpl.components) ? tpl.components : [];
+    return {
+      type,
+      template: {
+        name: tpl.name,
+        lang: tpl.language?.code,
+        components: components.map((comp) => ({
+          type: comp?.type,
+          params: Array.isArray(comp?.parameters) ? comp.parameters.length : 0,
+        })),
+      },
+    };
+  }
+  if (type === 'text') {
+    const body = payload.text?.body || '';
+    return {
+      type,
+      text: { length: String(body).length },
+    };
+  }
+  return { type };
+}
+
+function extractWamid(resp) {
+  try {
+    const id = resp?.messages?.[0]?.id;
+    return id ? String(id) : null;
+  } catch {
+    return null;
+  }
+}
+
 function isAllowed(to) {
   // Em ambiente de teste, o número de remetente é o +1 555 140 5688 (phone_id do print).
   // Garanta que só enviará para números da allowed list.
@@ -26,6 +70,11 @@ function isAllowed(to) {
 }
 
 async function postGraph(payload) {
+  console.log('[wa/send]', JSON.stringify({
+    type: payload?.type || 'unknown',
+    to: maskPhone(payload?.to),
+    payload: summarizePayload(payload),
+  }));
   const res = await fetch(API_URL, {
     method: 'POST',
     headers: {
@@ -44,6 +93,11 @@ async function postGraph(payload) {
     err.graph = data?.error;
     throw err;
   }
+  console.log('[wa/send/ok]', JSON.stringify({
+    type: payload?.type || 'unknown',
+    to: maskPhone(payload?.to),
+    wamid: extractWamid(data),
+  }));
   return data;
 }
 

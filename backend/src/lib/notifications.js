@@ -1,6 +1,7 @@
 // backend/src/lib/notifications.js
 import fetch from 'node-fetch';
 import nodemailer from 'nodemailer';
+import { getWhatsAppLastInboundAt, isWhatsAppWindowOpen } from './whatsapp_contacts.js';
 
 /**
  * Configuração (via ENV)
@@ -23,15 +24,17 @@ import nodemailer from 'nodemailer';
  * EMAIL_FROM="Agendamentos Online" <no-reply@seu-dominio>
  */
 
+const parseBool = (value) => /^(1|true|yes|on)$/i.test(String(value || '').trim());
+
 const cfg = {
   phoneId: process.env.WA_PHONE_NUMBER_ID,
   token: process.env.WA_TOKEN,
   apiVersion: process.env.WA_API_VERSION || 'v23.0',
 
-  forceTemplate: /^true$/i.test(process.env.WA_FORCE_TEMPLATE || ''),
+  forceTemplate: parseBool(process.env.WA_FORCE_TEMPLATE),
   templateName: process.env.WA_TEMPLATE_NAME || 'hello_world',
   templateLang: process.env.WA_TEMPLATE_LANG || 'en_US',
-  templateHasBodyParam: /^1|true$/i.test(process.env.WA_TEMPLATE_HAS_BODY_PARAM || ''),
+  templateHasBodyParam: parseBool(process.env.WA_TEMPLATE_HAS_BODY_PARAM),
 
   allowedList: String(process.env.WHATSAPP_ALLOWED_LIST || '')
     .split(',')
@@ -40,7 +43,7 @@ const cfg = {
     .map(normalizePhoneDigits)
     .filter(Boolean),
 
-  debug: /^true$/i.test(process.env.WA_DEBUG_LOG || ''),
+  debug: parseBool(process.env.WA_DEBUG_LOG),
 };
 
 const toDigits = s => String(s || '').replace(/\D/g, '');
@@ -59,6 +62,82 @@ function isAllowed(to) {
   if (!n) return false;
   if (!cfg.allowedList.length) return true;
   return cfg.allowedList.includes(n);
+}
+
+function maskPhone(phone) {
+  const digits = toDigits(phone);
+  if (!digits) return '';
+  if (digits.length <= 4) return '*'.repeat(digits.length);
+  return `${'*'.repeat(digits.length - 4)}${digits.slice(-4)}`;
+}
+
+function summarizePayload(payload) {
+  if (!payload || typeof payload !== 'object') return null;
+  const type = payload.type || 'unknown';
+  if (type === 'template') {
+    const template = payload.template || {};
+    const components = Array.isArray(template.components) ? template.components : [];
+    return {
+      type,
+      template: {
+        name: template.name,
+        lang: template.language?.code,
+        components: components.map((comp) => ({
+          type: comp?.type,
+          params: Array.isArray(comp?.parameters) ? comp.parameters.length : 0,
+        })),
+      },
+    };
+  }
+  if (type === 'text') {
+    const body = payload.text?.body || '';
+    return {
+      type,
+      text: {
+        length: String(body).length,
+        preview: Boolean(payload.text?.preview_url),
+      },
+    };
+  }
+  if (type === 'interactive') {
+    return { type, interactive: { hasBody: Boolean(payload.interactive?.body) } };
+  }
+  return { type };
+}
+
+function extractWamid(resp) {
+  try {
+    const id = resp?.messages?.[0]?.id;
+    return id ? String(id) : null;
+  } catch {
+    return null;
+  }
+}
+
+function logSend({ phone, payload, context }) {
+  const summary = summarizePayload(payload);
+  const base = {
+    type: summary?.type || payload?.type || 'unknown',
+    to: maskPhone(phone),
+    payload: summary,
+  };
+  if (context) base.context = context;
+  console.log('[wa/send]', JSON.stringify(base));
+}
+
+function logSendResult({ phone, payloadType, wamid, context }) {
+  const base = { type: payloadType || 'unknown', to: maskPhone(phone), wamid: wamid || null };
+  if (context) base.context = context;
+  console.log('[wa/send/ok]', JSON.stringify(base));
+}
+
+function is24hWindowError(err) {
+  const msg = (err?.body && typeof err.body === 'object')
+    ? (err.body.error?.message || '')
+    : String(err?.body || err?.message || '');
+  const code = err?.body?.error?.code;
+  const sub = err?.body?.error?.error_subcode;
+  return code === 470 || sub === 2018028 || sub === 131047 || /24\s*h/i.test(msg) || err?.status === 400;
 }
 
 function graphUrl(path) {
@@ -93,6 +172,33 @@ async function callGraph(url, payload) {
   return json;
 }
 
+async function sendText({ to, message, context }) {
+  const phone = normalizePhoneDigits(to);
+  if (!phone) {
+    if (cfg.debug) console.warn('[whatsapp] invalid phone -> %s', to);
+    return { invalid: true };
+  }
+  if (!isAllowed(phone)) {
+    if (cfg.debug) console.warn('[whatsapp] bloqueado por ALLOWED_LIST -> %s', phone);
+    return { blocked: true };
+  }
+  if (!cfg.token || !cfg.phoneId) {
+    throw new Error('WA config missing (token/phoneId)');
+  }
+
+  const payload = {
+    messaging_product: 'whatsapp',
+    to: phone,
+    type: 'text',
+    text: { preview_url: false, body: String(message || '') },
+  };
+  const url = graphUrl(`${cfg.phoneId}/messages`);
+  logSend({ phone, payload, context });
+  const resp = await callGraph(url, payload);
+  logSendResult({ phone, payloadType: payload.type, wamid: extractWamid(resp), context });
+  return resp;
+}
+
 // ============== WhatsApp: Template ==============
 export async function sendTemplate({
   to,
@@ -103,6 +209,7 @@ export async function sendTemplate({
   headerDocumentUrl,
   headerVideoUrl,
   headerText,
+  context,
 }) {
   const phone = normalizePhoneDigits(to);
   if (!phone) {
@@ -183,61 +290,140 @@ export async function sendTemplate({
     console.log('[wa/cloud/template] to=%s name=%s lang=%s params=%d',
       phone, template.name, template.language?.code, bodyParams.length);
   }
-  return callGraph(url, payload);
+  logSend({ phone, payload, context });
+  const resp = await callGraph(url, payload);
+  logSendResult({ phone, payloadType: payload.type, wamid: extractWamid(resp), context });
+  return resp;
 }
 // ============== WhatsApp: Texto (ou Template se forceTemplate=true) ==============
 export async function notifyWhatsapp(message, to) {
+  return sendWhatsAppSmart({ to, message });
+}
+
+export async function sendWhatsAppSmart({
+  to,
+  message,
+  text,
+  template,
+  templateNameFallback,
+  templateLangFallback,
+  allowText = true,
+  forceTemplate,
+  context,
+  returnMeta = false,
+} = {}) {
+  const messageText = message != null ? String(message) : (text != null ? String(text) : '');
+  const shouldForceTemplate = forceTemplate === true || cfg.forceTemplate;
   const phone = normalizePhoneDigits(to);
   if (!phone) {
     if (cfg.debug) console.warn('[whatsapp] invalid phone -> %s', to);
-    return { invalid: true };
+    if (!returnMeta) return { invalid: true };
+    return {
+      result: { invalid: true },
+      meta: {
+        decision: null,
+        window_open: false,
+        force_template: shouldForceTemplate,
+        wamid: null,
+      },
+    };
   }
-  if (!isAllowed(phone)) {
-    if (cfg.debug) console.warn('[whatsapp] bloqueado por ALLOWED_LIST -> %s', phone);
-    return { blocked: true };
-  }
-  if (!cfg.token || !cfg.phoneId) {
-    throw new Error('WA config missing (token/phoneId)');
-  }
+  const lastInbound = await getWhatsAppLastInboundAt(phone);
+  const windowOpen = isWhatsAppWindowOpen(lastInbound, new Date());
 
-  // Se quisermos sempre iniciar por template (fora da janela de 24h)
-  if (cfg.forceTemplate) {
-    return sendTemplate({
-      to: phone,
-      name: cfg.templateName,
-      lang: cfg.templateLang,
-      bodyParams: cfg.templateHasBodyParam ? [message] : [], // só envia params se o template tiver {{1}}
-    });
-  }
+  const fallbackName = templateNameFallback || cfg.templateName;
+  const fallbackLang = templateLangFallback || cfg.templateLang;
+  const templatePayload = template && template.name
+    ? template
+    : {
+        name: fallbackName,
+        lang: fallbackLang,
+        bodyParams: cfg.templateHasBodyParam && messageText ? [messageText] : [],
+      };
 
-  const payload = {
-    messaging_product: 'whatsapp',
-    to: phone,
-    type: 'text',
-    text: { preview_url: false, body: message },
+  let decision = null;
+  const finalize = (result) => {
+    if (!returnMeta) return result;
+    return {
+      result,
+      meta: {
+        decision,
+        window_open: windowOpen,
+        force_template: shouldForceTemplate,
+        wamid: extractWamid(result),
+      },
+    };
   };
-  const url = graphUrl(`${cfg.phoneId}/messages`);
-  if (cfg.debug) console.log('[wa/cloud/text] to=%s body=%s', phone, message);
-  try{
-    return await callGraph(url, payload);
-  } catch (err) {
-    // Fallback automático: fora da janela de 24h só é permitido template
-    const msg = (err?.body && typeof err.body === 'object') ? (err.body.error?.message || '') : String(err?.body || err?.message || '');
-    const code = err?.body?.error?.code;
-    const sub = err?.body?.error?.error_subcode;
-    const is24h = code === 470 || /24\s*h/i.test(msg) || sub === 2018028 || sub === 131047 || err?.status === 400;
-    if (cfg.debug) console.warn('[wa/cloud/text] falhou (%s/%s): %s', code, sub, msg);
-    if (is24h) {
-      if (cfg.debug) console.log('[wa/cloud] tentando template por fallback (24h window)');
-      return sendTemplate({
-        to: phone,
-        name: templateName || cfg.templateName,
-        lang: templateLang || cfg.templateLang,
-        bodyParams: cfg.templateHasBodyParam ? [message] : [],
-      });
+
+  if (shouldForceTemplate || !windowOpen) {
+    if (cfg.debug) {
+      console.log('[wa/cloud] smart-send template only (window closed or forced)');
     }
-    throw err;
+    decision = 'template';
+    const result = await sendTemplate({
+      to: phone,
+      name: templatePayload.name,
+      lang: templatePayload.lang,
+      bodyParams: templatePayload.bodyParams || [],
+      headerImageUrl: templatePayload.headerImageUrl,
+      headerDocumentUrl: templatePayload.headerDocumentUrl,
+      headerVideoUrl: templatePayload.headerVideoUrl,
+      headerText: templatePayload.headerText,
+      context,
+    });
+    return finalize(result);
   }
+
+  if (allowText && messageText) {
+    try {
+      decision = 'text';
+      const result = await sendText({ to: phone, message: messageText, context });
+      return finalize(result);
+    } catch (err) {
+      if (is24hWindowError(err)) {
+        if (cfg.debug) console.log('[wa/cloud] text failed, fallback to template');
+        decision = 'template';
+        const result = await sendTemplate({
+          to: phone,
+          name: templatePayload.name,
+          lang: templatePayload.lang,
+          bodyParams: templatePayload.bodyParams || [],
+          headerImageUrl: templatePayload.headerImageUrl,
+          headerDocumentUrl: templatePayload.headerDocumentUrl,
+          headerVideoUrl: templatePayload.headerVideoUrl,
+          headerText: templatePayload.headerText,
+          context,
+        });
+        return finalize(result);
+      }
+      throw err;
+    }
+  }
+
+  if (template && template.name) {
+    decision = 'template';
+    const result = await sendTemplate({
+      to: phone,
+      name: template.name,
+      lang: template.lang,
+      bodyParams: template.bodyParams || [],
+      headerImageUrl: template.headerImageUrl,
+      headerDocumentUrl: template.headerDocumentUrl,
+      headerVideoUrl: template.headerVideoUrl,
+      headerText: template.headerText,
+      context,
+    });
+    return finalize(result);
+  }
+
+  if (message != null || text != null) {
+    decision = 'text';
+    const result = await sendText({ to: phone, message: messageText, context });
+    return finalize(result);
+  }
+
+  decision = 'text';
+  return finalize({ ok: false, error: 'missing_message' });
 }
 
 // ============== WhatsApp: Agendamento simples em memória ==============
@@ -272,7 +458,18 @@ export async function scheduleWhatsApp({ to, scheduledAt, message, metadata, use
           bodyParams: params,
         });
       } else {
-        await notifyWhatsapp(message, phone);
+        const params = Array.isArray(bodyParams) && bodyParams.length > 0
+          ? bodyParams
+          : (cfg.templateHasBodyParam ? [message] : []);
+        await sendWhatsAppSmart({
+          to: phone,
+          message,
+          template: {
+            name: templateName || cfg.templateName,
+            lang: templateLang || cfg.templateLang,
+            bodyParams: params,
+          },
+        });
       }
     } catch (err) {
       console.error('[scheduleWhatsApp/send]', err.status, err.body || err.message);

@@ -6,6 +6,7 @@ import { getPlanContext, isDelinquentStatus, formatPlanLimitExceeded } from '../
 import { auth as authRequired, isCliente, isEstabelecimento } from '../middleware/auth.js';
 import { notifyEmail } from '../lib/notifications.js';
 import { sendAppointmentWhatsApp } from '../lib/whatsapp_outbox.js';
+import { buildConfirmacaoAgendamentoV2Components, isConfirmacaoAgendamentoV2 } from '../lib/whatsapp_templates.js';
 import bcrypt from 'bcryptjs';
 import { checkMonthlyAppointmentLimit, notifyAppointmentLimitReached } from '../lib/appointment_limits.js';
 import { estabNotificationsDisabled } from '../lib/estab_notifications.js';
@@ -802,6 +803,16 @@ router.post('/', authRequired, isCliente, async (req, res) => {
       const tplName = process.env.WA_TEMPLATE_NAME_CONFIRM || process.env.WA_TEMPLATE_NAME || 'confirmacao_agendamento_v2';
       const tplLang = process.env.WA_TEMPLATE_LANG || 'pt_BR';
       const estNomeLabel = estNome || '';
+      const isConfirmV2 = isConfirmacaoAgendamentoV2(tplName);
+      const tplParams = isConfirmV2
+        ? buildConfirmacaoAgendamentoV2Components({
+            serviceLabel,
+            dataHoraLabel: inicioBR,
+            estabelecimentoNome: estNomeLabel,
+          })
+        : [serviceLabel, inicioBR, estNomeLabel];
+      const waMsg = `ƒo. - Novo agendamento registrado: ${serviceLabel}${profNome ? ' / ' + profNome : ''} em ${inicioBR} ƒ?" ${estNomeLabel}. ƒ?" Obrigado!`;
+      const fallbackBodyParams = isConfirmV2 ? tplParams : [waMsg];
       if (!blockClientWhatsapp && telCli) {
         if (/^triple|3$/.test(paramMode)) {
           await sendAppointmentWhatsApp({
@@ -809,7 +820,7 @@ router.post('/', authRequired, isCliente, async (req, res) => {
             agendamentoId: novo.id,
             to: telCli,
             kind: 'confirm_cli',
-            template: { name: tplName, lang: tplLang, bodyParams: [serviceLabel, inicioBR, estNomeLabel] },
+            template: { name: tplName, lang: tplLang, bodyParams: tplParams },
           });
         } else {
           await sendAppointmentWhatsApp({
@@ -817,7 +828,8 @@ router.post('/', authRequired, isCliente, async (req, res) => {
             agendamentoId: novo.id,
             to: telCli,
             kind: 'confirm_cli',
-            message: `✅ - Novo agendamento registrado: ${serviceLabel}${profNome ? ' / ' + profNome : ''} em ${inicioBR} — ${estNomeLabel}. — Obrigado!`,
+            message: waMsg,
+            template: { name: tplName, lang: tplLang, bodyParams: fallbackBodyParams },
           });
         }
       }
@@ -828,7 +840,7 @@ router.post('/', authRequired, isCliente, async (req, res) => {
             agendamentoId: novo.id,
             to: telEst,
             kind: 'confirm_est',
-            template: { name: tplName, lang: tplLang, bodyParams: [serviceLabel, inicioBR, estNomeLabel] },
+            template: { name: tplName, lang: tplLang, bodyParams: tplParams },
           });
         } else {
           await sendAppointmentWhatsApp({
@@ -836,7 +848,8 @@ router.post('/', authRequired, isCliente, async (req, res) => {
             agendamentoId: novo.id,
             to: telEst,
             kind: 'confirm_est',
-            message: `✅ - Novo agendamento registrado: ${serviceLabel}${profNome ? ' / ' + profNome : ''} em ${inicioBR} — ${estNomeLabel}. — Obrigado!`,
+            message: waMsg,
+            template: { name: tplName, lang: tplLang, bodyParams: fallbackBodyParams },
           });
         }
       }
@@ -1247,6 +1260,16 @@ router.post('/estabelecimento', authRequired, isEstabelecimento, async (req, res
       const tplName = process.env.WA_TEMPLATE_NAME_CONFIRM || process.env.WA_TEMPLATE_NAME || 'confirmacao_agendamento_v2';
       const tplLang = process.env.WA_TEMPLATE_LANG || 'pt_BR';
       const estNomeLabel = estNome || '';
+      const isConfirmV2 = isConfirmacaoAgendamentoV2(tplName);
+      const tplParams = isConfirmV2
+        ? buildConfirmacaoAgendamentoV2Components({
+            serviceLabel,
+            dataHoraLabel: inicioBR,
+            estabelecimentoNome: estNomeLabel,
+          })
+        : [serviceLabel, inicioBR, estNomeLabel];
+      const waMsg = `Novo agendamento registrado: ${serviceLabel}${profNome ? ' / ' + profNome : ''} em ${inicioBR} - ${estNomeLabel}.`;
+      const fallbackBodyParams = isConfirmV2 ? tplParams : [waMsg];
       if (!blockClientWhatsapp && telCli) {
         if (/^triple|3$/.test(paramMode)) {
           await sendAppointmentWhatsApp({
@@ -1254,7 +1277,7 @@ router.post('/estabelecimento', authRequired, isEstabelecimento, async (req, res
             agendamentoId: novo.id,
             to: telCli,
             kind: 'confirm_cli',
-            template: { name: tplName, lang: tplLang, bodyParams: [serviceLabel, inicioBR, estNomeLabel] },
+            template: { name: tplName, lang: tplLang, bodyParams: tplParams },
           });
         } else {
           await sendAppointmentWhatsApp({
@@ -1262,7 +1285,8 @@ router.post('/estabelecimento', authRequired, isEstabelecimento, async (req, res
             agendamentoId: novo.id,
             to: telCli,
             kind: 'confirm_cli',
-            message: `Novo agendamento registrado: ${serviceLabel}${profNome ? ' / ' + profNome : ''} em ${inicioBR} - ${estNomeLabel}.`,
+            message: waMsg,
+            template: { name: tplName, lang: tplLang, bodyParams: fallbackBodyParams },
           });
         }
       }
@@ -1273,7 +1297,7 @@ router.post('/estabelecimento', authRequired, isEstabelecimento, async (req, res
             agendamentoId: novo.id,
             to: telEst,
             kind: 'confirm_est',
-            template: { name: tplName, lang: tplLang, bodyParams: [serviceLabel, inicioBR, estNomeLabel] },
+            template: { name: tplName, lang: tplLang, bodyParams: tplParams },
           });
         } else {
           await sendAppointmentWhatsApp({
@@ -1281,7 +1305,8 @@ router.post('/estabelecimento', authRequired, isEstabelecimento, async (req, res
             agendamentoId: novo.id,
             to: telEst,
             kind: 'confirm_est',
-            message: `Novo agendamento registrado: ${serviceLabel}${profNome ? ' / ' + profNome : ''} em ${inicioBR} - ${estNomeLabel}.`,
+            message: waMsg,
+            template: { name: tplName, lang: tplLang, bodyParams: fallbackBodyParams },
           });
         }
       }
@@ -1630,7 +1655,7 @@ router.put('/:id/cancel', authRequired, isCliente, async (req, res) => {
           process.env.WA_TEMPLATE_NAME_ESTAB_CANCEL ||
           process.env.WA_TEMPLATE_NAME_CANCEL ||
           process.env.WA_TEMPLATE_NAME ||
-          'confirmacao_agendamento';
+          'confirmacao_agendamento_v2';
         const tplLang = process.env.WA_TEMPLATE_LANG || 'pt_BR';
         const params3 = [serviceName, whenLabel, clientName];
         const params4 = [serviceName, whenLabel, clientName, profName || '-'];
@@ -1752,7 +1777,7 @@ router.put('/:id/cancel-estab', authRequired, isEstabelecimento, async (req, res
         'single'
       ).toLowerCase();
       const paramCountHint = Number(process.env.WA_TEMPLATE_CANCEL_PARAMS || NaN);
-      const tplName = process.env.WA_TEMPLATE_NAME_CANCEL || process.env.WA_TEMPLATE_NAME || 'confirmacao_agendamento';
+      const tplName = process.env.WA_TEMPLATE_NAME_CANCEL || process.env.WA_TEMPLATE_NAME || 'confirmacao_agendamento_v2';
       const tplLang = process.env.WA_TEMPLATE_LANG || 'pt_BR';
       // Ajuste de ordem: em {{3}} -> estabelecimento; às {{4}} -> hora+data
       const params3 = [serviceLabel || '', `${hora} de ${data}`.trim(), est?.nome || ''];

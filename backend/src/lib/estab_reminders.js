@@ -116,7 +116,7 @@ async function sendEstabReminder(pool, row) {
       process.env.WA_TEMPLATE_NAME_ESTAB ||
       process.env.WA_TEMPLATE_NAME_REMINDER ||
       process.env.WA_TEMPLATE_NAME ||
-      'confirmacao_agendamento';
+      'confirmacao_agendamento_v2';
     const tplLang = process.env.WA_TEMPLATE_LANG || 'pt_BR';
     const params3 = [service, whenLabel, clientName];
     const params4 = [service, whenLabel, clientName, profName || '-'];

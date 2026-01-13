@@ -6,6 +6,7 @@ import { getPlanContext, isDelinquentStatus, formatPlanLimitExceeded } from '../
 import bcrypt from 'bcryptjs';
 import { notifyEmail } from '../lib/notifications.js';
 import { sendAppointmentWhatsApp } from '../lib/whatsapp_outbox.js';
+import { buildConfirmacaoAgendamentoV2Components, isConfirmacaoAgendamentoV2 } from '../lib/whatsapp_templates.js';
 import { estabNotificationsDisabled } from '../lib/estab_notifications.js';
 import { clientWhatsappDisabled, whatsappImmediateDisabled, whatsappConfirmationDisabled } from '../lib/client_notifications.js';
 import jwt from 'jsonwebtoken';
@@ -14,13 +15,6 @@ import { checkMonthlyAppointmentLimit, notifyAppointmentLimitReached } from '../
 const router = Router();
 const TZ = 'America/Sao_Paulo';
 const FRONTEND_BASE = String(process.env.FRONTEND_BASE_URL || process.env.APP_URL || 'http://localhost:3001').replace(/\/$/, '');
-const API_BASE = String(process.env.API_BASE_URL || process.env.BACKEND_BASE_URL || 'http://localhost:3002').replace(/\/$/, '');
-const PUBLIC_CONFIRM_MINUTES = (() => {
-  const raw = process.env.PUBLIC_BOOKING_CONFIRM_MINUTES;
-  if (raw === undefined || raw === null || String(raw).trim() === '') return 10;
-  const parsed = Number(raw);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 10;
-})();
 const APPOINTMENT_BUFFER_MIN = (() => {
   const raw = process.env.AGENDAMENTO_BUFFER_MIN ?? process.env.APPOINTMENT_BUFFER_MIN;
   if (raw === undefined || raw === null || String(raw).trim() === '') return 0;
@@ -463,11 +457,8 @@ const boolPref = (value, fallback = true) => {
   return fallback;
 };
 
-const PUBLIC_CONFIRM_TTL_MS = PUBLIC_CONFIRM_MINUTES * 60_000;
 const hashToken = (token) =>
   crypto.createHash('sha256').update(String(token || '')).digest('hex');
-const createConfirmToken = () => crypto.randomBytes(32).toString('hex');
-const buildConfirmLink = (token) => `${API_BASE}/public/agendamentos/confirm?token=${token}`;
 const firstName = (full) => {
   const parts = String(full || '').trim().split(/\s+/);
   return parts[0] || '';
@@ -494,20 +485,6 @@ const renderConfirmPage = ({ title, message }) => `<!doctype html>
     </div>
   </body>
 </html>`;
-
-async function sendPublicConfirmEmail({ email, nome, servicoNome, inicioISO, profNome, confirmToken }) {
-  if (!email || !confirmToken) return;
-  const inicioBR = brDateTime(inicioISO);
-  const profLabel = profNome ? ` com ${profNome}` : '';
-  const confirmLink = buildConfirmLink(confirmToken);
-  const html = `
-    <p>Olá, <b>${firstName(nome) || 'cliente'}</b>!</p>
-    <p>Confirme seu agendamento de <b>${servicoNome}</b>${profLabel} para <b>${inicioBR}</b>.</p>
-    <p><a href="${confirmLink}">Confirmar agendamento</a></p>
-    <p class="muted">Este link expira em ${PUBLIC_CONFIRM_MINUTES} minutos.</p>
-  `;
-  await notifyEmail(String(email).trim().toLowerCase(), 'Confirme seu agendamento', html);
-}
 
 async function notifyPublicConfirmedAppointment(appointmentId) {
   try {
@@ -587,27 +564,38 @@ async function notifyPublicConfirmedAppointment(appointmentId) {
           const paramMode = String(process.env.WA_TEMPLATE_PARAM_MODE || 'single').toLowerCase();
           const tplName = process.env.WA_TEMPLATE_NAME_CONFIRM || process.env.WA_TEMPLATE_NAME || 'confirmacao_agendamento_v2';
           const tplLang = process.env.WA_TEMPLATE_LANG || 'pt_BR';
+          const estNomeLabel = est?.nome || '';
+          const isConfirmV2 = isConfirmacaoAgendamentoV2(tplName);
+          const tplParams = isConfirmV2
+            ? buildConfirmacaoAgendamentoV2Components({
+                serviceLabel,
+                dataHoraLabel: inicioBR,
+                estabelecimentoNome: estNomeLabel,
+              })
+            : [serviceLabel, inicioBR, estNomeLabel];
+          const waMsg = (tmpl.wa_template || `Novo agendamento registrado: {{servico_nome}} em {{data_hora}} - {{estabelecimento_nome}}.`)
+            .replace(/{{\s*cliente_nome\s*}}/g, firstName(ag.cliente_nome) || 'cliente')
+            .replace(/{{\s*servico_nome\s*}}/g, serviceLabel)
+            .replace(/{{\s*data_hora\s*}}/g, inicioBR)
+            .replace(/{{\s*estabelecimento_nome\s*}}/g, estNomeLabel)
+            .replace(/{{\s*profissional_nome\s*}}/g, profNome ? ` com ${profNome}` : '');
+          const fallbackBodyParams = isConfirmV2 ? tplParams : [waMsg];
           if (/^triple|3$/.test(paramMode)) {
             await sendAppointmentWhatsApp({
               estabelecimentoId: ag.estabelecimento_id,
               agendamentoId: ag.id,
               to: telCli,
               kind: 'confirm_cli',
-              template: { name: tplName, lang: tplLang, bodyParams: [serviceLabel, inicioBR, est?.nome || ''] },
+              template: { name: tplName, lang: tplLang, bodyParams: tplParams },
             });
           } else {
-            const waMsg = (tmpl.wa_template || `Novo agendamento registrado: {{servico_nome}} em {{data_hora}} - {{estabelecimento_nome}}.`)
-              .replace(/{{\s*cliente_nome\s*}}/g, firstName(ag.cliente_nome) || 'cliente')
-              .replace(/{{\s*servico_nome\s*}}/g, serviceLabel)
-              .replace(/{{\s*data_hora\s*}}/g, inicioBR)
-              .replace(/{{\s*estabelecimento_nome\s*}}/g, est?.nome || '')
-              .replace(/{{\s*profissional_nome\s*}}/g, profNome ? ` com ${profNome}` : '');
             await sendAppointmentWhatsApp({
               estabelecimentoId: ag.estabelecimento_id,
               agendamentoId: ag.id,
               to: telCli,
               kind: 'confirm_cli',
               message: waMsg,
+              template: { name: tplName, lang: tplLang, bodyParams: fallbackBodyParams },
             });
           }
         }
@@ -615,12 +603,26 @@ async function notifyPublicConfirmedAppointment(appointmentId) {
 
     try {
       if (!blockWhatsappImmediate && !blockWhatsappConfirmation && !blockEstabNotifications && canWhatsappEst && telEst && telEst !== telCli) {
+        const tplName = process.env.WA_TEMPLATE_NAME_CONFIRM || process.env.WA_TEMPLATE_NAME || 'confirmacao_agendamento_v2';
+        const tplLang = process.env.WA_TEMPLATE_LANG || 'pt_BR';
+        const estNomeLabel = est?.nome || '';
+        const isConfirmV2 = isConfirmacaoAgendamentoV2(tplName);
+        const tplParams = isConfirmV2
+          ? buildConfirmacaoAgendamentoV2Components({
+              serviceLabel,
+              dataHoraLabel: inicioBR,
+              estabelecimentoNome: estNomeLabel,
+            })
+          : [serviceLabel, inicioBR, estNomeLabel];
+        const waMsgEst = `Novo agendamento: ${serviceLabel}${profLabel} em ${inicioBR} - Cliente: ${String(ag.cliente_nome) || ''}`;
+        const fallbackBodyParams = isConfirmV2 ? tplParams : [waMsgEst];
         await sendAppointmentWhatsApp({
           estabelecimentoId: ag.estabelecimento_id,
           agendamentoId: ag.id,
           to: telEst,
           kind: 'confirm_est',
-          message: `Novo agendamento: ${serviceLabel}${profLabel} em ${inicioBR} - Cliente: ${String(ag.cliente_nome) || ''}`,
+          message: waMsgEst,
+          template: { name: tplName, lang: tplLang, bodyParams: fallbackBodyParams },
         });
       }
     } catch {}
@@ -713,7 +715,6 @@ router.post('/', async (req, res) => {
     const professionalMap = await fetchServiceProfessionalMap(pool, summary.serviceIds);
     const servicesRequiringProfessional = summary.serviceIds.filter((id) => (professionalMap.get(id)?.size || 0) > 0);
     const requiresProfessional = servicesRequiringProfessional.length > 0;
-    let profissionalRow = null;
 
     if (requiresProfessional && profissional_id == null) {
       return res.status(400).json({ error: 'profissional_obrigatorio', message: 'Escolha um profissional para estes servicos.' });
@@ -736,7 +737,6 @@ router.post('/', async (req, res) => {
           return res.status(400).json({ error: 'profissional_servico', message: 'Profissional nao esta associado a todos os servicos selecionados.' });
         }
       }
-      profissionalRow = profRow;
     }
 
     const duracaoTotal = summary.duracaoTotal + APPOINTMENT_BUFFER_MIN;
@@ -930,14 +930,11 @@ router.post('/', async (req, res) => {
     const [conf] = await conn.query(conflictSql, conflictParams);
     if (conf.length) { await conn.rollback(); conn.release(); return res.status(409).json({ error: 'slot_ocupado' }); }
 
-    const confirmToken = createConfirmToken();
-    const confirmTokenHash = hashToken(confirmToken);
-    const confirmExpiresAt = new Date(Date.now() + PUBLIC_CONFIRM_TTL_MS);
     const [ins] = await conn.query(
       `INSERT INTO agendamentos
-        (cliente_id, estabelecimento_id, servico_id, profissional_id, inicio, fim, status, public_confirm_token_hash, public_confirm_expires_at)
-       VALUES (?,?,?,?,?,?, 'pendente', ?, ?)`,
-      [userId, estabelecimento_id, primaryServiceId, profissional_id || null, inicioDate, fimDate, confirmTokenHash, confirmExpiresAt]
+        (cliente_id, estabelecimento_id, servico_id, profissional_id, inicio, fim, status, public_confirm_token_hash, public_confirm_expires_at, public_confirmed_at)
+       VALUES (?,?,?,?,?,?, 'confirmado', NULL, NULL, NOW())`,
+      [userId, estabelecimento_id, primaryServiceId, profissional_id || null, inicioDate, fimDate]
     );
     const itemValues = serviceItems.map((item, idx) => ([
       ins.insertId,
@@ -956,19 +953,10 @@ router.post('/', async (req, res) => {
 
     await conn.commit(); conn.release(); conn = null;
 
-    // Email de confirmacao (best-effort)
-    const inicioISO = new Date(inicioDate).toISOString();
-    const profNome = profissionalRow?.nome || '';
+    // Notificacoes de confirmacao (best-effort)
     (async () => {
       try {
-        await sendPublicConfirmEmail({
-          email: emailNorm,
-          nome,
-          servicoNome: serviceLabel,
-          inicioISO,
-          profNome,
-          confirmToken,
-        });
+        await notifyPublicConfirmedAppointment(ins.insertId);
       } catch {}
     })();
 
@@ -985,8 +973,8 @@ router.post('/', async (req, res) => {
       profissional_id: profissional_id || null,
       inicio: inicioDate,
       fim: fimDate,
-      status: 'pendente',
-      confirm_expires_at: confirmExpiresAt,
+      status: 'confirmado',
+      confirm_expires_at: null,
     });
   } catch (e) {
     try { if (conn) await conn.rollback(); } catch {}

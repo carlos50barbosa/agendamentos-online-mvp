@@ -129,6 +129,18 @@ CREATE TABLE IF NOT EXISTS agendamentos (
   INDEX idx_ag_reminder_estab_5h (estab_reminder_5h_sent_at, inicio)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
+-- Contatos WhatsApp (ultima mensagem inbound)
+CREATE TABLE IF NOT EXISTS whatsapp_contacts (
+  recipient_id VARCHAR(32) PRIMARY KEY,
+  cliente_id INT NULL,
+  last_inbound_at DATETIME NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_whatsapp_contacts_cliente (cliente_id),
+  INDEX idx_whatsapp_contacts_last_inbound (last_inbound_at),
+  CONSTRAINT fk_whatsapp_contacts_cliente FOREIGN KEY (cliente_id) REFERENCES usuarios(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
 CREATE TABLE IF NOT EXISTS agendamento_itens (
   id INT AUTO_INCREMENT PRIMARY KEY,
   agendamento_id INT NOT NULL,

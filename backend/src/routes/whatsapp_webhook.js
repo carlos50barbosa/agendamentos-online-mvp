@@ -2,6 +2,7 @@
 import { Router } from 'express';
 import { pool } from '../lib/db.js';
 import { notifyWhatsapp } from '../lib/notifications.js';
+import { initWhatsAppContacts, recordWhatsAppInbound } from '../lib/whatsapp_contacts.js';
 import { initWAStore, getSession as dbGet, setSession as dbSet } from '../lib/wa_store.js';
 import crypto from 'crypto';
 
@@ -9,6 +10,7 @@ const router = Router();
 
 // Inicializa tabelas de sessão/links
 initWAStore().catch(() => {});
+initWhatsAppContacts().catch(() => {});
 
 const OPEN_HOUR = 9;
 const CLOSE_HOUR = 18;
@@ -237,7 +239,21 @@ router.post('/', async (req, res) => {
     const value = changes?.value;
     const statuses = value?.statuses;
     if (Array.isArray(statuses) && statuses.length) {
-      console.log('[wa/webhook/status]', JSON.stringify(statuses));
+      statuses.forEach((status) => {
+        const error = Array.isArray(status?.errors) && status.errors.length
+          ? {
+              code: status.errors[0]?.code,
+              title: status.errors[0]?.title,
+              details: status.errors[0]?.details,
+            }
+          : null;
+        console.log('[wa/webhook/status]', JSON.stringify({
+          wamid: status?.id || null,
+          status: status?.status || null,
+          recipient_id: status?.recipient_id || null,
+          error,
+        }));
+      });
       return res.sendStatus(200);
     }
     const msgs = value?.messages;
@@ -246,6 +262,9 @@ router.post('/', async (req, res) => {
     const msg = msgs[0];
     const from = toDigits(msg?.from);
     if (!from) return res.sendStatus(200);
+    recordWhatsAppInbound({ recipientId: from }).catch((err) =>
+      console.warn('[wa/webhook][inbound] failed to record', err?.message || err)
+    );
 
     // Confirmacao de lembrete (botao "CONFIRMAR") usando context.id do template
     const interactive = msg?.interactive?.button_reply || null;

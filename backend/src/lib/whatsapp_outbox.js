@@ -1,6 +1,7 @@
 // backend/src/lib/whatsapp_outbox.js
 import { pool } from './db.js';
-import { notifyWhatsapp, sendTemplate } from './notifications.js';
+import { sendWhatsAppSmart } from './notifications.js';
+import { buildConfirmacaoAgendamentoV2Components, isConfirmacaoAgendamentoV2 } from './whatsapp_templates.js';
 import {
   debitWhatsAppMessage,
   getWhatsAppWalletSnapshot,
@@ -13,6 +14,84 @@ const toInt = (value, fallback = 0) => {
   if (!Number.isFinite(n)) return fallback;
   return Math.trunc(n);
 };
+
+const TZ = 'America/Sao_Paulo';
+
+function brDateTime(iso) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleString('pt-BR', {
+    hour: '2-digit',
+    minute: '2-digit',
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    timeZone: TZ,
+  });
+}
+
+async function loadConfirmacaoAgendamentoV2Context({ agendamentoId, estabelecimentoId }) {
+  const agId = toInt(agendamentoId, 0);
+  if (!agId) return null;
+  const params = [agId];
+  let where = 'WHERE a.id=?';
+  if (estabelecimentoId) {
+    const estId = toInt(estabelecimentoId, 0);
+    if (estId) {
+      where += ' AND a.estabelecimento_id=?';
+      params.push(estId);
+    }
+  }
+  try {
+    const [rows] = await pool.query(
+      `
+      SELECT a.inicio,
+             e.nome AS estabelecimento_nome,
+             COALESCE(NULLIF(GROUP_CONCAT(s.nome ORDER BY ai.ordem SEPARATOR ' + '), ''), s0.nome) AS servico_nome
+      FROM agendamentos a
+      JOIN usuarios e ON e.id = a.estabelecimento_id
+      LEFT JOIN agendamento_itens ai ON ai.agendamento_id = a.id
+      LEFT JOIN servicos s ON s.id = ai.servico_id
+      LEFT JOIN servicos s0 ON s0.id = a.servico_id
+      ${where}
+      GROUP BY a.id, a.inicio, e.nome, s0.nome
+      LIMIT 1
+      `,
+      params
+    );
+    const row = rows?.[0];
+    if (!row) return null;
+    return {
+      serviceLabel: row.servico_nome || '',
+      dataHoraLabel: brDateTime(row.inicio),
+      estabelecimentoNome: row.estabelecimento_nome || '',
+    };
+  } catch (err) {
+    console.warn('[wa][confirmacao_v2] context load failed', err?.message || err);
+    return null;
+  }
+}
+
+async function ensureConfirmacaoAgendamentoV2BodyParams(template, { agendamentoId, estabelecimentoId } = {}) {
+  if (!template || !isConfirmacaoAgendamentoV2(template.name)) return template;
+  const rawParams = Array.isArray(template.bodyParams) ? template.bodyParams : [];
+  const hasThree = rawParams.length === 3 && rawParams.every((p) => String(p || '').trim());
+  if (hasThree) {
+    template.bodyParams = buildConfirmacaoAgendamentoV2Components({
+      serviceLabel: rawParams[0],
+      dataHoraLabel: rawParams[1],
+      estabelecimentoNome: rawParams[2],
+    });
+    return template;
+  }
+  const ctx = await loadConfirmacaoAgendamentoV2Context({ agendamentoId, estabelecimentoId });
+  template.bodyParams = buildConfirmacaoAgendamentoV2Components({
+    serviceLabel: ctx?.serviceLabel ?? rawParams[0],
+    dataHoraLabel: ctx?.dataHoraLabel ?? rawParams[1],
+    estabelecimentoNome: ctx?.estabelecimentoNome ?? rawParams[2],
+  });
+  return template;
+}
 
 async function getAppointmentWaCount(agendamentoId) {
   const id = toInt(agendamentoId, 0);
@@ -88,20 +167,27 @@ export async function sendAppointmentWhatsApp({
 
   let resp;
   try {
-    if (template && template.name) {
-      resp = await sendTemplate({
-        to,
-        name: template.name,
-        lang: template.lang,
-        bodyParams: template.bodyParams || [],
-        headerImageUrl: template.headerImageUrl,
-        headerDocumentUrl: template.headerDocumentUrl,
-        headerVideoUrl: template.headerVideoUrl,
-        headerText: template.headerText,
+    let templateToSend = template && template.name ? {
+      name: template.name,
+      lang: template.lang,
+      bodyParams: template.bodyParams || [],
+      headerImageUrl: template.headerImageUrl,
+      headerDocumentUrl: template.headerDocumentUrl,
+      headerVideoUrl: template.headerVideoUrl,
+      headerText: template.headerText,
+    } : null;
+    if (templateToSend) {
+      templateToSend = await ensureConfirmacaoAgendamentoV2BodyParams(templateToSend, {
+        agendamentoId: agId,
+        estabelecimentoId: estabId,
       });
-    } else {
-      resp = await notifyWhatsapp(String(message || ''), to);
     }
+    resp = await sendWhatsAppSmart({
+      to,
+      message: message != null ? String(message) : null,
+      template: templateToSend,
+      context: { kind, agendamentoId: agId, estabelecimentoId: estabId },
+    });
   } catch (err) {
     return {
       ok: false,
