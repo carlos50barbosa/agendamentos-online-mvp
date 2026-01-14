@@ -18,6 +18,8 @@ import adminRouter from './routes/admin.js';
 import relatoriosRouter from './routes/relatorios.js';
 import billingRouter from './routes/billing.js';
 import waWebhookRouter from './routes/whatsapp_webhook.js';
+import waConnectRouter from './routes/waConnect.js';
+import waTenantWebhookRouter from './routes/waWebhook.js';
 import publicAgendamentosRouter from './routes/agendamentos_public.js';
 import otpPublicRouter from './routes/otp_public.js';
 import profissionaisRouter from './routes/profissionais.js';
@@ -94,6 +96,8 @@ app.use('/public/agendamentos', publicAgendamentosRouter);
 app.use('/admin', adminRouter);
 app.use('/relatorios', relatoriosRouter);
 app.use('/billing', billingRouter);
+app.use('/wa', waConnectRouter);
+app.use('/wa/webhook', waTenantWebhookRouter);
 app.use('/webhooks/whatsapp', waWebhookRouter);
 
 // Aliases “/api/*” (seu Nginx usa /api)
@@ -111,7 +115,9 @@ app.use('/api/public/agendamentos', publicAgendamentosRouter);
 app.use('/api/admin', adminRouter);
 app.use('/api/relatorios', relatoriosRouter);
 app.use('/api/billing', billingRouter);
-app.use('/api/webhooks/whatsapp', waWebhookRouter);
+app.use('/api/wa', waConnectRouter);
+app.use('/api/wa/webhook', waTenantWebhookRouter);
+app.use('/api/webhooks/whatsapp', waTenantWebhookRouter);
 
 // Middleware final de erro
 app.use((err, req, res, _next) => {

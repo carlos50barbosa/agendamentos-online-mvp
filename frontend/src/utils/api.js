@@ -236,6 +236,11 @@ export const Api = {
       body: JSON.stringify(payload),
     }),
 
+  // WhatsApp Cloud API (multi-tenant)
+  waConnectStart: () => req('/wa/connect/start'),
+  waConnectStatus: () => req('/wa/connect/status'),
+  waConnectDisconnect: () => req('/wa/connect/disconnect', { method: 'POST' }),
+
   // Admin (manutenÃ§Ã£o)
   adminCleanup: (adminToken) =>
     req('/admin/cleanup', {

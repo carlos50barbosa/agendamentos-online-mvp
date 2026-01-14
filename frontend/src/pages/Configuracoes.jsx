@@ -560,6 +560,14 @@ export default function Configuracoes() {
     whatsappPackages: [],
     whatsappHistory: [],
   });
+  const [waConnectState, setWaConnectState] = useState({
+    loading: false,
+    connectLoading: false,
+    disconnectLoading: false,
+    account: null,
+    error: '',
+    notice: '',
+  });
   const [billingLoading, setBillingLoading] = useState(false);
   const [billingStatus, setBillingStatus] = useState(null);
   const [checkoutLoading, setCheckoutLoading] = useState(false);
@@ -1009,6 +1017,60 @@ export default function Configuracoes() {
     }
   }, [isEstab, user?.id]);
 
+  const fetchWaConnectStatus = useCallback(async () => {
+    if (!isEstab || !user?.id) return null;
+    setWaConnectState((prev) => ({ ...prev, loading: true, error: '' }));
+    try {
+      const data = await Api.waConnectStatus();
+      setWaConnectState((prev) => ({
+        ...prev,
+        loading: false,
+        account: data?.account || null,
+      }));
+      return data;
+    } catch (err) {
+      const msg = err?.data?.message || err?.message || 'Falha ao carregar o status do WhatsApp.';
+      setWaConnectState((prev) => ({ ...prev, loading: false, error: msg }));
+      return null;
+    }
+  }, [isEstab, user?.id]);
+
+  const handleWhatsAppConnect = useCallback(async () => {
+    if (!isEstab) return;
+    setWaConnectState((prev) => ({
+      ...prev,
+      connectLoading: true,
+      error: '',
+      notice: '',
+    }));
+    try {
+      const data = await Api.waConnectStart();
+      if (!data?.url) throw new Error('URL de conexao indisponivel.');
+      window.location.assign(data.url);
+    } catch (err) {
+      const msg = err?.data?.message || err?.message || 'Nao foi possivel iniciar a conexao.';
+      setWaConnectState((prev) => ({ ...prev, connectLoading: false, error: msg }));
+    }
+  }, [isEstab]);
+
+  const handleWhatsAppDisconnect = useCallback(async () => {
+    if (!isEstab) return;
+    setWaConnectState((prev) => ({
+      ...prev,
+      disconnectLoading: true,
+      error: '',
+      notice: '',
+    }));
+    try {
+      await Api.waConnectDisconnect();
+      await fetchWaConnectStatus();
+      setWaConnectState((prev) => ({ ...prev, disconnectLoading: false, notice: 'WhatsApp desconectado.' }));
+    } catch (err) {
+      const msg = err?.data?.message || err?.message || 'Nao foi possivel desconectar.';
+      setWaConnectState((prev) => ({ ...prev, disconnectLoading: false, error: msg }));
+    }
+  }, [isEstab, fetchWaConnectStatus]);
+
   const fetchBillingStatus = useCallback(async () => {
     if (!isEstab || !user?.id) return null;
     try {
@@ -1047,10 +1109,28 @@ export default function Configuracoes() {
           url.searchParams.delete('checkout');
           window.history.replaceState({}, '', url.toString());
         }
+        const waParam = (url.searchParams.get('wa') || '').toLowerCase();
+        if (waParam) {
+          const waMessages = {
+            connected: { notice: 'WhatsApp conectado com sucesso.' },
+            disconnected: { notice: 'WhatsApp desconectado.' },
+            error: { error: 'Nao foi possivel concluir a conexao do WhatsApp.' },
+            phone_in_use: { error: 'Esse numero ja esta conectado a outro estabelecimento.' },
+          };
+          const payload = waMessages[waParam];
+          if (payload?.notice) {
+            setWaConnectState((prev) => ({ ...prev, notice: payload.notice, error: '' }));
+          } else if (payload?.error) {
+            setWaConnectState((prev) => ({ ...prev, error: payload.error, notice: '' }));
+          }
+          url.searchParams.delete('wa');
+          window.history.replaceState({}, '', url.toString());
+        }
       } catch {}
       // Carrega billing (assinatura + histórico) para preencher o cartão do plano
       try { await fetchBilling(); } catch {}
       try { await fetchBillingStatus(); } catch {}
+      try { await fetchWaConnectStatus(); } catch {}
       try {
         setPublicProfileLoading(true);
         setPublicProfileStatus({ type: '', message: '' });
@@ -1102,7 +1182,7 @@ export default function Configuracoes() {
         await fetchBilling();
       } catch {}
     })();
-  }, [isEstab, user?.id, fetchBilling, fetchBillingStatus, applyPublicProfile]);
+  }, [isEstab, user?.id, fetchBilling, fetchBillingStatus, fetchWaConnectStatus, applyPublicProfile]);
 
   useEffect(() => {
     const subscription = billing?.subscription;
@@ -2167,6 +2247,71 @@ export default function Configuracoes() {
     });
 
     if (isEstab) {
+      const waAccount = waConnectState.account;
+      const waConnected = waAccount?.status === 'connected';
+      const waDisplayRaw = waAccount?.display_phone_number || '';
+      const waDisplayLabel = waDisplayRaw ? formatPhoneLabel(String(waDisplayRaw)) : '';
+      list.push({
+        id: 'whatsapp-connect',
+        title: 'WhatsApp Business',
+        content: (
+          <div className="grid" style={{ gap: 10 }}>
+            <p className="muted">
+              Conecte o número do estabelecimento para enviar mensagens com o seu próprio WhatsApp Business.
+            </p>
+            {waConnectState.loading && (
+              <div className="row" style={{ gap: 8, alignItems: 'center' }}>
+                <span className="spinner" aria-hidden />
+                <span className="muted" style={{ fontSize: 13 }}>Carregando status do WhatsApp...</span>
+              </div>
+            )}
+            {!waConnectState.loading && waConnected && (
+              <div className="notice notice--success">
+                Conectado ao numero {waDisplayLabel || waDisplayRaw || 'indisponivel'}.
+              </div>
+            )}
+            {!waConnectState.loading && !waConnected && (
+              <div className="notice notice--warn">
+                WhatsApp não conectado. Conecte seu número para ativar os envios.
+              </div>
+            )}
+            {waAccount?.phone_number_id && (
+              <span className="muted" style={{ fontSize: 12 }}>
+                phone_number_id: {waAccount.phone_number_id}
+              </span>
+            )}
+            {waConnectState.error && (
+              <div className="notice notice--error" role="alert">{waConnectState.error}</div>
+            )}
+            {waConnectState.notice && (
+              <div className="notice notice--success" role="status">{waConnectState.notice}</div>
+            )}
+            <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                className="btn btn--primary"
+                onClick={handleWhatsAppConnect}
+                disabled={waConnectState.connectLoading}
+              >
+                {waConnectState.connectLoading ? <span className="spinner" /> : 'Conectar WhatsApp'}
+              </button>
+              {waConnected && (
+                <button
+                  type="button"
+                  className="btn btn--outline"
+                  onClick={handleWhatsAppDisconnect}
+                  disabled={waConnectState.disconnectLoading}
+                >
+                  {waConnectState.disconnectLoading ? <span className="spinner" /> : 'Desconectar'}
+                </button>
+              )}
+            </div>
+          </div>
+        ),
+      });
+    }
+
+    if (isEstab) {
       list.push({
         id: 'public-profile',
         title: 'Perfil público do estabelecimento',
@@ -3056,6 +3201,9 @@ export default function Configuracoes() {
     publicProfileStatus,
     publicProfileLoading,
     publicProfileSaving,
+    waConnectState,
+    handleWhatsAppConnect,
+    handleWhatsAppDisconnect,
     workingHours,
     handlePublicProfileChange,
     handleWorkingHoursToggle,

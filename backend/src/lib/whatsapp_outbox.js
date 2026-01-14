@@ -189,10 +189,11 @@ export async function sendAppointmentWhatsApp({
       context: { kind, agendamentoId: agId, estabelecimentoId: estabId },
     });
   } catch (err) {
+    const errorCode = err?.code === 'wa_not_connected' ? 'wa_not_connected' : 'send_failed';
     return {
       ok: false,
       sent: false,
-      error: 'send_failed',
+      error: errorCode,
       detail: err?.message || String(err),
       wa_status: err?.status,
       wa_body: err?.body,

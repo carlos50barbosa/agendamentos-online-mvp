@@ -53,7 +53,7 @@ router.post('/whatsapp/send', authRequired, async (req, res) => {
   }
 
   try {
-    const r = await notifyWhatsapp(message, to);
+    const r = await notifyWhatsapp(message, to, { estabelecimentoId: req.user.id });
     if (r && r.blocked) return res.status(202).json({ ok: true, blocked: true });
     return res.json({ ok: true, result: r });
   } catch (e) {
@@ -76,7 +76,7 @@ router.post('/whatsapp/schedule', authRequired, async (req, res) => {
       return res.status(403).json({ error: 'plan_restricted', message: planCheck.message });
     }
 
-    const r = await scheduleWhatsApp({ to, scheduledAt, message, metadata });
+    const r = await scheduleWhatsApp({ to, scheduledAt, message, metadata, estabelecimentoId: req.user.id });
     if (r && r.blocked) return res.status(202).json({ ok: true, blocked: true });
     return res.json({ ok: true, ...r });
   } catch (e) {

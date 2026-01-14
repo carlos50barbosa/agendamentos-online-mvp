@@ -1,13 +1,16 @@
 // backend/src/lib/notifications.js
-import fetch from 'node-fetch';
 import nodemailer from 'nodemailer';
 import { getWhatsAppLastInboundAt, isWhatsAppWindowOpen } from './whatsapp_contacts.js';
+import { decryptAccessToken } from '../services/waCrypto.js';
+import { extractWamid, sendWhatsAppMessage } from '../services/waGraph.js';
+import { getWaAccountByEstabelecimentoId, recordWaMessage } from '../services/waTenant.js';
 
 /**
  * Configuração (via ENV)
  *
- * WA_PHONE_NUMBER_ID=...
- * WA_TOKEN=...
+ * WA_PHONE_NUMBER_ID=...             // fallback/dev
+ * WA_TOKEN=...                       // fallback/dev (legado)
+ * WA_DEFAULT_TOKEN=...               // fallback/dev (opcional)
  * WA_API_VERSION=v23.0
  * WA_FORCE_TEMPLATE=true|false
  * WA_TEMPLATE_NAME=hello_world
@@ -27,8 +30,8 @@ import { getWhatsAppLastInboundAt, isWhatsAppWindowOpen } from './whatsapp_conta
 const parseBool = (value) => /^(1|true|yes|on)$/i.test(String(value || '').trim());
 
 const cfg = {
-  phoneId: process.env.WA_PHONE_NUMBER_ID,
-  token: process.env.WA_TOKEN,
+  defaultPhoneId: process.env.WA_PHONE_NUMBER_ID,
+  defaultToken: process.env.WA_DEFAULT_TOKEN || process.env.WA_TOKEN,
   apiVersion: process.env.WA_API_VERSION || 'v23.0',
 
   forceTemplate: parseBool(process.env.WA_FORCE_TEMPLATE),
@@ -105,15 +108,6 @@ function summarizePayload(payload) {
   return { type };
 }
 
-function extractWamid(resp) {
-  try {
-    const id = resp?.messages?.[0]?.id;
-    return id ? String(id) : null;
-  } catch {
-    return null;
-  }
-}
-
 function logSend({ phone, payload, context }) {
   const summary = summarizePayload(payload);
   const base = {
@@ -140,39 +134,62 @@ function is24hWindowError(err) {
   return code === 470 || sub === 2018028 || sub === 131047 || /24\s*h/i.test(msg) || err?.status === 400;
 }
 
-function graphUrl(path) {
-  return `https://graph.facebook.com/${cfg.apiVersion}/${path}`;
-}
-
-async function callGraph(url, payload) {
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${cfg.token}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(payload),
-  });
-
-  const text = await res.text();
-  let json;
-  try { json = JSON.parse(text); } catch { json = text; }
-
-  if (cfg.debug) {
-    console.log('[wa/cloud] url=%s status=%s body=%s',
-      url, res.status, typeof json === 'string' ? json : JSON.stringify(json));
+async function resolveTenantConfig(context = {}) {
+  const estabelecimentoId = Number(context?.estabelecimentoId || 0) || null;
+  if (estabelecimentoId) {
+    try {
+      const account = await getWaAccountByEstabelecimentoId(estabelecimentoId);
+      if (
+        account &&
+        account.status === 'connected' &&
+        account.phone_number_id &&
+        account.access_token_enc
+      ) {
+        const token = decryptAccessToken(account.access_token_enc);
+        if (token) {
+          return {
+            token,
+            phoneId: account.phone_number_id,
+            estabelecimentoId: account.estabelecimento_id,
+            fallback: false,
+          };
+        }
+      }
+    } catch (err) {
+      console.warn('[wa][tenant] resolve failed', err?.message || err);
+    }
   }
 
-  if (!res.ok) {
-    const err = new Error(`WA ${res.status}`);
-    err.status = res.status;
-    err.body = json;
-    throw err;
+  if (cfg.defaultToken && cfg.defaultPhoneId) {
+    return {
+      token: cfg.defaultToken,
+      phoneId: cfg.defaultPhoneId,
+      estabelecimentoId,
+      fallback: true,
+    };
   }
-  return json;
+
+  return { token: null, phoneId: null, estabelecimentoId, fallback: false };
 }
 
-async function sendText({ to, message, context }) {
+async function recordOutboundMessage({ tenant, phone, payload, resp }) {
+  if (!tenant?.estabelecimentoId) return;
+  try {
+    await recordWaMessage({
+      estabelecimentoId: tenant.estabelecimentoId,
+      direction: 'out',
+      waId: phone,
+      wamid: extractWamid(resp),
+      phoneNumberId: tenant.phoneId,
+      payload,
+      status: 'sent',
+    });
+  } catch (err) {
+    console.warn('[wa][outbound] record failed', err?.message || err);
+  }
+}
+
+async function sendText({ to, message, context, tenant }) {
   const phone = normalizePhoneDigits(to);
   if (!phone) {
     if (cfg.debug) console.warn('[whatsapp] invalid phone -> %s', to);
@@ -182,8 +199,11 @@ async function sendText({ to, message, context }) {
     if (cfg.debug) console.warn('[whatsapp] bloqueado por ALLOWED_LIST -> %s', phone);
     return { blocked: true };
   }
-  if (!cfg.token || !cfg.phoneId) {
-    throw new Error('WA config missing (token/phoneId)');
+  const resolved = tenant || await resolveTenantConfig(context);
+  if (!resolved.token || !resolved.phoneId) {
+    const err = new Error('WA config missing (token/phoneId)');
+    err.code = 'wa_not_connected';
+    throw err;
   }
 
   const payload = {
@@ -192,10 +212,14 @@ async function sendText({ to, message, context }) {
     type: 'text',
     text: { preview_url: false, body: String(message || '') },
   };
-  const url = graphUrl(`${cfg.phoneId}/messages`);
   logSend({ phone, payload, context });
-  const resp = await callGraph(url, payload);
+  const resp = await sendWhatsAppMessage({
+    accessToken: resolved.token,
+    phoneNumberId: resolved.phoneId,
+    payload,
+  });
   logSendResult({ phone, payloadType: payload.type, wamid: extractWamid(resp), context });
+  await recordOutboundMessage({ tenant: resolved, phone, payload, resp });
   return resp;
 }
 
@@ -210,6 +234,8 @@ export async function sendTemplate({
   headerVideoUrl,
   headerText,
   context,
+  estabelecimentoId,
+  tenant,
 }) {
   const phone = normalizePhoneDigits(to);
   if (!phone) {
@@ -220,8 +246,11 @@ export async function sendTemplate({
     if (cfg.debug) console.warn('[whatsapp] bloqueado por ALLOWED_LIST -> %s', phone);
     return { blocked: true };
   }
-  if (!cfg.token || !cfg.phoneId) {
-    throw new Error('WA config missing (token/phoneId)');
+  const resolved = tenant || await resolveTenantConfig(context || { estabelecimentoId });
+  if (!resolved.token || !resolved.phoneId) {
+    const err = new Error('WA config missing (token/phoneId)');
+    err.code = 'wa_not_connected';
+    throw err;
   }
 
   const template = {
@@ -285,19 +314,24 @@ export async function sendTemplate({
     template,
   };
 
-  const url = graphUrl(`${cfg.phoneId}/messages`);
   if (cfg.debug) {
     console.log('[wa/cloud/template] to=%s name=%s lang=%s params=%d',
       phone, template.name, template.language?.code, bodyParams.length);
   }
   logSend({ phone, payload, context });
-  const resp = await callGraph(url, payload);
+  const resp = await sendWhatsAppMessage({
+    accessToken: resolved.token,
+    phoneNumberId: resolved.phoneId,
+    payload,
+  });
   logSendResult({ phone, payloadType: payload.type, wamid: extractWamid(resp), context });
+  await recordOutboundMessage({ tenant: resolved, phone, payload, resp });
   return resp;
 }
 // ============== WhatsApp: Texto (ou Template se forceTemplate=true) ==============
-export async function notifyWhatsapp(message, to) {
-  return sendWhatsAppSmart({ to, message });
+export async function notifyWhatsapp(message, to, options = {}) {
+  const context = options?.context || (options?.estabelecimentoId ? { estabelecimentoId: options.estabelecimentoId } : undefined);
+  return sendWhatsAppSmart({ to, message, context });
 }
 
 export async function sendWhatsAppSmart({
@@ -310,6 +344,7 @@ export async function sendWhatsAppSmart({
   allowText = true,
   forceTemplate,
   context,
+  estabelecimentoId,
   returnMeta = false,
 } = {}) {
   const messageText = message != null ? String(message) : (text != null ? String(text) : '');
@@ -328,6 +363,8 @@ export async function sendWhatsAppSmart({
       },
     };
   }
+  const ctx = estabelecimentoId ? { ...(context || {}), estabelecimentoId } : (context || {});
+  const tenant = await resolveTenantConfig(ctx);
   const lastInbound = await getWhatsAppLastInboundAt(phone);
   const windowOpen = isWhatsAppWindowOpen(lastInbound, new Date());
 
@@ -369,7 +406,8 @@ export async function sendWhatsAppSmart({
       headerDocumentUrl: templatePayload.headerDocumentUrl,
       headerVideoUrl: templatePayload.headerVideoUrl,
       headerText: templatePayload.headerText,
-      context,
+      context: ctx,
+      tenant,
     });
     return finalize(result);
   }
@@ -377,7 +415,7 @@ export async function sendWhatsAppSmart({
   if (allowText && messageText) {
     try {
       decision = 'text';
-      const result = await sendText({ to: phone, message: messageText, context });
+      const result = await sendText({ to: phone, message: messageText, context: ctx, tenant });
       return finalize(result);
     } catch (err) {
       if (is24hWindowError(err)) {
@@ -392,7 +430,8 @@ export async function sendWhatsAppSmart({
           headerDocumentUrl: templatePayload.headerDocumentUrl,
           headerVideoUrl: templatePayload.headerVideoUrl,
           headerText: templatePayload.headerText,
-          context,
+          context: ctx,
+          tenant,
         });
         return finalize(result);
       }
@@ -411,14 +450,15 @@ export async function sendWhatsAppSmart({
       headerDocumentUrl: template.headerDocumentUrl,
       headerVideoUrl: template.headerVideoUrl,
       headerText: template.headerText,
-      context,
+      context: ctx,
+      tenant,
     });
     return finalize(result);
   }
 
   if (message != null || text != null) {
     decision = 'text';
-    const result = await sendText({ to: phone, message: messageText, context });
+    const result = await sendText({ to: phone, message: messageText, context: ctx, tenant });
     return finalize(result);
   }
 
@@ -429,7 +469,17 @@ export async function sendWhatsAppSmart({
 // ============== WhatsApp: Agendamento simples em memória ==============
 const timers = new Set();
 
-export async function scheduleWhatsApp({ to, scheduledAt, message, metadata, useTemplate, bodyParams, templateName, templateLang }) {
+export async function scheduleWhatsApp({
+  to,
+  scheduledAt,
+  message,
+  metadata,
+  useTemplate,
+  bodyParams,
+  templateName,
+  templateLang,
+  estabelecimentoId,
+} = {}) {
   const when = new Date(scheduledAt);
   if (Number.isNaN(+when)) throw new Error('scheduledAt inválido');
 
@@ -456,6 +506,7 @@ export async function scheduleWhatsApp({ to, scheduledAt, message, metadata, use
           name: templateName || cfg.templateName,
           lang: templateLang || cfg.templateLang,
           bodyParams: params,
+          estabelecimentoId,
         });
       } else {
         const params = Array.isArray(bodyParams) && bodyParams.length > 0
@@ -469,6 +520,7 @@ export async function scheduleWhatsApp({ to, scheduledAt, message, metadata, use
             lang: templateLang || cfg.templateLang,
             bodyParams: params,
           },
+          estabelecimentoId,
         });
       }
     } catch (err) {
