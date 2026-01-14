@@ -3,7 +3,7 @@ import crypto from 'node:crypto';
 import jwt from 'jsonwebtoken';
 import { auth, isEstabelecimento } from '../middleware/auth.js';
 import { encryptAccessToken } from '../services/waCrypto.js';
-import { exchangeOAuthCode, fetchWabaAssets } from '../services/waGraph.js';
+import { exchangeOAuthCode, getGraph } from '../services/waGraph.js';
 import {
   getWaAccountByEstabelecimentoId,
   getWaAccountByPhoneNumberId,
@@ -125,12 +125,64 @@ router.get('/connect/callback', async (req, res) => {
     const accessToken = tokenResp?.access_token;
     if (!accessToken) throw new Error('missing_access_token');
 
-    const assets = await fetchWabaAssets(accessToken);
-    if (!assets?.phoneNumberId) {
-      throw new Error('missing_phone_number');
+    let businessId = null;
+    try {
+      const businesses = await getGraph('me/businesses', accessToken, { fields: 'id,name', limit: 1 });
+      businessId = businesses?.data?.[0]?.id || null;
+    } catch {}
+    if (!businessId) {
+      try {
+        const me = await getGraph('me', accessToken, { fields: 'id' });
+        businessId = me?.id || null;
+      } catch {}
     }
 
-    const existingPhone = await getWaAccountByPhoneNumberId(assets.phoneNumberId);
+    let wabaId = null;
+    let phoneNumberId = null;
+    let displayPhoneNumber = null;
+    let phoneNumbersCount = 0;
+    let rawKeys = {};
+
+    if (businessId) {
+      const wabaResp = await getGraph(
+        `${businessId}/owned_whatsapp_business_accounts`,
+        accessToken,
+        { fields: 'id,name', limit: 10 }
+      );
+      const wabas = Array.isArray(wabaResp?.data) ? wabaResp.data : [];
+      rawKeys.waba_keys = Object.keys(wabaResp || {});
+      for (const waba of wabas) {
+        if (!waba?.id) continue;
+        const phonesResp = await getGraph(
+          `${waba.id}/phone_numbers`,
+          accessToken,
+          { fields: 'id,display_phone_number,verified_name', limit: 10 }
+        );
+        const phones = Array.isArray(phonesResp?.data) ? phonesResp.data : [];
+        phoneNumbersCount += phones.length;
+        rawKeys.phone_keys = Object.keys(phonesResp || {});
+        if (!phones.length) continue;
+        const first = phones[0];
+        if (first?.id) {
+          wabaId = String(waba.id);
+          phoneNumberId = String(first.id);
+          displayPhoneNumber = first.display_phone_number ? String(first.display_phone_number) : null;
+          break;
+        }
+      }
+    }
+
+    if (!phoneNumberId) {
+      console.warn('[wa/connect/callback] missing phone_number', {
+        business_id: businessId,
+        waba_id: wabaId,
+        phone_numbers_count: phoneNumbersCount,
+        raw_keys: rawKeys,
+      });
+      return res.redirect(302, `${FRONTEND_BASE}/configuracoes?wa=error&reason=missing_phone_number`);
+    }
+
+    const existingPhone = await getWaAccountByPhoneNumberId(phoneNumberId);
     if (existingPhone && Number(existingPhone.estabelecimento_id) !== Number(estabelecimentoId)) {
       return res.redirect(302, resolveRedirect('phone_in_use'));
     }
@@ -138,10 +190,10 @@ router.get('/connect/callback', async (req, res) => {
     const { enc, last4 } = encryptAccessToken(accessToken);
     await upsertWaAccount({
       estabelecimentoId,
-      wabaId: assets.wabaId,
-      phoneNumberId: assets.phoneNumberId,
-      displayPhoneNumber: assets.displayPhoneNumber,
-      businessId: assets.businessId,
+      wabaId,
+      phoneNumberId,
+      displayPhoneNumber,
+      businessId,
       accessTokenEnc: enc,
       tokenLast4: last4,
       status: 'connected',
