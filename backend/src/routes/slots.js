@@ -1,18 +1,15 @@
-﻿// src/routes/slots.js
+// src/routes/slots.js
 import { Router } from 'express';
 import { pool } from '../lib/db.js';
 import { EST_TZ_OFFSET_MIN, makeUtcFromLocalYMDHM, weekDayIndexInTZ } from '../lib/datetime_tz.js';
+import { buildWorkingRules, resolveExpedienteForDay } from '../lib/expediente.js';
 import { getPlanContext, isDelinquentStatus } from '../lib/plans.js';
 import { auth, isEstabelecimento } from '../middleware/auth.js';
 
 const router = Router();
 
 // ===== Configuracao padrao de funcionamento =====
-const OPEN_HOUR = 7;      // 07:00
-const CLOSE_HOUR = 22;    // ate 22:00 (ultimo slot termina as 22:00)
 const INTERVAL_MIN = 30;  // intervalo de 30min
-const DEFAULT_START_MIN = OPEN_HOUR * 60;
-const DEFAULT_END_MIN = CLOSE_HOUR * 60;
 const APPOINTMENT_BUFFER_MIN = (() => {
   const raw = process.env.AGENDAMENTO_BUFFER_MIN ?? process.env.APPOINTMENT_BUFFER_MIN;
   if (raw === undefined || raw === null || String(raw).trim() === '') return 0;
@@ -20,6 +17,7 @@ const APPOINTMENT_BUFFER_MIN = (() => {
   return Number.isFinite(parsed) && parsed > 0 ? Math.round(parsed) : 0;
 })();
 const DAY_MS = 24 * 60 * 60 * 1000;
+const DAY_MINUTES = 24 * 60;
 
 // Helpers
 const parseLocalYmd = (value) => {
@@ -96,224 +94,6 @@ const extractServiceIds = (query) => {
     return normalizeServiceIds([query.servico_id]);
   }
   return [];
-};
-
-const DAY_SLUG_TO_INDEX = Object.freeze({
-  sunday: 0,
-  sundayfeira: 0,
-  sun: 0,
-  domingo: 0,
-  domingofeira: 0,
-  dom: 0,
-  monday: 1,
-  mondayfeira: 1,
-  mon: 1,
-  segunda: 1,
-  segundafeira: 1,
-  seg: 1,
-  tuesday: 2,
-  tuesdayfeira: 2,
-  tue: 2,
-  terca: 2,
-  tercafeira: 2,
-  ter: 2,
-  wednesday: 3,
-  wednesdayfeira: 3,
-  wed: 3,
-  quarta: 3,
-  quartafeira: 3,
-  qua: 3,
-  thursday: 4,
-  thursdayfeira: 4,
-  thu: 4,
-  quinta: 4,
-  quintafeira: 4,
-  qui: 4,
-  friday: 5,
-  fridayfeira: 5,
-  fri: 5,
-  sexta: 5,
-  sextafeira: 5,
-  sex: 5,
-  saturday: 6,
-  saturdayfeira: 6,
-  sat: 6,
-  sabado: 6,
-  sabadofeira: 6,
-  sab: 6,
-});
-
-const normalizeDayKey = (value) => {
-  if (!value && value !== 0) return '';
-  return String(value)
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .replace(/[^a-z]/g, '');
-};
-
-const resolveDayIndex = (item) => {
-  if (!item || typeof item !== 'object') return null;
-  const candidates = [
-    item.day,
-    item.key,
-    item.weekday,
-    item.week_day,
-    item.dia,
-    item.label,
-  ];
-  if (item.value) {
-    candidates.push(item.value);
-    const firstChunk = String(item.value).split(/[\s,;-]+/)[0];
-    candidates.push(firstChunk);
-  }
-
-  for (const candidate of candidates) {
-    const normalized = normalizeDayKey(candidate);
-    if (!normalized) continue;
-    if (Object.prototype.hasOwnProperty.call(DAY_SLUG_TO_INDEX, normalized)) {
-      return DAY_SLUG_TO_INDEX[normalized];
-    }
-  }
-  return null;
-};
-
-const ensureTimeValue = (value) => {
-  if (!value && value !== 0) return null;
-  const text = String(value).trim();
-  if (!text) return null;
-  const direct = text.match(/^([01]?\d|2[0-3]):([0-5]\d)$/);
-  if (direct) return `${direct[1].padStart(2, '0')}:${direct[2]}`;
-  const digits = text.replace(/\D/g, '');
-  if (!digits) return null;
-  if (digits.length <= 2) {
-    const hours = Number(digits);
-    if (!Number.isInteger(hours) || hours < 0 || hours > 23) return null;
-    return `${String(hours).padStart(2, '0')}:00`;
-  }
-  const hoursDigits = digits.slice(0, -2);
-  const minutesDigits = digits.slice(-2);
-  const hoursNum = Number(hoursDigits);
-  const minutesNum = Number(minutesDigits);
-  if (
-    !Number.isInteger(hoursNum) ||
-    hoursNum < 0 ||
-    hoursNum > 23 ||
-    !Number.isInteger(minutesNum) ||
-    minutesNum < 0 ||
-    minutesNum > 59
-  ) {
-    return null;
-  }
-  return `${String(hoursNum).padStart(2, '0')}:${String(minutesNum).padStart(2, '0')}`;
-};
-
-const toMinutes = (time) => {
-  if (!time) return null;
-  const parts = time.split(':');
-  if (parts.length !== 2) return null;
-  const hours = Number(parts[0]);
-  const minutes = Number(parts[1]);
-  if (!Number.isInteger(hours) || !Number.isInteger(minutes)) return null;
-  return hours * 60 + minutes;
-};
-
-const buildWorkingRules = (horariosJson) => {
-  if (!horariosJson) return null;
-  let entries;
-  try {
-    entries = JSON.parse(horariosJson);
-  } catch {
-    return null;
-  }
-  if (!Array.isArray(entries) || !entries.length) return null;
-  const rules = Array.from({ length: 7 }, () => ({
-    enabled: false,
-    startMinutes: null,
-    endMinutes: null,
-    breaks: [],
-  }));
-  let recognized = false;
-
-  entries.forEach((item) => {
-    if (!item || typeof item !== 'object') return;
-    const idx = resolveDayIndex(item);
-    if (idx == null) return;
-    if (rules[idx].processed) return;
-
-    const valueText = String(item.value ?? '').toLowerCase();
-    if (
-      valueText.includes('fechado') ||
-      valueText.includes('sem atendimento') ||
-      valueText.includes('nao atende')
-    ) {
-      rules[idx] = { enabled: false, startMinutes: null, endMinutes: null, breaks: [], processed: true };
-      recognized = true;
-      return;
-    }
-
-    const start = ensureTimeValue(item.start ?? item.begin ?? item.from ?? null);
-    const end = ensureTimeValue(item.end ?? item.finish ?? item.to ?? null);
-    if (!start || !end) {
-      rules[idx] = { enabled: false, startMinutes: null, endMinutes: null, breaks: [], processed: true };
-      recognized = true;
-      return;
-    }
-    const startMinutes = toMinutes(start);
-    const endMinutes = toMinutes(end);
-    if (
-      startMinutes == null ||
-      endMinutes == null ||
-      startMinutes >= endMinutes
-    ) {
-      rules[idx] = { enabled: false, startMinutes: null, endMinutes: null, breaks: [], processed: true };
-      recognized = true;
-      return;
-    }
-
-    const rawBlocks = Array.isArray(item.blocks)
-      ? item.blocks
-      : Array.isArray(item.breaks)
-      ? item.breaks
-      : [];
-
-    const breaks = [];
-    rawBlocks.forEach((block) => {
-      if (!block) return;
-      const blockStart = ensureTimeValue(block.start ?? block.begin ?? block.from ?? null);
-      const blockEnd = ensureTimeValue(block.end ?? block.finish ?? block.to ?? null);
-      const blockStartMinutes = toMinutes(blockStart);
-      const blockEndMinutes = toMinutes(blockEnd);
-      if (
-        blockStartMinutes == null ||
-        blockEndMinutes == null ||
-        blockStartMinutes >= blockEndMinutes ||
-        blockStartMinutes < startMinutes ||
-        blockEndMinutes > endMinutes
-      ) {
-        return;
-      }
-      breaks.push([blockStartMinutes, blockEndMinutes]);
-    });
-
-    rules[idx] = {
-      enabled: true,
-      startMinutes,
-      endMinutes,
-      breaks,
-      processed: true,
-    };
-    recognized = true;
-  });
-
-  if (!recognized) return null;
-  return rules.map((rule) => {
-    if (!rule.processed) {
-      return { enabled: false, startMinutes: null, endMinutes: null, breaks: [] };
-    }
-    const { processed, ...rest } = rule;
-    return rest;
-  });
 };
 
 /**
@@ -440,44 +220,98 @@ router.get('/', async (req, res) => {
         0,
         EST_TZ_OFFSET_MIN
       );
-      const weekDayIndex = weekDayIndexInTZ(dayStartUtc, EST_TZ_OFFSET_MIN);
-      const rule = workingRules ? workingRules[weekDayIndex ?? localDay.weekday] : null;
-      if (rule && rule.enabled === false) {
-        continue;
-      }
-      const dayStartMinutes = rule && rule.enabled ? rule.startMinutes : DEFAULT_START_MIN;
-      const dayEndMinutes = rule && rule.enabled ? rule.endMinutes : DEFAULT_END_MIN;
-      const dayBreaks = rule && rule.enabled ? rule.breaks : [];
+      const dayIndex = weekDayIndexInTZ(dayStartUtc, EST_TZ_OFFSET_MIN) ?? localDay.weekday;
+      const expediente = resolveExpedienteForDay(workingRules, dayIndex);
+      const prevDayIndex = (dayIndex + 6) % 7;
+      const prevExpediente = resolveExpedienteForDay(workingRules, prevDayIndex);
+      const intervals = [];
 
-      for (let minute = dayStartMinutes; minute < dayEndMinutes; minute += INTERVAL_MIN) {
-        const hour = Math.floor(minute / 60);
-        const minuteOfHour = minute % 60;
-        const slotStartUtc = makeUtcFromLocalYMDHM(
-          localDay.year,
-          localDay.month,
-          localDay.day,
-          hour,
-          minuteOfHour,
-          EST_TZ_OFFSET_MIN
+      if (
+        !prevExpediente.closed &&
+        Number.isFinite(prevExpediente.startMinutes) &&
+        Number.isFinite(prevExpediente.endMinutes) &&
+        prevExpediente.startMinutes > prevExpediente.endMinutes &&
+        prevExpediente.endMinutes > 0
+      ) {
+        const prevBreaks = Array.isArray(prevExpediente.breaks) ? prevExpediente.breaks : [];
+        const earlyBreaks = prevBreaks.filter(
+          ([startMin, endMin]) =>
+            Number.isFinite(startMin) &&
+            Number.isFinite(endMin) &&
+            startMin < prevExpediente.startMinutes
         );
-        const sMs = slotStartUtc.getTime();
-        const eMs = sMs + effectiveDuration * 60_000;
-        const slotEndMinutes = minute + effectiveDuration;
-
-        const ultrapassaFim = slotEndMinutes > dayEndMinutes;
-        const ocupado = !ultrapassaFim && agIntervals.some(([start, end]) => start < eMs && end > sMs);
-        const bloqueadoDb = !ultrapassaFim && blqIntervals.some(([start, end]) => start < eMs && end > sMs);
-        const bloqueadoHorario = dayBreaks.some(([startMin, endMin]) => minute < endMin && slotEndMinutes > startMin);
-        const bloqueado = ultrapassaFim || bloqueadoDb || bloqueadoHorario;
-
-        const label = ocupado ? 'agendado' : (bloqueado ? 'bloqueado' : 'disponivel');
-        const status = ocupado ? 'booked' : (bloqueado ? 'unavailable' : 'free');
-
-        slots.push({
-          datetime: slotStartUtc.toISOString(), // ISO-8601 em UTC equivalente ao horário local
-          label,
-          status
+        intervals.push({
+          start: 0,
+          end: prevExpediente.endMinutes,
+          closeLimit: prevExpediente.endMinutes,
+          breaks: earlyBreaks,
         });
+      }
+
+      if (!expediente.closed && Number.isFinite(expediente.startMinutes) && Number.isFinite(expediente.endMinutes)) {
+        if (expediente.startMinutes < expediente.endMinutes) {
+          intervals.push({
+            start: expediente.startMinutes,
+            end: expediente.endMinutes,
+            closeLimit: expediente.endMinutes,
+            breaks: Array.isArray(expediente.breaks) ? expediente.breaks : [],
+          });
+        } else if (expediente.startMinutes > expediente.endMinutes) {
+          const dayBreaks = Array.isArray(expediente.breaks) ? expediente.breaks : [];
+          const lateBreaks = [];
+          dayBreaks.forEach(([startMin, endMin]) => {
+            if (!Number.isFinite(startMin) || !Number.isFinite(endMin)) return;
+            if (startMin >= expediente.startMinutes) {
+              lateBreaks.push([startMin, endMin]);
+              return;
+            }
+            lateBreaks.push([startMin + DAY_MINUTES, endMin + DAY_MINUTES]);
+          });
+          intervals.push({
+            start: expediente.startMinutes,
+            end: DAY_MINUTES,
+            closeLimit: DAY_MINUTES + expediente.endMinutes,
+            breaks: lateBreaks,
+          });
+        }
+      }
+
+      for (const interval of intervals) {
+        if (!Number.isFinite(interval.start) || !Number.isFinite(interval.end) || interval.start >= interval.end) {
+          continue;
+        }
+        const closeLimit = Number.isFinite(interval.closeLimit) ? interval.closeLimit : interval.end;
+        for (let minute = interval.start; minute < interval.end; minute += INTERVAL_MIN) {
+          const hour = Math.floor(minute / 60);
+          const minuteOfHour = minute % 60;
+          const slotStartUtc = makeUtcFromLocalYMDHM(
+            localDay.year,
+            localDay.month,
+            localDay.day,
+            hour,
+            minuteOfHour,
+            EST_TZ_OFFSET_MIN
+          );
+          const sMs = slotStartUtc.getTime();
+          const eMs = sMs + effectiveDuration * 60_000;
+          const slotEndWindow = minute + effectiveDuration;
+
+          const ultrapassaFim = slotEndWindow > closeLimit;
+          const ocupado = !ultrapassaFim && agIntervals.some(([start, end]) => start < eMs && end > sMs);
+          const bloqueadoDb = !ultrapassaFim && blqIntervals.some(([start, end]) => start < eMs && end > sMs);
+          const bloqueadoHorario = Array.isArray(interval.breaks) &&
+            interval.breaks.some(([startMin, endMin]) => minute < endMin && slotEndWindow > startMin);
+          const bloqueado = ultrapassaFim || bloqueadoDb || bloqueadoHorario;
+
+          const label = ocupado ? 'agendado' : (bloqueado ? 'bloqueado' : 'disponivel');
+          const status = ocupado ? 'booked' : (bloqueado ? 'unavailable' : 'free');
+
+          slots.push({
+            datetime: slotStartUtc.toISOString(), // ISO-8601 em UTC equivalente ao hor rio local
+            label,
+            status
+          });
+        }
       }
     }
 

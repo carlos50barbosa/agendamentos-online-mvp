@@ -20,6 +20,22 @@ const toDigits = (s) => String(s || '').replace(/\D/g, '');
 const HOURS_BACK_FALLBACK = 2;
 const HOURS_FORWARD_FALLBACK = 24;
 
+function getInboundText(msg) {
+  const raw =
+    msg?.text?.body ||
+    msg?.button?.text ||
+    msg?.interactive?.button_reply?.title ||
+    msg?.interactive?.button_reply?.id ||
+    msg?.interactive?.list_reply?.title ||
+    msg?.interactive?.list_reply?.id ||
+    '';
+  return String(raw || '').trim().toLowerCase();
+}
+
+function normalizeConfirmText(text) {
+  return String(text || '').replace(/[!.,;:?]+$/g, '').trim();
+}
+
 function parseDate(str) {
   // aceita YYYY-MM-DD ou DD/MM
   const s = String(str || '').trim();
@@ -130,7 +146,7 @@ async function findAppointmentByPhoneFallback({ fromDigits, reason }) {
     const upper = new Date(now + HOURS_FORWARD_FALLBACK * 60 * 60 * 1000);
 
     const [rows] = await pool.query(
-      `SELECT a.id, a.inicio, a.reminder_8h_msg_id, a.status, u.telefone
+      `SELECT a.id, a.inicio, a.reminder_8h_msg_id, a.status, a.estabelecimento_id, u.telefone
        FROM agendamentos a
        JOIN usuarios u ON u.id = a.cliente_id
        WHERE a.status IN ('confirmado','pendente')
@@ -173,13 +189,13 @@ async function tryRecordReminderConfirmation({ contextMessageId, fromDigits }) {
         'UPDATE agendamentos SET cliente_confirmou_whatsapp_at = COALESCE(cliente_confirmou_whatsapp_at, NOW()) WHERE id=? LIMIT 1',
         [fallback.id]
       );
-      return { ok: true };
+      return { ok: true, agendamentoId: fallback.id, estabelecimentoId: fallback.estabelecimento_id || null };
     }
     return { ok: false, reason: 'not_found' };
   }
   try {
     const [[row]] = await pool.query(
-      `SELECT a.id, a.status, u.telefone
+      `SELECT a.id, a.status, a.estabelecimento_id, u.telefone
        FROM agendamentos a
        JOIN usuarios u ON u.id = a.cliente_id
        WHERE a.reminder_8h_msg_id=? LIMIT 1`,
@@ -192,7 +208,7 @@ async function tryRecordReminderConfirmation({ contextMessageId, fromDigits }) {
           'UPDATE agendamentos SET cliente_confirmou_whatsapp_at = COALESCE(cliente_confirmou_whatsapp_at, NOW()) WHERE id=? LIMIT 1',
           [fallback.id]
         );
-        return { ok: true };
+        return { ok: true, agendamentoId: fallback.id, estabelecimentoId: fallback.estabelecimento_id || null };
       }
       return { ok: false, reason: 'not_found' };
     }
@@ -209,7 +225,7 @@ async function tryRecordReminderConfirmation({ contextMessageId, fromDigits }) {
       'UPDATE agendamentos SET cliente_confirmou_whatsapp_at = COALESCE(cliente_confirmou_whatsapp_at, NOW()) WHERE id=? LIMIT 1',
       [row.id]
     );
-    return { ok: true };
+    return { ok: true, agendamentoId: row.id, estabelecimentoId: row.estabelecimento_id || null };
   } catch (e) {
     console.warn('[wa/confirm-btn] erro ao registrar confirmacao', e?.message || e);
     return { ok: false, reason: 'error' };
@@ -266,25 +282,42 @@ router.post('/', async (req, res) => {
       console.warn('[wa/webhook][inbound] failed to record', err?.message || err)
     );
 
+    const inboundText = getInboundText(msg);
+    const confirmText = normalizeConfirmText(inboundText);
+    console.log('[wa][inbound]', { type: msg?.type || null, extracted: inboundText?.slice(0, 30) });
+
+    const isConfirm = confirmText === 'confirmar' || confirmText.startsWith('confirmar ');
+
     // Confirmacao de lembrete (botao "CONFIRMAR") usando context.id do template
     const interactive = msg?.interactive?.button_reply || null;
     const buttonPayload = msg?.button?.payload || interactive?.id || null;
     const contextMsgId = msg?.context?.id || null;
-    if (buttonPayload || contextMsgId) {
-      const recorded = await tryRecordReminderConfirmation({ contextMessageId: contextMsgId, fromDigits: from });
-      if (recorded?.ok) {
-        await send(from, 'Confirmado! Vamos te aguardar no horário combinado.');
-        return res.sendStatus(200);
-      }
-      if (recorded?.reason === 'cancelled') {
-        await send(from, 'Esse agendamento foi cancelado e não pode ser confirmado. Entre em contato com o estabelecimento se tiver dúvidas.');
-        return res.sendStatus(200);
-      }
-      if (recorded?.reason === 'not_confirmable') {
-        await send(from, 'Esse agendamento nao esta disponível para confirmacao.');
+    if (isConfirm || buttonPayload || contextMsgId) {
+      try {
+        const recorded = await tryRecordReminderConfirmation({ contextMessageId: contextMsgId, fromDigits: from });
+        if (recorded?.ok) {
+          console.log('[wa][confirm]', {
+            agendamentoId: recorded?.agendamentoId || null,
+            estabelecimentoId: recorded?.estabelecimentoId || null,
+            via: msg?.type || null,
+          });
+          await send(from, 'Confirmado! Vamos te aguardar no hor\u00e1rio combinado.');
+          return res.sendStatus(200);
+        }
+        if (recorded?.reason === 'cancelled') {
+          await send(from, 'Esse agendamento foi cancelado e n\u00e3o pode ser confirmado. Entre em contato com o estabelecimento se tiver d\u00favidas.');
+          return res.sendStatus(200);
+        }
+        if (recorded?.reason === 'not_confirmable') {
+          await send(from, 'Esse agendamento nao esta dispon\u00edvel para confirmacao.');
+          return res.sendStatus(200);
+        }
+      } catch (err) {
+        console.warn('[wa][confirm] failed', err?.message || err);
         return res.sendStatus(200);
       }
     }
+
 
     // Resposta fixa (menu desativado)
     const autoReply = 'Olá! Aqui é o assistênte do Agendamentos Online.\n\nPara marcar, reagendar ou cancelar, use nosso site.\n\nSe tiver qualquer dúvida, acesse: https://agendamentosonline.com/ajuda.\n\nObrigado!';

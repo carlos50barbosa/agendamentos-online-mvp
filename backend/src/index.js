@@ -17,7 +17,7 @@ import notifyRouter from './routes/notify.js'; // rota de teste de notificaçõe
 import adminRouter from './routes/admin.js';
 import relatoriosRouter from './routes/relatorios.js';
 import billingRouter from './routes/billing.js';
-import waWebhookRouter from './routes/whatsapp_webhook.js';
+import whatsappWebhookRouter from './routes/whatsapp_webhook.js';
 import waConnectRouter from './routes/waConnect.js';
 import waTenantWebhookRouter from './routes/waWebhook.js';
 import publicAgendamentosRouter from './routes/agendamentos_public.js';
@@ -98,7 +98,7 @@ app.use('/relatorios', relatoriosRouter);
 app.use('/billing', billingRouter);
 app.use('/wa', waConnectRouter);
 app.use('/wa/webhook', waTenantWebhookRouter);
-app.use('/webhooks/whatsapp', waWebhookRouter);
+app.use('/webhooks/whatsapp', whatsappWebhookRouter);
 
 // Aliases “/api/*” (seu Nginx usa /api)
 app.use('/api/auth', authRouter);
@@ -117,7 +117,7 @@ app.use('/api/relatorios', relatoriosRouter);
 app.use('/api/billing', billingRouter);
 app.use('/api/wa', waConnectRouter);
 app.use('/api/wa/webhook', waTenantWebhookRouter);
-app.use('/api/webhooks/whatsapp', waTenantWebhookRouter);
+app.use('/api/webhooks/whatsapp', whatsappWebhookRouter);
 
 // Middleware final de erro
 app.use((err, req, res, _next) => {
@@ -138,6 +138,7 @@ const PORT = Number(process.env.PORT || 3002);
 
 app.listen(PORT, HOST, () => {
   console.log(`✅ Backend ouvindo em http://${HOST}:${PORT}`);
+  console.log('[routes] whatsapp: /webhooks/whatsapp, /api/webhooks/whatsapp | wa: /wa/webhook, /api/wa/webhook');
 });
 
 // Tarefas de manutencao: limpeza de tokens expirados e lembretes de cobranca

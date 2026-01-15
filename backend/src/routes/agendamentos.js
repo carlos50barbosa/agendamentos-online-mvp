@@ -1,7 +1,7 @@
 // backend/src/routes/agendamentos.js
 import { Router } from 'express';
 import { pool } from '../lib/db.js';
-import { EST_TZ_OFFSET_MIN, minutesOfDayInTZ, weekDayIndexInTZ } from '../lib/datetime_tz.js';
+import { assertDentroExpediente, formatExpedienteMessage, getExpediente, getLocalRangeMinutes } from '../lib/expediente.js';
 import { getPlanContext, isDelinquentStatus, formatPlanLimitExceeded } from '../lib/plans.js';
 import { auth as authRequired, isCliente, isEstabelecimento } from '../middleware/auth.js';
 import { notifyEmail } from '../lib/notifications.js';
@@ -75,9 +75,6 @@ const APPOINTMENT_BUFFER_MIN = (() => {
   const parsed = Number(raw);
   return Number.isFinite(parsed) && parsed > 0 ? Math.round(parsed) : 0;
 })();
-const DEFAULT_START_MIN = 7 * 60;
-const DEFAULT_END_MIN = 22 * 60;
-
 const normalizeServiceIds = (value) => {
   const ids = [];
   const pushId = (entry) => {
@@ -249,260 +246,6 @@ const hydrateAppointmentsWithItems = async (db, rows) => {
   return rows;
 };
 
-/** Valida horário do payload em horário local (UTC-3). */
-function inBusinessHours(dateUtc) {
-  const minutes = minutesOfDayInTZ(dateUtc, EST_TZ_OFFSET_MIN);
-  if (minutes == null) return false;
-  return minutes >= DEFAULT_START_MIN && minutes < DEFAULT_END_MIN;
-}
-
-const DAY_SLUG_TO_INDEX = Object.freeze({
-  sunday: 0,
-  sundayfeira: 0,
-  sun: 0,
-  domingo: 0,
-  domingofeira: 0,
-  dom: 0,
-  monday: 1,
-  mondayfeira: 1,
-  mon: 1,
-  segunda: 1,
-  segundafeira: 1,
-  seg: 1,
-  tuesday: 2,
-  tuesdayfeira: 2,
-  tue: 2,
-  terca: 2,
-  tercafeira: 2,
-  ter: 2,
-  wednesday: 3,
-  wednesdayfeira: 3,
-  wed: 3,
-  quarta: 3,
-  quartafeira: 3,
-  qua: 3,
-  thursday: 4,
-  thursdayfeira: 4,
-  thu: 4,
-  quinta: 4,
-  quintafeira: 4,
-  qui: 4,
-  friday: 5,
-  fridayfeira: 5,
-  fri: 5,
-  sexta: 5,
-  sextafeira: 5,
-  sex: 5,
-  saturday: 6,
-  saturdayfeira: 6,
-  sat: 6,
-  sabado: 6,
-  sabadofeira: 6,
-  sab: 6,
-});
-
-const normalizeDayKey = (value) => {
-  if (!value && value !== 0) return '';
-  return String(value)
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .replace(/[^a-z]/g, '');
-};
-
-const resolveDayIndex = (item) => {
-  if (!item || typeof item !== 'object') return null;
-  const candidates = [
-    item.day,
-    item.key,
-    item.weekday,
-    item.week_day,
-    item.dia,
-    item.label,
-  ];
-  if (item.value) {
-    candidates.push(item.value);
-    const firstChunk = String(item.value).split(/[\s,;-]+/)[0];
-    candidates.push(firstChunk);
-  }
-
-  for (const candidate of candidates) {
-    const normalized = normalizeDayKey(candidate);
-    if (!normalized) continue;
-    if (Object.prototype.hasOwnProperty.call(DAY_SLUG_TO_INDEX, normalized)) {
-      return DAY_SLUG_TO_INDEX[normalized];
-    }
-  }
-  return null;
-};
-
-const ensureTimeValue = (value) => {
-  if (!value && value !== 0) return null;
-  const text = String(value).trim();
-  if (!text) return null;
-  const direct = text.match(/^([01]?\d|2[0-3]):([0-5]\d)$/);
-  if (direct) return `${direct[1].padStart(2, '0')}:${direct[2]}`;
-  const digits = text.replace(/\D/g, '');
-  if (!digits) return null;
-  if (digits.length <= 2) {
-    const hours = Number(digits);
-    if (!Number.isInteger(hours) || hours < 0 || hours > 23) return null;
-    return `${String(hours).padStart(2, '0')}:00`;
-  }
-  const hoursDigits = digits.slice(0, -2);
-  const minutesDigits = digits.slice(-2);
-  const hoursNum = Number(hoursDigits);
-  const minutesNum = Number(minutesDigits);
-  if (
-    !Number.isInteger(hoursNum) ||
-    hoursNum < 0 ||
-    hoursNum > 23 ||
-    !Number.isInteger(minutesNum) ||
-    minutesNum < 0 ||
-    minutesNum > 59
-  ) {
-    return null;
-  }
-  return `${String(hoursNum).padStart(2, '0')}:${String(minutesNum).padStart(2, '0')}`;
-};
-
-const toMinutes = (time) => {
-  if (!time) return null;
-  const parts = time.split(':');
-  if (parts.length !== 2) return null;
-  const hours = Number(parts[0]);
-  const minutes = Number(parts[1]);
-  if (!Number.isInteger(hours) || !Number.isInteger(minutes)) return null;
-  return hours * 60 + minutes;
-};
-
-const buildWorkingRules = (horariosJson) => {
-  if (!horariosJson) return null;
-  let entries;
-  try {
-    entries = JSON.parse(horariosJson);
-  } catch {
-    return null;
-  }
-  if (!Array.isArray(entries) || !entries.length) return null;
-  const rules = Array.from({ length: 7 }, () => ({
-    enabled: false,
-    startMinutes: null,
-    endMinutes: null,
-    breaks: [],
-  }));
-  let recognized = false;
-
-  entries.forEach((item) => {
-    if (!item || typeof item !== 'object') return;
-    const idx = resolveDayIndex(item);
-    if (idx == null) return;
-    if (rules[idx].processed) return;
-
-    const valueText = String(item.value ?? '').toLowerCase();
-    if (
-      valueText.includes('fechado') ||
-      valueText.includes('sem atendimento') ||
-      valueText.includes('não atende')
-    ) {
-      rules[idx] = { enabled: false, startMinutes: null, endMinutes: null, breaks: [], processed: true };
-      recognized = true;
-      return;
-    }
-
-    const start = ensureTimeValue(item.start ?? item.begin ?? item.from ?? null);
-    const end = ensureTimeValue(item.end ?? item.finish ?? item.to ?? null);
-    if (!start || !end) {
-      rules[idx] = { enabled: false, startMinutes: null, endMinutes: null, breaks: [], processed: true };
-      recognized = true;
-      return;
-    }
-    const startMinutes = toMinutes(start);
-    const endMinutes = toMinutes(end);
-    if (
-      startMinutes == null ||
-      endMinutes == null ||
-      startMinutes >= endMinutes
-    ) {
-      rules[idx] = { enabled: false, startMinutes: null, endMinutes: null, breaks: [], processed: true };
-      recognized = true;
-      return;
-    }
-
-    const rawBlocks = Array.isArray(item.blocks)
-      ? item.blocks
-      : Array.isArray(item.breaks)
-      ? item.breaks
-      : [];
-
-    const breaks = [];
-    rawBlocks.forEach((block) => {
-      if (!block) return;
-      const blockStart = ensureTimeValue(block.start ?? block.begin ?? block.from ?? null);
-      const blockEnd = ensureTimeValue(block.end ?? block.finish ?? block.to ?? null);
-      const blockStartMinutes = toMinutes(blockStart);
-      const blockEndMinutes = toMinutes(blockEnd);
-      if (
-        blockStartMinutes == null ||
-        blockEndMinutes == null ||
-        blockStartMinutes >= blockEndMinutes ||
-        blockStartMinutes < startMinutes ||
-        blockEndMinutes > endMinutes
-      ) {
-        return;
-      }
-      breaks.push([blockStartMinutes, blockEndMinutes]);
-    });
-
-    rules[idx] = {
-      enabled: true,
-      startMinutes,
-      endMinutes,
-      breaks,
-      processed: true,
-    };
-    recognized = true;
-  });
-
-  if (!recognized) return null;
-  return rules.map((rule) => {
-    if (!rule.processed) {
-      return { enabled: false, startMinutes: null, endMinutes: null, breaks: [] };
-    }
-    const { processed, ...rest } = rule;
-    return rest;
-  });
-};
-
-const isWithinWorkingHours = (startDate, endDate, workingRules) => {
-  const startMs = startDate instanceof Date ? startDate.getTime() : NaN;
-  const endMs = endDate instanceof Date ? endDate.getTime() : NaN;
-  if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) return false;
-  if (endMs <= startMs) return false;
-
-  const startDay = weekDayIndexInTZ(startDate, EST_TZ_OFFSET_MIN);
-  const endDay = weekDayIndexInTZ(endDate, EST_TZ_OFFSET_MIN);
-  if (startDay == null || endDay == null || startDay !== endDay) return false;
-
-  const startMinutes = minutesOfDayInTZ(startDate, EST_TZ_OFFSET_MIN);
-  const endMinutes = minutesOfDayInTZ(endDate, EST_TZ_OFFSET_MIN);
-  if (startMinutes == null || endMinutes == null) return false;
-
-  const rule = workingRules
-    ? workingRules[startDay]
-    : { enabled: true, startMinutes: DEFAULT_START_MIN, endMinutes: DEFAULT_END_MIN, breaks: [] };
-  if (!rule || rule.enabled === false) return false;
-  if (startMinutes < rule.startMinutes) return false;
-  if (endMinutes > rule.endMinutes) return false;
-  if (
-    Array.isArray(rule.breaks) &&
-    rule.breaks.some(([start, end]) => startMinutes < end && endMinutes > start)
-  ) {
-    return false;
-  }
-  return true;
-};
-
 function brDateTime(iso) {
   return new Date(iso).toLocaleString('pt-BR', {
     hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit', year: 'numeric',
@@ -584,6 +327,7 @@ router.get('/estabelecimento', authRequired, isEstabelecimento, async (req, res)
 // Criar agendamento (cliente)
 router.post('/', authRequired, isCliente, async (req, res) => {
   let conn;
+  let txStarted = false;
   try {
     const { estabelecimento_id, inicio, profissional_id: profissionalIdRaw, profissionalId } = req.body || {};
     const serviceIds = extractServiceIds(req.body || {});
@@ -608,9 +352,6 @@ router.post('/', authRequired, isCliente, async (req, res) => {
     }
     if (inicioDate.getTime() <= Date.now()) {
       return res.status(400).json({ error: 'past_datetime', message: 'Não é possível agendar no passado.' });
-    }
-    if (!inBusinessHours(inicioDate)) {
-      return res.status(400).json({ error: 'outside_business_hours', message: 'Horário fora do expediente (07:00-22:00).' });
     }
 
     // 2) valida servico e vinculo com estabelecimento
@@ -667,16 +408,28 @@ router.post('/', authRequired, isCliente, async (req, res) => {
       return res.status(400).json({ error: 'duracao_invalida', message: 'Duracao do servico invalida.' });
     }
     const fimDate = new Date(inicioDate.getTime() + duracaoTotalComBuffer * 60_000);
-    let workingRules = null;
-    try {
-      const [[profile]] = await pool.query(
-        'SELECT horarios_json FROM estabelecimento_perfis WHERE estabelecimento_id=? LIMIT 1',
-        [estabelecimento_id]
-      );
-      workingRules = buildWorkingRules(profile?.horarios_json || null);
-    } catch {}
-    if (!isWithinWorkingHours(inicioDate, fimDate, workingRules)) {
-      return res.status(400).json({ error: 'outside_business_hours', message: 'Horário fora do expediente do estabelecimento.' });
+    const expediente = await getExpediente({
+      db: conn || pool,
+      estabelecimentoId: estabelecimento_id,
+      dateUtc: inicioDate,
+    });
+    const { startMin, endMin, spansDays } = getLocalRangeMinutes(inicioDate, fimDate);
+    if (!assertDentroExpediente({
+      startMin,
+      endMin,
+      abre: expediente.abre,
+      fecha: expediente.fecha,
+      spansDays,
+      breaks: expediente.breaks,
+    })) {
+      if (conn) {
+        if (txStarted) {
+          await conn.rollback();
+        }
+        conn.release();
+        conn = null;
+      }
+      return res.status(400).json({ error: 'outside_business_hours', message: formatExpedienteMessage(expediente) });
     }
     const planConfig = planContext?.config;
     const limitCheck = await checkMonthlyAppointmentLimit({
@@ -706,6 +459,7 @@ router.post('/', authRequired, isCliente, async (req, res) => {
     // 3) transacao + checagem de conflito
     conn = await pool.getConnection();
     await conn.beginTransaction();
+    txStarted = true;
 
     // Conflito por sobreposicao: a.inicio < novoFim AND a.fim > novoInicio
     let conflictSql = `
@@ -724,7 +478,9 @@ router.post('/', authRequired, isCliente, async (req, res) => {
     const [conf] = await conn.query(conflictSql, conflictParams);
 
     if (conf.length) {
-      await conn.rollback();
+      if (txStarted && conn) {
+        await conn.rollback();
+      }
       conn.release();
       return res.status(409).json({ error: 'slot_ocupado', message: 'Horário indisponível.' });
     }
@@ -755,6 +511,7 @@ router.post('/', authRequired, isCliente, async (req, res) => {
     const [[est]]  = await conn.query('SELECT email, telefone, nome, notify_email_estab, notify_whatsapp_estab FROM usuarios WHERE id=?', [estabelecimento_id]);
 
     await conn.commit();
+    txStarted = false;
     conn.release(); conn = null;
 
     // 6) notificacao "best-effort" (NUNCA bloqueia a resposta)
@@ -889,7 +646,7 @@ router.post('/', authRequired, isCliente, async (req, res) => {
     });
 
   } catch (e) {
-    try { if (conn) await conn.rollback(); } catch {}
+    try { if (txStarted && conn) await conn.rollback(); } catch {}
     if (conn) { try { conn.release(); } catch {} }
     console.error('[agendamentos][POST] erro:', e);
     // Se for erro de chave/unique/conflito que porventura escapou:
@@ -906,6 +663,7 @@ router.post('/', authRequired, isCliente, async (req, res) => {
 // Criar agendamento (estabelecimento)
 router.post('/estabelecimento', authRequired, isEstabelecimento, async (req, res) => {
   let conn;
+  let txStarted = false;
   try {
     const {
       estabelecimento_id: estabelecimentoIdRaw,
@@ -974,9 +732,6 @@ router.post('/estabelecimento', authRequired, isEstabelecimento, async (req, res
     if (inicioDate.getTime() <= Date.now()) {
       return res.status(400).json({ error: 'past_datetime', message: 'Não é possível agendar no passado.' });
     }
-    if (!inBusinessHours(inicioDate)) {
-      return res.status(400).json({ error: 'outside_business_hours', message: 'Horário fora do expediente (07:00-22:00).' });
-    }
 
     const planContext = await getPlanContext(estabelecimento_id);
     if (!planContext) {
@@ -1027,18 +782,29 @@ router.post('/estabelecimento', authRequired, isEstabelecimento, async (req, res
     const duracaoTotalComBuffer = summary.duracaoTotal + APPOINTMENT_BUFFER_MIN;
     if (!Number.isFinite(duracaoTotalComBuffer) || duracaoTotalComBuffer <= 0) return res.status(400).json({ error: 'duracao_invalida' });
     const fimDate = new Date(inicioDate.getTime() + duracaoTotalComBuffer * 60_000);
-    let workingRules = null;
-    try {
-      const [[profile]] = await pool.query(
-        'SELECT horarios_json FROM estabelecimento_perfis WHERE estabelecimento_id=? LIMIT 1',
-        [estabelecimento_id]
-      );
-      workingRules = buildWorkingRules(profile?.horarios_json || null);
-    } catch {}
-    if (!isWithinWorkingHours(inicioDate, fimDate, workingRules)) {
-      return res.status(400).json({ error: 'outside_business_hours', message: 'Horário fora do expediente do estabelecimento.' });
+    const expediente = await getExpediente({
+      db: conn || pool,
+      estabelecimentoId: estabelecimento_id,
+      dateUtc: inicioDate,
+    });
+    const { startMin, endMin, spansDays } = getLocalRangeMinutes(inicioDate, fimDate);
+    if (!assertDentroExpediente({
+      startMin,
+      endMin,
+      abre: expediente.abre,
+      fecha: expediente.fecha,
+      spansDays,
+      breaks: expediente.breaks,
+    })) {
+      if (conn) {
+        if (txStarted) {
+          await conn.rollback();
+        }
+        conn.release();
+        conn = null;
+      }
+      return res.status(400).json({ error: 'outside_business_hours', message: formatExpedienteMessage(expediente) });
     }
-
     const planConfig = planContext?.config;
     const limitCheck = await checkMonthlyAppointmentLimit({
       estabelecimentoId: estabelecimento_id,
@@ -1181,6 +947,7 @@ router.post('/estabelecimento', authRequired, isEstabelecimento, async (req, res
 
     conn = await pool.getConnection();
     await conn.beginTransaction();
+    txStarted = true;
 
     let conflictSql = `SELECT id FROM agendamentos
        WHERE estabelecimento_id=? AND status IN ('confirmado','pendente')
@@ -1193,7 +960,13 @@ router.post('/estabelecimento', authRequired, isEstabelecimento, async (req, res
     }
     conflictSql += ' FOR UPDATE';
     const [conf] = await conn.query(conflictSql, conflictParams);
-    if (conf.length) { await conn.rollback(); conn.release(); return res.status(409).json({ error: 'slot_ocupado' }); }
+    if (conf.length) {
+      if (txStarted && conn) {
+        await conn.rollback();
+      }
+      conn.release();
+      return res.status(409).json({ error: 'slot_ocupado' });
+    }
 
     const [ins] = await conn.query(
       'INSERT INTO agendamentos (cliente_id, estabelecimento_id, servico_id, profissional_id, inicio, fim) VALUES (?,?,?,?,?,?)',
@@ -1219,6 +992,7 @@ router.post('/estabelecimento', authRequired, isEstabelecimento, async (req, res
     const [[est]] = await conn.query('SELECT email, telefone, nome, notify_email_estab, notify_whatsapp_estab FROM usuarios WHERE id=?', [estabelecimento_id]);
 
     await conn.commit();
+    txStarted = false;
     conn.release(); conn = null;
 
     const inicioISO = new Date(novo.inicio).toISOString();
@@ -1342,7 +1116,7 @@ router.post('/estabelecimento', authRequired, isEstabelecimento, async (req, res
       status: novo.status,
     });
   } catch (e) {
-    try { if (conn) await conn.rollback(); } catch {}
+    try { if (txStarted && conn) await conn.rollback(); } catch {}
     if (conn) { try { conn.release(); } catch {} }
     console.error('[agendamentos][POST][estabelecimento] erro:', e);
     return res.status(500).json({ error: 'server_error' });
@@ -1353,6 +1127,7 @@ router.post('/estabelecimento', authRequired, isEstabelecimento, async (req, res
 // Reagendar (estabelecimento)
 router.put('/:id/reschedule-estab', authRequired, isEstabelecimento, async (req, res) => {
   let conn;
+  let txStarted = false;
   try {
     const { id } = req.params;
     const estId = req.user.id;
@@ -1369,9 +1144,6 @@ router.put('/:id/reschedule-estab', authRequired, isEstabelecimento, async (req,
     if (inicioDate.getTime() <= Date.now()) {
       return res.status(400).json({ error: 'past_datetime', message: 'Não é possível reagendar no passado.' });
     }
-    if (!inBusinessHours(inicioDate)) {
-      return res.status(400).json({ error: 'outside_business_hours', message: 'Horário fora do expediente (07:00-22:00).' });
-    }
 
     const planContext = await getPlanContext(estId);
     if (planContext && isDelinquentStatus(planContext.status)) {
@@ -1383,6 +1155,7 @@ router.put('/:id/reschedule-estab', authRequired, isEstabelecimento, async (req,
 
     conn = await pool.getConnection();
     await conn.beginTransaction();
+    txStarted = true;
 
     const [[ag]] = await conn.query(
       `SELECT id, cliente_id, servico_id, profissional_id, status, inicio
@@ -1392,7 +1165,9 @@ router.put('/:id/reschedule-estab', authRequired, isEstabelecimento, async (req,
       [id, estId]
     );
     if (!ag) {
-      await conn.rollback();
+      if (txStarted && conn) {
+        await conn.rollback();
+      }
       conn.release();
       conn = null;
       return res.status(404).json({ error: 'not_found', message: 'Agendamento nao encontrado.' });
@@ -1400,13 +1175,17 @@ router.put('/:id/reschedule-estab', authRequired, isEstabelecimento, async (req,
 
     const statusNorm = String(ag.status || '').toLowerCase();
     if (statusNorm === 'cancelado') {
-      await conn.rollback();
+      if (txStarted && conn) {
+        await conn.rollback();
+      }
       conn.release();
       conn = null;
       return res.status(409).json({ error: 'already_cancelled', message: 'Agendamento já está cancelado.' });
     }
     if (statusNorm === 'concluido') {
-      await conn.rollback();
+      if (txStarted && conn) {
+        await conn.rollback();
+      }
       conn.release();
       conn = null;
       return res.status(409).json({ error: 'already_done', message: 'Não é possível reagendar um atendimento concluído.' });
@@ -1414,7 +1193,9 @@ router.put('/:id/reschedule-estab', authRequired, isEstabelecimento, async (req,
 
     const startTime = ag?.inicio ? new Date(ag.inicio).getTime() : NaN;
     if (Number.isFinite(startTime) && startTime <= Date.now()) {
-      await conn.rollback();
+      if (txStarted && conn) {
+        await conn.rollback();
+      }
       conn.release();
       conn = null;
       return res.status(409).json({
@@ -1430,7 +1211,9 @@ router.put('/:id/reschedule-estab', authRequired, isEstabelecimento, async (req,
       serviceItems = fallback.items || [];
     }
     if (!serviceItems.length) {
-      await conn.rollback();
+      if (txStarted && conn) {
+        await conn.rollback();
+      }
       conn.release();
       conn = null;
       return res.status(400).json({ error: 'servico_invalido', message: 'Servico invalido ou inativo.' });
@@ -1441,7 +1224,9 @@ router.put('/:id/reschedule-estab', authRequired, isEstabelecimento, async (req,
 
     const duracaoTotalComBuffer = summary.duracaoTotal + APPOINTMENT_BUFFER_MIN;
     if (!Number.isFinite(duracaoTotalComBuffer) || duracaoTotalComBuffer <= 0) {
-      await conn.rollback();
+      if (txStarted && conn) {
+        await conn.rollback();
+      }
       conn.release();
       conn = null;
       return res.status(400).json({ error: 'duracao_invalida', message: 'Duracao do servico invalida.' });
@@ -1449,24 +1234,29 @@ router.put('/:id/reschedule-estab', authRequired, isEstabelecimento, async (req,
 
     const fimDate = new Date(inicioDate.getTime() + duracaoTotalComBuffer * 60_000);
 
-    let workingRules = null;
-    try {
-      const [[profile]] = await conn.query(
-        'SELECT horarios_json FROM estabelecimento_perfis WHERE estabelecimento_id=? LIMIT 1',
-        [estId]
-      );
-      workingRules = buildWorkingRules(profile?.horarios_json || null);
-    } catch {}
-    if (!isWithinWorkingHours(inicioDate, fimDate, workingRules)) {
-      await conn.rollback();
-      conn.release();
-      conn = null;
-      return res.status(400).json({
-        error: 'outside_business_hours',
-        message: 'Horário fora do expediente do estabelecimento.',
-      });
+    const expediente = await getExpediente({
+      db: conn || pool,
+      estabelecimentoId: estId,
+      dateUtc: inicioDate,
+    });
+    const { startMin, endMin, spansDays } = getLocalRangeMinutes(inicioDate, fimDate);
+    if (!assertDentroExpediente({
+      startMin,
+      endMin,
+      abre: expediente.abre,
+      fecha: expediente.fecha,
+      spansDays,
+      breaks: expediente.breaks,
+    })) {
+      if (conn) {
+        if (txStarted) {
+          await conn.rollback();
+        }
+        conn.release();
+        conn = null;
+      }
+      return res.status(400).json({ error: 'outside_business_hours', message: formatExpedienteMessage(expediente) });
     }
-
     const professionalMap = await fetchServiceProfessionalMap(conn, serviceIds);
     const servicesRequiringProfessional = serviceIds.filter((id) => (professionalMap.get(id)?.size || 0) > 0);
     const requiresProfessional = servicesRequiringProfessional.length > 0;
@@ -1484,7 +1274,9 @@ router.put('/:id/reschedule-estab', authRequired, isEstabelecimento, async (req,
     conflictSql += ' FOR UPDATE';
     const [conf] = await conn.query(conflictSql, conflictParams);
     if (conf.length) {
-      await conn.rollback();
+      if (txStarted && conn) {
+        await conn.rollback();
+      }
       conn.release();
       conn = null;
       return res.status(409).json({ error: 'slot_ocupado', message: 'Horário indisponível.' });
@@ -1512,6 +1304,7 @@ router.put('/:id/reschedule-estab', authRequired, isEstabelecimento, async (req,
     );
 
     await conn.commit();
+    txStarted = false;
     conn.release();
     conn = null;
 
@@ -1541,7 +1334,7 @@ router.put('/:id/reschedule-estab', authRequired, isEstabelecimento, async (req,
 
     return res.json({ id: ag.id, inicio: updated?.inicio || inicioDate, fim: updated?.fim || fimDate });
   } catch (e) {
-    try { if (conn) await conn.rollback(); } catch {}
+    try { if (txStarted && conn) await conn.rollback(); } catch {}
     try { if (conn) conn.release(); } catch {}
     console.error('[agendamentos/reschedule-estab]', e);
     return res.status(500).json({ error: 'server_error' });
@@ -1843,3 +1636,4 @@ router.put('/:id/cancel-estab', authRequired, isEstabelecimento, async (req, res
 });
 
 export default router;
+

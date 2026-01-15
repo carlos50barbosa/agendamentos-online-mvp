@@ -1,7 +1,8 @@
-﻿// backend/src/routes/agendamentos_public.js
+// backend/src/routes/agendamentos_public.js
 import { Router } from 'express';
 import crypto from 'crypto';
 import { pool } from '../lib/db.js';
+import { assertDentroExpediente, formatExpedienteMessage, getExpediente, getLocalRangeMinutes } from '../lib/expediente.js';
 import { getPlanContext, isDelinquentStatus, formatPlanLimitExceeded } from '../lib/plans.js';
 import bcrypt from 'bcryptjs';
 import { notifyEmail } from '../lib/notifications.js';
@@ -159,253 +160,6 @@ const fetchAppointmentItems = async (db, appointmentIds) => {
     });
   });
   return byAppointment;
-};
-
-function inBusinessHours(dateISO) {
-  const d = new Date(dateISO);
-  if (Number.isNaN(d.getTime())) return false;
-  // Janela ampla (00:00-23:59) para não bloquear horários configurados pelo estabelecimento.
-  const h = d.getHours(), m = d.getMinutes();
-  const afterStart = h >= 0;
-  const beforeEnd = h < 24 || (h === 23 && m <= 59);
-  return afterStart && beforeEnd;
-}
-
-const DAY_SLUG_TO_INDEX = Object.freeze({
-  sunday: 0,
-  sundayfeira: 0,
-  sun: 0,
-  domingo: 0,
-  domingofeira: 0,
-  dom: 0,
-  monday: 1,
-  mondayfeira: 1,
-  mon: 1,
-  segunda: 1,
-  segundafeira: 1,
-  seg: 1,
-  tuesday: 2,
-  tuesdayfeira: 2,
-  tue: 2,
-  terca: 2,
-  tercafeira: 2,
-  ter: 2,
-  wednesday: 3,
-  wednesdayfeira: 3,
-  wed: 3,
-  quarta: 3,
-  quartafeira: 3,
-  qua: 3,
-  thursday: 4,
-  thursdayfeira: 4,
-  thu: 4,
-  quinta: 4,
-  quintafeira: 4,
-  qui: 4,
-  friday: 5,
-  fridayfeira: 5,
-  fri: 5,
-  sexta: 5,
-  sextafeira: 5,
-  sex: 5,
-  saturday: 6,
-  saturdayfeira: 6,
-  sat: 6,
-  sabado: 6,
-  sabadofeira: 6,
-  sab: 6,
-});
-
-const normalizeDayKey = (value) => {
-  if (!value && value !== 0) return '';
-  return String(value)
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .replace(/[^a-z]/g, '');
-};
-
-const resolveDayIndex = (item) => {
-  if (!item || typeof item !== 'object') return null;
-  const candidates = [
-    item.day,
-    item.key,
-    item.weekday,
-    item.week_day,
-    item.dia,
-    item.label,
-  ];
-  if (item.value) {
-    candidates.push(item.value);
-    const firstChunk = String(item.value).split(/[\s,;-]+/)[0];
-    candidates.push(firstChunk);
-  }
-
-  for (const candidate of candidates) {
-    const normalized = normalizeDayKey(candidate);
-    if (!normalized) continue;
-    if (Object.prototype.hasOwnProperty.call(DAY_SLUG_TO_INDEX, normalized)) {
-      return DAY_SLUG_TO_INDEX[normalized];
-    }
-  }
-  return null;
-};
-
-const ensureTimeValue = (value) => {
-  if (!value && value !== 0) return null;
-  const text = String(value).trim();
-  if (!text) return null;
-  const direct = text.match(/^([01]?\d|2[0-3]):([0-5]\d)$/);
-  if (direct) return `${direct[1].padStart(2, '0')}:${direct[2]}`;
-  const digits = text.replace(/\D/g, '');
-  if (!digits) return null;
-  if (digits.length <= 2) {
-    const hours = Number(digits);
-    if (!Number.isInteger(hours) || hours < 0 || hours > 23) return null;
-    return `${String(hours).padStart(2, '0')}:00`;
-  }
-  const hoursDigits = digits.slice(0, -2);
-  const minutesDigits = digits.slice(-2);
-  const hoursNum = Number(hoursDigits);
-  const minutesNum = Number(minutesDigits);
-  if (
-    !Number.isInteger(hoursNum) ||
-    hoursNum < 0 ||
-    hoursNum > 23 ||
-    !Number.isInteger(minutesNum) ||
-    minutesNum < 0 ||
-    minutesNum > 59
-  ) {
-    return null;
-  }
-  return `${String(hoursNum).padStart(2, '0')}:${String(minutesNum).padStart(2, '0')}`;
-};
-
-const toMinutes = (time) => {
-  if (!time) return null;
-  const parts = time.split(':');
-  if (parts.length !== 2) return null;
-  const hours = Number(parts[0]);
-  const minutes = Number(parts[1]);
-  if (!Number.isInteger(hours) || !Number.isInteger(minutes)) return null;
-  return hours * 60 + minutes;
-};
-
-const buildWorkingRules = (horariosJson) => {
-  if (!horariosJson) return null;
-  let entries;
-  try {
-    entries = JSON.parse(horariosJson);
-  } catch {
-    return null;
-  }
-  if (!Array.isArray(entries) || !entries.length) return null;
-  const rules = Array.from({ length: 7 }, () => ({
-    enabled: false,
-    startMinutes: null,
-    endMinutes: null,
-    breaks: [],
-  }));
-  let recognized = false;
-
-  entries.forEach((item) => {
-    if (!item || typeof item !== 'object') return;
-    const idx = resolveDayIndex(item);
-    if (idx == null) return;
-    if (rules[idx].processed) return;
-
-    const valueText = String(item.value ?? '').toLowerCase();
-    if (
-      valueText.includes('fechado') ||
-      valueText.includes('sem atendimento') ||
-      valueText.includes('nao atende')
-    ) {
-      rules[idx] = { enabled: false, startMinutes: null, endMinutes: null, breaks: [], processed: true };
-      recognized = true;
-      return;
-    }
-
-    const start = ensureTimeValue(item.start ?? item.begin ?? item.from ?? null);
-    const end = ensureTimeValue(item.end ?? item.finish ?? item.to ?? null);
-    if (!start || !end) {
-      rules[idx] = { enabled: false, startMinutes: null, endMinutes: null, breaks: [], processed: true };
-      recognized = true;
-      return;
-    }
-    const startMinutes = toMinutes(start);
-    const endMinutes = toMinutes(end);
-    if (
-      startMinutes == null ||
-      endMinutes == null ||
-      startMinutes >= endMinutes
-    ) {
-      rules[idx] = { enabled: false, startMinutes: null, endMinutes: null, breaks: [], processed: true };
-      recognized = true;
-      return;
-    }
-
-    const rawBlocks = Array.isArray(item.blocks)
-      ? item.blocks
-      : Array.isArray(item.breaks)
-      ? item.breaks
-      : [];
-
-    const breaks = [];
-    rawBlocks.forEach((block) => {
-      if (!block) return;
-      const blockStart = ensureTimeValue(block.start ?? block.begin ?? block.from ?? null);
-      const blockEnd = ensureTimeValue(block.end ?? block.finish ?? block.to ?? null);
-      const blockStartMinutes = toMinutes(blockStart);
-      const blockEndMinutes = toMinutes(blockEnd);
-      if (
-        blockStartMinutes == null ||
-        blockEndMinutes == null ||
-        blockStartMinutes >= blockEndMinutes ||
-        blockStartMinutes < startMinutes ||
-        blockEndMinutes > endMinutes
-      ) {
-        return;
-      }
-      breaks.push([blockStartMinutes, blockEndMinutes]);
-    });
-
-    rules[idx] = {
-      enabled: true,
-      startMinutes,
-      endMinutes,
-      breaks,
-      processed: true,
-    };
-    recognized = true;
-  });
-
-  if (!recognized) return null;
-  return rules.map((rule) => {
-    if (!rule.processed) {
-      return { enabled: false, startMinutes: null, endMinutes: null, breaks: [] };
-    }
-    const { processed, ...rest } = rule;
-    return rest;
-  });
-};
-
-const isWithinWorkingHours = (startDate, endDate, workingRules) => {
-  if (!workingRules) return true;
-  const rule = workingRules[startDate.getDay()];
-  if (!rule || !rule.enabled) return false;
-  const sameDay =
-    startDate.getFullYear() === endDate.getFullYear() &&
-    startDate.getMonth() === endDate.getMonth() &&
-    startDate.getDate() === endDate.getDate();
-  if (!sameDay) return false;
-  const startMinutes = startDate.getHours() * 60 + startDate.getMinutes();
-  const endMinutes = endDate.getHours() * 60 + endDate.getMinutes();
-  if (startMinutes < rule.startMinutes) return false;
-  if (endMinutes > rule.endMinutes) return false;
-  if (Array.isArray(rule.breaks) && rule.breaks.some(([start, end]) => startMinutes >= start && startMinutes < end)) {
-    return false;
-  }
-  return true;
 };
 
 function brDateTime(iso) {
@@ -634,6 +388,7 @@ async function notifyPublicConfirmedAppointment(appointmentId) {
 // POST /public/agendamentos — cria agendamento sem login (guest)
 router.post('/', async (req, res) => {
   let conn;
+  let txStarted = false;
   try {
     const {
       estabelecimento_id,
@@ -699,7 +454,6 @@ router.post('/', async (req, res) => {
     const inicioDate = new Date(inicio);
     if (Number.isNaN(inicioDate.getTime())) return res.status(400).json({ error: 'invalid_date' });
     if (inicioDate.getTime() <= Date.now()) return res.status(400).json({ error: 'past_datetime' });
-    if (!inBusinessHours(inicioDate.toISOString())) return res.status(400).json({ error: 'outside_business_hours' });
 
     const { items: serviceItems, missing } = await fetchServicesForAppointment(pool, estabelecimento_id, serviceIds);
     if (missing.length) {
@@ -742,16 +496,21 @@ router.post('/', async (req, res) => {
     const duracaoTotal = summary.duracaoTotal + APPOINTMENT_BUFFER_MIN;
     if (!Number.isFinite(duracaoTotal) || duracaoTotal <= 0) return res.status(400).json({ error: 'duracao_invalida' });
     const fimDate = new Date(inicioDate.getTime() + duracaoTotal * 60_000);
-    let workingRules = null;
-    try {
-      const [[profile]] = await pool.query(
-        'SELECT horarios_json FROM estabelecimento_perfis WHERE estabelecimento_id=? LIMIT 1',
-        [estabelecimento_id]
-      );
-      workingRules = buildWorkingRules(profile?.horarios_json || null);
-    } catch {}
-    if (!isWithinWorkingHours(inicioDate, fimDate, workingRules)) {
-      return res.status(400).json({ error: 'outside_business_hours', message: 'Horário fora do expediente do estabelecimento.' });
+    const expediente = await getExpediente({
+      db: pool,
+      estabelecimentoId: estabelecimento_id,
+      dateUtc: inicioDate,
+    });
+    const { startMin, endMin, spansDays } = getLocalRangeMinutes(inicioDate, fimDate);
+    if (!assertDentroExpediente({
+      startMin,
+      endMin,
+      abre: expediente.abre,
+      fecha: expediente.fecha,
+      spansDays,
+      breaks: expediente.breaks,
+    })) {
+      return res.status(400).json({ error: 'outside_business_hours', message: formatExpedienteMessage(expediente) });
     }
     const planConfig = planContext?.config;
     const limitCheck = await checkMonthlyAppointmentLimit({
@@ -916,6 +675,7 @@ router.post('/', async (req, res) => {
 
     conn = await pool.getConnection();
     await conn.beginTransaction();
+    txStarted = true;
 
     let conflictSql = `SELECT id FROM agendamentos
        WHERE estabelecimento_id=? AND status IN ('confirmado','pendente')
@@ -928,7 +688,13 @@ router.post('/', async (req, res) => {
     }
     conflictSql += ' FOR UPDATE';
     const [conf] = await conn.query(conflictSql, conflictParams);
-    if (conf.length) { await conn.rollback(); conn.release(); return res.status(409).json({ error: 'slot_ocupado' }); }
+    if (conf.length) {
+      if (txStarted && conn) {
+        await conn.rollback();
+      }
+      conn.release();
+      return res.status(409).json({ error: 'slot_ocupado' });
+    }
 
     const [ins] = await conn.query(
       `INSERT INTO agendamentos
@@ -951,7 +717,9 @@ router.post('/', async (req, res) => {
       );
     }
 
-    await conn.commit(); conn.release(); conn = null;
+    await conn.commit();
+    txStarted = false;
+    conn.release(); conn = null;
 
     // Notificacoes de confirmacao (best-effort)
     (async () => {
@@ -977,7 +745,7 @@ router.post('/', async (req, res) => {
       confirm_expires_at: null,
     });
   } catch (e) {
-    try { if (conn) await conn.rollback(); } catch {}
+    try { if (txStarted && conn) await conn.rollback(); } catch {}
     try { if (conn) conn.release(); } catch {}
     console.error('[public/agendamentos][POST]', e);
     return res.status(500).json({ error: 'server_error' });
@@ -1049,3 +817,4 @@ router.get('/confirm', async (req, res) => {
 });
 
 export default router;
+
