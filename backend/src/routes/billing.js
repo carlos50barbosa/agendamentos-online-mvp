@@ -724,8 +724,13 @@ router.post('/whatsapp/pix', auth, isEstabelecimento, async (req, res) => {
 router.post('/webhook', async (req, res) => {
   console.log('[billing:webhook][hdr]', {
     url: req.originalUrl,
-    x_request_id: req.headers['x-request-id'],
-    x_signature: req.headers['x-signature'] || req.headers['x-mercadopago-signature'],
+    x_request_id: req.headers['x-request-id'] || req.headers['x_request_id'],
+    x_forwarded_request_id: req.headers['x-forwarded-request-id'],
+    x_signature:
+      req.headers['x-signature'] ||
+      req.headers['x_signature'] ||
+      req.headers['x-mercadopago-signature'] ||
+      req.headers['x_mercadopago_signature'],
     query: req.query,
   })
 
