@@ -266,7 +266,7 @@ function validateMercadoPagoWebhook(req) {
     }
     return candidates
   }
-  const previewTs = tsCandidates[0] || tsValue || String(ts || '').trim()
+  const previewTs = tsCandidates[0]
   const previewCandidates = buildManifestCandidates(previewTs)
 
   if (!secrets.length) {
@@ -280,13 +280,15 @@ function validateMercadoPagoWebhook(req) {
       for (const candidate of manifestCandidates) {
         const expected = createHmac('sha256', secret).update(candidate.manifest).digest('hex')
         if (safeTimingCompareHex(expected, v1)) {
-          console.log('[billing:webhook] signature_match', {
-            id,
-            topic,
-            using_secret_index: index,
-            using_variant: candidate.variant,
-            using_ts: tsCandidate,
-          })
+          if (String(process.env.DEBUG_WEBHOOKS || '0') === '1') {
+            console.log('[billing:webhook] signature_match', {
+              id,
+              topic,
+              using_secret_index: index,
+              using_variant: candidate.variant,
+              using_ts: tsCandidate,
+            })
+          }
           return {
             ok: true,
             id,
@@ -1135,6 +1137,7 @@ router.get('/renew/pix/status', auth, isEstabelecimento, async (req, res) => {
 export default router
 
 // Manual test snippet (keep commented):
+// process.env.DEBUG_WEBHOOKS = '1' // enable signature_match logs
 // parseMercadoPagoSignatureHeader('ts=1700000000,v1=abc') // => { ts: '1700000000', v1: 'abc' }
 // parseMercadoPagoSignatureHeader('ts=1700000000, v1=abc') // => { ts: '1700000000', v1: 'abc' }
 // parseMercadoPagoSignatureHeader('v1=abc,ts=1700000000') // => { ts: '1700000000', v1: 'abc' }
