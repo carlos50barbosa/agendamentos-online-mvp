@@ -769,24 +769,31 @@ router.post('/whatsapp/pix', auth, isEstabelecimento, async (req, res) => {
 
 router.post('/webhook', async (req, res) => {
   const event = req.body || {}
+  const topic = String(
+    req.query?.type ||
+    req.query?.topic ||
+    event?.type ||
+    event?.topic ||
+    req.headers['x-topic'] ||
+    ''
+  ).toLowerCase()
 
   const verification = verifyMercadoPagoWebhookSignature(req)
   if (!verification.ok) {
+    if (topic.startsWith('subscription_')) {
+      console.warn('[billing:webhook] ignored_invalid_signature', {
+        topic: topic || null,
+        reason: verification.reason || 'invalid_signature',
+        id: verification.id || null,
+      })
+      return res.status(200).json({ ok: false, ignored: true, reason: 'invalid_signature' })
+    }
     return res.status(401).json({ ok: false, reason: verification.reason || 'invalid_signature' })
   }
 
   const resourceId = verification.id
 
   try {
-    const topic = String(
-      req.query?.type ||
-      req.query?.topic ||
-      event?.type ||
-      event?.topic ||
-      req.headers['x-topic'] ||
-      ''
-    ).toLowerCase();
-
     if (topic === 'payment') {
       const r = await syncMercadoPagoPayment(resourceId, event);
       console.log('[billing:webhook] payment', resourceId, r?.ok ? 'approved' : 'ignored', { ok: !!r?.ok });
