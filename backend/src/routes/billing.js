@@ -30,6 +30,7 @@ import { config } from '../lib/config.js'
 import { resolveBillingState } from '../lib/billing_monitor.js'
 import { BillingService } from '../lib/billing_service.js'
 import { listActiveWhatsAppPacks, findWhatsAppPack } from '../lib/addon_packs.js'
+import { verifyMercadoPagoWebhookSignature } from '../lib/mp_signature.js'
 
 const router = Router()
 const DAY_MS = 86400000
@@ -767,23 +768,11 @@ router.post('/whatsapp/pix', auth, isEstabelecimento, async (req, res) => {
 })
 
 router.post('/webhook', async (req, res) => {
-  console.log('[billing:webhook][hdr]', {
-    url: req.originalUrl,
-    x_request_id: req.headers['x-request-id'] || req.headers['x_request_id'],
-    x_forwarded_request_id: req.headers['x-forwarded-request-id'],
-    x_signature:
-      req.headers['x-signature'] ||
-      req.headers['x_signature'] ||
-      req.headers['x-mercadopago-signature'] ||
-      req.headers['x_mercadopago_signature'],
-    query: req.query,
-  })
-
   const event = req.body || {}
 
-  const verification = validateMercadoPagoWebhook(req)
+  const verification = verifyMercadoPagoWebhookSignature(req)
   if (!verification.ok) {
-    return res.status(401).send('INVALID')
+    return res.status(401).json({ ok: false, reason: verification.reason || 'invalid_signature' })
   }
 
   const resourceId = verification.id
@@ -1137,14 +1126,13 @@ router.get('/renew/pix/status', auth, isEstabelecimento, async (req, res) => {
 export default router
 
 // Manual test snippet (keep commented):
-// process.env.DEBUG_WEBHOOKS = '1' // enable signature_match logs
 // parseMercadoPagoSignatureHeader('ts=1700000000,v1=abc') // => { ts: '1700000000', v1: 'abc' }
 // parseMercadoPagoSignatureHeader('ts=1700000000, v1=abc') // => { ts: '1700000000', v1: 'abc' }
 // parseMercadoPagoSignatureHeader('v1=abc,ts=1700000000') // => { ts: '1700000000', v1: 'abc' }
-// const missingFieldsCheck = validateMercadoPagoWebhook({
-//   headers: { 'x-signature': 'ts=1700000000,v1=abc' },
+// const verification = verifyMercadoPagoWebhookSignature({
+//   headers: { 'x-signature': 'ts=1700000000,v1=abc', 'x-request-id': 'req-123' },
 //   query: { id: '123', topic: 'payment' },
 //   body: {},
 //   originalUrl: '/api/billing/webhook',
 // })
-// Expect: missingFieldsCheck.reason !== 'missing_fields' even without x-request-id.
+// Expect: verification.ok === false when v1 does not match any configured secret.
