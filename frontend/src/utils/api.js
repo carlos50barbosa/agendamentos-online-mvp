@@ -1,10 +1,10 @@
-﻿// src/utils/api.js
+// src/utils/api.js
 import { getToken, logout } from './auth';
 
 // Base robusta:
-// 1) Usa VITE_API_URL (produÃ§Ã£o recomendada)
+// 1) Usa VITE_API_URL (produção recomendada)
 // 2) Em dev, cai para http://localhost:3002
-// 3) Em produÃ§Ã£o sem VITE_API_URL, usa o mesmo domÃ­nio do front (window.location.origin)
+// 3) Em produção sem VITE_API_URL, usa o mesmo domínio do front (window.location.origin)
 const BASE = (
   import.meta.env.VITE_API_URL ||
   (import.meta.env.DEV ? 'http://localhost:3002' : window.location.origin)
@@ -30,7 +30,7 @@ function toQuery(params = {}) {
 async function req(path, opt = {}) {
   const token = getToken();
 
-  // extra (nÃ£o vai para fetch): idempotencyKey
+  // extra (não vai para fetch): idempotencyKey
   const { idempotencyKey, ...fetchOpt } = opt;
 
   const headers = {
@@ -38,7 +38,7 @@ async function req(path, opt = {}) {
     ...(fetchOpt.headers || {}),
   };
 
-  // Evita enviar "Bearer null" nos endpoints pÃºblicos (/auth/login, /auth/register)
+  // Evita enviar "Bearer null" nos endpoints públicos (/auth/login, /auth/register)
   const isPublicAuth = /^\/?auth\/(login|register)/i.test(path);
   if (token && !isPublicAuth) {
     headers.Authorization = `Bearer ${token}`;
@@ -64,7 +64,7 @@ async function req(path, opt = {}) {
     if (isJson) data = await res.json();
     else text = await res.text();
   } catch {
-    // corpo vazio/invalid â€” segue com null/texto vazio
+    // corpo vazio/invalid — segue com null/texto vazio
   }
 
   if (!res.ok) {
@@ -78,7 +78,7 @@ async function req(path, opt = {}) {
     err.text = text;
     err.url = join(BASE, path);
 
-    // Se o token expirou (ou outro 401), limpa sessÃ£o e redireciona para login
+    // Se o token expirou (ou outro 401), limpa sessão e redireciona para login
     const tokenStillPresent = !!token;
     const isAuthRoute = isPublicAuth;
     if (res.status === 401 && tokenStillPresent && !isAuthRoute) {
@@ -143,7 +143,7 @@ export const Api = {
   resetPassword: (token, senha) => req('/auth/reset', { method: 'POST', body: JSON.stringify({ token, senha }) }),
   linkPhone: (token) => req('/auth/link-phone', { method: 'POST', body: JSON.stringify({ token }) }),
 
-  // Estabelecimentos + ServiÃ§os (NOVOS)
+  // Estabelecimentos + Serviços (NOVOS)
   listEstablishments: (params = {}) => req(`/establishments${toQuery(params)}`),
   getEstablishment: (idOrSlug) => req(`/establishments/${idOrSlug}`),
   getEstablishmentClients: (id, params = {}) =>
@@ -179,6 +179,9 @@ export const Api = {
     if (body.billing_cycle == null) body.billing_cycle = 'mensal';
     return req('/billing/pix', { method: 'POST', body: JSON.stringify(body) });
   },
+  billingRenewalPix: () => req('/billing/renew/pix', { method: 'POST' }),
+  billingRenewalPixStatus: (paymentId) =>
+    req(`/billing/renew/pix/status${toQuery({ payment_id: paymentId })}`),
   billingStatus: () => req('/billing/status'),
   billingWhatsAppPacks: () => req('/billing/whatsapp/packs'),
   billingWhatsAppWallet: () => req('/billing/whatsapp/wallet'),
@@ -186,14 +189,14 @@ export const Api = {
   billingWhatsAppPixStatus: (paymentId) =>
     req(`/billing/whatsapp/pix/status${toQuery({ payment_id: paymentId })}`),
 
-  // ServiÃ§os (rotas existentes)
+  // Serviços (rotas existentes)
   servicosList: () => req('/servicos'),
   servicosCreate: (payload) => req('/servicos', { method: 'POST', body: JSON.stringify(payload) }),
   servicosUpdate: (id, payload) => req(`/servicos/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
   servicosDelete: (id) => req(`/servicos/${id}`, { method: 'DELETE' }),
 
   // Slots
-  // Obs.: includeBusy Ã© opcional; se o backend suportar, retorna tambÃ©m ocupados/bloqueados.
+  // Obs.: includeBusy é opcional; se o backend suportar, retorna também ocupados/bloqueados.
   getSlots: (establishmentId, weekStart, { includeBusy, durationMinutes, duration, serviceIds } = {}) => {
     const servicoIdsParam = Array.isArray(serviceIds) ? serviceIds.join(',') : serviceIds;
     const duracaoTotalParam = durationMinutes ?? duration;
@@ -229,7 +232,7 @@ export const Api = {
   reagendarAgendamentoEstab: (id, payload) =>
     req(`/agendamentos/${id}/reschedule-estab`, { method: 'PUT', body: JSON.stringify(payload) }),
 
-  // NotificaÃ§Ãµes (NOVO)
+  // Notificações (NOVO)
   scheduleWhatsApp: (payload) =>
     req('/notifications/whatsapp/schedule', {
       method: 'POST',
@@ -241,14 +244,14 @@ export const Api = {
   waConnectStatus: () => req('/wa/connect/status'),
   waConnectDisconnect: () => req('/wa/connect/disconnect', { method: 'POST' }),
 
-  // Admin (manutenÃ§Ã£o)
+  // Admin (manutenção)
   adminCleanup: (adminToken) =>
     req('/admin/cleanup', {
       method: 'POST',
       headers: { 'X-Admin-Token': String(adminToken || '') },
     }),
 
-  // PÃºblico (sem login)
+  // Público (sem login)
   publicAgendar: (payload, opts = {}) =>
     req('/public/agendamentos', {
       method: 'POST',
@@ -256,11 +259,14 @@ export const Api = {
       idempotencyKey: opts.idempotencyKey,
     }),
 
-  relatoriosEstabelecimento: (params = {}) => req(`/relatorios/estabelecimento${toQuery(params)}`),
-  downloadRelatorio: async (type, params = {}) => {
-    const search = { ...params, download: type };
+  relatoriosEstabelecimento: (params = {}) => req(`/relatorios/estabelecimento/overview${toQuery(params)}`),
+  relatoriosOverview: (params = {}) => req(`/relatorios/estabelecimento/overview${toQuery(params)}`),
+  relatoriosProfissionais: (params = {}) => req(`/relatorios/estabelecimento/profissionais${toQuery(params)}`),
+  relatoriosFunil: (params = {}) => req(`/relatorios/estabelecimento/funil${toQuery(params)}`),
+  downloadRelatorio: async (typeOrParams = {}, maybeParams = {}) => {
+    const params = typeof typeOrParams === 'string' ? maybeParams : typeOrParams;
     const token = getToken();
-    const url = join(BASE, `/relatorios/estabelecimento${toQuery(search)}`);
+    const url = join(BASE, `/relatorios/estabelecimento/export.csv${toQuery(params)}`);
     const headers = {
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     };
@@ -289,7 +295,7 @@ export const Api = {
 
     const disposition = res.headers.get('content-disposition') || '';
     const filenameMatch = disposition.match(/filename="?([^";]+)"?/i);
-    const rawName = filenameMatch ? filenameMatch[1] : `relatorio-${type}.csv`;
+    const rawName = filenameMatch ? filenameMatch[1] : 'relatorio.csv';
     let filename = rawName;
     try {
       filename = decodeURIComponent(rawName);
@@ -308,5 +314,5 @@ export const Api = {
   profissionaisDelete: (id) => req(`/profissionais/${id}`, { method: 'DELETE' }),
 };
 
-// Exporta para depuraÃ§Ã£o no console do navegador
+// Exporta para depuração no console do navegador
 export const API_BASE_URL = BASE;

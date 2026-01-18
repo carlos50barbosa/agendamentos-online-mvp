@@ -1,11 +1,12 @@
 // backend/src/lib/billing_monitor.js
 import { pool } from './db.js'
 import { config } from './config.js'
-import { notifyEmail, notifyWhatsapp } from './notifications.js'
+import { notifyEmail, sendWhatsAppSmart } from './notifications.js'
 import { getPlanLabel } from './plans.js'
 import { estabNotificationsDisabled } from './estab_notifications.js'
 
 const DAY_MS = 86400000
+const TIMEZONE = config.timezone || process.env.TZ || 'America/Sao_Paulo'
 const remindersCfg = config.billing?.reminders || {}
 const WARN_DAYS = Number(remindersCfg.warnDays ?? 3) || 3
 const GRACE_DAYS = Number(remindersCfg.graceDays ?? 3) || 3
@@ -47,6 +48,40 @@ function formatPtDate(date) {
     }).format(date)
   } catch {
     return date.toISOString().slice(0, 10)
+  }
+}
+
+function formatDateTimePtBr(date) {
+  if (!date) {
+    console.warn('[billing-monitor] missing date for format', { value: date })
+    return ''
+  }
+  const d = date instanceof Date ? date : new Date(date)
+  if (Number.isNaN(d.getTime())) {
+    console.warn('[billing-monitor] invalid date for format', { value: date })
+    return ''
+  }
+  const dateOptions = { day: '2-digit', month: '2-digit', year: 'numeric' }
+  const timeOptions = { hour: '2-digit', minute: '2-digit', hour12: false }
+  try {
+    const datePart = d.toLocaleDateString('pt-BR', { ...dateOptions, timeZone: TIMEZONE })
+    const timePart = d.toLocaleTimeString('pt-BR', { ...timeOptions, timeZone: TIMEZONE })
+    return `${datePart}, ${timePart}`
+  } catch (err) {
+    console.warn('[billing-monitor] invalid timezone, fallback to local', {
+      timeZone: TIMEZONE,
+      error: err?.message || err,
+    })
+    try {
+      const datePart = d.toLocaleDateString('pt-BR', dateOptions)
+      const timePart = d.toLocaleTimeString('pt-BR', timeOptions)
+      return `${datePart}, ${timePart}`
+    } catch (fallbackErr) {
+      console.warn('[billing-monitor] date format fallback failed', {
+        error: fallbackErr?.message || fallbackErr,
+      })
+      return ''
+    }
   }
 }
 
@@ -271,7 +306,59 @@ async function sendWhatsappReminder(row, dueAt, kind, state) {
 
   try {
     const message = buildWhatsappCopy(kind, row, state)
-    await notifyWhatsapp(message, row.telefone)
+    const rowId = row?.id || null
+    const agendamentoId = row.agendamento_id || row.agendamentoId || state.agendamento?.id || null
+    const estabelecimentoId = row.estabelecimento_id || row.estabelecimentoId || state.estabelecimento?.id || null
+    if (!estabelecimentoId) {
+      console.warn('[billing-monitor] missing estabelecimentoId for whatsapp context', { rowId, kind })
+    }
+    const servicoNome = row.servico_nome || row.servico || state.servico?.nome || ''
+    const dataHoraFmt = formatDateTimePtBr(row.inicio || row.inicio_local || row.datahora || null)
+    const estabNome = row.estabelecimento_nome || state.estabelecimento?.nome || ''
+    const templateParams = [servicoNome, dataHoraFmt, estabNome]
+    const missingFields = []
+    if (!String(servicoNome || '').trim()) missingFields.push('servicoNome')
+    if (!String(dataHoraFmt || '').trim()) missingFields.push('dataHoraFmt')
+    if (!String(estabNome || '').trim()) missingFields.push('estabNome')
+    const context = {}
+    if (kind) context.kind = kind
+    if (agendamentoId) context.agendamentoId = agendamentoId
+    if (estabelecimentoId) context.estabelecimentoId = estabelecimentoId
+    if (missingFields.length) {
+      console.warn('[billing-monitor] missing template params, fallback to text', {
+        template: 'confirmacao_agendamento_v2',
+        missingFields,
+        rowId,
+        agendamentoId,
+        estabelecimentoId,
+        kind,
+      })
+      const result = await sendWhatsAppSmart({
+        to: row.telefone,
+        message,
+        context,
+        template: null,
+      })
+      if (result?.ok === false) {
+        console.warn('[billing-monitor] whatsapp skip (window closed, no template params)', {
+          template: 'confirmacao_agendamento_v2',
+          rowId,
+          agendamentoId,
+          estabelecimentoId,
+          kind,
+          reason: result?.error || 'template_missing',
+        })
+        return false
+      }
+      return true
+    }
+    await sendWhatsAppSmart({
+      to: row.telefone,
+      message,
+      templateName: 'confirmacao_agendamento_v2',
+      templateParams,
+      context,
+    })
     return true
   } catch (err) {
     console.error('[billing-monitor] whatsapp failed', err?.message || err)

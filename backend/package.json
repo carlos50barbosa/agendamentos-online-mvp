@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "node src/index.js",
     "start": "node src/index.js",
-    "test:plan": "node scripts/test-plan-flows.mjs"
+    "test:plan": "node scripts/test-plan-flows.mjs",
+    "test:reports": "node --test tests/relatorios.test.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

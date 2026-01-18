@@ -136,7 +136,7 @@ function BillingStatusBanner({ status, user, planInfo }) {
     return null;
   })();
   const billingState = String(status?.state || '').toLowerCase();
-  const planStatus = billingState || String(planInfo?.status || '').toLowerCase();
+  const planStatus = String(status?.plan_status || planInfo?.status || '').toLowerCase();
   const isTrialing = planStatus === 'trialing';
   const trialExpired = isTrialing && trialDaysLeft != null && trialDaysLeft < 0;
 
@@ -151,6 +151,9 @@ function BillingStatusBanner({ status, user, planInfo }) {
   let title = '';
   let body = '';
   let ctaLabel = 'Pagar agora';
+  let ctaTo = '/configuracoes';
+  let secondaryCtaLabel = '';
+  let secondaryCtaTo = '';
 
   if (state === 'due_soon') {
     const daysRaw = Number(status?.days_to_due ?? 0);
@@ -182,7 +185,10 @@ function BillingStatusBanner({ status, user, planInfo }) {
     tone = 'warning';
     title = 'Teste gratuito encerrado';
     body = 'Escolha um plano para continuar usando a plataforma sem interrupções.';
-    ctaLabel = 'Ver planos';
+    ctaLabel = 'Reativar agora (Gerar PIX)';
+    ctaTo = '/configuracoes?tab=plano&action=gerar_pix';
+    secondaryCtaLabel = 'Ver planos';
+    secondaryCtaTo = '/planos#planos';
   }
 
   return (
@@ -192,7 +198,12 @@ function BillingStatusBanner({ status, user, planInfo }) {
           <strong>{title}</strong>
           <p>{body}</p>
         </div>
-        <NavLink to="/configuracoes" className="btn btn--sm btn--primary">{ctaLabel}</NavLink>
+        <div className="billing-banner__actions">
+          <NavLink to={ctaTo} className="btn btn--sm btn--primary">{ctaLabel}</NavLink>
+          {secondaryCtaLabel && (
+            <NavLink to={secondaryCtaTo} className="btn btn--ghost btn--sm billing-banner__link">{secondaryCtaLabel}</NavLink>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -561,7 +572,7 @@ export default function App() {
 
   const planStatusLocal = String(planBarInfo.status || '').toLowerCase();
   const billingState = String(billingStatus?.state || '').toLowerCase();
-  const planStatus = billingState || planStatusLocal;
+  const planStatus = String(billingStatus?.plan_status || planStatusLocal || '').toLowerCase();
   const isTrialing = planStatus === 'trialing';
   const trialExpired = isTrialing && trialDaysLeft != null && trialDaysLeft < 0;
   const trialEndingSoon = isTrialing && trialDaysLeft != null && trialDaysLeft >= 0 && trialDaysLeft <= 3;

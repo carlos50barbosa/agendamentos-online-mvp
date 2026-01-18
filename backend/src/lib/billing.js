@@ -213,6 +213,7 @@ export async function createMercadoPagoPixCheckout({
     payment_id: String(payment.id),
     qr_code: transactionData.qr_code || null,
     qr_code_base64: transactionData.qr_code_base64 || null,
+    copia_e_cola: transactionData.copia_e_cola || transactionData.qr_code || null,
     ticket_url: transactionData.ticket_url || null,
     expires_at: transactionData.expires_at || payment?.date_of_expiration || null,
     amount_cents: priceCents,

@@ -99,6 +99,8 @@ CREATE TABLE IF NOT EXISTS agendamentos (
   inicio             DATETIME     NOT NULL,
   fim                DATETIME     NOT NULL,
   status             ENUM('confirmado','pendente','cancelado') NOT NULL DEFAULT 'confirmado',
+  no_show            TINYINT(1)   NOT NULL DEFAULT 0,
+  origem             VARCHAR(32)  NULL,
   public_confirm_token_hash VARCHAR(64) NULL,
   public_confirm_expires_at DATETIME    NULL,
   public_confirmed_at DATETIME          NULL,
@@ -121,6 +123,8 @@ CREATE TABLE IF NOT EXISTS agendamentos (
 
   -- indices uteis para consultas
   INDEX idx_ag_estab_inicio (estabelecimento_id, inicio),
+  INDEX idx_ag_estab_inicio_status (estabelecimento_id, inicio, status),
+  INDEX idx_ag_estab_criado (estabelecimento_id, criado_em),
   INDEX idx_ag_cliente_inicio (cliente_id, inicio),
   INDEX idx_ag_estab_status_inicio (estabelecimento_id, status, inicio),
   INDEX idx_ag_cliente_status_inicio (cliente_id, status, inicio),

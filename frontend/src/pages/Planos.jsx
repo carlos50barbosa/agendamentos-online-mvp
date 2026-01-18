@@ -1,7 +1,8 @@
 // src/pages/Planos.jsx
-import React, { Suspense, useEffect, useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import React, { Suspense, useEffect, useMemo, useState } from 'react';
+import { useNavigate, Link, useLocation } from 'react-router-dom';
 import { getUser } from '../utils/auth';
+import { Api } from '../utils/api';
 
 const PlanosUpperExtras = React.lazy(() => import('./PlanosUpperExtras.jsx'));
 const PlanosLowerExtras = React.lazy(() => import('./PlanosLowerExtras.jsx'));
@@ -127,7 +128,11 @@ const PRICING_PLANS = [
 export default function Planos() {
   const user = getUser();
   const nav = useNavigate();
+  const location = useLocation();
   const [billingCycle, setBillingCycle] = useState('mensal');
+  const [billingStatus, setBillingStatus] = useState(null);
+  const [billingStatusLoading, setBillingStatusLoading] = useState(false);
+  const [billingStatusError, setBillingStatusError] = useState('');
 
   useEffect(() => {
     const root = typeof document !== 'undefined' ? document.documentElement : null;
@@ -141,11 +146,41 @@ export default function Planos() {
     };
   }, []);
 
+  useEffect(() => {
+    let active = true;
+    if (user?.tipo !== 'estabelecimento' || !user?.id) {
+      setBillingStatus(null);
+      setBillingStatusError('');
+      return () => { active = false; };
+    }
+    setBillingStatusLoading(true);
+    setBillingStatusError('');
+    Api.billingStatus()
+      .then((data) => {
+        if (active) setBillingStatus(data);
+      })
+      .catch((err) => {
+        if (!active) return;
+        const message = err?.data?.message || err?.message || 'Falha ao carregar status de cobrança.';
+        setBillingStatusError(message);
+      })
+      .finally(() => {
+        if (active) setBillingStatusLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [user?.id, user?.tipo]);
+
   const scrollToPlans = () => {
     if (typeof document === 'undefined') return;
     const section = document.getElementById('planos');
     if (section) section.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
+
+  useEffect(() => {
+    if (location.hash === '#planos') scrollToPlans();
+  }, [location.hash]);
 
   const goCheckout = (plano, ciclo = 'mensal') => () => {
     try {
@@ -159,6 +194,13 @@ export default function Planos() {
     } else {
       nav('/cadastro?next=/configuracoes&tipo=estabelecimento');
     }
+  };
+
+  const goRenewal = () => {
+    try {
+      localStorage.setItem('intent_kind', 'renewal');
+    } catch {}
+    nav('/configuracoes');
   };
 
   const goTrial = (plano) => () => {
@@ -177,6 +219,19 @@ export default function Planos() {
       );
     }
   };
+
+  const trialInfo = billingStatus?.trial || {};
+  const renewalInfo = billingStatus?.billing || {};
+  const renewalRequired = Boolean(renewalInfo.renewalRequired);
+  const hasOpenRenewalPayment = Boolean(renewalInfo.hasOpenPayment && renewalInfo.openPayment);
+  const subscriptionStatus = String(billingStatus?.subscription?.status || '').toLowerCase();
+  const hasActivePlan = ['active', 'authorized'].includes(subscriptionStatus);
+  const currentPlanKey = billingStatus?.subscription?.plan || '';
+  const hasPlanContext = Boolean(currentPlanKey);
+  const currentPlan = PRICING_PLANS.find((item) => item.key === currentPlanKey) || null;
+  const currentPlanLabel = currentPlan?.title || (currentPlanKey ? currentPlanKey : 'Starter');
+  const showStarterTrial =
+    user?.tipo !== 'estabelecimento' || (!trialInfo.wasUsed && !trialInfo.isExpired);
 
   const handlePlanCta = (plan, ciclo, kind) => (event) => {
     if (event?.preventDefault) event.preventDefault();
@@ -244,6 +299,44 @@ export default function Planos() {
             <h2>Planos e preços</h2>
             <p>Veja o que cada plano inclui e compare os limites.</p>
           </header>
+          {hasPlanContext && (
+            <div
+              className="planos-current-plan"
+              style={{ marginBottom: 12, display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center' }}
+            >
+              <div>
+                <strong>Plano atual:</strong> {currentPlanLabel}
+              </div>
+              {billingStatusLoading && (
+                <span className="muted" style={{ fontSize: 12 }}>
+                  Carregando status de cobrança...
+                </span>
+              )}
+              {renewalRequired && !hasOpenRenewalPayment ? (
+                <button className="btn btn--primary btn--sm" type="button" onClick={goRenewal}>
+                  Renovar agora
+                </button>
+              ) : (
+                <span className="muted">Assinatura ativa.</span>
+              )}
+              {hasOpenRenewalPayment && renewalInfo.openPayment?.expiresAt && (
+                <span className="muted" style={{ fontSize: 12 }}>
+                  PIX pendente expira em{' '}
+                  {new Date(renewalInfo.openPayment.expiresAt).toLocaleString('pt-BR', {
+                    day: '2-digit',
+                    month: 'long',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                })}
+              </span>
+            )}
+            {billingStatusError && (
+              <span className="muted" style={{ color: '#c53030', fontSize: 12 }}>
+                {billingStatusError}
+              </span>
+            )}
+          </div>
+          )}
           <div className="small muted" style={{ marginTop: -8, marginBottom: 12 }}>
             Política de cobrança: upgrades liberam recursos imediatamente e o novo valor é cobrado no próximo ciclo. Downgrades valem no ciclo seguinte, desde que os limites do plano sejam atendidos.
           </div>
@@ -269,26 +362,34 @@ export default function Planos() {
           </div>
           <div className="pricing-grid">
             {PRICING_PLANS.map((plan) => {
-              const price = plan.prices[billingCycle];
-              const periodLabel = BILLING_CYCLES[billingCycle].periodLabel;
-              const cardClass = `pricing-card${plan.featured ? ' is-featured' : ''}`;
-              const isSales = plan.ctaKind === 'sales';
-              const showAnnualEquivalent = billingCycle === 'anual' && plan.annualEquivalent;
-              const ctaLabel = plan.ctaLabel || 'Saiba mais';
-              const ctaClass = plan.ctaVariant || 'btn';
-              const ctaLink = (() => {
-                if (!isSales) return null;
-                const base = plan.ctaHref || `/contato?plano=${plan.key}`;
-                const separator = base.includes('?') ? '&' : '?';
-                return `${base}${separator}ciclo=${billingCycle}`;
-              })();
+          const price = plan.prices[billingCycle];
+          const periodLabel = BILLING_CYCLES[billingCycle].periodLabel;
+          const isCurrentPlan = hasActivePlan && plan.key === currentPlanKey;
+          const cardClass = `pricing-card${plan.featured ? ' is-featured' : ''}${isCurrentPlan ? ' pricing-card--current' : ''}`;
+          const isSales = plan.ctaKind === 'sales';
+          const showAnnualEquivalent = billingCycle === 'anual' && plan.annualEquivalent;
+          const isStarterPlan = plan.key === 'starter';
+          const ctaKind = isStarterPlan && !showStarterTrial ? 'checkout' : plan.ctaKind;
+          const ctaLabel = isStarterPlan && !showStarterTrial ? 'Assinar Starter' : plan.ctaLabel || 'Saiba mais';
+          const ctaClass = plan.ctaVariant || 'btn';
+          const ctaLink = (() => {
+            if (!isSales) return null;
+            const base = plan.ctaHref || `/contato?plano=${plan.key}`;
+            const separator = base.includes('?') ? '&' : '?';
+            return `${base}${separator}ciclo=${billingCycle}`;
+          })();
               return (
                 <div key={plan.key} className={cardClass}>
                   {plan.badge && <span className="pricing-badge">{plan.badge}</span>}
-                  <div className="pricing-header">
+                <div className="pricing-header">
+                  <div>
                     <div className="pricing-title">{plan.title}</div>
                     <div className="pricing-subtitle muted">{plan.subtitle}</div>
                   </div>
+                  {isCurrentPlan && (
+                    <span className="tag tag--accent">Plano atual</span>
+                  )}
+                </div>
                   <div className="price">
                     <span className="currency">R$</span>
                     <span className="amount">{price}</span>
@@ -340,7 +441,7 @@ export default function Planos() {
                     <button
                       type="button"
                       className={ctaClass}
-                      onClick={handlePlanCta(plan.key, billingCycle, plan.ctaKind)}
+                      onClick={handlePlanCta(plan.key, billingCycle, ctaKind)}
                     >
                       {ctaLabel}
                     </button>

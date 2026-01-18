@@ -27,16 +27,19 @@ function summarizePayload(payload) {
   if (type === 'template') {
     const tpl = payload.template || {};
     const components = Array.isArray(tpl.components) ? tpl.components : [];
+    const templateSummary = {
+      name: tpl.name,
+      lang: tpl.language?.code,
+    };
+    if (components.length) {
+      templateSummary.components = components.map((comp) => ({
+        type: comp?.type,
+        params: Array.isArray(comp?.parameters) ? comp.parameters.length : 0,
+      }));
+    }
     return {
       type,
-      template: {
-        name: tpl.name,
-        lang: tpl.language?.code,
-        components: components.map((comp) => ({
-          type: comp?.type,
-          params: Array.isArray(comp?.parameters) ? comp.parameters.length : 0,
-        })),
-      },
+      template: templateSummary,
     };
   }
   if (type === 'text') {
@@ -85,12 +88,21 @@ async function postGraph(payload) {
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    // Log amigável pra debugar rapidinho
-    console.error('[notifyWhatsapp] Graph error:', JSON.stringify(data, null, 2));
-    const msg = data?.error?.message || `Graph HTTP ${res.status}`;
+    const error = data?.error;
+    const logData = (error && typeof error === 'object')
+      ? {
+          message: error.message,
+          code: error.code,
+          error_data: error.error_data,
+          fbtrace_id: error.fbtrace_id,
+        }
+      : data;
+    console.error('[wa/graph/error]', { status: res.status, data: logData });
+    const msg = error?.message || `Graph HTTP ${res.status}`;
     const err = new Error(msg);
     err.status = res.status;
-    err.graph = data?.error;
+    err.body = data;
+    err.graph = error;
     throw err;
   }
   console.log('[wa/send/ok]', JSON.stringify({
@@ -125,14 +137,17 @@ export async function waSendTemplate({ to, name, lang = 'en_US', components }) {
     e.status = 400;
     throw e;
   }
+  const template = {
+    name: name || process.env.WA_TEMPLATE_NAME || 'hello_world',
+    language: { code: lang || process.env.WA_TEMPLATE_LANG || 'en_US' },
+  };
+  if (Array.isArray(components) && components.length > 0) {
+    template.components = components;
+  }
   return postGraph({
     messaging_product: 'whatsapp',
     to: dest,
     type: 'template',
-    template: {
-      name: name || process.env.WA_TEMPLATE_NAME || 'hello_world',
-      language: { code: lang || process.env.WA_TEMPLATE_LANG || 'en_US' },
-      ...(components ? { components } : {})
-    }
+    template,
   });
 }

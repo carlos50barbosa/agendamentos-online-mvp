@@ -419,8 +419,24 @@ export default function Configuracoes() {
   const isEstab = user?.tipo === 'estabelecimento';
   const isCliente = user?.tipo === 'cliente';
   const location = useLocation();
+  const searchParams = useMemo(() => new URLSearchParams(location.search || ''), [location.search]);
+  const tabParam = (searchParams.get('tab') || '').toLowerCase();
+  const actionParam = (searchParams.get('action') || '').toLowerCase();
+  const shouldOpenPlan = tabParam === 'plano' || actionParam === 'gerar_pix';
+  const shouldFocusPix = actionParam === 'gerar_pix';
   const sectionRefs = useRef({});
   const focusTimeoutRef = useRef(null);
+  const pixRenewBtnRef = useRef(null);
+  const pixHighlightTimeoutRef = useRef(null);
+  const pixActionHandledRef = useRef(false);
+
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    console.log('[configuracoes] label source', {
+      source: 'hardcoded',
+      samples: ['Configurações', 'Segurança', 'Próxima confirmação', 'renovação', 'mês'],
+    });
+  }, []);
 
   const [planInfo, setPlanInfo] = useState({
     plan: 'starter',
@@ -439,6 +455,7 @@ export default function Configuracoes() {
   const [savingMessages, setSavingMessages] = useState(false);
   const [openSections, setOpenSections] = useState({});
   const [focusedSection, setFocusedSection] = useState('');
+  const [pixHighlightActive, setPixHighlightActive] = useState(false);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [showQrCode, setShowQrCode] = useState(false);
   const [publicProfileForm, setPublicProfileForm] = useState({
@@ -460,6 +477,9 @@ export default function Configuracoes() {
   useEffect(() => () => {
     if (focusTimeoutRef.current) {
       clearTimeout(focusTimeoutRef.current);
+    }
+    if (pixHighlightTimeoutRef.current) {
+      clearTimeout(pixHighlightTimeoutRef.current);
     }
   }, []);
 
@@ -483,6 +503,15 @@ export default function Configuracoes() {
   }, [location?.state?.focusSection]);
 
   useEffect(() => {
+    pixActionHandledRef.current = false;
+  }, [location.search]);
+
+  useEffect(() => {
+    if (!isEstab || !shouldOpenPlan) return;
+    setOpenSections((prev) => ({ ...prev, plan: true }));
+  }, [isEstab, shouldOpenPlan]);
+
+  useEffect(() => {
     const handleBeforeUnload = (event) => {
       if (!hasUnsavedChanges) return;
       event.preventDefault();
@@ -494,6 +523,18 @@ export default function Configuracoes() {
 
   const toggleSection = useCallback((id) => {
     setOpenSections((prev) => ({ ...prev, [id]: !prev[id] }));
+  }, []);
+
+  const flashPixHighlight = useCallback(() => {
+    if (typeof window === 'undefined') return;
+    setPixHighlightActive(true);
+    if (pixHighlightTimeoutRef.current) {
+      clearTimeout(pixHighlightTimeoutRef.current);
+    }
+    pixHighlightTimeoutRef.current = window.setTimeout(() => {
+      setPixHighlightActive(false);
+      pixHighlightTimeoutRef.current = null;
+    }, 1500);
   }, []);
 
   const applyPublicProfile = useCallback((profile) => {
@@ -596,6 +637,46 @@ export default function Configuracoes() {
   const [pixPaymentId, setPixPaymentId] = useState(null);
   const [pixPaid, setPixPaid] = useState(false);
   const [pixHint, setPixHint] = useState('');
+  const [renewalLoading, setRenewalLoading] = useState(false);
+  const [renewalError, setRenewalError] = useState('');
+
+  useEffect(() => {
+    if (!isEstab || !shouldFocusPix || !openSections.plan) return;
+    if (pixActionHandledRef.current) return;
+    if (typeof window === 'undefined') return;
+    pixActionHandledRef.current = true;
+
+    let timeoutId = null;
+    let rafId = null;
+
+    const run = () => {
+      const btn = pixRenewBtnRef.current;
+      if (btn) {
+        try { btn.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch {}
+        try { btn.focus({ preventScroll: true }); } catch { try { btn.focus(); } catch {} }
+        flashPixHighlight();
+        return;
+      }
+      const sectionNode = sectionRefs.current.plan;
+      if (sectionNode) {
+        try { sectionNode.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch {}
+      }
+      setCheckoutNotice({
+        kind: 'warn',
+        message: 'Abra seu plano e gere o PIX para reativar.',
+        syncing: false,
+      });
+    };
+
+    rafId = window.requestAnimationFrame(() => {
+      timeoutId = window.setTimeout(run, 60);
+    });
+
+    return () => {
+      if (rafId) window.cancelAnimationFrame(rafId);
+      if (timeoutId) window.clearTimeout(timeoutId);
+    };
+  }, [flashPixHighlight, isEstab, openSections.plan, setCheckoutNotice, shouldFocusPix]);
   const pixPollIntervalRef = useRef(null);
   const pixPollAttemptsRef = useRef(0);
   const pixPaidRef = useRef(false);
@@ -853,6 +934,17 @@ export default function Configuracoes() {
     return statusPlan === 'active' || statusSub === 'active' || statusSub === 'authorized';
   }, [planInfo.status, billing?.subscription?.status, isOverdue]);
   const subStatus = useMemo(() => String(billing?.subscription?.status || '').toLowerCase(), [billing?.subscription?.status]);
+  const renewalInfo = billingStatus?.billing || {};
+  const renewalRequired = Boolean(renewalInfo.renewalRequired);
+  const renewalOpenPayment = renewalInfo.openPayment || null;
+  const hasRenewalOpenPayment = Boolean(renewalInfo.hasOpenPayment && renewalOpenPayment);
+  const renewalPaymentMethod = String(renewalInfo.paymentMethod || 'pix_manual').toLowerCase();
+  const trialData = billingStatus?.trial || {};
+  useEffect(() => {
+    if (!renewalRequired) {
+      setRenewalError('');
+    }
+  }, [renewalRequired]);
   // Assinatura ativa (evita acionar checkout padrão e resultar em 409 "already_active")
 
   const exceedsServices = (target) => {
@@ -1299,6 +1391,37 @@ export default function Configuracoes() {
     return success;
   }, [fetchBilling, isEstab, user?.id, clearPixCache, resetPixState, cleanupIntentStorage]);
 
+  const handleShowRenewalPix = useCallback(() => {
+    if (!hasRenewalOpenPayment || !renewalOpenPayment) return;
+    resetPixState();
+    if (renewalOpenPayment.payment_id) setPixPaymentId(renewalOpenPayment.payment_id);
+    setPixCheckoutModal({ open: true, data: { ...renewalOpenPayment, kind: 'renewal' } });
+    setRenewalError('');
+  }, [hasRenewalOpenPayment, renewalOpenPayment, resetPixState]);
+
+  const handleRenewalPix = useCallback(async () => {
+    if (!isEstab || !user?.id) return false;
+    setRenewalError('');
+    setRenewalLoading(true);
+    try {
+      const data = await Api.billingRenewalPix();
+      await fetchBilling();
+      await fetchBillingStatus();
+      const paymentData = data?.renewal?.openPayment;
+      if (paymentData) {
+        resetPixState();
+        if (paymentData.payment_id) setPixPaymentId(paymentData.payment_id);
+        setPixCheckoutModal({ open: true, data: { ...paymentData, kind: 'renewal' } });
+      }
+      return true;
+    } catch (err) {
+      setRenewalError(err?.data?.message || err?.message || 'Falha ao gerar PIX de renovação.');
+      return false;
+    } finally {
+      setRenewalLoading(false);
+    }
+  }, [isEstab, user?.id, fetchBilling, fetchBillingStatus, resetPixState]);
+
   const handleWhatsAppTopup = useCallback(
     async (packOverride = null) => {
       if (!isEstab || !user?.id) return false;
@@ -1370,26 +1493,54 @@ export default function Configuracoes() {
       null,
     [pixPaymentId, pixCheckoutModal.data?.payment_id, pixCheckoutModal.data?.paymentId, pixCheckoutModal.data?.gateway_preference_id]
   );
-  const isPixTopupModal = pixCheckoutModal.open && pixCheckoutModal.data?.kind === 'whatsapp_topup';
+  const pixModalKind = pixCheckoutModal.data?.kind || '';
+  const isPixTopupModal = pixModalKind === 'whatsapp_topup';
+  const isRenewalModal = pixModalKind === 'renewal';
+  const isPixPollingModal = pixCheckoutModal.open && (isPixTopupModal || isRenewalModal);
 
   const checkPixStatus = useCallback(
     async ({ silent = true } = {}) => {
-      if (!isPixTopupModal || !pixStatusPaymentId || pixPaidRef.current) return null;
+      if (!isPixPollingModal || !pixStatusPaymentId || pixPaidRef.current) return null;
       pixPollAttemptsRef.current += 1;
       try {
-        const status = await Api.billingWhatsAppPixStatus(pixStatusPaymentId);
-        if (status?.credited) {
-          pixPaidRef.current = true;
-          setPixPaid(true);
-          setPixHint('Pagamento confirmado! Saldo atualizado automaticamente.');
-          clearPixPolling();
-          setPixCheckoutModal((prev) =>
-            prev?.data ? { ...prev, data: { ...prev.data, status: 'approved' } } : prev
-          );
-          try {
-            await fetchBilling();
-          } catch (err) {
-            console.warn('billing refresh after PIX credit failed', err);
+        if (isPixTopupModal) {
+          const status = await Api.billingWhatsAppPixStatus(pixStatusPaymentId);
+          if (status?.credited) {
+            pixPaidRef.current = true;
+            setPixPaid(true);
+            setPixHint('Pagamento confirmado! Saldo atualizado automaticamente.');
+            clearPixPolling();
+            setPixCheckoutModal((prev) =>
+              prev?.data ? { ...prev, data: { ...prev.data, status: 'approved' } } : prev
+            );
+            try {
+              await fetchBilling();
+            } catch (err) {
+              console.warn('billing refresh after PIX credit failed', err);
+            }
+            return status;
+          }
+        } else if (isRenewalModal) {
+          const status = await Api.billingRenewalPixStatus(pixStatusPaymentId);
+          if (status?.openPayment) {
+            setPixCheckoutModal((prev) =>
+              prev?.data ? { ...prev, data: { ...prev.data, ...status.openPayment } } : prev
+            );
+          }
+          if (status?.paid) {
+            pixPaidRef.current = true;
+            setPixPaid(true);
+            setPixHint('Pagamento confirmado! Renovamos o plano automaticamente.');
+            clearPixPolling();
+            setPixCheckoutModal((prev) =>
+              prev?.data ? { ...prev, data: { ...prev.data, status: 'approved' } } : prev
+            );
+            try {
+              await fetchBilling();
+              await fetchBillingStatus();
+            } catch (err) {
+              console.warn('billing refresh after PIX renewal failed', err);
+            }
           }
           return status;
         }
@@ -1402,11 +1553,19 @@ export default function Configuracoes() {
       }
       return null;
     },
-    [clearPixPolling, fetchBilling, isPixTopupModal, pixStatusPaymentId]
+    [
+      clearPixPolling,
+      fetchBilling,
+      fetchBillingStatus,
+      isPixPollingModal,
+      isPixTopupModal,
+      isRenewalModal,
+      pixStatusPaymentId,
+    ]
   );
 
   useEffect(() => {
-    if (!isPixTopupModal || !pixStatusPaymentId) {
+    if (!isPixPollingModal || !pixStatusPaymentId) {
       clearPixPolling();
       return undefined;
     }
@@ -1565,19 +1724,23 @@ export default function Configuracoes() {
       if (rawCycle) storedCycle = rawCycle;
     } catch {}
     try { storedKind = localStorage.getItem('intent_kind'); } catch {}
-    const normalizedIntentKind = (storedKind || '').trim().toLowerCase();
-    const intentKind = normalizedIntentKind || 'checkout';
+      const normalizedIntentKind = (storedKind || '').trim().toLowerCase();
+      const intentKind = normalizedIntentKind || 'checkout';
 
-    if (storedPlan && !checkoutIntentRef.current) {
-      checkoutIntentRef.current = true;
-      (async () => {
-        try {
-          const trialActive = statusKey === 'trialing' && !trialExpired && daysLeft > 0;
-          if (intentKind === 'trial' && trialActive) {
-            setCheckoutNotice({
-              kind: 'info',
-              message: 'Você está em teste grátis. Gere o PIX quando quiser ativar antes do fim do teste.',
-              syncing: false,
+      if (storedPlan && !checkoutIntentRef.current) {
+        checkoutIntentRef.current = true;
+        (async () => {
+          try {
+            const trialActive = statusKey === 'trialing' && !trialExpired && daysLeft > 0;
+            if (intentKind === 'renewal') {
+              await handleRenewalPix();
+              return;
+            }
+            if (intentKind === 'trial' && trialActive) {
+              setCheckoutNotice({
+                kind: 'info',
+                message: 'Você está em teste grátis. Gere o PIX quando quiser ativar antes do fim do teste.',
+                syncing: false,
             });
             return;
           }
@@ -1590,6 +1753,7 @@ export default function Configuracoes() {
     }
   }, [
     handleCheckout,
+    handleRenewalPix,
     isEstab,
     planInfo.status,
     planInfo.trialEnd,
@@ -2251,61 +2415,406 @@ export default function Configuracoes() {
       const waConnected = waAccount?.status === 'connected';
       const waDisplayRaw = waAccount?.display_phone_number || '';
       const waDisplayLabel = waDisplayRaw ? formatPhoneLabel(String(waDisplayRaw)) : '';
+      const whatsappWallet = billing?.whatsappWallet || null;
+      const includedLimitLabel =
+        whatsappWallet && typeof whatsappWallet.included_limit === 'number'
+          ? `${whatsappWallet.included_limit} msgs/mês`
+          : 'franquia mensal de mensagens';
+      const whatsappFeature = `WhatsApp: ${includedLimitLabel} (máx. 5 msgs por agendamento). Ao esgotar, seguimos por e-mail e painel.`;
+      const reportsFeature = planInfo.allowAdvanced ? 'Relatórios avançados' : 'Relatórios básicos';
+      const planFeatures = [whatsappFeature, reportsFeature];
+      const whatsappPackages = whatsappPackagesNormalized;
+      const whatsappHistoryPreview = whatsappHistorySummary;
+      const whatsappHistoryFull = whatsappHistoryVisible;
+      const whatsappHistoryCount = whatsappHistoryMeta.length;
+      const historyPanelId = 'whatsapp-history-panel';
+      const whatsappMonthLabel =
+        whatsappWallet?.month_label ||
+        new Date().toLocaleString('pt-BR', { month: 'long', year: 'numeric' });
+      const includedLimit = Number(whatsappWallet?.included_limit ?? 0);
+      const includedBalance = Number(whatsappWallet?.included_balance ?? 0);
+      const includedUsed = includedLimit > 0 ? Math.max(includedLimit - includedBalance, 0) : 0;
+      const includedUsagePct = includedLimit > 0 ? Math.min(100, (includedUsed / includedLimit) * 100) : 0;
+      const includedUsageLabel = `Usadas ${includedUsed.toLocaleString('pt-BR')} de ${includedLimit.toLocaleString('pt-BR')}`;
+      const includedUsagePercentLabel = `${Math.round(includedUsagePct)}%`;
+      const extraBalance = Number(whatsappWallet?.extra_balance ?? 0);
+      const totalBalance = Number(whatsappWallet?.total_balance || 0);
+      const appointmentsEquivalent = totalBalance > 0 ? totalBalance / 5 : 0;
+      const whatsappHeaderBadge = planInfo.activeUntil
+        ? 'Assinatura ativa até ' + fmtDate(planInfo.activeUntil)
+        : includedLimit > 0
+        ? 'Incluído no plano'
+        : '';
+      const resolvePackPriceCents = (pack) => {
+        if (typeof pack?.price_cents === 'number') return pack.price_cents;
+        if (typeof pack?.priceCents === 'number') return pack.priceCents;
+        if (typeof pack?.price === 'number') return pack.price;
+        return null;
+      };
+      let recommendedPackageKey = null;
+      let bestPricePerMsg = Number.POSITIVE_INFINITY;
+      whatsappPackages.forEach((pkg) => {
+        const priceCents = resolvePackPriceCents(pkg);
+        const messagesCount = Number(pkg?.messages || 0);
+        if (!priceCents || !messagesCount) return;
+        const perMsg = (Number(priceCents) / 100) / messagesCount;
+        if (perMsg < bestPricePerMsg) {
+          bestPricePerMsg = perMsg;
+          recommendedPackageKey = pkg.id ?? pkg.code ?? pkg.messages;
+        }
+      });
+      if (recommendedPackageKey == null && whatsappPackages.length) {
+        const largest = whatsappPackages.reduce((top, current) => {
+          const topMsgs = Number(top?.messages || 0);
+          const currentMsgs = Number(current?.messages || 0);
+          return currentMsgs > topMsgs ? current : top;
+        });
+        recommendedPackageKey = largest?.id ?? largest?.code ?? largest?.messages ?? null;
+      }
+      const renderHistoryItem = (entry) => (
+        <li key={entry.key} className={whatsappStyles.historyItem}>
+          <div className={whatsappStyles.historyMain}>
+            <span className={whatsappStyles.historyAmount}>+{entry.messagesLabel} msgs</span>
+            {entry.priceLabel ? <span className={whatsappStyles.historyPrice}>{entry.priceLabel}</span> : null}
+          </div>
+          <div className={whatsappStyles.historyMeta}>
+            <span className={whatsappStyles.historyDate}>{entry.createdLabel || 'Data indisponível'}</span>
+            {entry.statusLabel ? (
+              <span
+                className={`${whatsappStyles.statusChip} ${
+                  entry.statusTone === 'success'
+                    ? whatsappStyles.statusSuccess
+                    : entry.statusTone === 'pending'
+                    ? whatsappStyles.statusPending
+                    : entry.statusTone === 'error'
+                    ? whatsappStyles.statusError
+                    : entry.statusTone === 'neutral'
+                    ? whatsappStyles.statusNeutral
+                    : ''
+                }`}
+              >
+                {entry.statusLabel}
+              </span>
+            ) : null}
+          </div>
+        </li>
+      );
       list.push({
         id: 'whatsapp-connect',
         title: 'WhatsApp Business',
         content: (
-          <div className="grid" style={{ gap: 10 }}>
-            <p className="muted">
-              Conecte o número do estabelecimento para enviar mensagens com o seu próprio WhatsApp Business.
-            </p>
-            {waConnectState.loading && (
-              <div className="row" style={{ gap: 8, alignItems: 'center' }}>
-                <span className="spinner" aria-hidden />
-                <span className="muted" style={{ fontSize: 13 }}>Carregando status do WhatsApp...</span>
+          <div className="grid" style={{ gap: 12 }}>
+            <section className="box" style={{ display: 'grid', gap: 10 }}>
+              <div>
+                <h4 style={{ margin: 0 }}>Conexão</h4>
+                <p className="muted" style={{ margin: '4px 0 0' }}>
+                  Conecte o número do estabelecimento para enviar mensagens com o seu próprio WhatsApp Business.
+                </p>
               </div>
-            )}
-            {!waConnectState.loading && waConnected && (
-              <div className="notice notice--success">
-                Conectado ao numero {waDisplayLabel || waDisplayRaw || 'indisponivel'}.
-              </div>
-            )}
-            {!waConnectState.loading && !waConnected && (
-              <div className="notice notice--warn">
-                WhatsApp não conectado. Conecte seu número para ativar os envios.
-              </div>
-            )}
-            {waAccount?.phone_number_id && (
-              <span className="muted" style={{ fontSize: 12 }}>
-                phone_number_id: {waAccount.phone_number_id}
-              </span>
-            )}
-            {waConnectState.error && (
-              <div className="notice notice--error" role="alert">{waConnectState.error}</div>
-            )}
-            {waConnectState.notice && (
-              <div className="notice notice--success" role="status">{waConnectState.notice}</div>
-            )}
-            <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
-              <button
-                type="button"
-                className="btn btn--primary"
-                onClick={handleWhatsAppConnect}
-                disabled={waConnectState.connectLoading}
-              >
-                {waConnectState.connectLoading ? <span className="spinner" /> : 'Conectar WhatsApp'}
-              </button>
-              {waConnected && (
+              {waConnectState.loading && (
+                <div className="row" style={{ gap: 8, alignItems: 'center' }}>
+                  <span className="spinner" aria-hidden />
+                  <span className="muted" style={{ fontSize: 13 }}>Carregando status do WhatsApp...</span>
+                </div>
+              )}
+              {!waConnectState.loading && waConnected && (
+                <div className="notice notice--success">
+                  Conectado ao numero {waDisplayLabel || waDisplayRaw || 'indisponivel'}.
+                </div>
+              )}
+              {!waConnectState.loading && !waConnected && (
+                <div className="notice notice--warn">
+                  WhatsApp não conectado. Conecte seu número para ativar os envios.
+                </div>
+              )}
+              {waAccount?.phone_number_id && (
+                <span className="muted" style={{ fontSize: 12 }}>
+                  phone_number_id: {waAccount.phone_number_id}
+                </span>
+              )}
+              {waConnectState.error && (
+                <div className="notice notice--error" role="alert">{waConnectState.error}</div>
+              )}
+              {waConnectState.notice && (
+                <div className="notice notice--success" role="status">{waConnectState.notice}</div>
+              )}
+              <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
                 <button
                   type="button"
-                  className="btn btn--outline"
-                  onClick={handleWhatsAppDisconnect}
-                  disabled={waConnectState.disconnectLoading}
+                  className="btn btn--primary"
+                  onClick={handleWhatsAppConnect}
+                  disabled={waConnectState.connectLoading}
                 >
-                  {waConnectState.disconnectLoading ? <span className="spinner" /> : 'Desconectar'}
+                  {waConnectState.connectLoading ? <span className="spinner" /> : 'Conectar WhatsApp'}
                 </button>
-              )}
-            </div>
+                {waConnected && (
+                  <button
+                    type="button"
+                    className="btn btn--outline"
+                    onClick={handleWhatsAppDisconnect}
+                    disabled={waConnectState.disconnectLoading}
+                  >
+                    {waConnectState.disconnectLoading ? <span className="spinner" /> : 'Desconectar'}
+                  </button>
+                )}
+              </div>
+            </section>
+
+            <section className="box" style={{ display: 'grid', gap: 12 }}>
+              <div>
+                <h4 style={{ margin: 0 }}>Mensagens / Créditos</h4>
+                <p className="muted" style={{ margin: '4px 0 0' }}>
+                  Acompanhe o limite mensal e recarregue pacotes extras via PIX quando necessário.
+                </p>
+              </div>
+              <div className={whatsappStyles.whatsLayout}>
+                <div className={whatsappStyles.mainCol}>
+                  <div className={whatsappStyles.walletPanel}>
+                    <div className={whatsappStyles.panelMain}>
+                      <div className={whatsappStyles.panelHeader}>
+                        <div className={whatsappStyles.titleGroup}>
+                          <h4 className={whatsappStyles.title}>WhatsApp (mensagens)</h4>
+                          {whatsappHeaderBadge ? (
+                            <span className={whatsappStyles.badge}>{whatsappHeaderBadge}</span>
+                          ) : null}
+                        </div>
+                        <div className={whatsappStyles.subtitle}>{whatsappMonthLabel}</div>
+                      </div>
+                      {whatsappWallet ? (
+                        <>
+                          <div className={whatsappStyles.statGrid}>
+                            <div className={whatsappStyles.statCard}>
+                              <div className={whatsappStyles.statHeader}>
+                                <div className={whatsappStyles.statLabel}>Incluído no plano</div>
+                                {includedBalance >= 0 ? (
+                                  <div className={whatsappStyles.statRemaining}>
+                                    Restam {Math.max(includedBalance, 0).toLocaleString('pt-BR')}
+                                  </div>
+                                ) : null}
+                              </div>
+                              <div className={whatsappStyles.progress} aria-hidden="true">
+                                <div
+                                  className={whatsappStyles.progressFill}
+                                  style={{ width: `${includedUsagePct}%` }}
+                                  role="presentation"
+                                />
+                              </div>
+                              <div className={whatsappStyles.progressMeta}>
+                                <span className={whatsappStyles.progressLabel}>{includedUsageLabel}</span>
+                                <span className={whatsappStyles.progressPercent}>{includedUsagePercentLabel}</span>
+                              </div>
+                            </div>
+                            <div className={whatsappStyles.statCard}>
+                              <div className={whatsappStyles.statLabel}>Créditos extras</div>
+                              <div className={whatsappStyles.statValue}>{extraBalance.toLocaleString('pt-BR')}</div>
+                              <div className={whatsappStyles.statHint}>Créditos comprados via PIX</div>
+                            </div>
+                            <div className={`${whatsappStyles.statCard} ${whatsappStyles.statHighlight}`}>
+                              <div className={whatsappStyles.statLabel}>Total disponível</div>
+                              <div className={whatsappStyles.statValue}>{totalBalance.toLocaleString('pt-BR')}</div>
+                              <div className={whatsappStyles.statHint}>
+                                ~ {appointmentsEquivalent.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} agend. (5 msg = 1)
+                              </div>
+                            </div>
+                          </div>
+                          {Number(totalBalance) < 1 && (
+                            <div className={`notice notice--warn ${whatsappStyles.inlineNotice}`}>
+                              WhatsApp pausado; e-mail continua.
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        <p className="muted" style={{ marginTop: 10 }}>Saldo indisponível.</p>
+                      )}
+
+                      <div className={whatsappStyles.section}>
+                        <div className={whatsappStyles.sectionHeader}>
+                          <span className={whatsappStyles.sectionTitle}>Pacotes extras (PIX)</span>
+                          <span className={whatsappStyles.sectionHint}>Recarregue mensagens em segundos via PIX</span>
+                        </div>
+                        <div className={whatsappStyles.packageList}>
+                          {whatsappPackages.length ? (
+                            whatsappPackages.map((pkg) => {
+                              const priceCents = resolvePackPriceCents(pkg);
+                              const priceLabel = priceCents != null
+                                ? (Number(priceCents) / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+                                : null;
+                              const oldPriceLabel = pkg.old_price_cents != null
+                                ? (Number(pkg.old_price_cents) / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+                                : null;
+                              const pricePerMsgLabel = priceCents && pkg.messages
+                                ? ((Number(priceCents) / 100) / Number(pkg.messages)).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+                                : null;
+                              const isRecommended = recommendedPackageKey != null && recommendedPackageKey === (pkg.id ?? pkg.code ?? pkg.messages);
+                              const description = pkg.description || pkg.label || 'Recarga imediata via PIX';
+                              return (
+                                <div
+                                  key={pkg.id ?? pkg.code ?? pkg.messages}
+                                  className={`${whatsappStyles.packageRow} ${isRecommended ? whatsappStyles.packageRowHighlight : ''}`}
+                                >
+                                  <div className={whatsappStyles.packageInfo}>
+                                    <div className={whatsappStyles.packageTop}>
+                                      <div className={whatsappStyles.packageTitle}>
+                                        <span className={whatsappStyles.packageAmount}>+{pkg.messages} msgs</span>
+                                        {isRecommended ? (
+                                          <span className={whatsappStyles.packageBadge}>Melhor custo</span>
+                                        ) : null}
+                                      </div>
+                                      <span className={whatsappStyles.packagePrices}>
+                                        {oldPriceLabel ? (
+                                          <span className={whatsappStyles.oldPrice}>{oldPriceLabel}</span>
+                                        ) : null}
+                                        <span className={whatsappStyles.priceLabel}>{priceLabel || 'Sob consulta'}</span>
+                                      </span>
+                                    </div>
+                                    <div className={whatsappStyles.packageMeta}>
+                                      <span className={whatsappStyles.packageDescription}>{description}</span>
+                                      {pricePerMsgLabel ? (
+                                        <span className={whatsappStyles.priceHint}>~ {pricePerMsgLabel}/msg</span>
+                                      ) : null}
+                                    </div>
+                                  </div>
+                                  <div className={whatsappStyles.packageAction}>
+                                    <button
+                                      type="button"
+                                      className={`btn ${isRecommended ? 'btn--primary' : 'btn--outline'} ${whatsappStyles.actionButton}`}
+                                      onClick={() => handleWhatsAppTopup(pkg)}
+                                      disabled={waTopupLoading === String(pkg.id ?? pkg.code ?? pkg.messages)}
+                                    >
+                                      {waTopupLoading === String(pkg.id ?? pkg.code ?? pkg.messages) ? <span className="spinner" /> : 'Recarregar'}
+                                    </button>
+                                  </div>
+                                </div>
+                              );
+                            })
+                          ) : (
+                            <div className={whatsappStyles.emptyRow}>Nenhum pacote disponível no momento.</div>
+                          )}
+                        </div>
+                        {waTopupError && (
+                          <div className={`notice notice--error ${whatsappStyles.inlineNotice}`} role="alert">
+                            {waTopupError}
+                          </div>
+                        )}
+                      </div>
+
+                      <div className={whatsappStyles.section}>
+                        <div className={whatsappStyles.sectionHeader}>
+                          <div className={whatsappStyles.historyHeading}>
+                            <span className={whatsappStyles.sectionTitle}>Histórico de recargas</span>
+                            <span className={whatsappStyles.historySubtext}>Mostrando as últimas 5</span>
+                          </div>
+                        </div>
+                        {whatsappHistoryPreview.length ? (
+                          <ul className={whatsappStyles.historyList}>
+                            {whatsappHistoryPreview.map((entry) => renderHistoryItem(entry))}
+                          </ul>
+                        ) : (
+                          <p className="muted" style={{ margin: 0 }}>Sem recargas recentes.</p>
+                        )}
+                        {whatsappHistoryCount > 0 ? (
+                          <div className={whatsappStyles.historyActions}>
+                            <button
+                              type="button"
+                              className={`btn btn--sm btn--outline ${whatsappStyles.historyToggle}`}
+                              onClick={() => setWhatsHistoryOpen((prev) => !prev)}
+                              aria-expanded={whatsHistoryOpen}
+                              aria-controls={historyPanelId}
+                            >
+                              {whatsHistoryOpen ? 'Ocultar histórico completo' : 'Ver histórico completo'}
+                            </button>
+                            <div id={historyPanelId} className={whatsappStyles.historyPanel}>
+                              {(whatsappHistoryHasDates || whatsappHistoryHasStatus) && (
+                                <div className={whatsappStyles.historyFilters}>
+                                  {whatsappHistoryHasDates ? (
+                                    <label className={whatsappStyles.historyFilter}>
+                                      <span>Período</span>
+                                      <select
+                                        value={whatsHistoryPeriod}
+                                        onChange={(e) => setWhatsHistoryPeriod(e.target.value)}
+                                      >
+                                        <option value="all">Tudo</option>
+                                        <option value="30">Últimos 30 dias</option>
+                                        <option value="90">Últimos 90 dias</option>
+                                        <option value="year">Este ano</option>
+                                      </select>
+                                    </label>
+                                  ) : null}
+                                  {whatsappHistoryHasStatus ? (
+                                    <label className={whatsappStyles.historyFilter}>
+                                      <span>Status</span>
+                                      <select
+                                        value={whatsHistoryStatus}
+                                        onChange={(e) => setWhatsHistoryStatus(e.target.value)}
+                                      >
+                                        <option value="all">Todos</option>
+                                        <option value="pending">Pendentes</option>
+                                        <option value="paid">Confirmados</option>
+                                        <option value="failed">Falhos</option>
+                                      </select>
+                                    </label>
+                                  ) : null}
+                                </div>
+                              )}
+                              {whatsappHistoryFiltered.length ? (
+                                <ul className={whatsappStyles.historyList}>
+                                  {whatsappHistoryFull.map((entry) => renderHistoryItem(entry))}
+                                </ul>
+                              ) : (
+                                <p className="muted" style={{ margin: 0 }}>Nenhum registro no período.</p>
+                              )}
+                              {whatsappHistoryHasMore && (
+                                <button
+                                  type="button"
+                                  className={`btn btn--sm btn--outline ${whatsappStyles.historyLoadMore}`}
+                                  onClick={handleWhatsHistoryLoadMore}
+                                  disabled={whatsHistoryLoading}
+                                >
+                                  {whatsHistoryLoading ? <span className="spinner" /> : 'Carregar mais'}
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        ) : null}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <aside className={whatsappStyles.asideCol}>
+                  <div className={`plan-card__features ${whatsappStyles.planColLeft}`}>
+                    <span className="plan-card__features-title">Resumo do plano</span>
+                    <ul>
+                      {planFeatures.map((feature) => (
+                        <li key={feature}>{feature}</li>
+                      ))}
+                    </ul>
+                  </div>
+                  <div className={`${whatsappStyles.helpCard} ${whatsHelpOpen ? whatsappStyles.helpCardOpen : ''}`}>
+                    <button
+                      type="button"
+                      className={whatsappStyles.helpToggle}
+                      onClick={() => setWhatsHelpOpen((prev) => !prev)}
+                      aria-expanded={whatsHelpOpen}
+                      aria-controls="whatsapp-help"
+                    >
+                      <span className={whatsappStyles.helpTitle}>Ajuda rápida</span>
+                      <IconChevronRight className={whatsappStyles.helpIcon} aria-hidden="true" />
+                    </button>
+                    <div
+                      id="whatsapp-help"
+                      className={`${whatsappStyles.helpBody} ${whatsHelpOpen ? whatsappStyles.helpBodyOpen : ''}`}
+                      aria-hidden={!whatsHelpOpen}
+                    >
+                      <ul className={whatsappStyles.helpList}>
+                        <li>5 msgs ~ 1 agendamento</li>
+                        <li>Pagamentos via PIX confirmam em instantes</li>
+                        <li>Saldo extra é usado quando o limite do plano termina</li>
+                      </ul>
+                    </div>
+                  </div>
+                </aside>
+              </div>
+            </section>
           </div>
         ),
       });
@@ -2576,101 +3085,25 @@ export default function Configuracoes() {
 
     if (isEstab) {
       const planTierLabel = PLAN_META[planInfo.plan]?.label || planInfo.plan.toUpperCase();
-      const whatsappWallet = billing?.whatsappWallet || null;
-      const includedLimitLabel =
-        whatsappWallet && typeof whatsappWallet.included_limit === 'number'
-          ? `${whatsappWallet.included_limit} msgs/mês`
-          : 'franquia mensal de mensagens';
-      const whatsappFeature = `WhatsApp: ${includedLimitLabel} (máx. 5 msgs por agendamento). Ao esgotar, seguimos por e-mail e painel.`;
-      const reportsFeature = planInfo.allowAdvanced ? 'Relatórios avançados' : 'Relatórios básicos';
       const servicesLimit = PLAN_META[planInfo.plan]?.maxServices;
       const professionalsLimit = PLAN_META[planInfo.plan]?.maxProfessionals;
-      const appointmentsLimit = planInfo.appointmentsLimit ?? PLAN_META[planInfo.plan]?.maxAppointments ?? null;
-      const appointmentsUsageText = appointmentsLimit == null
-        ? `${planInfo.appointmentsMonth ? `(${planInfo.appointmentsMonth}) ` : ''}ilimitados`
-        : `${planInfo.appointmentsMonth ? `(${planInfo.appointmentsMonth}) ` : ''}${planInfo.appointmentsUsed ?? 'carregando'} / ${appointmentsLimit}`;
-      const usageText = (serviceCount == null ? '...' : serviceCount) + ' serviços · ' + (professionalCount == null ? '...' : professionalCount) + ' profissionais';
-      const limitsText =
-        (servicesLimit == null ? 'serviços ilimitados' : 'até ' + servicesLimit + ' serviços') + ' · ' +
-        (professionalsLimit == null ? 'profissionais ilimitados' : 'até ' + professionalsLimit + ' profissionais') + ' · ' +
-        (appointmentsLimit == null ? 'agendamentos ilimitados' : 'até ' + appointmentsLimit + ' agendamentos/mês');
-      const planFeatures = [whatsappFeature, reportsFeature];
-      const whatsappPackages = whatsappPackagesNormalized;
-      const whatsappHistoryPreview = whatsappHistorySummary;
-      const whatsappHistoryFull = whatsappHistoryVisible;
-      const whatsappHistoryCount = whatsappHistoryMeta.length;
-      const historyPanelId = 'whatsapp-history-panel';
-      const whatsappMonthLabel =
-        whatsappWallet?.month_label ||
-        new Date().toLocaleString('pt-BR', { month: 'long', year: 'numeric' });
-      const includedLimit = Number(whatsappWallet?.included_limit ?? 0);
-      const includedBalance = Number(whatsappWallet?.included_balance ?? 0);
-      const includedUsed = includedLimit > 0 ? Math.max(includedLimit - includedBalance, 0) : 0;
-      const includedUsagePct = includedLimit > 0 ? Math.min(100, (includedUsed / includedLimit) * 100) : 0;
-      const includedUsageLabel = `Usadas ${includedUsed.toLocaleString('pt-BR')} de ${includedLimit.toLocaleString('pt-BR')}`;
-      const includedUsagePercentLabel = `${Math.round(includedUsagePct)}%`;
-      const extraBalance = Number(whatsappWallet?.extra_balance ?? 0);
-      const totalBalance = Number(whatsappWallet?.total_balance || 0);
-      const appointmentsEquivalent = totalBalance > 0 ? totalBalance / 5 : 0;
-      const whatsappHeaderBadge = planInfo.activeUntil
-        ? 'Assinatura ativa até ' + fmtDate(planInfo.activeUntil)
-        : includedLimit > 0
-        ? 'Incluído no plano'
-        : '';
-      const resolvePackPriceCents = (pack) => {
-        if (typeof pack?.price_cents === 'number') return pack.price_cents;
-        if (typeof pack?.priceCents === 'number') return pack.priceCents;
-        if (typeof pack?.price === 'number') return pack.price;
-        return null;
-      };
-      let recommendedPackageKey = null;
-      let bestPricePerMsg = Number.POSITIVE_INFINITY;
-      whatsappPackages.forEach((pkg) => {
-        const priceCents = resolvePackPriceCents(pkg);
-        const messagesCount = Number(pkg?.messages || 0);
-        if (!priceCents || !messagesCount) return;
-        const perMsg = (Number(priceCents) / 100) / messagesCount;
-        if (perMsg < bestPricePerMsg) {
-          bestPricePerMsg = perMsg;
-          recommendedPackageKey = pkg.id ?? pkg.code ?? pkg.messages;
-        }
-      });
-      if (recommendedPackageKey == null && whatsappPackages.length) {
-        const largest = whatsappPackages.reduce((top, current) => {
-          const topMsgs = Number(top?.messages || 0);
-          const currentMsgs = Number(current?.messages || 0);
-          return currentMsgs > topMsgs ? current : top;
-        });
-        recommendedPackageKey = largest?.id ?? largest?.code ?? largest?.messages ?? null;
-      }
-      const renderHistoryItem = (entry) => (
-        <li key={entry.key} className={whatsappStyles.historyItem}>
-          <div className={whatsappStyles.historyMain}>
-            <span className={whatsappStyles.historyAmount}>+{entry.messagesLabel} msgs</span>
-            {entry.priceLabel ? <span className={whatsappStyles.historyPrice}>{entry.priceLabel}</span> : null}
-          </div>
-          <div className={whatsappStyles.historyMeta}>
-            <span className={whatsappStyles.historyDate}>{entry.createdLabel || 'Data indisponível'}</span>
-            {entry.statusLabel ? (
-              <span
-                className={`${whatsappStyles.statusChip} ${
-                  entry.statusTone === 'success'
-                    ? whatsappStyles.statusSuccess
-                    : entry.statusTone === 'pending'
-                    ? whatsappStyles.statusPending
-                    : entry.statusTone === 'error'
-                    ? whatsappStyles.statusError
-                    : entry.statusTone === 'neutral'
-                    ? whatsappStyles.statusNeutral
-                    : ''
-                }`}
-              >
-                {entry.statusLabel}
-              </span>
-            ) : null}
-          </div>
-        </li>
-      );
+      const usageText = `${serviceCount == null ? '...' : serviceCount} servicos / ${
+        professionalCount == null ? '...' : professionalCount
+      } profissionais`;
+      const limitsText = `${servicesLimit == null ? 'servicos ilimitados' : 'ate ' + servicesLimit + ' servicos'} / ${
+        professionalsLimit == null ? 'profissionais ilimitados' : 'ate ' + professionalsLimit + ' profissionais'
+      }`;
+      const appointmentsUsed = typeof planInfo.appointmentsUsed === 'number' ? planInfo.appointmentsUsed : null;
+      const appointmentsLimit = typeof planInfo.appointmentsLimit === 'number' ? planInfo.appointmentsLimit : null;
+      const appointmentsMonthLabel = planInfo.appointmentsMonth || '';
+      const hasAppointmentsData = appointmentsUsed != null || appointmentsLimit != null;
+      const appointmentsUsedLabel = appointmentsUsed != null ? appointmentsUsed.toLocaleString('pt-BR') : '...';
+      const appointmentsLimitLabel = appointmentsLimit != null ? appointmentsLimit.toLocaleString('pt-BR') : 'ilimitado';
+      const appointmentsUsageText = hasAppointmentsData
+        ? `${appointmentsUsedLabel} / ${appointmentsLimitLabel}${
+            appointmentsMonthLabel ? ' - ' + appointmentsMonthLabel : ''
+          }`
+        : 'Sem dados';
       const pricedAmount = amountLabel ? `${amountLabel}/mês` : null;
       const summarySubscription = subscriptionStatusLabel || statusLabel || 'Em análise';
       const summaryWithPrice = pricedAmount ? `${summarySubscription} · ${pricedAmount}` : summarySubscription;
@@ -2683,13 +3116,60 @@ export default function Configuracoes() {
       if (billingLoading) {
         planAlerts.push({ key: 'loading', variant: 'info', message: 'Atualizando informações de cobrança...' });
       }
-      if (isOverdue || planInfo.status === 'delinquent') planAlerts.push({ key: 'delinquent', variant: 'error', message: 'Pagamento em atraso. Regularize para manter o acesso aos recursos.' });
-      if (trialExpired) planAlerts.push({ key: 'trial-expired', variant: 'warn', message: 'Seu teste gratuito terminou. Contrate um plano para manter o acesso aos recursos.' });
+      if (renewalRequired && !hasActiveSubscription) {
+        planAlerts.push({
+          key: 'renewal-pending',
+          variant: 'warn',
+          message: 'Plano vencido / renovação pendente. Gere o PIX para manter o acesso aos recursos.',
+        });
+      } else if (isOverdue || planInfo.status === 'delinquent') {
+        planAlerts.push({
+          key: 'delinquent',
+          variant: 'error',
+          message: 'Pagamento em atraso. Regularize para manter o acesso aos recursos.',
+        });
+      }
+      if (!renewalRequired && trialData.isExpired && !hasActiveSubscription) {
+        planAlerts.push({
+          key: 'trial-expired',
+          variant: 'warn',
+          message: 'Seu teste gratuito terminou. Contrate um plano para manter o acesso aos recursos.',
+        });
+      }
       if (effectivePlanStatus === 'pending') planAlerts.push({ key: 'pending', variant: 'warn', message: 'Pagamento pendente. Finalize o checkout para concluir a contratação.' });
       if (planInfo.plan === 'starter' && hasPaidHistory) planAlerts.push({ key: 'trial-blocked', variant: 'muted', message: 'Teste grátis indisponível: já houve uma assinatura contratada nesta conta.' });
       else if (planInfo.plan === 'starter' && trialEligible) planAlerts.push({ key: 'trial-available', variant: 'info', message: 'Experimente o plano Pro gratuitamente por 7 dias quando desejar.' });
 
       const planChangeButtons = [];
+      const renewalActions = [];
+      if (hasRenewalOpenPayment) {
+        renewalActions.push(
+          <button
+            key="renewal-pending"
+            className="btn btn--primary btn--sm"
+            type="button"
+            onClick={handleShowRenewalPix}
+            disabled={renewalLoading}
+            title="Verifique o PIX pendente de renovação"
+          >
+            {renewalLoading ? <span className="spinner" /> : 'Ver PIX pendente'}
+          </button>
+        );
+      } else if (renewalRequired && renewalPaymentMethod === 'pix_manual') {
+        renewalActions.push(
+          <button
+            key="renewal-create"
+            className={`btn btn--primary btn--sm${pixHighlightActive ? ' is-pix-highlight' : ''}`}
+            type="button"
+            ref={pixRenewBtnRef}
+            onClick={handleRenewalPix}
+            disabled={renewalLoading}
+            title="Gerar PIX de renovação"
+          >
+            {renewalLoading ? <span className="spinner" /> : 'Gerar PIX de renovação'}
+          </button>
+        );
+      }
       if (planInfo.plan === 'starter') {
         if (!planInfo.trialEnd && trialEligible) {
           planChangeButtons.push(
@@ -2826,291 +3306,12 @@ export default function Configuracoes() {
               <div className="plan-card__alert plan-card__alert--error">{checkoutError}</div>
             )}
 
-            <div className="plan-card__body">
-              <div className={whatsappStyles.whatsLayout}>
-                <div className={whatsappStyles.mainCol}>
-                  <div className={whatsappStyles.walletPanel}>
-                    <div className={whatsappStyles.panelMain}>
-                      <div className={whatsappStyles.panelHeader}>
-                        <div className={whatsappStyles.titleGroup}>
-                          <h4 className={whatsappStyles.title}>WhatsApp (mensagens)</h4>
-                          {whatsappHeaderBadge ? (
-                            <span className={whatsappStyles.badge}>{whatsappHeaderBadge}</span>
-                          ) : null}
-                        </div>
-                        <div className={whatsappStyles.subtitle}>{whatsappMonthLabel}</div>
-                      </div>
-                      {whatsappWallet ? (
-                        <>
-                          <div className={whatsappStyles.statGrid}>
-                            <div className={whatsappStyles.statCard}>
-                              <div className={whatsappStyles.statHeader}>
-                                <div className={whatsappStyles.statLabel}>Incluído no plano</div>
-                                {includedBalance >= 0 ? (
-                                  <div className={whatsappStyles.statRemaining}>
-                                    Restam {Math.max(includedBalance, 0).toLocaleString('pt-BR')}
-                                  </div>
-                                ) : null}
-                              </div>
-                              <div className={whatsappStyles.progress} aria-hidden="true">
-                                <div
-                                  className={whatsappStyles.progressFill}
-                                  style={{ width: `${includedUsagePct}%` }}
-                                  role="presentation"
-                                />
-                              </div>
-                              <div className={whatsappStyles.progressMeta}>
-                                <span className={whatsappStyles.progressLabel}>{includedUsageLabel}</span>
-                                <span className={whatsappStyles.progressPercent}>{includedUsagePercentLabel}</span>
-                              </div>
-                            </div>
-                            <div className={whatsappStyles.statCard}>
-                              <div className={whatsappStyles.statLabel}>Créditos extras</div>
-                              <div className={whatsappStyles.statValue}>{extraBalance.toLocaleString('pt-BR')}</div>
-                              <div className={whatsappStyles.statHint}>Créditos comprados via PIX</div>
-                            </div>
-                            <div className={`${whatsappStyles.statCard} ${whatsappStyles.statHighlight}`}>
-                              <div className={whatsappStyles.statLabel}>Total disponível</div>
-                              <div className={whatsappStyles.statValue}>{totalBalance.toLocaleString('pt-BR')}</div>
-                              <div className={whatsappStyles.statHint}>
-                                ~ {appointmentsEquivalent.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} agend. (5 msg = 1)
-                              </div>
-                            </div>
-                          </div>
-                          {Number(totalBalance) < 1 && (
-                            <div className={`notice notice--warn ${whatsappStyles.inlineNotice}`}>
-                              WhatsApp pausado; e-mail continua.
-                            </div>
-                          )}
-                        </>
-                      ) : (
-                        <p className="muted" style={{ marginTop: 10 }}>Saldo indispon?vel.</p>
-                      )}
-
-                      <div className={whatsappStyles.section}>
-                        <div className={whatsappStyles.sectionHeader}>
-                          <span className={whatsappStyles.sectionTitle}>Pacotes extras (PIX)</span>
-                          <span className={whatsappStyles.sectionHint}>Recarregue mensagens em segundos via PIX</span>
-                        </div>
-                        <div className={whatsappStyles.packageList}>
-                          {whatsappPackages.length ? (
-                            whatsappPackages.map((pkg) => {
-                              const priceCents = resolvePackPriceCents(pkg);
-                              const priceLabel = priceCents != null
-                                ? (Number(priceCents) / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
-                                : '-';
-                              const oldPriceCents = typeof pkg?.old_price_cents === 'number'
-                                ? pkg.old_price_cents
-                                : typeof pkg?.oldPriceCents === 'number'
-                                ? pkg.oldPriceCents
-                                : null;
-                              const oldPriceLabel = oldPriceCents != null
-                                ? (Number(oldPriceCents) / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
-                                : null;
-                              const pricePerMsg = priceCents != null && Number(pkg?.messages || 0) > 0
-                                ? (Number(priceCents) / 100) / Number(pkg.messages)
-                                : null;
-                              const pricePerMsgLabel = pricePerMsg != null
-                                ? pricePerMsg.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 4, maximumFractionDigits: 4 })
-                                : null;
-                              const packKey = pkg.id ?? pkg.code ?? pkg.messages;
-                              const isLoading = waTopupLoading != null && String(waTopupLoading) === String(packKey);
-                              const isRecommended = recommendedPackageKey != null && String(recommendedPackageKey) === String(packKey);
-                              const description = pkg.name || `Pacote ${pkg.messages} mensagens`;
-                              return (
-                                <div
-                                  key={packKey}
-                                  className={`${whatsappStyles.packageRow} ${isRecommended ? whatsappStyles.packageRowHighlight : ''}`}
-                                >
-                                  <div className={whatsappStyles.packageInfo}>
-                                    <div className={whatsappStyles.packageTop}>
-                                      <div className={whatsappStyles.packageTitle}>
-                                        <span className={whatsappStyles.packageAmount}>+{pkg.messages} msgs</span>
-                                        {isRecommended ? (
-                                          <span className={whatsappStyles.packageBadge}>Melhor custo</span>
-                                        ) : null}
-                                      </div>
-                                      <span className={whatsappStyles.packagePrices}>
-                                        {oldPriceLabel ? (
-                                          <span className={whatsappStyles.oldPrice}>{oldPriceLabel}</span>
-                                        ) : null}
-                                        <span className={whatsappStyles.priceLabel}>{priceLabel}</span>
-                                      </span>
-                                    </div>
-                                    <div className={whatsappStyles.packageMeta}>
-                                      <span className={whatsappStyles.packageDescription}>{description}</span>
-                                      {pricePerMsgLabel ? (
-                                        <span className={whatsappStyles.priceHint}>~ {pricePerMsgLabel}/msg</span>
-                                      ) : null}
-                                    </div>
-                                  </div>
-                                  <div className={whatsappStyles.packageAction}>
-                                    <button
-                                      type="button"
-                                      className={`btn ${isRecommended ? 'btn--primary' : 'btn--outline'} ${whatsappStyles.actionButton}`}
-                                      onClick={() => handleWhatsAppTopup(pkg)}
-                                      disabled={isLoading || checkoutLoading}
-                                      title="Cria uma cobranca PIX e credita o saldo apos a confirmacao."
-                                      aria-busy={isLoading}
-                                    >
-                                      {isLoading ? (
-                                        <>
-                                          <span className="spinner" aria-hidden="true" />
-                                          Gerando PIX...
-                                        </>
-                                      ) : (
-                                        'Recarregar'
-                                      )}
-                                    </button>
-                                  </div>
-                                </div>
-                              );
-                            })
-                          ) : (
-                            <div className={whatsappStyles.emptyRow}>Nenhum pacote disponível no momento.</div>
-                          )}
-                        </div>
-                        {waTopupError && (
-                          <div className={`notice notice--error ${whatsappStyles.inlineNotice}`} role="alert">
-                            {waTopupError}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className={whatsappStyles.section}>
-                      <div className={whatsappStyles.sectionHeader}>
-                        <div className={whatsappStyles.historyHeading}>
-                          <span className={whatsappStyles.sectionTitle}>Histórico de recargas</span>
-                          <span className={whatsappStyles.historySubtext}>Mostrando as últimas 5</span>
-                        </div>
-                      </div>
-                      {whatsappHistoryPreview.length ? (
-                        <ul className={whatsappStyles.historyList}>
-                          {whatsappHistoryPreview.map((entry) => renderHistoryItem(entry))}
-                        </ul>
-                      ) : (
-                        <p className="muted" style={{ marginTop: 6 }}>Nenhuma recarga ainda.</p>
-                      )}
-                      {whatsappHistoryCount > 0 ? (
-                        <>
-                          <div className={whatsappStyles.historyActions}>
-                            <button
-                              type="button"
-                              className={`btn btn--sm btn--outline ${whatsappStyles.historyToggle}`}
-                              onClick={() => setWhatsHistoryOpen((prev) => !prev)}
-                              aria-expanded={whatsHistoryOpen}
-                              aria-controls={historyPanelId}
-                            >
-                              {whatsHistoryOpen ? 'Ocultar histórico completo' : 'Ver histórico completo'}
-                            </button>
-                          </div>
-                          {whatsHistoryOpen && (
-                            <div id={historyPanelId} className={whatsappStyles.historyPanel}>
-                              {(whatsappHistoryHasDates || whatsappHistoryHasStatus) && (
-                                <div className={whatsappStyles.historyFilters}>
-                                  {whatsappHistoryHasDates ? (
-                                    <label className={whatsappStyles.historyFilter}>
-                                      <span>Período</span>
-                                      <select
-                                        className="input"
-                                        value={whatsHistoryPeriod}
-                                        onChange={(e) => setWhatsHistoryPeriod(e.target.value)}
-                                      >
-                                        <option value="30">30 dias</option>
-                                        <option value="90">90 dias</option>
-                                        <option value="year">Este ano</option>
-                                        <option value="all">Tudo</option>
-                                      </select>
-                                    </label>
-                                  ) : null}
-                                  {whatsappHistoryHasStatus ? (
-                                    <label className={whatsappStyles.historyFilter}>
-                                      <span>Status</span>
-                                      <select
-                                        className="input"
-                                        value={whatsHistoryStatus}
-                                        onChange={(e) => setWhatsHistoryStatus(e.target.value)}
-                                      >
-                                        <option value="all">Todos</option>
-                                        <option value="paid">Pago</option>
-                                        <option value="pending">Pendente</option>
-                                        <option value="failed">Falhou</option>
-                                      </select>
-                                    </label>
-                                  ) : null}
-                                </div>
-                              )}
-                              {whatsappHistoryFiltered.length ? (
-                                <ul className={whatsappStyles.historyList}>
-                                  {whatsappHistoryFull.map((entry) => renderHistoryItem(entry))}
-                                </ul>
-                              ) : (
-                                <p className="muted" style={{ margin: 0 }}>Nenhuma recarga encontrada.</p>
-                              )}
-                              {whatsappHistoryHasMore && (
-                                <button
-                                  type="button"
-                                  className={`btn btn--sm btn--outline ${whatsappStyles.historyLoadMore}`}
-                                  onClick={handleWhatsHistoryLoadMore}
-                                  disabled={whatsHistoryLoading}
-                                  aria-busy={whatsHistoryLoading}
-                                >
-                                  {whatsHistoryLoading ? (
-                                    <>
-                                      <span className="spinner" aria-hidden="true" />
-                                      Carregando...
-                                    </>
-                                  ) : (
-                                    'Carregar mais'
-                                  )}
-                                </button>
-                              )}
-                            </div>
-                          )}
-                        </>
-                      ) : null}
-                    </div>
-                  </div>
-                </div>
-                <aside className={whatsappStyles.asideCol}>
-                  <div className={`plan-card__features ${whatsappStyles.planColLeft}`}>
-                    <span className="plan-card__section-title">Recursos incluídos</span>
-                    <ul>
-                      {planFeatures.map((feature) => (
-                        <li key={feature}>{feature}</li>
-                      ))}
-                    </ul>
-                  </div>
-                  <div className={`${whatsappStyles.helpCard} ${whatsHelpOpen ? whatsappStyles.helpCardOpen : ''}`}>
-                    <button
-                      type="button"
-                      className={whatsappStyles.helpToggle}
-                      onClick={() => setWhatsHelpOpen((prev) => !prev)}
-                      aria-expanded={whatsHelpOpen}
-                      aria-controls="whatsapp-help"
-                    >
-                      <span className={whatsappStyles.helpTitle}>Ajuda rápida</span>
-                      <IconChevronRight className={whatsappStyles.helpIcon} aria-hidden="true" />
-                    </button>
-                    <div
-                      id="whatsapp-help"
-                      className={`${whatsappStyles.helpBody} ${whatsHelpOpen ? whatsappStyles.helpBodyOpen : ''}`}
-                      aria-hidden={!whatsHelpOpen}
-                    >
-                      <ul className={whatsappStyles.helpList}>
-                        <li>5 msgs ~ 1 agendamento</li>
-                        <li>Pagamentos via PIX confirmam em instantes</li>
-                        <li>Saldo extra é usado quando o limite do plano termina</li>
-                      </ul>
-                    </div>
-                  </div>
-                </aside>
-              </div>
-            </div>
             <div className="plan-card__notice muted">{planNotice}</div>
 
             <div className="plan-card__actions">
+              {renewalActions.length > 0 && (
+                <div className="plan-card__actions-group">{renewalActions}</div>
+              )}
               {planChangeButtons.length > 0 && (
                 <div className="plan-card__actions-group">{planChangeButtons}</div>
               )}
@@ -3118,6 +3319,9 @@ export default function Configuracoes() {
                 <div className="plan-card__actions-group plan-card__actions-group--secondary">{secondaryActions}</div>
               )}
             </div>
+            {renewalError && (
+              <div className="plan-card__alert plan-card__alert--error">{renewalError}</div>
+            )}
 
             <footer className="plan-card__foot" style={{ display: 'grid', gap: 6 }}>
               <div><strong>Agendamentos:</strong> {appointmentsUsageText}</div>
@@ -3196,6 +3400,7 @@ export default function Configuracoes() {
     hasActiveSubscription,
     fetchBilling,
     pixCycle,
+    pixHighlightActive,
     focusedSection,
     publicProfileForm,
     publicProfileStatus,
@@ -3253,6 +3458,17 @@ export default function Configuracoes() {
       ? 'Status em processamento'
       : '';
   const pixStatusIcon = pixStatusTone === 'success' ? '✓' : pixStatusTone === 'error' ? '!' : '•';
+  const pixNoteText = pixPaid
+    ? isRenewalModal
+      ? 'Pagamento confirmado. Renovamos seu plano automaticamente.'
+      : isPixTopupModal
+      ? 'Pagamento confirmado. Atualizamos seu saldo automaticamente.'
+      : 'Pagamento confirmado. Ativamos seu plano automaticamente.'
+    : isRenewalModal
+    ? 'Pague pelo app do seu banco e aguarde a confirmacao automatica. Renovacao liberada apos a aprovacao.'
+    : isPixTopupModal
+    ? 'Pague pelo app do seu banco e aguarde a confirmacao automatica. Credito liberado apos a aprovacao.'
+    : 'Pague pelo app do seu banco e aguarde a confirmacao automatica. Plano liberado apos a aprovacao.';
   const pixPack = pixCheckoutModal.data?.pack || null;
   const pixPackPriceCents = pixPack
     ? (typeof pixPack.price_cents === 'number'
@@ -3414,7 +3630,7 @@ export default function Configuracoes() {
                 ) : null}
               </div>
             )}
-            {isPixTopupModal && (
+            {isPixPollingModal && (
               <div
                 className={`box pix-checkout__topup-status${pixPaid ? ' is-success' : ' is-pending'}`}
                 role="status"
@@ -3498,9 +3714,7 @@ export default function Configuracoes() {
               </p>
             )}
             <p className="muted pix-checkout__note">
-              {pixPaid
-                ? 'Pagamento confirmado. Atualizamos seu saldo automaticamente.'
-                : 'Pague pelo app do seu banco e aguarde a confirmação automática. Crédito liberado após a aprovação.'}
+              {pixNoteText}
             </p>
           </div>
         </Modal>

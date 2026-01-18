@@ -87,6 +87,12 @@ const summarizeServices = (items) => {
   };
 };
 
+const normalizeOrigem = (value) => {
+  const raw = String(value || '').trim().toLowerCase();
+  if (!raw) return null;
+  return raw.slice(0, 32);
+};
+
 const fetchServicesForAppointment = async (db, estabelecimentoId, serviceIds) => {
   if (!serviceIds.length) return { items: [], missing: serviceIds };
   const placeholders = serviceIds.map(() => '?').join(', ');
@@ -696,11 +702,26 @@ router.post('/', async (req, res) => {
       return res.status(409).json({ error: 'slot_ocupado' });
     }
 
+    const origem =
+      normalizeOrigem(
+        req.body?.origem ??
+        req.body?.canal ??
+        req.body?.channel ??
+        req.body?.utm_source ??
+        req.body?.utmSource ??
+        req.body?.source ??
+        req.query?.origem ??
+        req.query?.canal ??
+        req.query?.utm_source ??
+        req.query?.utmSource ??
+        req.query?.source
+      ) || 'site';
+
     const [ins] = await conn.query(
       `INSERT INTO agendamentos
-        (cliente_id, estabelecimento_id, servico_id, profissional_id, inicio, fim, status, public_confirm_token_hash, public_confirm_expires_at, public_confirmed_at)
-       VALUES (?,?,?,?,?,?, 'confirmado', NULL, NULL, NOW())`,
-      [userId, estabelecimento_id, primaryServiceId, profissional_id || null, inicioDate, fimDate]
+        (cliente_id, estabelecimento_id, servico_id, profissional_id, inicio, fim, status, origem, public_confirm_token_hash, public_confirm_expires_at, public_confirmed_at)
+       VALUES (?,?,?,?,?,?, 'confirmado', ?, NULL, NULL, NOW())`,
+      [userId, estabelecimento_id, primaryServiceId, profissional_id || null, inicioDate, fimDate, origem]
     );
     const itemValues = serviceItems.map((item, idx) => ([
       ins.insertId,

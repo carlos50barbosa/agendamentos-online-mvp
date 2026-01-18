@@ -1698,7 +1698,7 @@ export default function NovoAgendamento() {
             ...(prev[selectedEstablishmentId] || {}),
             loading: false,
             loaded: true,
-            error: 'Detalhes indisponÃ­veis.',
+            error: 'Detalhes indisponíveis.',
           },
         }));
         showToast('error', 'Não foi possível carregar detalhes do estabelecimento.');
@@ -1990,7 +1990,7 @@ useEffect(() => {
     },
     [showToast, user]
   );
-  // Verifica se o agendamento existe mesmo apÃƒÂ³s um erro
+  // Verifica se o agendamento existe mesmo após um erro
   const verifyBookingCreated = useCallback(
     async (slotIso) => {
       const sameStart = (a, b) =>

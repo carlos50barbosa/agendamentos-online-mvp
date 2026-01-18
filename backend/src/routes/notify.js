@@ -1,7 +1,6 @@
 // backend/src/routes/notify.js
 import { Router } from 'express';
-import { sendWhatsAppSmart } from '../lib/notifications.js';
-import { waSendTemplate } from '../lib/whatsapp.js';
+import { sendTemplate, sendWhatsAppSmart } from '../lib/notifications.js';
 
 const router = Router();
 
@@ -39,7 +38,7 @@ router.post('/whatsapp/text', async (req, res) => {
 router.post('/whatsapp/template', async (req, res) => {
   try {
     const { to, name, lang } = req.body || {};
-    const data = await waSendTemplate({ to, name, lang });
+    const data = await sendTemplate({ to, name, lang });
     res.json({ ok: true, data });
   } catch (e) {
     console.error('[notify/template]', e.message);

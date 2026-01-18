@@ -69,9 +69,88 @@ async function findPendingPixSubscription(estabelecimentoId, { plan, billingCycl
     if (ref.startsWith('wallet:whatsapp_topup')) continue
     if (targetPlan && normalizePlanKey(sub.plan) !== targetPlan) continue
     if (targetCycle && normalizeBillingCycle(sub.billingCycle) !== targetCycle) continue
-    return sub
+  return sub
+}
+return null
+}
+
+function toIsoDate(value) {
+  if (!value) return null
+  const date = value instanceof Date ? value : new Date(value)
+  if (!Number.isFinite(date.getTime())) return null
+  return date.toISOString()
+}
+
+function formatOpenPaymentPayload({
+  paymentId,
+  status,
+  expiresAt,
+  qrCode,
+  qrCodeBase64,
+  copiaECola,
+  initPoint,
+  ticketUrl,
+  amountCents,
+  plan,
+  billingCycle,
+}) {
+  const expiresIso = toIsoDate(expiresAt)
+  const copyValue = copiaECola || qrCode || null
+  const amount = Number.isFinite(Number(amountCents)) ? Number(amountCents) : null
+  const normalizedInitPoint = initPoint || ticketUrl || null
+  return {
+    payment_id: paymentId || null,
+    id: paymentId || null,
+    status: status || null,
+    expiresAt: expiresIso,
+    expires_at: expiresIso,
+    qrCode: qrCode || null,
+    qr_code: qrCode || null,
+    qrCodeBase64: qrCodeBase64 || null,
+    qr_code_base64: qrCodeBase64 || null,
+    copiaECola: copyValue,
+    copia_e_cola: copyValue,
+    initPoint: normalizedInitPoint,
+    init_point: normalizedInitPoint,
+    ticketUrl: normalizedInitPoint,
+    ticket_url: normalizedInitPoint,
+    amountCents: amount,
+    amount_cents: amount,
+    plan: plan || null,
+    billingCycle: billingCycle || null,
   }
-  return null
+}
+
+async function loadOpenPaymentFromSubscription(subscription) {
+  if (!subscription?.gatewayPreferenceId) return null
+  let payment = null
+  try {
+    const sync = await syncMercadoPagoPayment(subscription.gatewayPreferenceId)
+    payment = sync?.payment || null
+  } catch (err) {
+    console.warn('[billing/open-payment] sync failed', err?.message || err)
+  }
+  if (!payment) return null
+  const txData = payment.point_of_interaction?.transaction_data || {}
+  return formatOpenPaymentPayload({
+    paymentId: subscription.gatewayPreferenceId,
+    status: payment.status || subscription.status,
+    expiresAt: txData.expires_at || payment.date_of_expiration || null,
+    qrCode: txData.qr_code || null,
+    qrCodeBase64: txData.qr_code_base64 || null,
+    copiaECola: txData.copia_e_cola || txData.qr_code || null,
+    initPoint: txData.ticket_url || txData.init_point || null,
+    amountCents: subscription.amountCents,
+    plan: subscription.plan,
+    billingCycle: subscription.billingCycle,
+  })
+}
+
+function isOpenPaymentExpired(payment) {
+  if (!payment?.expiresAt) return false
+  const expiresAt = new Date(payment.expiresAt)
+  if (!Number.isFinite(expiresAt.getTime())) return false
+  return expiresAt.getTime() <= Date.now()
 }
 
 function verifyWebhookSignature(req, resourceId) {
@@ -242,6 +321,25 @@ router.get('/status', auth, isEstabelecimento, async (req, res) => {
         : null
     const reminders = await summarizeReminders(req.user.id)
 
+    const trialEndsAt = ctx.trialEndsAt
+    const trialEndsIso = trialEndsAt ? trialEndsAt.toISOString() : null
+    const trialExpired = trialEndsAt ? trialEndsAt.getTime() <= Date.now() : false
+    const pendingSubscription = await findPendingPixSubscription(req.user.id, { plan: ctx.plan, billingCycle: ctx.cycle })
+    let openPayment = null
+    if (pendingSubscription) {
+      openPayment = await loadOpenPaymentFromSubscription(pendingSubscription)
+      if (openPayment && isOpenPaymentExpired(openPayment)) {
+        openPayment = null
+      }
+    }
+    const hasOpenPayment = Boolean(openPayment)
+    const normalizedStatus = String(ctx.status || '').toLowerCase()
+    const hasActiveSubscription = ['active', 'authorized'].includes(normalizedStatus)
+    const renewalRequired =
+      (trialExpired && !hasActiveSubscription) ||
+      ['due_soon', 'overdue', 'blocked'].includes(state.state) ||
+      normalizedStatus === 'pending'
+
     return res.json({
       ok: true,
       plan: ctx.plan,
@@ -256,6 +354,23 @@ router.get('/status', auth, isEstabelecimento, async (req, res) => {
       days_overdue: state.daysOverdue,
       grace_days_remaining: state.graceDaysRemaining,
       reminders,
+      trial: {
+        wasUsed: Boolean(trialEndsAt),
+        isExpired: trialExpired,
+        endsAt: trialEndsIso,
+      },
+      subscription: {
+        plan: ctx.plan,
+        status: ctx.status,
+        billingCycle: ctx.cycle,
+        currentPeriodEnd: ctx.activeUntil ? ctx.activeUntil.toISOString() : null,
+        paymentMethod: 'pix_manual',
+      },
+      billing: {
+        renewalRequired,
+        hasOpenPayment,
+        openPayment,
+      },
     })
   } catch (err) {
     console.error('[billing/status]', err)
@@ -831,6 +946,116 @@ router.post('/pix', auth, isEstabelecimento, async (req, res) => {
       error?.message || 'Falha ao criar cobrança PIX'
     console.error('POST /billing/pix', detail, cause || error)
     return res.status(400).json({ error: 'pix_failed', message: detail, cause })
+  }
+})
+
+router.post('/renew/pix', auth, isEstabelecimento, async (req, res) => {
+  try {
+    const planContext = await getPlanContext(req.user.id)
+    if (!planContext) {
+      return res.status(404).json({ error: 'plan_context_not_found' })
+    }
+    const targetPlan = normalizePlanKey(planContext.plan || req.user.plan || 'starter') || 'starter'
+    const targetCycle = normalizeBillingCycle(planContext.cycle || req.user.plan_cycle || 'mensal')
+
+    const pending = await findPendingPixSubscription(req.user.id, { plan: targetPlan, billingCycle: targetCycle })
+    if (pending) {
+      const openPayment = await loadOpenPaymentFromSubscription(pending)
+      if (openPayment && !isOpenPaymentExpired(openPayment)) {
+        console.info('[billing/renew/pix/existing]', {
+          user_id: req.user?.id,
+          user_email: req.user?.email,
+          estab_id: req.user?.id,
+          plan: targetPlan,
+          billing_cycle: targetCycle,
+          preference_id: pending.gatewayPreferenceId,
+        })
+        return res.json({
+          ok: true,
+          renewal: { hasOpenPayment: true, openPayment },
+          subscription: serializeSubscription(pending),
+        })
+      }
+    }
+
+    const result = await createMercadoPagoPixCheckout({
+      estabelecimento: { id: req.user.id, email: req.user.email },
+      plan: targetPlan,
+      billingCycle: targetCycle,
+    })
+    const newOpenPayment = formatOpenPaymentPayload({
+      paymentId: result.pix?.payment_id || result.subscription?.gatewayPreferenceId || null,
+      status: result.payment?.status || result.subscription?.status || 'pending',
+      expiresAt: result.pix?.expires_at || null,
+      qrCode: result.pix?.qr_code || null,
+      qrCodeBase64: result.pix?.qr_code_base64 || null,
+      copiaECola: result.pix?.copia_e_cola || result.pix?.qr_code || null,
+      initPoint: result.initPoint || result.pix?.ticket_url || null,
+      amountCents: result.pix?.amount_cents ?? result.subscription?.amountCents ?? null,
+      plan: targetPlan,
+      billingCycle: targetCycle,
+    })
+
+    console.info('[billing/renew/pix/create]', {
+      user_id: req.user?.id,
+      user_email: req.user?.email,
+      estab_id: req.user?.id,
+      plan: targetPlan,
+      billing_cycle: targetCycle,
+      preference_id: result.pix?.payment_id || result.subscription?.gatewayPreferenceId || null,
+    })
+
+    return res.json({
+      ok: true,
+      renewal: { hasOpenPayment: true, openPayment: newOpenPayment },
+      subscription: serializeSubscription(result.subscription),
+    })
+  } catch (error) {
+    console.error('POST /billing/renew/pix', error)
+    return res.status(500).json({ error: 'renewal_pix_failed' })
+  }
+})
+
+router.get('/renew/pix/status', auth, isEstabelecimento, async (req, res) => {
+  try {
+    const paymentId = String(req.query.payment_id || '').trim()
+    if (!paymentId) {
+      return res.status(400).json({ error: 'missing_payment_id' })
+    }
+
+    const result = await syncMercadoPagoPayment(paymentId)
+    const payment = result?.payment || null
+    const openPayment = formatOpenPaymentPayload({
+      paymentId: payment?.id || paymentId,
+      status: payment?.status || null,
+      expiresAt: payment?.point_of_interaction?.transaction_data?.expires_at || payment?.date_of_expiration || null,
+      qrCode: payment?.point_of_interaction?.transaction_data?.qr_code || null,
+      qrCodeBase64: payment?.point_of_interaction?.transaction_data?.qr_code_base64 || null,
+      copiaECola:
+        payment?.point_of_interaction?.transaction_data?.copia_e_cola ||
+        payment?.point_of_interaction?.transaction_data?.qr_code ||
+        null,
+      initPoint: payment?.point_of_interaction?.transaction_data?.ticket_url || null,
+      amountCents: payment?.transaction_amount ? Math.round(Number(payment.transaction_amount || 0) * 100) : null,
+      plan: result?.subscription?.plan || null,
+      billingCycle: result?.subscription?.billingCycle || null,
+    })
+    const statusNormalized = String(payment?.status || '').toLowerCase()
+    const paid =
+      !!statusNormalized &&
+      (statusNormalized.includes('approved') || statusNormalized.includes('paid'))
+
+    return res.json({
+      ok: true,
+      paid,
+      status: payment?.status || null,
+      payment_id: payment?.id || paymentId,
+      openPayment,
+      subscription: result?.subscription ? serializeSubscription(result.subscription) : null,
+    })
+  } catch (err) {
+    console.error('GET /billing/renew/pix/status', err)
+    return res.status(500).json({ error: 'renewal_status_failed' })
   }
 })
 

@@ -3,6 +3,7 @@ import nodemailer from 'nodemailer';
 import { getWhatsAppLastInboundAt, isWhatsAppWindowOpen } from './whatsapp_contacts.js';
 import { decryptAccessToken } from '../services/waCrypto.js';
 import { extractWamid, sendWhatsAppMessage } from '../services/waGraph.js';
+import { buildConfirmacaoAgendamentoV2Components, isConfirmacaoAgendamentoV2 } from './whatsapp_templates.js';
 import { getWaAccountByEstabelecimentoId, recordWaMessage } from '../services/waTenant.js';
 
 /**
@@ -80,16 +81,19 @@ function summarizePayload(payload) {
   if (type === 'template') {
     const template = payload.template || {};
     const components = Array.isArray(template.components) ? template.components : [];
+    const templateSummary = {
+      name: template.name,
+      lang: template.language?.code,
+    };
+    if (components.length) {
+      templateSummary.components = components.map((comp) => ({
+        type: comp?.type,
+        params: Array.isArray(comp?.parameters) ? comp.parameters.length : 0,
+      }));
+    }
     return {
       type,
-      template: {
-        name: template.name,
-        lang: template.language?.code,
-        components: components.map((comp) => ({
-          type: comp?.type,
-          params: Array.isArray(comp?.parameters) ? comp.parameters.length : 0,
-        })),
-      },
+      template: templateSummary,
     };
   }
   if (type === 'text') {
@@ -132,6 +136,69 @@ function is24hWindowError(err) {
   const code = err?.body?.error?.code;
   const sub = err?.body?.error?.error_subcode;
   return code === 470 || sub === 2018028 || sub === 131047 || /24\s*h/i.test(msg) || err?.status === 400;
+}
+
+function buildTemplateParamError({ name, expected, provided }) {
+  const err = new Error(`WA template ${name} requires ${expected} params, provided ${provided}`);
+  err.code = 'wa_template_params_missing';
+  err.status = 400;
+  err.body = {
+    error: {
+      message: 'template_params_missing',
+      code: 'wa_template_params_missing',
+      error_data: { template: name, expected, provided },
+    },
+  };
+  return err;
+}
+
+function normalizeTemplateBodyParams({ name, bodyParams, phone, context }) {
+  const rawParams = Array.isArray(bodyParams) ? bodyParams : [];
+  if (isConfirmacaoAgendamentoV2(name)) {
+    if (rawParams.length !== 3) {
+      const base = {
+        template: name,
+        expected: 3,
+        provided: rawParams.length,
+        to: maskPhone(phone),
+      };
+      if (context) base.context = context;
+      console.warn('[wa/template] missing params, skip send', base);
+      throw buildTemplateParamError({ name, expected: 3, provided: rawParams.length });
+    }
+    return buildConfirmacaoAgendamentoV2Components({
+      serviceLabel: rawParams[0],
+      dataHoraLabel: rawParams[1],
+      estabelecimentoNome: rawParams[2],
+    });
+  }
+  if (cfg.templateHasBodyParam && rawParams.length === 0) {
+    const base = {
+      template: name,
+      expected: 1,
+      provided: 0,
+      to: maskPhone(phone),
+    };
+    if (context) base.context = context;
+    console.warn('[wa/template] missing params, skip send', base);
+    throw buildTemplateParamError({ name, expected: 1, provided: 0 });
+  }
+  return rawParams;
+}
+
+function buildTemplateComponents(params) {
+  if (!Array.isArray(params) || params.length === 0) return null;
+  return [{
+    type: 'body',
+    parameters: params.map((value) => ({ type: 'text', text: String(value) })),
+  }];
+}
+
+function countBodyParams(components) {
+  if (!Array.isArray(components)) return 0;
+  return components
+    .filter((comp) => comp?.type === 'body')
+    .reduce((sum, comp) => sum + (Array.isArray(comp?.parameters) ? comp.parameters.length : 0), 0);
 }
 
 async function resolveTenantConfig(context = {}) {
@@ -228,6 +295,7 @@ export async function sendTemplate({
   to,
   name,
   lang,
+  components,
   bodyParams = [],
   headerImageUrl,
   headerDocumentUrl,
@@ -257,6 +325,17 @@ export async function sendTemplate({
     name: name || cfg.templateName,
     language: { code: lang || cfg.templateLang },
   };
+  const componentsOverride = Array.isArray(components) && components.length > 0 ? components : null;
+  let bodyParamsNormalized = [];
+  const componentsList = [];
+  if (!componentsOverride) {
+    bodyParamsNormalized = normalizeTemplateBodyParams({
+      name: template.name,
+      bodyParams,
+      phone,
+      context,
+    });
+  }
 
   const nameLower = String(name || cfg.templateName || '').toLowerCase();
 
@@ -272,40 +351,42 @@ export async function sendTemplate({
     headerImage = process.env.WA_TEMPLATE_HEADER_URL;
   }
 
-  const components = [];
+  if (componentsOverride) {
+    componentsList.push(...componentsOverride);
+  } else {
+    // Header opcional (necessario se o template tiver header de imagem/documento/video/texto)
+    if (headerImage) {
+      componentsList.push({
+        type: 'header',
+        parameters: [{ type: 'image', image: { link: headerImage } }],
+      });
+    } else if (headerDocumentUrl) {
+      componentsList.push({
+        type: 'header',
+        parameters: [{ type: 'document', document: { link: headerDocumentUrl } }],
+      });
+    } else if (headerVideoUrl) {
+      componentsList.push({
+        type: 'header',
+        parameters: [{ type: 'video', video: { link: headerVideoUrl } }],
+      });
+    } else if (headerText) {
+      componentsList.push({
+        type: 'header',
+        parameters: [{ type: 'text', text: String(headerText) }],
+      });
+    }
 
-  // Header opcional (necessario se o template tiver header de imagem/documento/video/texto)
-  if (headerImage) {
-    components.push({
-      type: 'header',
-      parameters: [{ type: 'image', image: { link: headerImage } }],
-    });
-  } else if (headerDocumentUrl) {
-    components.push({
-      type: 'header',
-      parameters: [{ type: 'document', document: { link: headerDocumentUrl } }],
-    });
-  } else if (headerVideoUrl) {
-    components.push({
-      type: 'header',
-      parameters: [{ type: 'video', video: { link: headerVideoUrl } }],
-    });
-  } else if (headerText) {
-    components.push({
-      type: 'header',
-      parameters: [{ type: 'text', text: String(headerText) }],
-    });
+    // IMPORTANTE: so inclua components se houver params (evita erro 132000)
+    if (Array.isArray(bodyParamsNormalized) && bodyParamsNormalized.length > 0) {
+      componentsList.push({
+        type: 'body',
+        parameters: bodyParamsNormalized.map(t => ({ type: 'text', text: String(t) })),
+      });
+    }
   }
 
-  // IMPORTANTE: so inclua components se houver params (evita erro 132000)
-  if (Array.isArray(bodyParams) && bodyParams.length > 0) {
-    components.push({
-      type: 'body',
-      parameters: bodyParams.map(t => ({ type: 'text', text: String(t) })),
-    });
-  }
-
-  if (components.length) template.components = components;
+  if (componentsList.length) template.components = componentsList;
 
   const payload = {
     messaging_product: 'whatsapp',
@@ -314,9 +395,12 @@ export async function sendTemplate({
     template,
   };
 
+  const paramsCount = componentsOverride
+    ? countBodyParams(componentsList)
+    : bodyParamsNormalized.length;
   if (cfg.debug) {
     console.log('[wa/cloud/template] to=%s name=%s lang=%s params=%d',
-      phone, template.name, template.language?.code, bodyParams.length);
+      phone, template.name, template.language?.code, paramsCount);
   }
   logSend({ phone, payload, context });
   const resp = await sendWhatsAppMessage({
@@ -339,6 +423,8 @@ export async function sendWhatsAppSmart({
   message,
   text,
   template,
+  templateName,
+  templateParams,
   templateNameFallback,
   templateLangFallback,
   allowText = true,
@@ -348,6 +434,7 @@ export async function sendWhatsAppSmart({
   returnMeta = false,
 } = {}) {
   const messageText = message != null ? String(message) : (text != null ? String(text) : '');
+  const templateDisabled = template === null || template === false;
   const shouldForceTemplate = forceTemplate === true || cfg.forceTemplate;
   const phone = normalizePhoneDigits(to);
   if (!phone) {
@@ -372,11 +459,20 @@ export async function sendWhatsAppSmart({
   const fallbackLang = templateLangFallback || cfg.templateLang;
   const templatePayload = template && template.name
     ? template
-    : {
+    : (templateDisabled ? null : {
         name: fallbackName,
         lang: fallbackLang,
         bodyParams: cfg.templateHasBodyParam && messageText ? [messageText] : [],
-      };
+      });
+  const overrideName = templateName || 'confirmacao_agendamento_v2';
+  const overrideParams = Array.isArray(templateParams) ? templateParams : null;
+  const hasOverride = Boolean(templateName || overrideParams);
+  const overrideMissing = hasOverride
+    && isConfirmacaoAgendamentoV2(overrideName)
+    && !(Array.isArray(overrideParams)
+      && overrideParams.length === 3
+      && overrideParams.every((value) => String(value || '').trim()));
+  const canUseOverride = hasOverride && !overrideMissing;
 
   let decision = null;
   const finalize = (result) => {
@@ -391,13 +487,47 @@ export async function sendWhatsAppSmart({
       },
     };
   };
-
-  if (shouldForceTemplate || !windowOpen) {
-    if (cfg.debug) {
-      console.log('[wa/cloud] smart-send template only (window closed or forced)');
+  const overrideComponents = canUseOverride ? buildTemplateComponents(overrideParams) : null;
+  const sendTemplateSafely = async (payload) => {
+    try {
+      return await sendTemplate(payload);
+    } catch (err) {
+      const code = err?.code || err?.body?.error?.code;
+      if (code === 'wa_template_params_missing') {
+        return { ok: false, error: 'template_params_missing' };
+      }
+      throw err;
     }
-    decision = 'template';
-    const result = await sendTemplate({
+  };
+  const sendTemplateWithOverrides = async () => {
+    if (overrideMissing) {
+      const base = {
+        template: overrideName,
+        expected: 3,
+        provided: Array.isArray(overrideParams) ? overrideParams.length : 0,
+        to: maskPhone(phone),
+      };
+      if (ctx) base.context = ctx;
+      console.warn('[wa/template] missing params, skip send', base);
+      return { ok: false, error: 'template_params_missing' };
+    }
+    if (canUseOverride) {
+      return sendTemplateSafely({
+        to: phone,
+        name: overrideName,
+        lang: 'pt_BR',
+        components: overrideComponents,
+        context: ctx,
+        tenant,
+      });
+    }
+    if (!templatePayload) {
+      const base = { to: maskPhone(phone) };
+      if (ctx) base.context = ctx;
+      console.warn('[wa/template] template disabled, skip send', base);
+      return { ok: false, error: 'template_missing' };
+    }
+    return sendTemplateSafely({
       to: phone,
       name: templatePayload.name,
       lang: templatePayload.lang,
@@ -409,6 +539,14 @@ export async function sendWhatsAppSmart({
       context: ctx,
       tenant,
     });
+  };
+
+  if (shouldForceTemplate || !windowOpen) {
+    if (cfg.debug) {
+      console.log('[wa/cloud] smart-send template only (window closed or forced)');
+    }
+    decision = 'template';
+    const result = await sendTemplateWithOverrides();
     return finalize(result);
   }
 
@@ -421,18 +559,7 @@ export async function sendWhatsAppSmart({
       if (is24hWindowError(err)) {
         if (cfg.debug) console.log('[wa/cloud] text failed, fallback to template');
         decision = 'template';
-        const result = await sendTemplate({
-          to: phone,
-          name: templatePayload.name,
-          lang: templatePayload.lang,
-          bodyParams: templatePayload.bodyParams || [],
-          headerImageUrl: templatePayload.headerImageUrl,
-          headerDocumentUrl: templatePayload.headerDocumentUrl,
-          headerVideoUrl: templatePayload.headerVideoUrl,
-          headerText: templatePayload.headerText,
-          context: ctx,
-          tenant,
-        });
+        const result = await sendTemplateWithOverrides();
         return finalize(result);
       }
       throw err;
@@ -441,18 +568,7 @@ export async function sendWhatsAppSmart({
 
   if (template && template.name) {
     decision = 'template';
-    const result = await sendTemplate({
-      to: phone,
-      name: template.name,
-      lang: template.lang,
-      bodyParams: template.bodyParams || [],
-      headerImageUrl: template.headerImageUrl,
-      headerDocumentUrl: template.headerDocumentUrl,
-      headerVideoUrl: template.headerVideoUrl,
-      headerText: template.headerText,
-      context: ctx,
-      tenant,
-    });
+    const result = await sendTemplateWithOverrides();
     return finalize(result);
   }
 

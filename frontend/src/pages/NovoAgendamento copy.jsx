@@ -1,4 +1,4 @@
-﻿// src/pages/NovoAgendamento.jsx
+// src/pages/NovoAgendamento.jsx
 import React, { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import { Link, useSearchParams, useLocation } from "react-router-dom";
 import { Api, resolveAssetUrl } from "../utils/api";
@@ -99,7 +99,7 @@ const DateHelpers = {
     const fmt = new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "short" });
     const s1 = fmt.format(start);
     const s2 = fmt.format(end);
-    return `${s1} â€¢ ${s2}`.replace(/\./g, "");
+    return `${s1} • ${s2}`.replace(/\./g, "");
   },
   formatTime: (datetime) => {
     const dt = new Date(datetime);
@@ -180,7 +180,7 @@ const createGuestModalState = () => ({
   error: "",
   info: "",
 });
-/* =================== Janela 07â€¢22 =================== */
+/* =================== Janela 07•22 =================== */
 const DEFAULT_BUSINESS_HOURS = { start: 7, end: 22 };
 const normalizeText = (value) =>
   String(value || '')
@@ -459,7 +459,7 @@ const inBusinessHours = (isoDatetime, schedule = null, durationMinutes = 0) => {
   const closeMinutes = DEFAULT_BUSINESS_HOURS.end * 60;
   return startMinutes >= openMinutes && endMinutes <= closeMinutes;
 };
-/* =================== Grade 07â€¢22 =================== */
+/* =================== Grade 07•22 =================== */
 const pad2 = (n) => String(n).padStart(2, "0");
 const localKey = (dateish) => {
   const d = new Date(dateish);
@@ -642,13 +642,13 @@ const displayEstablishmentAddress = (est) => {
     est?.bairro,
     [est?.cidade, est?.estado].filter(Boolean).join(' - '),
   ].filter(Boolean);
-  return parts.join(' â€¢ ');
+  return parts.join(' • ');
 };
 /* =================== UI Components =================== */
 const Toast = ({ type, message, onDismiss }) => (
   <div className={`toast ${type}`} role="status" aria-live="polite">
     <div className="toast-content">
-      <span className="toast-icon">{type === "success" ? "âœ”" : type === "error" ? "âœ˜" : "â„¹"}</span>
+      <span className="toast-icon">{type === "success" ? "✔" : type === "error" ? "✘" : "ℹ"}</span>
       {message}
     </div>
     <button className="toast-close" onClick={onDismiss} aria-label="Fechar">
@@ -676,7 +676,7 @@ const SlotButton = ({ slot, isSelected, onClick, density = "compact" }) => {
   return (
     <button
       className={className}
-      title={`${new Date(slot.datetime).toLocaleString("pt-BR")} â€“ ${tooltipLabel}${isPast ? " (passado)" : ""}`}
+      title={`${new Date(slot.datetime).toLocaleString("pt-BR")} – ${tooltipLabel}${isPast ? " (passado)" : ""}`}
       onClick={onClick}
       disabled={disabledReason}
       aria-disabled={disabledReason}
@@ -694,7 +694,7 @@ const ServiceCard = ({ service, selected, onSelect }) => {
   const description = ServiceHelpers.description(service);
   const imageRaw = service?.imagem_url || service?.image_url || service?.imagem || service?.image || service?.foto_url || '';
   const imageUrl = resolveAssetUrl(imageRaw);
-  const showPrice = price !== 'R$Â 0,00';
+  const showPrice = price !== 'R$ 0,00';
   const showDuration = duration > 0;
   const cardClass = ['mini-card', selected ? 'mini-card--selected' : ''].filter(Boolean).join(' ');
   return (
@@ -849,7 +849,7 @@ const EstablishmentCard = ({ est, selected, onSelect }) => {
                 : 'Estabelecimento ainda sem avaliações'
             }
           >
-            <span aria-hidden>â˜…</span>
+            <span aria-hidden>★</span>
             {hasRatings ? `${ratingLabel} (${ratingCount})` : 'Sem avaliações'}
           </span>
         </div>
@@ -857,7 +857,7 @@ const EstablishmentCard = ({ est, selected, onSelect }) => {
     </div>
   );
 };
-/* =================== PÃƒÂ¡gina Principal =================== */
+/* =================== Página Principal =================== */
 export default function NovoAgendamento() {
   const user = getUser();
   const isAuthenticated = Boolean(user?.id);
@@ -926,7 +926,7 @@ export default function NovoAgendamento() {
   const [ratingModal, setRatingModal] = useState({ open: false, nota: 0, comentario: '', saving: false, error: '' });
   const [planLimitModal, setPlanLimitModal] = useState({ open: false, message: '', details: null });
   const [guestModal, setGuestModal] = useState(() => createGuestModalState());
-  // Inicializa estQuery a partir de ?q= da URL e reage a mudanÃ§as no histÃ³rico
+  // Inicializa estQuery a partir de ?q= da URL e reage a mudanças no histórico
   useEffect(() => {
     const q = (searchParams.get('q') || '').trim();
     if (q !== estQuery) setEstQuery(q);
@@ -949,7 +949,7 @@ export default function NovoAgendamento() {
     } catch {}
   }, [userLocation]);
   // Inicializa/normaliza a semana a partir de ?week=YYYY-MM-DD
-  // Sempre forÃƒÂ§a a segunda-feira correspondente
+  // Sempre força a segunda-feira correspondente
   useEffect(() => {
     const w = (searchParams.get('week') || '').trim();
     if (/^\d{4}-\d{2}-\d{2}$/.test(w)) {
@@ -962,7 +962,7 @@ export default function NovoAgendamento() {
   }, [searchParams, state.currentWeek]);
   const [modal, setModal] = useState({ isOpen: false, isSaving: false });
   const [toast, setToast] = useState(null);
-  const [viewMode] = useState('month'); // por ora, MÃªs ÃƒÂ© o padrÃƒÂ£o
+  const [viewMode] = useState('month'); // por ora, Mês é o padrão
   const [monthStart, setMonthStart] = useState(() => DateHelpers.firstOfMonthISO(new Date()));
   const [selectedDate, setSelectedDate] = useState(null); // YYYY-MM-DD
   const [professionalMenuOpen, setProfessionalMenuOpen] = useState(false);
@@ -1118,7 +1118,7 @@ export default function NovoAgendamento() {
       const [start] = laterToday;
       return {
         prefix: 'Fechado',
-        detail: `Abre hoje Ã s ${formatMinutes(start)}`,
+        detail: `Abre hoje às ${formatMinutes(start)}`,
         status: 'closed',
       };
     }
@@ -1133,7 +1133,7 @@ export default function NovoAgendamento() {
       if (offset === 1) {
         return {
           prefix: 'Fechado',
-          detail: `Abre amanhÃ£ Ã s ${openTime}`,
+          detail: `Abre amanhã às ${openTime}`,
           status: 'closed',
         };
       }
@@ -1142,7 +1142,7 @@ export default function NovoAgendamento() {
       const weekday = weekdayFormatter.format(nextDate);
       return {
         prefix: 'Fechado',
-        detail: `Abre ${weekday} Ã s ${openTime}`,
+        detail: `Abre ${weekday} às ${openTime}`,
         status: 'closed',
       };
     }
@@ -1200,7 +1200,7 @@ export default function NovoAgendamento() {
     subscriptionStatus === 'active' ||
     subscriptionStatus === 'authorized';
   const bookingBlocked = !subscriptionActive && (planExpired || trialExpired);
-  const bookingBlockedMessage = 'Agendamentos indisponÃ­veis no momento. Entre em contato com o estabelecimento.';
+  const bookingBlockedMessage = 'Agendamentos indisponíveis no momento. Entre em contato com o estabelecimento.';
   useEffect(() => {
     const cache = coordsCacheRef.current;
     let changed = false;
@@ -1275,13 +1275,13 @@ export default function NovoAgendamento() {
     if (d && d % 5 === 0) return Math.max(15, Math.min(120, d));
     return 30;
   }, [selectedService]);
-  // PersistÃƒÂªncia leve (filtros/densidade)
+  // Persistência leve (filtros/densidade)
   useEffect(() => {
     try {
       const saved = JSON.parse(localStorage.getItem("novo-agendamento-ui") || "{}");
       setState((p) => ({
         ...p,
-        filters: { ...p.filters, ...saved.filters, onlyAvailable: false }, // forÃƒÂ§a exibir ocupados
+        filters: { ...p.filters, ...saved.filters, onlyAvailable: false }, // força exibir ocupados
         density: saved.density || p.density
       }));
     } catch {}
@@ -1328,14 +1328,14 @@ export default function NovoAgendamento() {
       cancelled = true;
     };
   }, [showToast]);
-  // Se vier ?estabelecimento= na URL, seleciona automaticamente apÃ³s carregar a lista
+  // Se vier ?estabelecimento= na URL, seleciona automaticamente após carregar a lista
   useEffect(() => {
     const estParam = (searchParams.get('estabelecimento') || '').trim();
     if (establishments.length && estParam && estParam !== state.establishmentId) {
       setState((p) => ({ ...p, establishmentId: estParam, serviceId: "", professionalId: "", slots: [], selectedSlot: null }));
     }
   }, [establishments, searchParams, state.establishmentId]);
-  /* ====== Carregar ServiÃƒÂ§os quando escolher Estabelecimento ====== */
+  /* ====== Carregar Serviços quando escolher Estabelecimento ====== */
   useEffect(() => {
     (async () => {
       if (!establishmentId) {
@@ -1353,7 +1353,7 @@ export default function NovoAgendamento() {
           ...p,
           services: list || [],
           serviceId: "",
-    professionalId: "", // aguarda o clique do usuÃƒÂ¡rio
+    professionalId: "", // aguarda o clique do usuário
           slots: [],
           selectedSlot: null,
         }));
@@ -1414,7 +1414,7 @@ export default function NovoAgendamento() {
             ...(prev[selectedEstablishmentId] || {}),
             loading: false,
             loaded: true,
-            error: 'Detalhes indisponÃ­veis.',
+            error: 'Detalhes indisponíveis.',
           },
         }));
         showToast('error', 'Não foi possível carregar detalhes do estabelecimento.');
@@ -1531,7 +1531,7 @@ useEffect(() => {
         if (!Array.isArray(persisted)) persisted = [];
       } catch {}
       const apptCounts = await getBusyFromAppointments();
-      // D) aplica overlay considerando capacidade por profissional/serviÃ§o
+      // D) aplica overlay considerando capacidade por profissional/serviço
       setState((prev) => {
         const rawForced = Array.from(new Set([...prev.forceBusy, ...persisted]));
         const filteredForced = rawForced.filter(
@@ -1668,7 +1668,7 @@ useEffect(() => {
       const reminderTime = new Date(inMs - 8 * 60 * 60 * 1000);
       const dataBR = start.toLocaleDateString("pt-BR");
       const horaBR = start.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
-      const msgReminder = `Ã¢ÂÂ° Lembrete: faltam 8 horas para o seu ${servicoNome} em ${estabelecimentoNome} (${horaBR} de ${dataBR}).`;
+      const msgReminder = `⏰ Lembrete: faltam 8 horas para o seu ${servicoNome} em ${estabelecimentoNome} (${horaBR} de ${dataBR}).`;
       const tasks = [];
       if (reminderTime.getTime() > now)
         tasks.push(Api.scheduleWhatsApp?.({ to: toPhone, scheduledAt: reminderTime.toISOString(), message: msgReminder, metadata: { kind: "reminder_8h", appointmentAt: start.toISOString() } }));
@@ -1682,7 +1682,7 @@ useEffect(() => {
     },
     [showToast, user]
   );
-  // Verifica se o agendamento existe mesmo apÃƒÂ³s um erro
+  // Verifica se o agendamento existe mesmo após um erro
   const verifyBookingCreated = useCallback(
     async (slotIso) => {
       const sameStart = (a, b) =>
@@ -1717,18 +1717,18 @@ useEffect(() => {
 
   const validateBookingSelection = useCallback(() => {
     if (!selectedSlot || !serviceId || !selectedService) {
-      return "Selecione um horÃ‡Â­rio para continuar.";
+      return "Selecione um horário para continuar.";
     }
     if (bookingBlocked) {
-      return bookingBlockedMessage || "Agendamentos temporariamente indisponÃ‡Â­veis.";
+      return bookingBlockedMessage || "Agendamentos temporariamente indisponíveis.";
     }
     if (DateHelpers.isPastSlot(selectedSlot.datetime)) {
-      return "NÃ‡Å“o foi possÃ‡Â­vel agendar no passado.";
+      return "Não foi possível agendar no passado.";
     }
     if (!inBusinessHours(selectedSlot.datetime, workingSchedule, serviceDuration)) {
       return workingSchedule
-        ? "Este horÃ‡Â­rio estÃ‡Â¡ fora do horÃ‡Â­rio de atendimento do estabelecimento."
-        : "Este horÃ‡Â­rio estÃ‡Â¡ fora do perÃ‡Â­odo de 07:00-22:00.";
+        ? "Este horário está fora do horário de atendimento do estabelecimento."
+        : "Este horário está fora do período de 07:00-22:00.";
     }
     if (serviceProfessionals.length && !state.professionalId) {
       return "Selecione um profissional para continuar.";
@@ -1971,11 +1971,11 @@ useEffect(() => {
 
   const handleGuestOtpSubmit = useCallback(async () => {
     if (!guestModal.otpReqId) {
-      setGuestModal((prev) => ({ ...prev, error: "Solicite o envio do cÃ³digo para confirmar." }));
+      setGuestModal((prev) => ({ ...prev, error: "Solicite o envio do código para confirmar." }));
       return;
     }
     if (!guestModal.otpCode || !guestModal.otpCode.trim()) {
-      setGuestModal((prev) => ({ ...prev, error: "Informe o cÃ³digo recebido por email." }));
+      setGuestModal((prev) => ({ ...prev, error: "Informe o código recebido por email." }));
       return;
     }
     setGuestModal((prev) => ({ ...prev, loading: true, error: "", info: "" }));
@@ -1994,7 +1994,7 @@ useEffect(() => {
   const handleGuestResendOtp = useCallback(async () => {
     const email = (guestModal.email || "").trim();
     if (!email) {
-      setGuestModal((prev) => ({ ...prev, error: "Informe o email para reenviar o cÃ³digo." }));
+      setGuestModal((prev) => ({ ...prev, error: "Informe o email para reenviar o código." }));
       return;
     }
     try {
@@ -2004,7 +2004,7 @@ useEffect(() => {
         ...prev,
         loading: false,
         otpReqId: resp?.request_id || prev.otpReqId || "",
-        info: "CÃ³digo reenviado para seu email.",
+        info: "Código reenviado para seu email.",
         step: "otp",
       }));
     } catch {
@@ -2286,7 +2286,7 @@ useEffect(() => {
   const handleToggleFavorite = async () => {
     if (!selectedEstablishment || !selectedEstablishmentId) return;
     if (!user || user.tipo !== 'cliente') {
-      showToast('info', 'FaÃ§a login como cliente para favoritar.');
+      showToast('info', 'Faça login como cliente para favoritar.');
       return;
     }
     if (selectedExtras?.favoriteUpdating) return;
@@ -2328,7 +2328,7 @@ useEffect(() => {
   const handleOpenRatingModal = () => {
     if (!selectedEstablishment || !selectedEstablishmentId) return;
     if (!user || user.tipo !== 'cliente') {
-      showToast('info', 'FaÃ§a login como cliente para avaliar.');
+      showToast('info', 'Faça login como cliente para avaliar.');
       return;
     }
     const existing = selectedExtras?.user_review;
@@ -2353,7 +2353,7 @@ useEffect(() => {
   const handleSaveRating = async () => {
     if (!selectedEstablishment || !selectedEstablishmentId) return;
     if (!user || user.tipo !== 'cliente') {
-      showToast('info', 'FaÃ§a login como cliente para avaliar.');
+      showToast('info', 'Faça login como cliente para avaliar.');
       return;
     }
     if (!ratingModal.nota || ratingModal.nota < 1) {
@@ -2453,7 +2453,7 @@ useEffect(() => {
     return DateHelpers.formatTime(end.toISOString());
   }, [selectedSlot, serviceDuration]);
   const weekLabel = DateHelpers.formatWeekLabel(currentWeek);
-  // Reordenar colunas da semana para comeÃƒÂ§ar pelo dia atual (se pertencer ÃƒÂ  semana atual)
+  // Reordenar colunas da semana para começar pelo dia atual (se pertencer à semana atual)
   const daysToRender = useMemo(() => {
     const list = DateHelpers.weekDays(currentWeek);
     const todayIso = DateHelpers.toISODate(new Date());
@@ -2462,13 +2462,13 @@ useEffect(() => {
   }, [currentWeek]);
   /* ====== UI por passos ====== */
   const step = !establishmentId ? 1 : !serviceId ? 2 : 3;
-  // Ao clicar num dia do MÃªs, define a semana correspondente e marca o dia
+  // Ao clicar num dia do Mês, define a semana correspondente e marca o dia
   const handlePickDay = useCallback((isoDay) => {
     setSelectedDate(isoDay);
     const wk = DateHelpers.weekStartISO(isoDay);
     if (wk !== currentWeek) setState((p) => ({ ...p, currentWeek: wk }));
   }, [currentWeek]);
-  // Quando o mÃªs visÃ­vel contÃ©m hoje, prÃ©-seleciona o dia atual se nada estiver selecionado
+  // Quando o mês visível contém hoje, pré-seleciona o dia atual se nada estiver selecionado
   useEffect(() => {
     const todayIso = DateHelpers.toISODate(new Date());
     if (DateHelpers.isSameMonth(todayIso, monthStart)) {
@@ -2519,7 +2519,7 @@ useEffect(() => {
     <>
       <div ref={servicesSectionRef} className="novo-agendamento__services">
         {services.length === 0 ? (
-          <div className="empty small">Sem serviÃ§os cadastrados.</div>
+          <div className="empty small">Sem serviços cadastrados.</div>
         ) : (
           services.map((s) => (
             <ServiceCard
@@ -2563,7 +2563,7 @@ useEffect(() => {
                 <div className="novo-agendamento__select-label">
                   <div>{selectedProfessional ? (selectedProfessional.nome || selectedProfessional.name) : 'Selecione um profissional'}</div>
                 </div>
-                <span className="novo-agendamento__select-caret" aria-hidden>â–¾</span>
+                <span className="novo-agendamento__select-caret" aria-hidden>▾</span>
               </button>
               {professionalMenuOpen && (
                 <div className="novo-agendamento__select-menu">
@@ -2594,10 +2594,10 @@ useEffect(() => {
           <div className="novo-agendamento__inline-summary">
             <div className="inline-summary__item inline-summary__item--service">
               <span className="inline-summary__value">{ServiceHelpers.title(selectedService)}</span>
-              {(serviceDuration || servicePrice !== 'R$Â 0,00') && (
+              {(serviceDuration || servicePrice !== 'R$ 0,00') && (
                 <div className="inline-summary__meta">
                   {serviceDuration ? <span>{serviceDuration} min</span> : null}
-                  {servicePrice !== 'R$Â 0,00' ? <span>{servicePrice}</span> : null}
+                  {servicePrice !== 'R$ 0,00' ? <span>{servicePrice}</span> : null}
                 </div>
               )}
             </div>
@@ -2639,7 +2639,7 @@ useEffect(() => {
                 </div>
                 <div className="row" style={{ gap: 6, flexWrap: 'wrap', marginTop: 6 }} role="group" aria-label="Perí­odo do dia">
                   <Chip active={filters.timeRange === 'all'} onClick={() => handleTimeRange('all')} title="Todos os horários">Todos</Chip>
-                  <Chip active={filters.timeRange === 'morning'} onClick={() => handleTimeRange('morning')} title="Manhã (07-12)">ManhÃ£</Chip>
+                  <Chip active={filters.timeRange === 'morning'} onClick={() => handleTimeRange('morning')} title="Manhã (07-12)">Manhã</Chip>
                   <Chip active={filters.timeRange === 'afternoon'} onClick={() => handleTimeRange('afternoon')} title="Tarde (12-18)">Tarde</Chip>
                   <Chip active={filters.timeRange === 'evening'} onClick={() => handleTimeRange('evening')} title="Noite (18-22)">Noite</Chip>
                 </div>
@@ -2653,7 +2653,7 @@ useEffect(() => {
               <div className="row" style={{ gap: 6, alignItems: 'center' }}>
                 <button
                   className="btn btn--sm"
-                  aria-label="MÃªs anterior"
+                  aria-label="Mês anterior"
                   onClick={() => setMonthStart(DateHelpers.formatLocalISO(DateHelpers.addMonths(monthStart, -1)))}
                 >
                   ‹
@@ -2661,7 +2661,7 @@ useEffect(() => {
                 <strong>{new Date(monthStart + 'T00:00:00').toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })}</strong>
                 <button
                   className="btn btn--sm"
-                  aria-label="PrÃ³ximo mÃªs"
+                  aria-label="Próximo mês"
                   onClick={() => setMonthStart(DateHelpers.formatLocalISO(DateHelpers.addMonths(monthStart, 1)))}
                 >
                   ›
@@ -2922,9 +2922,9 @@ useEffect(() => {
                       className={`summary-action${ratingCount > 0 ? '' : ' summary-action--muted'}`}
                       onClick={handleOpenRatingModal}
                       disabled={!isClientUser || selectedExtras?.loading}
-                      title={!isClientUser ? 'DisponÃ­vel apenas para clientes.' : undefined}
+                      title={!isClientUser ? 'Disponível apenas para clientes.' : undefined}
                     >
-                      <span aria-hidden>â˜…</span>
+                      <span aria-hidden>★</span>
                       {ratingButtonLabel}
                     </button>
                   )}
@@ -3137,8 +3137,8 @@ useEffect(() => {
               ) : (
                 <div className="estab-reviews">
                   <div className="estab-reviews__summary">
-                    <div className="estab-reviews__average" aria-label={`Nota mÃ©dia ${ratingAverageLabel ?? 'â€“'}`}>
-                      <span className="estab-reviews__value">{ratingAverageLabel ?? 'â€“'}</span>
+                    <div className="estab-reviews__average" aria-label={`Nota média ${ratingAverageLabel ?? '–'}`}>
+                      <span className="estab-reviews__value">{ratingAverageLabel ?? '–'}</span>
                       <div className="estab-reviews__stars" aria-hidden="true">
                         {[1, 2, 3, 4, 5].map((value) => (
                           <span
@@ -3147,7 +3147,7 @@ useEffect(() => {
                               ratingSummary?.average != null && ratingSummary.average >= value - 0.5 ? ' is-active' : ''
                             }`}
                           >
-                            {ratingSummary?.average != null && ratingSummary.average >= value - 0.5 ? 'â˜…' : 'â˜†'}
+                            {ratingSummary?.average != null && ratingSummary.average >= value - 0.5 ? '★' : '☆'}
                           </span>
                         ))}
                       </div>
@@ -3306,7 +3306,7 @@ useEffect(() => {
                     zIndex: 2,
                   }}
                 >
-                  â€¹
+                  ‹
                 </button>
                 <button
                   type="button"
@@ -3321,7 +3321,7 @@ useEffect(() => {
                     zIndex: 2,
                   }}
                 >
-                  â€º
+                  ›
                 </button>
                 {(() => {
                   const currentImage = galleryImages[galleryViewIndex] || galleryImages[0];
@@ -3472,13 +3472,13 @@ useEffect(() => {
                   disabled={ratingModal.saving}
                   aria-label={`${value} ${value === 1 ? 'estrela' : 'estrelas'}`}
                 >
-                  {ratingModal.nota >= value ? 'â˜…' : 'â˜†'}
+                  {ratingModal.nota >= value ? '★' : '☆'}
                 </button>
               ))}
             </div>
             <textarea
               className="input rating-modal__comment"
-              placeholder="Conte sua experiÃªncia (opcional)"
+              placeholder="Conte sua experiência (opcional)"
               value={ratingModal.comentario}
               onChange={handleRatingCommentChange}
               rows={4}

@@ -151,5 +151,21 @@ export async function sendWhatsAppMessage({ accessToken, phoneNumberId, payload 
   if (!accessToken || !phoneNumberId) {
     throw new Error('wa_missing_token_or_phone');
   }
-  return postGraph(`${phoneNumberId}/messages`, accessToken, payload);
+  try {
+    return await postGraph(`${phoneNumberId}/messages`, accessToken, payload);
+  } catch (err) {
+    if (err?.status >= 400) {
+      const error = err?.body?.error;
+      const data = (error && typeof error === 'object')
+        ? {
+            message: error.message,
+            code: error.code,
+            error_data: error.error_data,
+            fbtrace_id: error.fbtrace_id,
+          }
+        : err?.body;
+      console.error('[wa/graph/error]', { status: err?.status || null, data });
+    }
+    throw err;
+  }
 }
