@@ -155,17 +155,21 @@ function isOpenPaymentExpired(payment) {
 
 function parseMercadoPagoSignatureHeader(xSignature) {
   // Example header: "ts=1700000000, v1=abcdef..."
-  const raw = Array.isArray(xSignature) ? xSignature.join(',') : String(xSignature || '')
+  if (!xSignature) return { ts: null, v1: null }
+  const raw = Array.isArray(xSignature) ? xSignature.join(',') : String(xSignature)
+  const trimmed = raw.trim()
+  if (!trimmed) return { ts: null, v1: null }
+  const parts = trimmed.split(',').map((part) => part.trim()).filter(Boolean)
   const headerData = {}
-  for (const segment of raw.split(',')) {
-    const [rawKey, ...rawValue] = segment.split('=')
-    const key = String(rawKey || '').trim().toLowerCase()
+  for (const part of parts) {
+    const separatorIndex = part.indexOf('=')
+    if (separatorIndex < 0) continue
+    const key = part.slice(0, separatorIndex).trim().toLowerCase()
+    const value = part.slice(separatorIndex + 1).trim()
     if (!key) continue
-    const value = rawValue.join('=').trim().replace(/^"|"$/g, '').replace(/^'|'$/g, '')
-    if (!value) continue
     headerData[key] = value
   }
-  return { ts: String(headerData.ts || '').trim(), v1: String(headerData.v1 || '').trim() }
+  return { ts: headerData.ts || null, v1: headerData.v1 || null }
 }
 
 function safeTimingCompareHex(expectedHex, receivedHex) {
@@ -187,13 +191,17 @@ function safeTimingCompareHex(expectedHex, receivedHex) {
 // const headers = { 'x-signature': 'ts=1700000000, v1=abcdef1234', 'x-request-id': 'req-123' }
 // validateMercadoPagoWebhook({ headers, query: { id: '999' }, body: {} })
 function validateMercadoPagoWebhook(req) {
-  const header = req.headers['x-signature'] || req.headers['x-mercadopago-signature']
+  const header =
+    req.headers['x-signature'] ||
+    req.headers['x_signature'] ||
+    req.headers['x-mercadopago-signature'] ||
+    req.headers['x_mercadopago_signature']
   const { ts, v1 } = parseMercadoPagoSignatureHeader(header)
-  const requestId = String(req.headers['x-request-id'] || '').trim()
+  const requestId = String(req.headers['x-request-id'] || req.headers['x_request_id'] || '').trim()
   const id = normalizeId(req.query?.id || req.query?.['data.id'] || req.body?.data?.id || req.body?.id || req.body?.resource)
   const topic = String(req.query?.topic || req.query?.type || '').trim()
 
-  if (!id || !ts || !v1 || !requestId) {
+  if (!id || !ts || !v1 || (!requestId && !topic)) {
     console.warn('[billing:webhook] missing_fields', {
       id: id || null,
       ts: ts || null,
@@ -224,10 +232,13 @@ function validateMercadoPagoWebhook(req) {
     secrets = [envA, envB].filter(Boolean)
   }
 
-  const manifestCandidates = [
-    { variant: 'request-id', manifest: `id:${id};request-id:${requestId};ts:${ts};` },
-    { variant: 'topic', manifest: `id:${id};topic:${topic};ts:${ts};` },
-  ]
+  const manifestCandidates = []
+  if (requestId) {
+    manifestCandidates.push({ variant: 'request-id', manifest: `id:${id};request-id:${requestId};ts:${ts};` })
+  }
+  if (topic) {
+    manifestCandidates.push({ variant: 'topic', manifest: `id:${id};topic:${topic};ts:${ts};` })
+  }
 
   if (!secrets.length) {
     return { ok: true, skipped: 'missing_secret', id, request_id: requestId, ts, manifest: manifestCandidates[0]?.manifest }
@@ -1074,3 +1085,15 @@ router.get('/renew/pix/status', auth, isEstabelecimento, async (req, res) => {
 })
 
 export default router
+
+// Manual test snippet (keep commented):
+// parseMercadoPagoSignatureHeader('ts=1700000000,v1=abc') // => { ts: '1700000000', v1: 'abc' }
+// parseMercadoPagoSignatureHeader('ts=1700000000, v1=abc') // => { ts: '1700000000', v1: 'abc' }
+// parseMercadoPagoSignatureHeader('v1=abc,ts=1700000000') // => { ts: '1700000000', v1: 'abc' }
+// const missingFieldsCheck = validateMercadoPagoWebhook({
+//   headers: { 'x-signature': 'ts=1700000000,v1=abc' },
+//   query: { id: '123', topic: 'payment' },
+//   body: {},
+//   originalUrl: '/api/billing/webhook',
+// })
+// Expect: missingFieldsCheck.reason !== 'missing_fields' even without x-request-id.
