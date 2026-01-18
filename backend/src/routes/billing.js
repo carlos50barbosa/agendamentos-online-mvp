@@ -197,6 +197,29 @@ function validateMercadoPagoWebhook(req) {
     req.headers['x-mercadopago-signature'] ||
     req.headers['x_mercadopago_signature']
   const { ts, v1 } = parseMercadoPagoSignatureHeader(header)
+  const tsCandidates = []
+  const tsCandidateSet = new Set()
+  const tsValue = String(ts || '').trim()
+  const addTsCandidate = (value) => {
+    if (!value) return
+    if (tsCandidateSet.has(value)) return
+    tsCandidateSet.add(value)
+    tsCandidates.push(value)
+  }
+  addTsCandidate(tsValue)
+  if (tsValue && /^\d+$/.test(tsValue)) {
+    const tsNumber = Number(tsValue)
+    if (Number.isFinite(tsNumber)) {
+      if (tsValue.length === 10) {
+        addTsCandidate(String(tsNumber * 1000))
+      } else if (tsValue.length === 13) {
+        addTsCandidate(String(Math.floor(tsNumber / 1000)))
+      }
+    }
+  }
+  if (!tsCandidates.length) {
+    tsCandidates.push(tsValue || String(ts || '').trim())
+  }
   const requestId = String(req.headers['x-request-id'] || req.headers['x_request_id'] || '').trim()
   const id = normalizeId(req.query?.id || req.query?.['data.id'] || req.body?.data?.id || req.body?.id || req.body?.resource)
   const topic = String(req.query?.topic || req.query?.type || '').trim()
@@ -232,38 +255,55 @@ function validateMercadoPagoWebhook(req) {
     secrets = [envA, envB].filter(Boolean)
   }
 
-  const manifestCandidates = []
-  if (requestId) {
-    manifestCandidates.push({ variant: 'request-id', manifest: `id:${id};request-id:${requestId};ts:${ts};` })
+  const buildManifestCandidates = (tsCandidate) => {
+    const candidates = []
+    if (requestId) {
+      candidates.push({ variant: 'request-id', manifest: `id:${id};request-id:${requestId};ts:${tsCandidate};` })
+      candidates.push({ variant: 'request_id', manifest: `id:${id};request_id:${requestId};ts:${tsCandidate};` })
+    }
+    if (topic) {
+      candidates.push({ variant: 'topic', manifest: `id:${id};topic:${topic};ts:${tsCandidate};` })
+    }
+    return candidates
   }
-  if (topic) {
-    manifestCandidates.push({ variant: 'topic', manifest: `id:${id};topic:${topic};ts:${ts};` })
-  }
+  const previewTs = tsCandidates[0] || tsValue || String(ts || '').trim()
+  const previewCandidates = buildManifestCandidates(previewTs)
 
   if (!secrets.length) {
-    return { ok: true, skipped: 'missing_secret', id, request_id: requestId, ts, manifest: manifestCandidates[0]?.manifest }
+    return { ok: true, skipped: 'missing_secret', id, request_id: requestId, ts, manifest: previewCandidates[0]?.manifest }
   }
 
   for (let index = 0; index < secrets.length; index++) {
     const secret = secrets[index]
-    for (const candidate of manifestCandidates) {
-      const expected = createHmac('sha256', secret).update(candidate.manifest).digest('hex')
-      if (safeTimingCompareHex(expected, v1)) {
-        return {
-          ok: true,
-          id,
-          request_id: requestId,
-          ts,
-          manifest: candidate.manifest,
-          using_variant: candidate.variant,
-          using_secret_index: index,
+    for (const tsCandidate of tsCandidates) {
+      const manifestCandidates = buildManifestCandidates(tsCandidate)
+      for (const candidate of manifestCandidates) {
+        const expected = createHmac('sha256', secret).update(candidate.manifest).digest('hex')
+        if (safeTimingCompareHex(expected, v1)) {
+          console.log('[billing:webhook] signature_match', {
+            id,
+            topic,
+            using_secret_index: index,
+            using_variant: candidate.variant,
+            using_ts: tsCandidate,
+          })
+          return {
+            ok: true,
+            id,
+            request_id: requestId,
+            ts,
+            manifest: candidate.manifest,
+            using_variant: candidate.variant,
+            using_secret_index: index,
+            using_ts: tsCandidate,
+          }
         }
       }
     }
   }
 
-  const requestIdManifest = manifestCandidates.find((candidate) => candidate.variant === 'request-id')?.manifest || ''
-  const topicManifest = manifestCandidates.find((candidate) => candidate.variant === 'topic')?.manifest || ''
+  const requestIdManifest = previewCandidates.find((candidate) => candidate.variant === 'request-id')?.manifest || ''
+  const topicManifest = previewCandidates.find((candidate) => candidate.variant === 'topic')?.manifest || ''
   const previewRequestId =
     requestIdManifest.length > 160 ? `${requestIdManifest.slice(0, 160)}...` : requestIdManifest
   const previewTopic = topicManifest.length > 160 ? `${topicManifest.slice(0, 160)}...` : topicManifest
@@ -276,6 +316,9 @@ function validateMercadoPagoWebhook(req) {
     id_from_query_id: req.query?.id ?? null,
     topic,
     ts,
+    ts_candidates: tsCandidates,
+    request_id_present: Boolean(requestId),
+    topic_present: Boolean(topic),
     v1_prefix: v1Prefix || null,
     manifest_preview_request_id: previewRequestId || null,
     manifest_preview_topic: previewTopic || null,
