@@ -153,92 +153,130 @@ function isOpenPaymentExpired(payment) {
   return expiresAt.getTime() <= Date.now()
 }
 
-function verifyWebhookSignature(req, resourceId) {
-  const secretA = (config.billing?.mercadopago?.webhookSecret || '').trim()
-  const secretB = (config.billing?.mercadopago?.webhookSecret2 || '').trim()
-  const secrets = [secretA, secretB].filter(Boolean)
-  if (!secrets.length) return { valid: true, method: 'none', using_secret_index: null }
-  if (config.billing?.mercadopago?.allowUnsigned) {
-    return { valid: true, method: 'unsigned-allowed', using_secret_index: null }
-  }
-
-  const header = req.headers['x-signature'] || req.headers['x-mercadopago-signature']
-  if (!header) return { valid: false, reason: 'missing_signature' }
-
-  const normalizeHeaderValue = (value) =>
-    String(value || '').trim().replace(/^"|"$/g, '').replace(/^'|'$/g, '')
-
+function parseMercadoPagoSignatureHeader(xSignature) {
+  // Example header: "ts=1700000000, v1=abcdef..."
+  const raw = Array.isArray(xSignature) ? xSignature.join(',') : String(xSignature || '')
   const headerData = {}
-  for (const segment of String(header).split(',')) {
+  for (const segment of raw.split(',')) {
     const [rawKey, ...rawValue] = segment.split('=')
     const key = String(rawKey || '').trim().toLowerCase()
     if (!key) continue
-    const value = normalizeHeaderValue(rawValue.join('='))
+    const value = rawValue.join('=').trim().replace(/^"|"$/g, '').replace(/^'|'$/g, '')
     if (!value) continue
     headerData[key] = value
   }
+  return { ts: String(headerData.ts || '').trim(), v1: String(headerData.v1 || '').trim() }
+}
 
-  const ts = String(headerData.ts || '').trim()
-  const signature = String(headerData.v1 || '').trim()
-  if (!ts || !signature) return { valid: false, reason: 'invalid_signature_header' }
+function safeTimingCompareHex(expectedHex, receivedHex) {
+  const expectedBuffer = Buffer.from(String(expectedHex || ''), 'hex')
+  const receivedBuffer = Buffer.from(String(receivedHex || ''), 'hex')
+  if (expectedBuffer.length !== receivedBuffer.length) {
+    const maxLength = Math.max(expectedBuffer.length, receivedBuffer.length)
+    const paddedExpected = Buffer.alloc(maxLength)
+    const paddedReceived = Buffer.alloc(maxLength)
+    expectedBuffer.copy(paddedExpected)
+    receivedBuffer.copy(paddedReceived)
+    timingSafeEqual(paddedExpected, paddedReceived)
+    return false
+  }
+  return timingSafeEqual(expectedBuffer, receivedBuffer)
+}
 
+// How to test (example headers):
+// const headers = { 'x-signature': 'ts=1700000000, v1=abcdef1234', 'x-request-id': 'req-123' }
+// validateMercadoPagoWebhook({ headers, query: { id: '999' }, body: {} })
+function validateMercadoPagoWebhook(req) {
+  const header = req.headers['x-signature'] || req.headers['x-mercadopago-signature']
+  const { ts, v1 } = parseMercadoPagoSignatureHeader(header)
   const requestId = String(req.headers['x-request-id'] || '').trim()
-  if (!requestId) return { valid: false, reason: 'missing_request_id', ts }
+  const id = normalizeId(req.query?.id || req.query?.['data.id'] || req.body?.data?.id || req.body?.id || req.body?.resource)
+  const topic = String(req.query?.topic || req.query?.type || '').trim()
 
-  const canonicalId = String(
-    req.body?.data?.id ?? req.query?.['data.id'] ?? req.query?.id ?? resourceId ?? ''
-  ).trim()
-  if (!canonicalId) {
-    return { valid: false, reason: 'missing_id', request_id: requestId, ts }
+  if (!id || !ts || !v1 || !requestId) {
+    console.warn('[billing:webhook] missing_fields', {
+      id: id || null,
+      ts: ts || null,
+      v1: v1 || null,
+      request_id: requestId || null,
+    })
+    return { ok: false, reason: 'missing_fields', status: 401 }
   }
 
-  let signatureBuffer
-  try {
-    signatureBuffer = Buffer.from(signature, 'hex')
-  } catch (error) {
-    return { valid: false, reason: 'invalid_signature_header', request_id: requestId, ts }
-  }
-  if (!signatureBuffer.length) {
-    return { valid: false, reason: 'invalid_signature_header', request_id: requestId, ts }
+  if (config.billing?.mercadopago?.allowUnsigned) {
+    return {
+      ok: true,
+      skipped: 'unsigned-allowed',
+      id,
+      request_id: requestId,
+      ts,
+      using_variant: null,
+      using_secret_index: null,
+    }
   }
 
-  const manifestVariants = [
-    { variant: 'request-id', manifest: `id:${canonicalId};request-id:${requestId};ts:${ts};` },
-    { variant: 'request_id', manifest: `id:${canonicalId};request_id:${requestId};ts:${ts};` },
+  const secretA = (config.billing?.mercadopago?.webhookSecret || '').trim()
+  const secretB = (config.billing?.mercadopago?.webhookSecret2 || '').trim()
+  let secrets = [secretA, secretB].filter(Boolean)
+  if (!secrets.length) {
+    const envA = String(process.env.MERCADOPAGO_WEBHOOK_SECRET || '').trim()
+    const envB = String(process.env.MERCADOPAGO_WEBHOOK_SECRET_2 || '').trim()
+    secrets = [envA, envB].filter(Boolean)
+  }
+
+  const manifestCandidates = [
+    { variant: 'request-id', manifest: `id:${id};request-id:${requestId};ts:${ts};` },
+    { variant: 'topic', manifest: `id:${id};topic:${topic};ts:${ts};` },
   ]
 
-  let lastManifest = null
+  if (!secrets.length) {
+    return { ok: true, skipped: 'missing_secret', id, request_id: requestId, ts, manifest: manifestCandidates[0]?.manifest }
+  }
 
   for (let index = 0; index < secrets.length; index++) {
     const secret = secrets[index]
-    for (const candidate of manifestVariants) {
-      const manifest = candidate.manifest
-      lastManifest = manifest
-      const expectedBuffer = createHmac('sha256', secret).update(manifest).digest()
-      if (expectedBuffer.length !== signatureBuffer.length) continue
-      if (timingSafeEqual(expectedBuffer, signatureBuffer)) {
+    for (const candidate of manifestCandidates) {
+      const expected = createHmac('sha256', secret).update(candidate.manifest).digest('hex')
+      if (safeTimingCompareHex(expected, v1)) {
         return {
-          valid: true,
-          using_variant: candidate.variant,
-          id: canonicalId,
+          ok: true,
+          id,
           request_id: requestId,
           ts,
-          manifest,
-          method: 'hmac',
+          manifest: candidate.manifest,
+          using_variant: candidate.variant,
           using_secret_index: index,
         }
       }
     }
   }
 
-  return {
-    valid: false,
-    reason: 'signature_mismatch',
-    id: canonicalId,
-    request_id: requestId,
+  const requestIdManifest = manifestCandidates.find((candidate) => candidate.variant === 'request-id')?.manifest || ''
+  const topicManifest = manifestCandidates.find((candidate) => candidate.variant === 'topic')?.manifest || ''
+  const previewRequestId =
+    requestIdManifest.length > 160 ? `${requestIdManifest.slice(0, 160)}...` : requestIdManifest
+  const previewTopic = topicManifest.length > 160 ? `${topicManifest.slice(0, 160)}...` : topicManifest
+  const v1Prefix = String(v1 || '').slice(0, 8)
+  console.warn('[billing:webhook] signature_mismatch', {
+    url: req.originalUrl,
+    id,
+    id_from_body: req.body?.data?.id ?? null,
+    id_from_query_data: req.query?.['data.id'] ?? null,
+    id_from_query_id: req.query?.id ?? null,
+    topic,
     ts,
-    manifest: lastManifest,
-  }
+    v1_prefix: v1Prefix || null,
+    manifest_preview_request_id: previewRequestId || null,
+    manifest_preview_topic: previewTopic || null,
+  })
+  // Se Nginx/proxy sobrescrever X-Request-Id, a assinatura nunca vai bater. Nao setar proxy_set_header X-Request-Id ...
+  const debugPayload = { request_id_received: requestId || null }
+  const forwardedRequestId = req.headers['x-forwarded-request-id']
+  const amznTraceId = req.headers['x-amzn-trace-id']
+  if (forwardedRequestId) debugPayload.x_forwarded_request_id = forwardedRequestId
+  if (amznTraceId) debugPayload.x_amzn_trace_id = amznTraceId
+  console.warn('[billing:webhook] signature_mismatch_debug', debugPayload)
+  return { ok: false, reason: 'signature_mismatch', status: 401, id, ts, manifest: requestIdManifest }
 }
 
 function normalizeId(value) {
@@ -682,36 +720,12 @@ router.post('/webhook', async (req, res) => {
 
   const event = req.body || {}
 
-  // MP pode mandar o id como body.data.id ou query data.id ou query id
-  const resourceId =
-    event?.data?.id ||
-    req.query?.['data.id'] ||
-    req.query?.id ||
-    event?.resource ||
-    event?.id ||
-    null
-
-  if (!resourceId) {
-    console.warn('[billing:webhook] evento sem resource id', { query: req.query })
-    return res.status(400).send('MISSING_ID')
-  }
-
-  const verification = verifyWebhookSignature(req, resourceId)
-  if (!verification.valid) {
-    const idFromBody = event?.data?.id ?? null
-    const idFromQueryData = req.query?.['data.id'] ?? null
-    const idFromQueryId = req.query?.id ?? null
-    console.warn('[billing:webhook] invalid signature', {
-      reason: verification.reason,
-      url: req.originalUrl,
-      id_from_body: idFromBody,
-      id_from_query_data: idFromQueryData,
-      id_from_query_id: idFromQueryId,
-      ts: verification.ts,
-      manifest: verification.manifest,
-    })
+  const verification = validateMercadoPagoWebhook(req)
+  if (!verification.ok) {
     return res.status(401).send('INVALID')
   }
+
+  const resourceId = verification.id
 
   try {
     const topic = String(
@@ -774,9 +788,9 @@ router.get('/webhook/health', (req, res) => {
 
       const results = secrets.map((sec, idx) => {
         const primary = (() => {
-          const payloadReqId = `id:${id};request-id:${requestId || ''};ts:${ts}`
+          const payloadReqId = `id:${id};request-id:${requestId || ''};ts:${ts};`
           const expectedReqId = createHmac('sha256', sec).update(payloadReqId).digest('hex')
-          const payloadTopic = `id:${id};topic:${topic || ''};ts:${ts}`
+          const payloadTopic = `id:${id};topic:${topic || ''};ts:${ts};`
           const expectedTopic = createHmac('sha256', sec).update(payloadTopic).digest('hex')
           return { request_id_variant: { payload: payloadReqId, expected: expectedReqId }, topic_variant: { payload: payloadTopic, expected: expectedTopic } }
         })()
@@ -784,9 +798,9 @@ router.get('/webhook/health', (req, res) => {
         const alternatives = []
         for (const alt of tsCandidates) {
           if (alt === ts) continue
-          const payloadReqId = `id:${id};request-id:${requestId || ''};ts:${alt}`
+          const payloadReqId = `id:${id};request-id:${requestId || ''};ts:${alt};`
           const expectedReqId = createHmac('sha256', sec).update(payloadReqId).digest('hex')
-          const payloadTopic = `id:${id};topic:${topic || ''};ts:${alt}`
+          const payloadTopic = `id:${id};topic:${topic || ''};ts:${alt};`
           const expectedTopic = createHmac('sha256', sec).update(payloadTopic).digest('hex')
           alternatives.push({ ts: alt, request_id_variant: { payload: payloadReqId, expected: expectedReqId }, topic_variant: { payload: payloadTopic, expected: expectedTopic } })
         }
