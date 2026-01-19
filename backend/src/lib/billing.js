@@ -348,7 +348,89 @@ function addCycle(date, cycle) {
 export async function syncMercadoPagoPayment(paymentId, eventPayload = null) {
   if (!paymentId) throw new Error('paymentId ausente')
   const client = ensureMercadoPagoPayment()
-  const payment = await client.get({ id: String(paymentId) })
+  const truncateText = (value, maxLen = 160) => {
+    if (value === null || value === undefined) return null
+    const text = String(value).trim()
+    if (!text) return null
+    if (text.length <= maxLen) return text
+    return text.slice(0, Math.max(0, maxLen - 3)) + '...'
+  }
+  const sanitizeUrl = (value) => {
+    const raw = String(value || '').trim()
+    if (!raw) return null
+    try {
+      const parsed = new URL(raw)
+      parsed.search = ''
+      parsed.hash = ''
+      return parsed.toString()
+    } catch {
+      return truncateText(raw, 200)
+    }
+  }
+  const summarizeMetadata = (metadata) => {
+    if (!metadata || typeof metadata !== 'object') return null
+    const out = {}
+    const sensitiveKey = /(token|secret|password|passwd|authorization|auth|bearer|key)/i
+    for (const [key, value] of Object.entries(metadata)) {
+      const safeKey = String(key)
+      if (sensitiveKey.test(safeKey)) {
+        out[safeKey] = '[redacted]'
+        continue
+      }
+      if (value === null || value === undefined) {
+        out[safeKey] = null
+        continue
+      }
+      const t = typeof value
+      if (t === 'string') {
+        out[safeKey] = truncateText(value, 120)
+      } else if (t === 'number' || t === 'boolean') {
+        out[safeKey] = value
+      } else {
+        out[safeKey] = Array.isArray(value) ? '[array]' : '[object]'
+      }
+    }
+    return out
+  }
+  const logPaymentSnapshot = (paymentData) => {
+    const snapshot = {
+      id: paymentData?.id ? String(paymentData.id) : String(paymentId),
+      status: paymentData?.status || null,
+      status_detail: paymentData?.status_detail || null,
+      live_mode: paymentData?.live_mode ?? null,
+      collector_id: paymentData?.collector_id ?? null,
+      transaction_amount: paymentData?.transaction_amount ?? null,
+      payment_method_id: paymentData?.payment_method_id || null,
+      payment_type_id: paymentData?.payment_type_id || null,
+      notification_url: sanitizeUrl(paymentData?.notification_url),
+      external_reference: truncateText(paymentData?.external_reference, 200),
+      description: truncateText(paymentData?.description, 200),
+      metadata: summarizeMetadata(paymentData?.metadata),
+      date_created: paymentData?.date_created || null,
+      date_approved: paymentData?.date_approved || null,
+    }
+    console.info('[billing:sync] payment_snapshot', snapshot)
+  }
+  let payment = null
+  const ignore = (reason, extra = null, resultExtra = null) => {
+    const payload = {
+      reason: String(reason || 'unknown'),
+      payment_id: payment?.id ? String(payment.id) : String(paymentId),
+      status: payment?.status || null,
+      status_detail: payment?.status_detail || null,
+      external_reference: truncateText(payment?.external_reference, 200),
+    }
+    if (extra && typeof extra === 'object') {
+      for (const [key, value] of Object.entries(extra)) {
+        payload[key] = value
+      }
+    }
+    console.info('[billing:sync] payment_ignored', payload)
+    return { ok: false, payment, ...(resultExtra || {}) }
+  }
+
+  payment = await client.get({ id: String(paymentId) })
+  logPaymentSnapshot(payment)
   if (!payment?.id) throw new Error('Pagamento nao encontrado')
 
   const status = String(payment.status || '').toLowerCase()
@@ -436,7 +518,10 @@ export async function syncMercadoPagoPayment(paymentId, eventPayload = null) {
   }
 
   if (subscription?.lastEventId && String(subscription.lastEventId) === String(payment.id)) {
-    return { ok: status === 'approved', payment, already_processed: true }
+    if (status === 'approved') {
+      return { ok: true, payment, already_processed: true }
+    }
+    return ignore('already_processed', null, { already_processed: true })
   }
 
   if (status !== 'approved') {
@@ -447,7 +532,8 @@ export async function syncMercadoPagoPayment(paymentId, eventPayload = null) {
         payload: { event: eventPayload, payment },
       })
     }
-    return { ok: false, payment }
+    const reason = `unsupported_status:${status || 'unknown'}`
+    return ignore(reason)
   }
 
   if (isTopup) {
