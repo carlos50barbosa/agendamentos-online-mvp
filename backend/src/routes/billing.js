@@ -827,6 +827,10 @@ router.post('/webhook', async (req, res) => {
     req.headers['x-topic'] ||
     ''
   ).toLowerCase()
+  const bodyUserId = event?.user_id ?? event?.userId ?? null
+  const liveMode = typeof event?.live_mode === 'boolean' ? event.live_mode : null
+  const bodyType = event?.type ?? event?.topic ?? null
+  const bodyAction = event?.action ?? null
 
   const verification = verifyMercadoPagoWebhookSignature(req)
   if (!verification.ok) {
@@ -854,6 +858,10 @@ router.post('/webhook', async (req, res) => {
         v1_prefix: signatureDetails.v1Prefix,
         resource_id: verification.id || null,
         topic: topic || null,
+        body_user_id: bodyUserId,
+        body_live_mode: liveMode,
+        body_type: bodyType,
+        body_action: bodyAction,
         reason,
       })
     } else {
@@ -863,6 +871,10 @@ router.post('/webhook', async (req, res) => {
         user_agent: String(req.headers['user-agent'] || '').trim() || null,
         topic: topic || null,
         resource_id: verification.id || null,
+        body_user_id: bodyUserId,
+        body_live_mode: liveMode,
+        body_type: bodyType,
+        body_action: bodyAction,
         reason,
         x_signature_present: signaturePresent,
       })
