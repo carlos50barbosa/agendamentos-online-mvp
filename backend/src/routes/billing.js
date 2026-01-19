@@ -848,7 +848,7 @@ router.post('/webhook', async (req, res) => {
         user_agent: String(req.headers['user-agent'] || '').trim() || null,
         x_request_id: requestId || null,
         x_request_id_present: Boolean(requestId),
-        x_signature_present: true,
+        x_signature_present: signaturePresent,
         x_signature_prefix: signatureDetails.signaturePrefix,
         ts: signatureDetails.ts || null,
         v1_prefix: signatureDetails.v1Prefix,
@@ -860,6 +860,7 @@ router.post('/webhook', async (req, res) => {
       console.warn('[billing:webhook] invalid_webhook', {
         url: req.originalUrl,
         ip: ip || null,
+        user_agent: String(req.headers['user-agent'] || '').trim() || null,
         topic: topic || null,
         resource_id: verification.id || null,
         reason,
