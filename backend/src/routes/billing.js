@@ -34,6 +34,56 @@ import { verifyMercadoPagoWebhookSignature } from '../lib/mp_signature.js'
 
 const router = Router()
 const DAY_MS = 86400000
+const WEBHOOK_MISMATCH_WINDOW_MS = 60000
+const webhookMismatchLogByIp = new Map()
+
+function normalizeWebhookHeaderValue(value) {
+  if (!value) return ''
+  if (Array.isArray(value)) return value.join(',')
+  return String(value)
+}
+
+function parseSignatureHeaderForLog(header) {
+  const raw = normalizeWebhookHeaderValue(header)
+  const trimmed = raw.trim()
+  if (!trimmed) {
+    return { signaturePrefix: null, ts: null, v1Prefix: null }
+  }
+  const signaturePrefix = trimmed.slice(0, 32)
+  let ts = null
+  let v1 = null
+  const parts = trimmed.split(',').map((part) => part.trim()).filter(Boolean)
+  for (const part of parts) {
+    const separatorIndex = part.indexOf('=')
+    if (separatorIndex < 0) continue
+    const key = part.slice(0, separatorIndex).trim().toLowerCase()
+    const value = part.slice(separatorIndex + 1).trim()
+    if (key === 'ts') ts = value
+    if (key === 'v1') v1 = value
+  }
+  return { signaturePrefix, ts, v1Prefix: v1 ? v1.slice(0, 12) : null }
+}
+
+function getClientIpForLog(req) {
+  const forwarded = String(req.headers['x-forwarded-for'] || '').trim()
+  if (forwarded) return forwarded
+  return String(req.ip || '').trim()
+}
+
+function shouldLogMismatchForIp(ip) {
+  const key = ip || 'unknown'
+  const now = Date.now()
+  const last = webhookMismatchLogByIp.get(key) || 0
+  if (now - last < WEBHOOK_MISMATCH_WINDOW_MS) return false
+  webhookMismatchLogByIp.set(key, now)
+  if (webhookMismatchLogByIp.size > 500) {
+    const cutoff = now - WEBHOOK_MISMATCH_WINDOW_MS * 5
+    for (const [storedKey, timestamp] of webhookMismatchLogByIp.entries()) {
+      if (timestamp < cutoff) webhookMismatchLogByIp.delete(storedKey)
+    }
+  }
+  return true
+}
 
 async function summarizeReminders(estabelecimentoId) {
   const [rows] = await pool.query(
@@ -780,6 +830,29 @@ router.post('/webhook', async (req, res) => {
 
   const verification = verifyMercadoPagoWebhookSignature(req)
   if (!verification.ok) {
+    if (verification.reason === 'invalid_signature') {
+      const xSignature = req.headers['x-signature']
+      const signaturePresent = Boolean(String(normalizeWebhookHeaderValue(xSignature)).trim())
+      const signatureDetails = parseSignatureHeaderForLog(xSignature)
+      const requestId = String(req.headers['x-request-id'] || '').trim()
+      const ip = getClientIpForLog(req)
+      if (shouldLogMismatchForIp(ip)) {
+        console.warn('[billing:webhook] mismatch_source', {
+          host: String(req.headers.host || '').trim() || null,
+          url: req.originalUrl,
+          ip: ip || null,
+          user_agent: String(req.headers['user-agent'] || '').trim() || null,
+          x_request_id: requestId || null,
+          x_request_id_present: Boolean(requestId),
+          x_signature_present: signaturePresent,
+          x_signature_prefix: signatureDetails.signaturePrefix,
+          ts: signatureDetails.ts || null,
+          v1_prefix: signatureDetails.v1Prefix,
+          resource_id: verification.id || null,
+          topic: topic || null,
+        })
+      }
+    }
     if (topic.startsWith('subscription_')) {
       console.warn('[billing:webhook] ignored_invalid_signature', {
         topic: topic || null,
