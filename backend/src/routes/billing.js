@@ -34,6 +34,7 @@ import { verifyMercadoPagoWebhookSignature } from '../lib/mp_signature.js'
 
 const router = Router()
 const DAY_MS = 86400000
+const MP_COLLECTOR_ID = Number(process.env.MERCADOPAGO_COLLECTOR_ID || 281768531)
 const WEBHOOK_MISMATCH_WINDOW_MS = 60000
 const webhookMismatchLogByIp = new Map()
 
@@ -884,6 +885,18 @@ router.post('/webhook', async (req, res) => {
   }
 
   const resourceId = verification.id
+
+  if (topic === 'payment' && bodyUserId != null && Number(bodyUserId) !== MP_COLLECTOR_ID) {
+    console.warn('[billing:webhook] ignored_foreign_user', {
+      resource_id: verification.id || null,
+      body_user_id: bodyUserId,
+      expected_user_id: MP_COLLECTOR_ID,
+      live_mode: liveMode,
+      body_type: bodyType,
+      body_action: bodyAction,
+    })
+    return res.status(200).json({ ok: true, ignored: true, reason: 'foreign_user' })
+  }
 
   try {
     if (topic === 'payment') {
