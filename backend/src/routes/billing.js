@@ -830,38 +830,44 @@ router.post('/webhook', async (req, res) => {
 
   const verification = verifyMercadoPagoWebhookSignature(req)
   if (!verification.ok) {
-    if (verification.reason === 'invalid_signature') {
-      const xSignature = req.headers['x-signature']
-      const signaturePresent = Boolean(String(normalizeWebhookHeaderValue(xSignature)).trim())
-      const signatureDetails = parseSignatureHeaderForLog(xSignature)
-      const requestId = String(req.headers['x-request-id'] || '').trim()
-      const ip = getClientIpForLog(req)
-      if (shouldLogMismatchForIp(ip)) {
-        console.warn('[billing:webhook] mismatch_source', {
-          host: String(req.headers.host || '').trim() || null,
-          url: req.originalUrl,
-          ip: ip || null,
-          user_agent: String(req.headers['user-agent'] || '').trim() || null,
-          x_request_id: requestId || null,
-          x_request_id_present: Boolean(requestId),
-          x_signature_present: signaturePresent,
-          x_signature_prefix: signatureDetails.signaturePrefix,
-          ts: signatureDetails.ts || null,
-          v1_prefix: signatureDetails.v1Prefix,
-          resource_id: verification.id || null,
-          topic: topic || null,
-        })
-      }
-    }
-    if (topic.startsWith('subscription_')) {
-      console.warn('[billing:webhook] ignored_invalid_signature', {
+    const reason = verification.reason || 'invalid_signature'
+
+    // Se veio x-signature, loga detalhes (util p/ diagnosticar fonte/ambiente errado),
+    // mas SEMPRE responde 200 para nao gerar retries.
+    const xSignature = req.headers['x-signature']
+    const signaturePresent = Boolean(String(normalizeWebhookHeaderValue(xSignature)).trim())
+    const signatureDetails = parseSignatureHeaderForLog(xSignature)
+    const requestId = String(req.headers['x-request-id'] || '').trim()
+    const ip = getClientIpForLog(req)
+
+    if (signaturePresent && shouldLogMismatchForIp(ip)) {
+      console.warn('[billing:webhook] mismatch_source', {
+        host: String(req.headers.host || '').trim() || null,
+        url: req.originalUrl,
+        ip: ip || null,
+        user_agent: String(req.headers['user-agent'] || '').trim() || null,
+        x_request_id: requestId || null,
+        x_request_id_present: Boolean(requestId),
+        x_signature_present: true,
+        x_signature_prefix: signatureDetails.signaturePrefix,
+        ts: signatureDetails.ts || null,
+        v1_prefix: signatureDetails.v1Prefix,
+        resource_id: verification.id || null,
         topic: topic || null,
-        reason: verification.reason || 'invalid_signature',
-        id: verification.id || null,
+        reason,
       })
-      return res.status(200).json({ ok: false, ignored: true, reason: 'invalid_signature' })
+    } else {
+      console.warn('[billing:webhook] invalid_webhook', {
+        url: req.originalUrl,
+        ip: ip || null,
+        topic: topic || null,
+        resource_id: verification.id || null,
+        reason,
+        x_signature_present: signaturePresent,
+      })
     }
-    return res.status(401).json({ ok: false, reason: verification.reason || 'invalid_signature' })
+
+    return res.status(200).json({ ok: true, ignored: true, reason })
   }
 
   const resourceId = verification.id
