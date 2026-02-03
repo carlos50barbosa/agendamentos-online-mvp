@@ -25,7 +25,7 @@ return Math.round(num);
 
 async function fetchDepositSettings(estabelecimentoId) {
 const [rows] = await pool.query(
-    'SELECT deposit_enabled, deposit_percent, deposit_hold_minutes FROM establishment_settings WHERE estabelecimento_id= LIMIT 1', [estabelecimentoId] );
+    'SELECT deposit_enabled, deposit_percent, deposit_hold_minutes FROM establishment_settings WHERE estabelecimento_id=? LIMIT 1', [estabelecimentoId] );
 const row = rows?.[0];
 return {
 deposit_enabled: row ? Number(row.deposit_enabled || 0) : 0, deposit_percent: row?.deposit_percent ?? null, deposit_hold_minutes: row?.deposit_hold_minutes || DEFAULT_DEPOSIT_HOLD_MINUTES, };
@@ -33,7 +33,10 @@ deposit_enabled: row ? Number(row.deposit_enabled || 0) : 0, deposit_percent: ro
 
 router.get('/settings', auth, isEstabelecimento, async (req, res) => {
 try {
-const estId = req.user.id;
+const estId = Number(req.user?.id);
+if (!Number.isFinite(estId) || estId <= 0) {
+return res.status(400).json({ ok: false, error: 'missing_estabelecimento_id' });
+}
 const planContext = await getPlanContext(estId);
 if (!planContext) {
 return res.status(404).json({ error: 'estabelecimento_inexistente' });
@@ -46,7 +49,7 @@ deposit: {
 enabled, percent: settings.deposit_percent, hold_minutes: settings.deposit_hold_minutes, }, features: {
 deposit: allowed, }, });
 } catch (err) {
-console.error('GET /estabelecimento/settings', err);
+console.error('GET /estabelecimento/settings', err?.stack || err);
 return res.status(500).json({ error: 'settings_fetch_failed' });
 }
 });
