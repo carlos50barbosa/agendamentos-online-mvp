@@ -1,4 +1,4 @@
-﻿// src/components/LogoAO.jsx
+// src/components/LogoAO.jsx
 import React from 'react';
 
 export default function LogoAO({ size = 28, className = 'brand__logo', title = 'Agendamentos Online' }) {
@@ -58,4 +58,4 @@ export default function LogoAO({ size = 28, className = 'brand__logo', title = '
       </svg>
     </span>
   );
-}
+}

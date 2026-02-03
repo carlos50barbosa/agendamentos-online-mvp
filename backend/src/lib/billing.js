@@ -84,6 +84,21 @@ function ensureMercadoPagoPayment() {
   return mercadoPagoPayment
 }
 
+export async function fetchMercadoPagoPayment(paymentId, { accessToken } = {}) {
+  if (!paymentId) throw new Error('paymentId ausente')
+  if (MOCK_MP) {
+    const client = ensureMercadoPagoPayment()
+    return client.get({ id: String(paymentId) })
+  }
+  if (accessToken) {
+    const mpClient = new MercadoPagoConfig({ accessToken })
+    const paymentClient = new Payment(mpClient)
+    return paymentClient.get({ id: String(paymentId) })
+  }
+  const client = ensureMercadoPagoPayment()
+  return client.get({ id: String(paymentId) })
+}
+
 function formatAmountString(priceCents) {
   const n = Number(priceCents || 0)
   return (n / 100).toFixed(2) // string com 2 casas decimais

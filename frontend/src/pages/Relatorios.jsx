@@ -261,7 +261,7 @@ export default function Relatorios() {
 
   const currentParams = useMemo(() => {
     const base = allowAdvanced && isCustom
-      ? { start: customStart, end: customEnd }
+       ? { start: customStart, end: customEnd }
       : { range };
     if (allowAdvanced && statusFilters.length) base.status = statusFilters.join(',');
     if (allowAdvanced && serviceFilter !== 'all') base.serviceId = serviceFilter;

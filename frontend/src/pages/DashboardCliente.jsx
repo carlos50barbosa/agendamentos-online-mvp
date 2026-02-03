@@ -121,15 +121,15 @@ export default function DashboardCliente() {
               {filtrados.map((i) => {
                 const past = new Date(i.fim || i.inicio).getTime() < Date.now();
                 const effective = (String(i.status||'').toLowerCase() === 'confirmado' && past)
-                  ? 'concluido'
+                   ? 'concluido'
                   : i.status;
                 const canCancel = String(i.status||'').toLowerCase() === 'confirmado' && !past;
                 const { cls, label } = statusMeta(effective);
                 const serviceNames = Array.isArray(i.servicos)
-                  ? i.servicos.map((svc) => svc?.nome).filter(Boolean)
+                   ? i.servicos.map((svc) => svc?.nome).filter(Boolean)
                   : [];
                 const serviceLabel = serviceNames.length
-                  ? serviceNames.join(' + ')
+                   ? serviceNames.join(' + ')
                   : (i.servico_nome || i.service_name || 'Servico');
                 return (
                   <tr key={i.id}>

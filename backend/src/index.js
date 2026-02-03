@@ -17,14 +17,17 @@ import notifyRouter from './routes/notify.js'; // rota de teste de notificaçõe
 import adminRouter from './routes/admin.js';
 import relatoriosRouter from './routes/relatorios.js';
 import billingRouter from './routes/billing.js';
+import paymentsRouter from './routes/payments.js';
 import whatsappWebhookRouter from './routes/whatsapp_webhook.js';
 import waConnectRouter from './routes/waConnect.js';
 import waTenantWebhookRouter from './routes/waWebhook.js';
+import mercadoPagoRouter from './routes/mercadopago.js';
 import publicAgendamentosRouter from './routes/agendamentos_public.js';
 import otpPublicRouter from './routes/otp_public.js';
 import profissionaisRouter from './routes/profissionais.js';
+import estabelecimentoSettingsRouter from './routes/estabelecimento_settings.js';
 import { pool } from './lib/db.js';
-import { startMaintenance, startPublicPendingCleanup } from './lib/maintenance.js';
+import { startMaintenance, startPublicPendingCleanup, startAppointmentPaymentCleanup } from './lib/maintenance.js';
 import { mountWebhooks } from './routes/webhooks.js';
 import { startBillingMonitor } from './lib/billing_monitor.js';
 import { startAppointmentReminders } from './lib/appointment_reminders.js';
@@ -36,6 +39,15 @@ const UPLOADS_DIR = path.join(__dirname, '..', 'uploads');
 mkdir(UPLOADS_DIR, { recursive: true }).catch(() => {});
 
 const app = express();
+const MP_NOTIFICATION_URL = String(process.env.MP_NOTIFICATION_URL || '').trim();
+const BILLING_ROUTES_ENABLED = (() => {
+  const env = String(process.env.NODE_ENV || '').toLowerCase();
+  if (env === 'production' && MP_NOTIFICATION_URL.toLowerCase().includes('ngrok')) {
+    console.error('[billing] FATAL: MP_NOTIFICATION_URL aponta para ngrok em producao. Rotas de billing desativadas.');
+    return false;
+  }
+  return true;
+})();
 
 // Se hoje o Nginx mantém /api até o Node, passe withApiPrefix=true (mas aceitamos ambos):
 mountWebhooks(app, true);
@@ -55,6 +67,24 @@ app.use(cors({
 }));
 app.options('*', cors());
 app.use(express.json({ limit: '5mb' }));
+app.use((req, res, next) => {
+  const json = res.json.bind(res);
+  res.json = (payload) => {
+    res.set('Content-Type', 'application/json; charset=utf-8');
+    return json(payload);
+  };
+  const send = res.send.bind(res);
+  res.send = (body) => {
+    const contentType = res.get('Content-Type') || '';
+    if (!contentType && typeof body === 'string') {
+      res.set('Content-Type', 'text/plain; charset=utf-8');
+    } else if (contentType.startsWith('text/') && !contentType.includes('charset')) {
+      res.set('Content-Type', `${contentType}; charset=utf-8`);
+    }
+    return send(body);
+  };
+  next();
+});
 
 app.use('/uploads', express.static(UPLOADS_DIR, { maxAge: '7d' }));
 app.use('/api/uploads', express.static(UPLOADS_DIR, { maxAge: '7d' }));
@@ -89,14 +119,19 @@ app.use('/slots', slotsRouter);
 app.use('/notifications', notificationsRouter);
 app.use('/establishments', estabelecimentosRoutes);
 app.use('/estabelecimentos', estabelecimentosRoutes);
+app.use('/estabelecimento', estabelecimentoSettingsRouter);
 app.use('/profissionais', profissionaisRouter);
 app.use('/notify', notifyRouter);
 app.use('/public/otp', otpPublicRouter);
 app.use('/public/agendamentos', publicAgendamentosRouter);
 app.use('/admin', adminRouter);
 app.use('/relatorios', relatoriosRouter);
-app.use('/billing', billingRouter);
+if (BILLING_ROUTES_ENABLED) {
+  app.use('/billing', billingRouter);
+}
+app.use('/payments', paymentsRouter);
 app.use('/wa', waConnectRouter);
+app.use('/mercadopago', mercadoPagoRouter);
 app.use('/wa/webhook', waTenantWebhookRouter);
 app.use('/webhooks/whatsapp', whatsappWebhookRouter);
 
@@ -108,14 +143,19 @@ app.use('/api/slots', slotsRouter);
 app.use('/api/notifications', notificationsRouter);
 app.use('/api/establishments', estabelecimentosRoutes);
 app.use('/api/estabelecimentos', estabelecimentosRoutes);
+app.use('/api/estabelecimento', estabelecimentoSettingsRouter);
 app.use('/api/profissionais', profissionaisRouter);
 app.use('/api/notify', notifyRouter);
 app.use('/api/public/otp', otpPublicRouter);
 app.use('/api/public/agendamentos', publicAgendamentosRouter);
 app.use('/api/admin', adminRouter);
 app.use('/api/relatorios', relatoriosRouter);
-app.use('/api/billing', billingRouter);
+if (BILLING_ROUTES_ENABLED) {
+  app.use('/api/billing', billingRouter);
+}
+app.use('/api/payments', paymentsRouter);
 app.use('/api/wa', waConnectRouter);
+app.use('/api/mercadopago', mercadoPagoRouter);
 app.use('/api/wa/webhook', waTenantWebhookRouter);
 app.use('/api/webhooks/whatsapp', whatsappWebhookRouter);
 
@@ -144,6 +184,9 @@ app.listen(PORT, HOST, () => {
 // Tarefas de manutencao: limpeza de tokens expirados e lembretes de cobranca
 startMaintenance(pool);
 startPublicPendingCleanup(pool);
-startBillingMonitor();
+startAppointmentPaymentCleanup(pool);
+if (BILLING_ROUTES_ENABLED) {
+  startBillingMonitor();
+}
 startAppointmentReminders(pool);
 startEstabReminders(pool);

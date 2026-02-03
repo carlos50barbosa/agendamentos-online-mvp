@@ -98,7 +98,13 @@ CREATE TABLE IF NOT EXISTS agendamentos (
   profissional_id    INT          NULL,
   inicio             DATETIME     NOT NULL,
   fim                DATETIME     NOT NULL,
-  status             ENUM('confirmado','pendente','cancelado') NOT NULL DEFAULT 'confirmado',
+  status             ENUM('confirmado','pendente','pendente_pagamento','cancelado','concluido') NOT NULL DEFAULT 'confirmado',
+  total_centavos     INT NOT NULL DEFAULT 0,
+  deposit_required   TINYINT(1)   NOT NULL DEFAULT 0,
+  deposit_percent    INT          NULL,
+  deposit_centavos   INT          NULL,
+  deposit_expires_at DATETIME     NULL,
+  deposit_paid_at    DATETIME     NULL,
   no_show            TINYINT(1)   NOT NULL DEFAULT 0,
   origem             VARCHAR(32)  NULL,
   public_confirm_token_hash VARCHAR(64) NULL,
@@ -131,6 +137,55 @@ CREATE TABLE IF NOT EXISTS agendamentos (
   INDEX idx_ag_confirm_wa (cliente_confirmou_whatsapp_at),
   INDEX idx_ag_public_confirm_expires (public_confirm_expires_at),
   INDEX idx_ag_reminder_estab_5h (estab_reminder_5h_sent_at, inicio)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+CREATE TABLE IF NOT EXISTS establishment_settings (
+  estabelecimento_id INT NOT NULL PRIMARY KEY,
+  deposit_enabled TINYINT(1) NOT NULL DEFAULT 0,
+  deposit_percent INT NULL,
+  deposit_hold_minutes INT NOT NULL DEFAULT 15,
+  CONSTRAINT fk_establishment_settings_estab FOREIGN KEY (estabelecimento_id)
+    REFERENCES usuarios(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+CREATE TABLE IF NOT EXISTS appointment_payments (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  agendamento_id INT NOT NULL,
+  estabelecimento_id INT NOT NULL,
+  type ENUM('deposit') NOT NULL,
+  status ENUM('pending','paid','expired','canceled','refunded','failed') NOT NULL DEFAULT 'pending',
+  amount_centavos INT NOT NULL,
+  percent INT NOT NULL,
+  provider VARCHAR(32) NOT NULL DEFAULT 'mercadopago',
+  provider_payment_id VARCHAR(64) NULL,
+  provider_reference VARCHAR(64) NULL,
+  expires_at DATETIME NOT NULL,
+  paid_at DATETIME NULL,
+  raw_payload LONGTEXT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_appointment_payments_agendamento (agendamento_id),
+  INDEX idx_appointment_payments_provider (provider, provider_payment_id),
+  INDEX idx_appointment_payments_status_expires (status, expires_at),
+  CONSTRAINT fk_appointment_payments_agendamento FOREIGN KEY (agendamento_id) REFERENCES agendamentos(id) ON DELETE CASCADE,
+  CONSTRAINT fk_appointment_payments_estabelecimento FOREIGN KEY (estabelecimento_id) REFERENCES usuarios(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+CREATE TABLE IF NOT EXISTS mercadopago_accounts (
+  estabelecimento_id INT NOT NULL PRIMARY KEY,
+  mp_user_id VARCHAR(64) NULL,
+  access_token_enc TEXT NULL,
+  refresh_token_enc TEXT NULL,
+  token_last4 VARCHAR(4) NULL,
+  expires_at DATETIME NULL,
+  status ENUM('connected','revoked','error') NOT NULL DEFAULT 'connected',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_mp_accounts_user (mp_user_id),
+  INDEX idx_mp_accounts_status (status),
+  INDEX idx_mp_accounts_expires (expires_at),
+  CONSTRAINT fk_mp_accounts_estab FOREIGN KEY (estabelecimento_id)
+    REFERENCES usuarios(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 -- Contatos WhatsApp (ultima mensagem inbound)

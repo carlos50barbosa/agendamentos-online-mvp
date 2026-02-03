@@ -71,7 +71,7 @@ export default function RecuperarSenha(){
                 </button>
               </form>
               <div className="muted" style={{ marginTop: 6, fontSize: 12, lineHeight: 1.35 }}>
-                Esqueceu qual e-mail usou? <Link to="/ajuda">Fale com o suporte</Link> ou{' '}
+                Esqueceu qual e-mail usou <Link to="/ajuda">Fale com o suporte</Link> ou{' '}
                 <a href={WHATSAPP_SUPPORT_URL} target="_blank" rel="noreferrer">
                   chame no WhatsApp
                 </a>
@@ -88,7 +88,7 @@ export default function RecuperarSenha(){
 
           <div className="divider"><span>ou</span></div>
           <div className="auth-alt">
-            Lembrou a senha? <Link to="/login">Voltar ao login</Link>
+            Lembrou a senha <Link to="/login">Voltar ao login</Link>
           </div>
         </div>
       </div>

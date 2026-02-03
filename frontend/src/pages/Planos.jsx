@@ -453,7 +453,7 @@ export default function Planos() {
           <div className="pricing-extras">
             <h3>Pacotes extras de WhatsApp (opcional)</h3>
             <ul>
-              <li>Passou do limite? Adicione mensagens via PIX.</li>
+              <li>Passou do limite Adicione mensagens via PIX.</li>
               <li>Saldo extra é usado quando o limite do plano termina.</li>
               <li>Confirmação rápida via PIX.</li>
             </ul>

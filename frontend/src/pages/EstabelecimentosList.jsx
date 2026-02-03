@@ -1,424 +1,848 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+
 import { Link, useLocation, useSearchParams } from 'react-router-dom';
+
 import { Api, resolveAssetUrl } from '../utils/api';
+
 import LogoAO from '../components/LogoAO.jsx';
+
 import { IconStar } from '../components/Icons.jsx';
+
 import Modal from '../components/Modal.jsx';
+
 import EstablishmentsHero from '../components/EstablishmentsHero.jsx';
+
 import { IconMapPin } from '../components/Icons.jsx';
 
+
+
 const FAVORITES_CACHE_KEY = 'ao:favorites_local';
+
 const PAGE_SIZE_MOBILE = 8;
+
 const PAGE_SIZE_DESKTOP = 20;
+
 const PAGE_SIZE_BREAKPOINT = 768;
+
 const getPageSize = () => {
+
   if (typeof window === 'undefined') return PAGE_SIZE_DESKTOP;
+
   return window.innerWidth < PAGE_SIZE_BREAKPOINT ? PAGE_SIZE_MOBILE : PAGE_SIZE_DESKTOP;
+
 };
+
 const QUERY_DEBOUNCE_MS = 350;
+
 const getQueryFromSearch = (search) =>
+
   (new URLSearchParams(search).get('q') || '').trim();
+
 const getInitialQuery = () => {
+
   if (typeof window === 'undefined') return '';
+
   return getQueryFromSearch(window.location.search);
+
 };
+
+
 
 const normalize = (value) =>
+
   String(value || '')
+
     .normalize('NFD')
+
     .replace(/[\u0300-\u036f]/g, '')
+
     .toLowerCase();
 
+
+
 const toSlug = (value = '') => {
+
   const normalized = normalize(value)
+
     .replace(/[^a-z0-9]+/g, '-')
+
     .replace(/^-+|-+$/g, '');
+
   return normalized || 'estabelecimento';
+
 };
 
+
+
 const buildSearchText = (est) =>
+
   normalize([
+
     est?.nome,
+
     est?.name,
+
     est?.endereco,
+
     est?.numero,
+
     est?.bairro,
+
     est?.cidade,
+
     est?.estado,
+
     est?.cep,
+
   ]
+
     .filter(Boolean)
+
     .join(' '));
+
+
 
 const HEADLINE_TEXT = 'O jeito mais simples de agendar serviços de beleza e bem-estar';
 
+
+
 const formatAddress = (est) => {
+
   const street = [est?.endereco, est?.numero].filter(Boolean).join(', ');
+
   const district = est?.bairro ? est.bairro : '';
+
   const cityState = [est?.cidade, est?.estado].filter(Boolean).join(' - ');
+
   const parts = [street, district, cityState].filter(Boolean);
+
   if (est?.cep) parts.push(`CEP ${est.cep}`);
+
   return parts.join(', ');
+
 };
+
+
 
 const fallbackAvatar = (label) => {
+
   const name = encodeURIComponent(String(label || 'AO'));
+
   return `https://ui-avatars.com/api/?name=${name}&size=128&background=1C64F2&color=ffffff&rounded=true`;
+
 };
 
+
+
 const ratingNumberFormatter = new Intl.NumberFormat('pt-BR', {
+
   minimumFractionDigits: 1,
+
   maximumFractionDigits: 1,
+
 });
 
+
+
 export default function EstabelecimentosList() {
+
   const [items, setItems] = useState([]);
+
   const [loading, setLoading] = useState(false);
+
   const [loadingMore, setLoadingMore] = useState(false);
+
   const [hasMore, setHasMore] = useState(false);
+
   const [error, setError] = useState('');
+
   const [query, setQuery] = useState(getInitialQuery);
+
   const [debouncedQuery, setDebouncedQuery] = useState(getInitialQuery);
+
   const [page, setPage] = useState(1);
+
   const [pageSize, setPageSize] = useState(getPageSize);
+
   const location = useLocation();
+
   const [, setSearchParams] = useSearchParams();
+
   const [showResults, setShowResults] = useState(() => {
+
     return getInitialQuery().length > 0;
+
   });
+
   const [pendingScroll, setPendingScroll] = useState(false);
+
   const searchInputRef = useRef(null);
+
   const resultsSectionRef = useRef(null);
+
   const [favoritesOnly, setFavoritesOnly] = useState(false);
+
   const [favoriteIds, setFavoriteIds] = useState(() => {
+
     try {
+
       const raw = localStorage.getItem(FAVORITES_CACHE_KEY);
+
       if (!raw) return new Set();
+
       const parsed = JSON.parse(raw);
+
       if (!Array.isArray(parsed)) return new Set();
+
       return new Set(parsed.map((v) => String(v)));
+
     } catch {
+
       return new Set();
+
     }
+
   });
+
   useEffect(() => {
+
     const q = getQueryFromSearch(location.search);
+
     setQuery((prev) => (prev === q ? prev : q));
+
     setDebouncedQuery((prev) => (prev === q ? prev : q));
+
     if (q) setShowResults(true);
+
   }, [location.search]);
 
+
+
   useEffect(() => {
+
     if (typeof window === 'undefined') return undefined;
+
     const handleResize = () => {
+
       setPageSize((prev) => {
+
         const next = getPageSize();
+
         return next === prev ? prev : next;
+
       });
+
     };
+
     window.addEventListener('resize', handleResize);
+
     return () => window.removeEventListener('resize', handleResize);
+
   }, []);
 
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setDebouncedQuery(query.trim());
-    }, QUERY_DEBOUNCE_MS);
-    return () => clearTimeout(timer);
-  }, [query]);
+
 
   useEffect(() => {
+
+    const timer = setTimeout(() => {
+
+      setDebouncedQuery(query.trim());
+
+    }, QUERY_DEBOUNCE_MS);
+
+    return () => clearTimeout(timer);
+
+  }, [query]);
+
+
+
+  useEffect(() => {
+
     const current = getQueryFromSearch(location.search);
+
     if (debouncedQuery === current) return;
+
     const params = new URLSearchParams(location.search);
+
     if (debouncedQuery) params.set('q', debouncedQuery);
+
     else params.delete('q');
+
     setSearchParams(params, { replace: true });
+
   }, [debouncedQuery, location.search, setSearchParams]);
 
+
+
   useEffect(() => {
+
     if (!showResults) return;
+
     setPage(1);
+
   }, [debouncedQuery, showResults, pageSize]);
 
+
+
   useEffect(() => {
+
     if (!showResults) return;
+
     let cancelled = false;
+
     const isFirstPage = page === 1;
+
     if (isFirstPage) {
+
       setLoading(true);
+
       setError('');
+
       setLoadingMore(false);
+
     } else {
+
       setLoadingMore(true);
+
     }
+
     (async () => {
+
       try {
+
         const response = await Api.listEstablishments({
+
           q: debouncedQuery,
+
           page,
+
           limit: pageSize,
+
         });
+
         if (cancelled) return;
+
         const list = Array.isArray(response) ? response : response?.items || [];
+
         const nextHasMore = Array.isArray(response)
-          ? false
-          : Boolean(response?.has_more ?? list.length > pageSize);
+
+           ? false
+
+          : Boolean(response?.has_more ? list.length > pageSize);
+
         setItems((prev) => (isFirstPage ? list : [...prev, ...list]));
+
         setHasMore(nextHasMore);
+
       } catch (e) {
+
         if (cancelled) return;
+
         if (isFirstPage) {
+
           setError('Não foi possível carregar os estabelecimentos.');
+
         }
+
       } finally {
+
         if (cancelled) return;
+
         setLoading(false);
+
         setLoadingMore(false);
+
       }
+
     })();
+
     return () => {
+
       cancelled = true;
+
     };
+
   }, [debouncedQuery, page, showResults, pageSize]);
 
+
+
   const normalizedQuery = useMemo(() => normalize(debouncedQuery.trim()), [debouncedQuery]);
+
   const queryTokens = useMemo(
+
     () => (normalizedQuery ? normalizedQuery.split(/\s+/).filter(Boolean) : []),
+
     [normalizedQuery]
+
   );
+
+
 
   const filteredItems = useMemo(() => {
+
     return items.filter((est) => {
+
       const isFavorite = favoriteIds.has(String(est?.id)) || Boolean(est?.is_favorite || est?.isFavorite);
+
       est.is_favorite = isFavorite;
+
       if (favoritesOnly) {
+
         if (!isFavorite) return false;
+
       }
+
       if (!queryTokens.length) return true;
+
       const haystack = buildSearchText(est);
+
       return queryTokens.every((token) => haystack.includes(token));
+
     });
+
   }, [items, queryTokens, favoritesOnly, favoriteIds]);
 
+
+
   const results = useMemo(() => {
+
     const mapped = filteredItems.map((est) => ({ est }));
+
     const sortKey = (value) => normalize(value?.nome || value?.name || `est-${value?.id || ''}`);
+
     return mapped.sort((a, b) => sortKey(a.est).localeCompare(sortKey(b.est)));
+
   }, [filteredItems]);
 
+
+
   useEffect(() => {
+
     if (!showResults || !pendingScroll) return;
+
     if (typeof window === 'undefined') {
+
       setPendingScroll(false);
+
       return;
+
     }
+
     const section = resultsSectionRef.current;
+
     if (!section) {
+
       setPendingScroll(false);
+
       return;
+
     }
+
     const frame = window.requestAnimationFrame(() => {
+
       try {
+
         section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
       } catch {
+
         section.scrollIntoView();
+
       }
+
       setPendingScroll(false);
+
     });
+
     return () => window.cancelAnimationFrame(frame);
+
   }, [showResults, pendingScroll]);
 
+
+
   const handleQueryChange = useCallback((value) => {
+
     setQuery(value);
+
   }, []);
+
+
 
   const handleSubmit = useCallback((event) => {
+
     event.preventDefault();
+
     setShowResults(true);
+
     setPendingScroll(true);
+
     setDebouncedQuery(query.trim());
+
     setPage(1);
+
   }, [query]);
 
+
+
   const handleToggleFavorites = useCallback(() => {
+
     setFavoritesOnly((prev) => !prev);
+
     setShowResults(true);
+
     setPendingScroll(true);
+
   }, []);
 
+
+
   return (
+
     <div className="home">
+
       <EstablishmentsHero
+
         heading={HEADLINE_TEXT}
+
         subtitle="Descubra estabelecimentos perto de você, escolha o horário ideal e confirme em segundos."
+
         query={query}
+
         onChange={handleQueryChange}
+
         onSubmit={handleSubmit}
+
         placeholder="Buscar por nome, bairro ou cidade"
+
         inputRef={searchInputRef}
+
         headingId="home-hero-title"
+
       >
+
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'center', marginTop: 6 }}>
+
           <button
+
             type="button"
+
             className={`pill-btn${favoritesOnly ? ' pill-btn--active' : ''}`}
+
             onClick={handleToggleFavorites}
+
             style={{
+
               borderRadius: 9999,
+
               padding: '8px',
+
               border: '1px solid var(--border, #e5e7eb)',
+
               background: favoritesOnly ? '#fef9c3' : 'var(--surface, #fff)',
+
               color: favoritesOnly ? '#b45309' : '#6c2bd9',
+
               fontWeight: 700,
+
               cursor: 'pointer',
+
               boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
+
               width: 32,
+
               height: 32,
+
               display: 'inline-flex',
+
               alignItems: 'center',
+
               justifyContent: 'center',
+
             }}
+
             aria-pressed={favoritesOnly}
+
             aria-label={favoritesOnly ? 'Favoritos' : 'Favoritos'}
+
             title={favoritesOnly ? 'Favoritos' : 'Favoritos'}
+
           >
+
             <IconStar
+
               filled={favoritesOnly}
+
               style={{
+
                 width: 14,
+
                 height: 14,
+
                 color: favoritesOnly ? '#d97706' : '#6c2bd9',
+
               }}
+
             />
+
           </button>
+
         </div>
+
       </EstablishmentsHero>
 
+
+
       {showResults && (
+
         <section
+
           ref={resultsSectionRef}
+
           className="home-results"
+
           aria-label="Resultados da busca"
+
         >
+
           {loading && <div className="home-results__state">Carregando...</div>}
+
           {!loading && error && (
+
             <div className="home-results__state home-results__state--error">{error}</div>
+
           )}
+
           {!loading && !error && results.length === 0 && (
+
             <div className="home-results__state">Nenhum estabelecimento encontrado.</div>
+
           )}
+
           {!loading && !error && results.length > 0 && (
+
             <>
+
               <div className="home-results__grid">
+
               {results.map((item) => {
+
                 const { est } = item;
+
                 const name = est?.nome || est?.name || `Estabelecimento #${est?.id || ''}`;
+
                 const address = formatAddress(est);
+
                 const sp = new URLSearchParams();
+
                 sp.set('estabelecimento', String(est.id));
+
                 const currentQuery = (debouncedQuery || '').trim();
+
                 if (currentQuery) sp.set('q', currentQuery);
+
                 const slugSource = est?.slug || name;
+
                 const slug = slugSource ? toSlug(slugSource) : 'estabelecimento';
+
                 const path = slug ? `/novo/${slug}` : '/novo';
+
                 const avatarSource = est?.foto_url || est?.avatar_url || '';
+
                 const image = avatarSource ? resolveAssetUrl(avatarSource) : fallbackAvatar(name);
+
                 const coords = (() => {
+
                   const lat = Number(est?.latitude ?? est?.lat ?? est?.coord_lat ?? null);
+
                   const lng = Number(est?.longitude ?? est?.lng ?? est?.coord_lng ?? null);
+
                   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+
                   if (lat === 0 && lng === 0) return null;
+
                   return { lat, lng };
+
                 })();
+
                 const mapLink = (() => {
+
                   if (coords) return `https://www.google.com/maps/search/?api=1&query=${coords.lat},${coords.lng}`;
+
                   if (address) return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`;
+
                   return '';
+
                 })();
+
                 const ratingAverageRaw = Number(est?.rating_average ?? est?.ratingAverage ?? NaN);
+
                 const ratingCount = Number(est?.rating_count ?? est?.ratingCount ?? 0);
+
                 const hasRatings = Number.isFinite(ratingAverageRaw) && ratingCount > 0;
+
                 const ratingLabel = hasRatings ? ratingNumberFormatter.format(ratingAverageRaw) : null;
 
+
+
               return (
+
                 <Link
+
                   key={est.id}
+
                   className="establishment-card"
+
                   to={`${path}?${sp.toString()}`}
+
                   aria-label={`Agendar em ${name}`}
+
                 >
+
                   <div className="establishment-card__avatar">
+
                     <img
+
                       src={image}
+
                       alt={`Foto do estabelecimento ${name}`}
+
                       onError={(event) => {
+
                         const target = event.currentTarget;
+
                         if (!target.dataset.fallback) {
+
                           target.dataset.fallback = '1';
+
                           target.src = fallbackAvatar(name);
+
                         }
+
                       }}
+
                     />
+
                   </div>
+
                   <div className="establishment-card__info">
+
                     <h3 className="establishment-card__name">{name}</h3>
+
                     <p className="establishment-card__address">
+
                       {address || 'Endereco nao informado'}
+
                     </p>
+
                     <div className="establishment-card__meta-row">
+
                       {mapLink ? (
+
                         <button
+
                           type="button"
+
                           className="establishment-card__distance establishment-card__distance--btn"
+
                           onClick={(event) => {
+
                             event.preventDefault();
+
                             event.stopPropagation();
+
                             try {
+
                               window.open(mapLink, '_blank', 'noopener,noreferrer');
+
                             } catch {
+
                               window.location.href = mapLink;
+
                             }
+
                           }}
+
                         >
+
                           <IconMapPin aria-hidden style={{ width: 14, height: 14 }} /> Ver no mapa
+
                         </button>
+
                       ) : (
+
                         <span className="establishment-card__distance">Mapa indisponível</span>
+
                       )}
+
                       <span
+
                         className={`establishment-card__rating${hasRatings ? '' : ' establishment-card__rating--muted'}`}
+
                         aria-label={
+
                           hasRatings
-                            ? `Avaliação ${ratingLabel} de 5, com ${ratingCount} ${ratingCount === 1 ? 'avaliação' : 'avaliações'}`
+
+                             ? `Avaliação ${ratingLabel} de 5, com ${ratingCount} ${ratingCount === 1 ? 'avaliação' : 'avaliações'}`
+
                             : 'Estabelecimento ainda sem avaliações'
+
                         }
+
                       >
+
                         <span aria-hidden>★</span>
+
                         {hasRatings ? `${ratingLabel} (${ratingCount})` : 'Sem avaliações'}
+
                       </span>
+
                     </div>
+
                   </div>
+
                 </Link>
+
               );
+
               })}
+
               </div>
+
               {hasMore && (
+
                 <div style={{ marginTop: 14, display: 'flex', justifyContent: 'center' }}>
+
                   <button
+
                     type="button"
+
                     className="btn btn--outline"
+
                     onClick={() => setPage((prev) => prev + 1)}
+
                     disabled={loadingMore}
+
                   >
+
                     {loadingMore ? <span className="spinner" /> : 'Carregar mais'}
+
                   </button>
+
                 </div>
+
               )}
+
             </>
+
           )}
+
         </section>
+
       )}
+
     </div>
+
   );
+
 }
+

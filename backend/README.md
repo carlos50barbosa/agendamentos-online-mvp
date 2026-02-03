@@ -23,3 +23,8 @@
   - `GET /billing/subscription` — contexto do plano e assinatura atual.
 - Webhook público: `POST /billing/webhook` — configure a URL no painel do Mercado Pago para receber eventos de preapproval.
 - Banco: execute as migrações `sql/2025-09-27-add-subscriptions-tables.sql` e `sql/2025-09-27-update-plan-status-enum.sql` após aplicar `schema.sql`.
+## Sinal (adiantamento) em agendamentos
+- Aplique a migration `sql/2026-02-12-add-deposit-payments.sql`.
+- Garanta um estabelecimento em plano `pro` ou `premium`, e ative o sinal via `PUT /estabelecimento/settings/deposit`.
+- Use `MERCADOPAGO_MOCK=1` para gerar PIX fake em dev (ou sandbox do MP).
+- Para testar pago: atualize `appointment_payments.status='paid'` e `agendamentos.status='confirmado'`, ou dispare o webhook em `/payments/webhook`.

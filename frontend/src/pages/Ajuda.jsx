@@ -82,7 +82,7 @@ export default function Ajuda() {
         key: 'profile',
         title: isEstab ? 'Atualizar cadastro da empresa' : 'Atualizar dados pessoais',
         description: isEstab
-          ? 'Edite razão social, telefone principal e senha em Perfil e Segurança.'
+           ? 'Edite razão social, telefone principal e senha em Perfil e Segurança.'
           : 'Revise nome, e-mail e senha para continuar recebendo notificações.',
         section: 'profile',
         cta: 'Abrir perfil',

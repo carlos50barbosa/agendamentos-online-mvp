@@ -35,6 +35,45 @@ export async function cleanupPublicPendingAppointments(pool) {
   }
 }
 
+export async function cleanupExpiredAppointmentPayments(pool, { limit = 200 } = {}) {
+  try {
+    const [rows] = await pool.query(
+      `SELECT id, agendamento_id
+         FROM appointment_payments
+        WHERE status='pending'
+          AND expires_at < NOW()
+        ORDER BY expires_at ASC
+        LIMIT ?`,
+      [Number(limit)]
+    );
+    if (!rows.length) return { expiredPayments: 0 };
+
+    const paymentIds = rows.map((row) => row.id);
+    const appointmentIds = rows.map((row) => row.agendamento_id);
+    const paymentPlaceholders = paymentIds.map(() => '?').join(',');
+    const appointmentPlaceholders = appointmentIds.map(() => '?').join(',');
+
+    await pool.query(
+      `UPDATE appointment_payments
+          SET status='expired'
+        WHERE id IN (${paymentPlaceholders})`,
+      paymentIds
+    );
+    await pool.query(
+      `UPDATE agendamentos
+          SET status='cancelado',
+              deposit_expires_at=NOW()
+        WHERE id IN (${appointmentPlaceholders})
+          AND status='pendente_pagamento'`,
+      appointmentIds
+    );
+    return { expiredPayments: paymentIds.length };
+  } catch (e) {
+    console.error('[maintenance] cleanupExpiredAppointmentPayments error:', e?.message || e);
+    return { expiredPayments: 0, error: e?.message || String(e) };
+  }
+}
+
 export function startMaintenance(pool, { intervalMs } = {}) {
   const every = Number(intervalMs || 6 * 60 * 60 * 1000); // 6h
   async function tick() {
@@ -53,6 +92,18 @@ export function startPublicPendingCleanup(pool, { intervalMs } = {}) {
     const r = await cleanupPublicPendingAppointments(pool);
     if (r?.expiredCanceled) {
       console.log('[maintenance] public pending cleanup', r);
+    }
+  }
+  setTimeout(tick, 10_000);
+  return setInterval(tick, every);
+}
+
+export function startAppointmentPaymentCleanup(pool, { intervalMs } = {}) {
+  const every = Number(intervalMs || 60_000);
+  async function tick() {
+    const r = await cleanupExpiredAppointmentPayments(pool);
+    if (r?.expiredPayments) {
+      console.log('[maintenance] appointment payments cleanup', r);
     }
   }
   setTimeout(tick, 10_000);

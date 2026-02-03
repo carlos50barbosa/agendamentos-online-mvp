@@ -1,4 +1,4 @@
-﻿-- Migration: add subscriptions tables for billing
+-- Migration: add subscriptions tables for billing
 USE agendamentos;
 
 CREATE TABLE IF NOT EXISTS subscriptions (
@@ -35,4 +35,4 @@ CREATE TABLE IF NOT EXISTS subscription_events (
   INDEX idx_subscription_events_sub (subscription_id),
   CONSTRAINT fk_subscription_events_sub FOREIGN KEY (subscription_id) REFERENCES subscriptions(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
-
+
