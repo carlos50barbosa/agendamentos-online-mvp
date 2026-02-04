@@ -12,6 +12,7 @@ const MP_AUTH_URL = process.env.MP_AUTH_URL || 'https://auth.mercadopago.com/aut
 const MP_TOKEN_URL = process.env.MP_TOKEN_URL || 'https://api.mercadopago.com/oauth/token';
 const MP_PLATFORM_ID = process.env.MP_PLATFORM_ID || 'mp';
 const MP_SCOPE = process.env.MP_OAUTH_SCOPE || 'read write offline_access';
+const MP_STATE_SECRET = process.env.MP_STATE_SECRET || process.env.JWT_SECRET;
 const MP_OAUTH_ENV_GROUPS = [ { names: ['MP_CLIENT_ID', 'MERCADOPAGO_CLIENT_ID'], recommended: 'MP_CLIENT_ID' }, { names: ['MP_CLIENT_SECRET', 'MERCADOPAGO_CLIENT_SECRET'], recommended: 'MP_CLIENT_SECRET' }, { names: ['MP_REDIRECT_URI', 'MERCADOPAGO_REDIRECT_URI'], recommended: 'MP_REDIRECT_URI' },
 ];
 function normalizeEnvValue(value) {
@@ -49,7 +50,10 @@ return url.toString();
 function buildState(estabelecimentoId) {
 const payload = {
 estabelecimentoId, nonce: crypto.randomBytes(8).toString('hex'), ts: Date.now(), };
-return jwt.sign(payload, process.env.JWT_SECRET || 'secret', { expiresIn: '15m' });
+if (!MP_STATE_SECRET) {
+throw new Error('mp_state_secret_missing');
+}
+return jwt.sign(payload, MP_STATE_SECRET, { expiresIn: '15m' });
 }
 function resolveRedirect(status) {
 const safe = status || 'connected';
@@ -130,11 +134,26 @@ return res.status(500).send('MP config missing');
 
   let estabelecimentoId = null;
 try {
-const payload = jwt.verify(state, process.env.JWT_SECRET || 'secret');
+if (!MP_STATE_SECRET) {
+console.error('[mp/callback][state] mp_state_secret_missing');
+return res.status(500).send('State secret missing');
+}
+const payload = jwt.verify(state, MP_STATE_SECRET);
 estabelecimentoId = Number(payload?.estabelecimentoId);
 } catch (err) {
-console.error('[mp/callback][state]', err?.message || err);
-return res.status(400).send('Invalid state');
+const errName = err?.name || 'Error';
+const errMessage = err?.message || String(err);
+let reason = 'invalid_state';
+let responseMessage = 'Invalid state';
+if (errName === 'TokenExpiredError') {
+reason = 'expired';
+responseMessage = 'State expired';
+} else if (errName === 'JsonWebTokenError' && /signature/i.test(errMessage)) {
+reason = 'invalid_signature';
+responseMessage = 'Invalid state signature';
+}
+console.warn('[mp/callback][state]', { reason, name: errName, message: errMessage });
+return res.status(400).send(responseMessage);
 }
 
   if (!Number.isFinite(estabelecimentoId) || estabelecimentoId <= 0) {

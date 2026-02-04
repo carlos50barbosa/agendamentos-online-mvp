@@ -7,6 +7,7 @@
   - `MERCADOPAGO_WEBHOOK_SECRET` — Assinatura secreta (Webhook secret) da mesma aplicação/ambiente
 
 - Opcionais
+  - `MP_STATE_SECRET` - segredo para assinar o state do OAuth (fallback: `JWT_SECRET`)
   - `MERCADOPAGO_PUBLIC_KEY`
   - `MERCADOPAGO_SUCCESS_URL`, `MERCADOPAGO_FAILURE_URL`, `MERCADOPAGO_PENDING_URL`
   - `MERCADOPAGO_TEST_PAYER_EMAIL` — e-mail do comprador de teste (`test_user_...@testuser.com`) quando usar `TEST-...`

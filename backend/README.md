@@ -18,6 +18,8 @@
 
 ## Pagamentos (Mercado Pago)
 - Variáveis obrigatórias no `.env`: `MERCADOPAGO_ACCESS_TOKEN`, `MERCADOPAGO_WEBHOOK_SECRET`. Opcionalmente configure `MERCADOPAGO_SUCCESS_URL`, `MERCADOPAGO_FAILURE_URL`, `MERCADOPAGO_PENDING_URL`, `MERCADOPAGO_TEST_PAYER_EMAIL`, `BILLING_CURRENCY` (padrão BRL).
+
+- OAuth: configure `MP_STATE_SECRET` (fallback: `JWT_SECRET`) para assinar/validar o `state` do callback.
 - Rotas protegidas para estabelecimentos:
   - `POST /billing/checkout-session` — cria uma sessão de pagamento para o plano informado e retorna o `init_point` do Mercado Pago.
   - `GET /billing/subscription` — contexto do plano e assinatura atual.
