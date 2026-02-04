@@ -2,8 +2,14 @@
 import { Router } from 'express'
 import { createHmac, timingSafeEqual } from 'node:crypto'
 import { auth, isEstabelecimento } from '../middleware/auth.js'
-import { createMercadoPagoPixCheckout, createMercadoPagoPixTopupCheckout, syncMercadoPagoPayment } from '../lib/billing.js'
+import {
+  createMercadoPagoPixCheckout,
+  createMercadoPagoPixTopupCheckout,
+  fetchMercadoPagoPayment,
+  syncMercadoPagoPayment,
+} from '../lib/billing.js'
 import { notifyEmail } from '../lib/notifications.js'
+import { notifyAppointmentConfirmed } from '../lib/appointment_confirmation.js'
 import {
   getWhatsAppWalletSnapshot,
   WHATSAPP_TOPUP_PACKAGES,
@@ -31,6 +37,7 @@ import { resolveBillingState } from '../lib/billing_monitor.js'
 import { BillingService } from '../lib/billing_service.js'
 import { listActiveWhatsAppPacks, findWhatsAppPack } from '../lib/addon_packs.js'
 import { verifyMercadoPagoWebhookSignature } from '../lib/mp_signature.js'
+import { resolveMpAccessToken } from '../services/mpAccounts.js'
 
 const router = Router()
 const DAY_MS = 86400000
@@ -404,6 +411,63 @@ function normalizeResourceCandidate(value) {
   return segments[segments.length - 1]
 }
 
+function safeJson(payload) {
+  try {
+    return JSON.stringify(payload)
+  } catch {
+    return null
+  }
+}
+
+function normalizePaymentStatus(value) {
+  return String(value || '').trim().toLowerCase()
+}
+
+function isApprovedStatus(status) {
+  return status === 'approved' || status === 'paid'
+}
+
+function mapFailureStatus(status) {
+  if (!status) return null
+  if (status === 'expired') return 'expired'
+  if (status === 'refunded') return 'refunded'
+  if (status === 'cancelled' || status === 'canceled') return 'canceled'
+  if (status === 'rejected' || status === 'failed' || status === 'charged_back') return 'failed'
+  return null
+}
+
+function parseDepositExternalReference(value) {
+  const raw = String(value || '').trim()
+  if (!raw) return null
+  const match = raw.match(/dep:ag:(\d+):pay:(\d+):est:(\d+)/i)
+  if (!match) return null
+  return {
+    agendamentoId: Number(match[1]),
+    paymentId: Number(match[2]),
+    estabelecimentoId: Number(match[3]),
+  }
+}
+
+async function fetchAppointmentPaymentByProvider(providerPaymentId, { connection = null, forUpdate = false } = {}) {
+  const db = connection || pool
+  const lock = forUpdate ? ' FOR UPDATE' : ''
+  const [rows] = await db.query(
+    `SELECT * FROM appointment_payments WHERE provider_payment_id=? LIMIT 1${lock}`,
+    [String(providerPaymentId)]
+  )
+  return rows?.[0] || null
+}
+
+async function fetchAppointmentPaymentById(id, { connection = null, forUpdate = false } = {}) {
+  const db = connection || pool
+  const lock = forUpdate ? ' FOR UPDATE' : ''
+  const [rows] = await db.query(
+    `SELECT * FROM appointment_payments WHERE id=? LIMIT 1${lock}`,
+    [Number(id)]
+  )
+  return rows?.[0] || null
+}
+
 function serializeWhatsAppPack(pack) {
   if (!pack) return null
   const waMessages = Number(pack.waMessages ?? pack.wa_messages ?? pack.messages ?? 0) || 0
@@ -430,6 +494,164 @@ function serializeTopupHistory(entry) {
     pack_id: meta.pack_id ?? nestedPack.id ?? null,
     price_cents: meta.price_cents ?? nestedPack.price_cents ?? null,
     created_at: entry.created_at || null,
+  }
+}
+
+async function handleDepositPaymentWebhook({ resourceId, event, bodyUserId = null }) {
+  const providerPaymentId = normalizeId(resourceId)
+  if (!providerPaymentId) return { ok: false, reason: 'missing_resource_id' }
+
+  let paymentRow = await fetchAppointmentPaymentByProvider(providerPaymentId)
+  let estabelecimentoId = paymentRow?.estabelecimento_id ?? null
+
+  if (!estabelecimentoId && bodyUserId != null) {
+    const [rows] = await pool.query(
+      'SELECT estabelecimento_id FROM mercadopago_accounts WHERE mp_user_id=? LIMIT 1',
+      [Number(bodyUserId)]
+    )
+    if (rows?.[0]?.estabelecimento_id) {
+      estabelecimentoId = Number(rows[0].estabelecimento_id)
+    }
+  }
+
+  if (!estabelecimentoId) {
+    return { ok: false, reason: 'estabelecimento_not_found' }
+  }
+
+  const mpAccess = await resolveMpAccessToken(estabelecimentoId, { allowFallback: false })
+  const accessToken = mpAccess.accessToken || null
+  if (!accessToken) {
+    return { ok: false, reason: 'mp_token_missing', estabelecimentoId }
+  }
+
+  let payment = null
+  try {
+    payment = await fetchMercadoPagoPayment(providerPaymentId, { accessToken })
+  } catch (err) {
+    console.warn('[billing:webhook][deposit] fetch_payment_failed', err?.message || err)
+    return { ok: false, reason: 'mp_fetch_failed' }
+  }
+  if (!payment?.id) return { ok: false, reason: 'payment_not_found' }
+
+  const status = normalizePaymentStatus(payment.status)
+  const metadataType = String(payment?.metadata?.type || payment?.metadata?.kind || '').toLowerCase()
+  const externalReference = String(payment?.external_reference || '').trim()
+  const isDeposit = metadataType === 'deposit' || /^dep:ag:\d+:pay:\d+:est:\d+/i.test(externalReference)
+  if (!isDeposit) {
+    return { ok: false, reason: 'not_deposit' }
+  }
+
+  const parsedRef = parseDepositExternalReference(externalReference)
+  const metadataAgendamentoId = Number(payment?.metadata?.agendamento_id || 0) || null
+  let appointmentPaymentId = paymentRow?.id ?? parsedRef?.paymentId ?? null
+
+  if (!appointmentPaymentId && metadataAgendamentoId) {
+    const [rows] = await pool.query(
+      `SELECT id, estabelecimento_id
+         FROM appointment_payments
+        WHERE agendamento_id=?
+        ORDER BY id DESC
+        LIMIT 1`,
+      [metadataAgendamentoId]
+    )
+    if (rows?.[0]?.id) {
+      appointmentPaymentId = Number(rows[0].id)
+      if (!estabelecimentoId && rows[0].estabelecimento_id) {
+        estabelecimentoId = Number(rows[0].estabelecimento_id)
+      }
+    }
+  }
+
+  if (!appointmentPaymentId) {
+    return { ok: false, reason: 'deposit_payment_not_found' }
+  }
+
+  const failureStatus = mapFailureStatus(status)
+  const approved = isApprovedStatus(status)
+
+  const conn = await pool.getConnection()
+  try {
+    await conn.beginTransaction()
+    let locked = await fetchAppointmentPaymentById(appointmentPaymentId, { connection: conn, forUpdate: true })
+    if (!locked && providerPaymentId) {
+      locked = await fetchAppointmentPaymentByProvider(providerPaymentId, { connection: conn, forUpdate: true })
+    }
+    if (!locked) {
+      await conn.rollback()
+      return { ok: false, reason: 'deposit_payment_not_found' }
+    }
+
+    const rawPayload = safeJson({ event, payment })
+
+    if (approved) {
+      if (String(locked.status || '').toLowerCase() !== 'paid') {
+        await conn.query(
+          `UPDATE appointment_payments
+              SET status=?,
+                  paid_at=NOW(),
+                  raw_payload=?,
+                  provider_payment_id=COALESCE(provider_payment_id, ?),
+                  provider_reference=COALESCE(provider_reference, ?)
+            WHERE id=?`,
+          ['paid', rawPayload, String(payment.id), externalReference || null, locked.id]
+        )
+      } else {
+        await conn.query(
+          `UPDATE appointment_payments
+              SET raw_payload=?,
+                  provider_reference=COALESCE(provider_reference, ?)
+            WHERE id=?`,
+          [rawPayload, externalReference || null, locked.id]
+        )
+      }
+      const [result] = await conn.query(
+        "UPDATE agendamentos SET status='confirmado', deposit_paid_at=NOW() WHERE id=? AND status='pendente_pagamento'",
+        [locked.agendamento_id]
+      )
+      await conn.commit()
+      if (result?.affectedRows) {
+        notifyAppointmentConfirmed(locked.agendamento_id).catch((err) => {
+          console.warn('[billing:webhook][deposit] notify_failed', err?.message || err)
+        })
+      }
+      return { ok: true, handled: true, status: 'paid', appointmentId: locked.agendamento_id }
+    }
+
+    if (failureStatus) {
+      await conn.query(
+        `UPDATE appointment_payments
+            SET status=?,
+                raw_payload=?,
+                provider_payment_id=COALESCE(provider_payment_id, ?),
+                provider_reference=COALESCE(provider_reference, ?)
+          WHERE id=?`,
+        [failureStatus, rawPayload, String(payment.id), externalReference || null, locked.id]
+      )
+      await conn.query(
+        "UPDATE agendamentos SET status='cancelado', deposit_expires_at=NOW() WHERE id=? AND status='pendente_pagamento'",
+        [locked.agendamento_id]
+      )
+      await conn.commit()
+      return { ok: true, handled: true, status: failureStatus, appointmentId: locked.agendamento_id }
+    }
+
+    await conn.query(
+      `UPDATE appointment_payments
+          SET raw_payload=?,
+              provider_payment_id=COALESCE(provider_payment_id, ?),
+              provider_reference=COALESCE(provider_reference, ?)
+        WHERE id=?`,
+      [rawPayload, String(payment.id), externalReference || null, locked.id]
+    )
+    await conn.commit()
+    return { ok: true, handled: false, status: status || 'pending', appointmentId: locked.agendamento_id }
+  } catch (err) {
+    try {
+      await conn.rollback()
+    } catch {}
+    throw err
+  } finally {
+    conn.release()
   }
 }
 
@@ -886,23 +1108,39 @@ router.post('/webhook', async (req, res) => {
 
   const resourceId = verification.id
 
-  if (topic === 'payment' && bodyUserId != null && Number(bodyUserId) !== MP_COLLECTOR_ID) {
-    console.warn('[billing:webhook] ignored_foreign_user', {
-      resource_id: verification.id || null,
-      body_user_id: bodyUserId,
-      expected_user_id: MP_COLLECTOR_ID,
-      live_mode: liveMode,
-      body_type: bodyType,
-      body_action: bodyAction,
-    })
-    return res.status(200).json({ ok: true, ignored: true, reason: 'foreign_user' })
-  }
-
   try {
     if (topic === 'payment') {
-      const r = await syncMercadoPagoPayment(resourceId, event);
-      console.log('[billing:webhook] payment', resourceId, r?.ok ? 'approved' : 'ignored', { ok: !!r?.ok });
-      return res.status(200).json({ ok: true, processed: !!r?.ok });
+      const normalizedUserId = bodyUserId != null ? Number(bodyUserId) : null
+      const isPlatformUser = Number.isFinite(normalizedUserId) && normalizedUserId === MP_COLLECTOR_ID
+
+      if (!isPlatformUser) {
+        const depositResult = await handleDepositPaymentWebhook({
+          resourceId,
+          event,
+          bodyUserId: normalizedUserId,
+        })
+        if (depositResult?.handled) {
+          console.log('[billing:webhook][deposit] handled', resourceId, depositResult.status || 'ok')
+          return res.status(200).json({ ok: true, processed: true, deposit: true, status: depositResult.status || null })
+        }
+        if (depositResult?.ok && depositResult?.status) {
+          return res.status(200).json({ ok: true, processed: false, deposit: true, status: depositResult.status })
+        }
+        console.warn('[billing:webhook] ignored_foreign_user', {
+          resource_id: verification.id || null,
+          body_user_id: bodyUserId,
+          expected_user_id: MP_COLLECTOR_ID,
+          live_mode: liveMode,
+          body_type: bodyType,
+          body_action: bodyAction,
+          reason: depositResult?.reason || 'foreign_user',
+        })
+        return res.status(200).json({ ok: true, ignored: true, reason: depositResult?.reason || 'foreign_user' })
+      }
+
+      const r = await syncMercadoPagoPayment(resourceId, event)
+      console.log('[billing:webhook] payment', resourceId, r?.ok ? 'approved' : 'ignored', { ok: !!r?.ok })
+      return res.status(200).json({ ok: true, processed: !!r?.ok })
     }
 
     console.log('[billing:webhook] ignoring topic', topic || 'unknown', 'for resource', resourceId);

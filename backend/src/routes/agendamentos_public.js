@@ -8,6 +8,8 @@ import bcrypt from 'bcryptjs';
 import { notifyEmail } from '../lib/notifications.js';
 import { sendAppointmentWhatsApp } from '../lib/whatsapp_outbox.js';
 import { buildConfirmacaoAgendamentoV2Components, isConfirmacaoAgendamentoV2 } from '../lib/whatsapp_templates.js';
+import { createMercadoPagoPixPayment } from '../lib/billing.js';
+import { resolveMpAccessToken } from '../services/mpAccounts.js';
 import { estabNotificationsDisabled } from '../lib/estab_notifications.js';
 import { clientWhatsappDisabled, whatsappImmediateDisabled, whatsappConfirmationDisabled } from '../lib/client_notifications.js';
 import jwt from 'jsonwebtoken';
@@ -22,6 +24,46 @@ const APPOINTMENT_BUFFER_MIN = (() => {
   const parsed = Number(raw);
   return Number.isFinite(parsed) && parsed > 0 ? Math.round(parsed) : 0;
 })();
+const DEFAULT_DEPOSIT_HOLD_MINUTES = 15;
+const DEPOSIT_ALLOWED_PLANS = new Set(['pro', 'premium']);
+
+const safeJson = (payload) => {
+  try {
+    return JSON.stringify(payload);
+  } catch {
+    return null;
+  }
+};
+
+function resolveApiBaseUrl() {
+  const frontBase = String(process.env.FRONTEND_BASE_URL || process.env.APP_URL || 'http://localhost:3001').replace(/\/$/, '');
+  const isDevFront = /^(https?:\/\/)?(localhost|127\.0\.0\.1):3001$/i.test(frontBase);
+  const defaultApi = isDevFront ? 'http://localhost:3002' : `${frontBase}/api`;
+  return String(process.env.API_BASE_URL || process.env.BACKEND_BASE_URL || defaultApi).replace(/\/$/, '');
+}
+
+function resolveBillingWebhookUrl(apiBase) {
+  const base = String(apiBase || '').replace(/\/$/, '');
+  if (base.endsWith('/api')) return `${base}/billing/webhook`;
+  return `${base}/api/billing/webhook`;
+}
+
+async function resolveDepositConfig(estabelecimentoId, planContext) {
+  const allowed = DEPOSIT_ALLOWED_PLANS.has(String(planContext?.plan || '').toLowerCase());
+  if (!allowed) {
+    return { allowed: false, enabled: false, percent: null, holdMinutes: DEFAULT_DEPOSIT_HOLD_MINUTES };
+  }
+  const [rows] = await pool.query(
+    'SELECT deposit_enabled, deposit_percent, deposit_hold_minutes FROM establishment_settings WHERE estabelecimento_id=? LIMIT 1',
+    [estabelecimentoId]
+  );
+  const row = rows?.[0];
+  const enabledFlag = row ? Number(row.deposit_enabled || 0) : 0;
+  const percent = row?.deposit_percent != null ? Number(row.deposit_percent) : null;
+  const holdMinutes = Number(row?.deposit_hold_minutes || DEFAULT_DEPOSIT_HOLD_MINUTES) || DEFAULT_DEPOSIT_HOLD_MINUTES;
+  const enabled = Boolean(enabledFlag) && Number.isFinite(percent) && percent > 0;
+  return { allowed: true, enabled, percent, holdMinutes };
+}
 
 const normalizeServiceIds = (value) => {
   const ids = [];
@@ -471,6 +513,10 @@ router.post('/', async (req, res) => {
     const summary = summarizeServices(serviceItems);
     const primaryServiceId = summary.serviceIds[0] || serviceIds[0];
     const serviceLabel = summary.serviceLabel || serviceItems[0]?.nome || 'servico';
+    const totalCentavos = serviceItems.reduce(
+      (sum, item) => sum + Math.max(0, Math.round(Number(item?.preco_centavos || 0))),
+      0
+    );
 
     const professionalMap = await fetchServiceProfessionalMap(pool, summary.serviceIds);
     const servicesRequiringProfessional = summary.serviceIds.filter((id) => (professionalMap.get(id)?.size || 0) > 0);
@@ -565,6 +611,63 @@ router.post('/', async (req, res) => {
         return res.status(400).json({ error: 'otp_invalid' });
       }
     }
+
+    const depositConfig = await resolveDepositConfig(estabelecimento_id, planContext);
+    const depositEnabled = depositConfig.allowed && depositConfig.enabled;
+    const depositPercent = depositEnabled ? Number(depositConfig.percent || 0) : null;
+    let depositCentavos = null;
+    let depositHoldMinutes = DEFAULT_DEPOSIT_HOLD_MINUTES;
+    let depositExpiresAt = null;
+    let mpAccessToken = null;
+    if (depositEnabled) {
+      if (!Number.isFinite(totalCentavos) || totalCentavos <= 0) {
+        console.warn('[deposit] invalid_total', {
+          estabelecimento_id,
+          total_centavos: totalCentavos,
+          percent: depositPercent,
+        });
+        return res.status(400).json({ error: 'invalid_total_for_deposit', message: 'Total invalido para sinal.' });
+      }
+      depositCentavos = Math.ceil(totalCentavos * (depositPercent || 0) / 100);
+      if (!Number.isFinite(depositCentavos) || depositCentavos <= 0) {
+        console.warn('[deposit] invalid_deposit_value', {
+          estabelecimento_id,
+          total_centavos: totalCentavos,
+          percent: depositPercent,
+          deposit_centavos: depositCentavos,
+        });
+        return res.status(400).json({ error: 'invalid_total_for_deposit', message: 'Total invalido para sinal.' });
+      }
+      depositHoldMinutes = Number(depositConfig.holdMinutes || DEFAULT_DEPOSIT_HOLD_MINUTES) || DEFAULT_DEPOSIT_HOLD_MINUTES;
+      depositExpiresAt = new Date(Date.now() + depositHoldMinutes * 60_000);
+      const mpAccess = await resolveMpAccessToken(estabelecimento_id, { allowFallback: false });
+      const mpStatus = mpAccess.account?.status || null;
+      if (mpStatus !== 'connected' || !mpAccess.accessToken) {
+        console.warn('[deposit] mp_not_connected', {
+          estabelecimento_id,
+          status: mpStatus,
+          reason: mpAccess.reason || 'missing_token',
+        });
+        return res.status(409).json({
+          error: 'mp_not_connected_for_deposit',
+          message: 'Conecte seu Mercado Pago para receber o sinal.',
+        });
+      }
+      mpAccessToken = mpAccess.accessToken;
+    }
+    const depositRequired = Boolean(depositEnabled && Number.isFinite(depositCentavos) && depositCentavos > 0);
+    if (!depositRequired) {
+      depositCentavos = null;
+      depositExpiresAt = null;
+    }
+    console.info('[deposit]', {
+      estabelecimento_id,
+      enabled: depositEnabled,
+      percent: depositPercent,
+      total_centavos: totalCentavos,
+      deposit_centavos: depositCentavos,
+      hold_minutes: depositHoldMinutes,
+    });
 
     // resolve/ cria cliente guest via email (preferencia) ou telefone
 
@@ -684,8 +787,12 @@ router.post('/', async (req, res) => {
     txStarted = true;
 
     let conflictSql = `SELECT id FROM agendamentos
-       WHERE estabelecimento_id=? AND status IN ('confirmado','pendente')
-         AND (status <> 'pendente' OR public_confirm_expires_at IS NULL OR public_confirm_expires_at >= NOW())
+       WHERE estabelecimento_id=? AND status IN ('confirmado','pendente','pendente_pagamento')
+         AND (
+           status = 'confirmado'
+           OR (status = 'pendente' AND (public_confirm_expires_at IS NULL OR public_confirm_expires_at >= NOW()))
+           OR (status = 'pendente_pagamento' AND (deposit_expires_at IS NULL OR deposit_expires_at >= NOW()))
+         )
          AND (inicio < ? AND fim > ?)`;
     const conflictParams = [estabelecimento_id, fimDate, inicioDate];
     if (profissional_id != null && requiresProfessional) {
@@ -717,14 +824,56 @@ router.post('/', async (req, res) => {
         req.query?.source
       ) || 'site';
 
-    const [ins] = await conn.query(
-      `INSERT INTO agendamentos
-        (cliente_id, estabelecimento_id, servico_id, profissional_id, inicio, fim, status, origem, public_confirm_token_hash, public_confirm_expires_at, public_confirmed_at)
-       VALUES (?,?,?,?,?,?, 'confirmado', ?, NULL, NULL, NOW())`,
-      [userId, estabelecimento_id, primaryServiceId, profissional_id || null, inicioDate, fimDate, origem]
-    );
+    let appointmentId = null;
+    let depositPaymentId = null;
+    if (depositRequired) {
+      const [ins] = await conn.query(
+        `INSERT INTO agendamentos
+          (cliente_id, estabelecimento_id, servico_id, profissional_id, inicio, fim, status, origem, total_centavos,
+           deposit_required, deposit_percent, deposit_centavos, deposit_expires_at)
+         VALUES (?,?,?,?,?,?, 'pendente_pagamento', ?, ?, 1, ?, ?, ?)`,
+        [
+          userId,
+          estabelecimento_id,
+          primaryServiceId,
+          profissional_id || null,
+          inicioDate,
+          fimDate,
+          origem,
+          totalCentavos,
+          depositPercent,
+          depositCentavos,
+          depositExpiresAt,
+        ]
+      );
+      appointmentId = ins.insertId;
+      const [payIns] = await conn.query(
+        `INSERT INTO appointment_payments
+          (agendamento_id, estabelecimento_id, type, status, amount_centavos, percent, expires_at)
+         VALUES (?,?,?,?,?,?,?)`,
+        [
+          appointmentId,
+          estabelecimento_id,
+          'deposit',
+          'pending',
+          depositCentavos,
+          depositPercent,
+          depositExpiresAt,
+        ]
+      );
+      depositPaymentId = payIns.insertId;
+    } else {
+      const [ins] = await conn.query(
+        `INSERT INTO agendamentos
+          (cliente_id, estabelecimento_id, servico_id, profissional_id, inicio, fim, status, origem, public_confirm_token_hash,
+           public_confirm_expires_at, public_confirmed_at, total_centavos)
+         VALUES (?,?,?,?,?,?, 'confirmado', ?, NULL, NULL, NOW(), ?)`,
+        [userId, estabelecimento_id, primaryServiceId, profissional_id || null, inicioDate, fimDate, origem, totalCentavos]
+      );
+      appointmentId = ins.insertId;
+    }
     const itemValues = serviceItems.map((item, idx) => ([
-      ins.insertId,
+      appointmentId,
       item.id,
       idx + 1,
       Math.max(0, Math.round(item.duracao_min || 0)),
@@ -742,15 +891,76 @@ router.post('/', async (req, res) => {
     txStarted = false;
     conn.release(); conn = null;
 
+    if (depositRequired) {
+      const expiresIso = depositExpiresAt ? depositExpiresAt.toISOString() : null;
+      const apiBase = resolveApiBaseUrl();
+      const webhookUrl = resolveBillingWebhookUrl(apiBase);
+      const externalReference = `dep:ag:${appointmentId}:pay:${depositPaymentId}:est:${estabelecimento_id}`;
+      const metadata = {
+        agendamento_id: String(appointmentId),
+        estabelecimento_id: String(estabelecimento_id),
+        type: 'deposit',
+      };
+      try {
+        const { payment, pix } = await createMercadoPagoPixPayment({
+          amountCents: depositCentavos,
+          description: `Sinal - ${serviceLabel}`,
+          externalReference,
+          metadata,
+          notificationUrl: webhookUrl,
+          payerEmail: emailNorm || null,
+          expiresAt: depositExpiresAt,
+          accessToken: mpAccessToken,
+        });
+        await pool.query(
+          'UPDATE appointment_payments SET provider_payment_id=?, provider_reference=?, raw_payload=? WHERE id=?',
+          [String(payment.id), externalReference, safeJson(payment), depositPaymentId]
+        );
+        return res.status(201).json({
+          id: appointmentId,
+          agendamentoId: appointmentId,
+          status: 'pendente_pagamento',
+          total_centavos: totalCentavos,
+          deposit_required: 1,
+          deposit_percent: depositPercent,
+          deposit_centavos: depositCentavos,
+          deposit_expires_at: expiresIso,
+          paymentId: depositPaymentId,
+          expiresAt: expiresIso,
+          pix_qr: pix?.qr_code_base64 || null,
+          pix_qr_raw: pix?.qr_code || null,
+          pix_copia_cola: pix?.copia_e_cola || pix?.qr_code || null,
+          pix_ticket_url: pix?.ticket_url || null,
+          amount_centavos: depositCentavos,
+          pix,
+        });
+      } catch (err) {
+        console.error('[public/agendamentos][deposit] erro ao criar PIX:', err?.message || err);
+        const payload = safeJson({ error: err?.message || String(err) });
+        await pool.query(
+          'UPDATE appointment_payments SET status=?, raw_payload=? WHERE id=?',
+          ['failed', payload, depositPaymentId]
+        );
+        await pool.query(
+          "UPDATE agendamentos SET status='cancelado', deposit_expires_at=NOW() WHERE id=? AND status='pendente_pagamento'",
+          [appointmentId]
+        );
+        return res.status(502).json({
+          error: 'payment_create_failed',
+          message: 'Nao foi possivel gerar o PIX do sinal. Tente novamente.',
+        });
+      }
+    }
+
     // Notificacoes de confirmacao (best-effort)
     (async () => {
       try {
-        await notifyPublicConfirmedAppointment(ins.insertId);
+        await notifyPublicConfirmedAppointment(appointmentId);
       } catch {}
     })();
 
     return res.status(201).json({
-      id: ins.insertId,
+      id: appointmentId,
       cliente_id: userId,
       estabelecimento_id,
       servico_id: primaryServiceId,
@@ -759,6 +969,7 @@ router.post('/', async (req, res) => {
       servicos: serviceItems,
       duracao_total: summary.duracaoTotal,
       preco_total: summary.precoTotal,
+      total_centavos: totalCentavos,
       profissional_id: profissional_id || null,
       inicio: inicioDate,
       fim: fimDate,

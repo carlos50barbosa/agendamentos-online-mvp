@@ -42,6 +42,7 @@ const mockPayments = new Map()
 
 let mercadoPagoClient = null
 let mercadoPagoPayment = null
+const mercadoPagoPaymentsByToken = new Map()
 
 function ensureMercadoPagoPayment() {
   if (MOCK_MP) {
@@ -84,18 +85,22 @@ function ensureMercadoPagoPayment() {
   return mercadoPagoPayment
 }
 
+function resolveMercadoPagoPayment(accessToken) {
+  if (MOCK_MP) return ensureMercadoPagoPayment()
+  if (!accessToken) return ensureMercadoPagoPayment()
+  const tokenKey = String(accessToken)
+  if (mercadoPagoPaymentsByToken.has(tokenKey)) {
+    return mercadoPagoPaymentsByToken.get(tokenKey)
+  }
+  const mpClient = new MercadoPagoConfig({ accessToken: tokenKey })
+  const paymentClient = new Payment(mpClient)
+  mercadoPagoPaymentsByToken.set(tokenKey, paymentClient)
+  return paymentClient
+}
+
 export async function fetchMercadoPagoPayment(paymentId, { accessToken } = {}) {
   if (!paymentId) throw new Error('paymentId ausente')
-  if (MOCK_MP) {
-    const client = ensureMercadoPagoPayment()
-    return client.get({ id: String(paymentId) })
-  }
-  if (accessToken) {
-    const mpClient = new MercadoPagoConfig({ accessToken })
-    const paymentClient = new Payment(mpClient)
-    return paymentClient.get({ id: String(paymentId) })
-  }
-  const client = ensureMercadoPagoPayment()
+  const client = resolveMercadoPagoPayment(accessToken)
   return client.get({ id: String(paymentId) })
 }
 
@@ -115,6 +120,55 @@ function extractMpError(err) {
     }
     return JSON.stringify(out)
   } catch { return String(err?.message || err) }
+}
+
+export async function createMercadoPagoPixPayment({
+  amountCents,
+  description,
+  externalReference,
+  metadata,
+  notificationUrl,
+  payerEmail,
+  expiresAt = null,
+  accessToken = null,
+}) {
+  const paymentClient = resolveMercadoPagoPayment(accessToken)
+  const amountNum = Number((Number(amountCents || 0) / 100).toFixed(2))
+  const paymentBody = {
+    transaction_amount: amountNum,
+    description: description || 'Agendamentos Online - Pagamento',
+    payment_method_id: 'pix',
+    external_reference: externalReference,
+    metadata,
+    notification_url: notificationUrl,
+    payer: payerEmail ? { email: payerEmail } : undefined,
+  }
+  if (expiresAt) {
+    const exp = new Date(expiresAt)
+    if (Number.isFinite(exp.getTime())) {
+      paymentBody.date_of_expiration = exp.toISOString()
+    }
+  }
+  let payment
+  try {
+    payment = await paymentClient.create({ body: paymentBody })
+  } catch (e) {
+    const detail = extractMpError(e)
+    console.error('[mp][payment.create][deposit] error', detail)
+    throw new Error('mercadopago_payment_error: ' + detail)
+  }
+  if (!payment?.id) throw new Error('mercadopago_payment_error: pagamento sem id')
+  const txData = payment?.point_of_interaction?.transaction_data || {}
+  const pixPayload = {
+    payment_id: String(payment.id),
+    qr_code: txData.qr_code || null,
+    qr_code_base64: txData.qr_code_base64 || null,
+    copia_e_cola: txData.copia_e_cola || txData.qr_code || null,
+    ticket_url: txData.ticket_url || null,
+    expires_at: txData.expires_at || payment?.date_of_expiration || null,
+    amount_cents: amountCents,
+  }
+  return { payment, pix: pixPayload }
 }
 
 function buildExternalReference(estabelecimentoId, plan, cycle) {
