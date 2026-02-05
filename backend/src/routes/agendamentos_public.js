@@ -626,7 +626,7 @@ router.post('/', async (req, res) => {
           total_centavos: totalCentavos,
           percent: depositPercent,
         });
-        return res.status(400).json({ error: 'invalid_total_for_deposit', message: 'Total invalido para sinal.' });
+        return res.status(400).json({ error: 'invalid_total', message: 'Serviço sem preço configurado' });
       }
       depositCentavos = Math.ceil(totalCentavos * (depositPercent || 0) / 100);
       if (!Number.isFinite(depositCentavos) || depositCentavos <= 0) {
@@ -636,7 +636,7 @@ router.post('/', async (req, res) => {
           percent: depositPercent,
           deposit_centavos: depositCentavos,
         });
-        return res.status(400).json({ error: 'invalid_total_for_deposit', message: 'Total invalido para sinal.' });
+        return res.status(400).json({ error: 'invalid_total', message: 'Serviço sem preço configurado' });
       }
       depositHoldMinutes = Number(depositConfig.holdMinutes || DEFAULT_DEPOSIT_HOLD_MINUTES) || DEFAULT_DEPOSIT_HOLD_MINUTES;
       depositExpiresAt = new Date(Date.now() + depositHoldMinutes * 60_000);
@@ -872,18 +872,79 @@ router.post('/', async (req, res) => {
       );
       appointmentId = ins.insertId;
     }
-    const itemValues = serviceItems.map((item, idx) => ([
-      appointmentId,
-      item.id,
-      idx + 1,
-      Math.max(0, Math.round(item.duracao_min || 0)),
-      Math.max(0, Math.round(item.preco_centavos || 0)),
-    ]));
+    const itemValues = serviceItems.map((item, idx) => {
+      const precoSnapshot = Math.max(0, Math.round(item.preco_centavos || 0));
+      if (precoSnapshot <= 0) {
+        console.warn('[agendamentos_public][preco_snapshot_zero]', {
+          estabelecimento_id,
+          servico_id: item.id,
+          preco_centavos: item.preco_centavos,
+        });
+      }
+      return [
+        appointmentId,
+        item.id,
+        idx + 1,
+        Math.max(0, Math.round(item.duracao_min || 0)),
+        precoSnapshot,
+      ];
+    });
     if (itemValues.length) {
       const placeholders = itemValues.map(() => '(?,?,?,?,?)').join(',');
       await conn.query(
         `INSERT INTO agendamento_itens (agendamento_id, servico_id, ordem, duracao_min, preco_snapshot) VALUES ${placeholders}`,
         itemValues.flat()
+      );
+    }
+
+    const totalCentavosFinal = itemValues.reduce((sum, item) => sum + Number(item[4] || 0), 0);
+    if (!Number.isFinite(totalCentavosFinal) || totalCentavosFinal <= 0) {
+      if (txStarted && conn) {
+        await conn.rollback();
+      }
+      txStarted = false;
+      if (conn) conn.release();
+      return res.status(400).json({
+        error: 'invalid_total',
+        message: 'Serviço sem preço configurado',
+      });
+    }
+
+    let depositCentavosFinal = depositCentavos;
+    if (depositRequired) {
+      depositCentavosFinal = Math.ceil(totalCentavosFinal * (depositPercent || 0) / 100);
+      if (!Number.isFinite(depositCentavosFinal) || depositCentavosFinal <= 0) {
+        if (txStarted && conn) {
+          await conn.rollback();
+        }
+        txStarted = false;
+        if (conn) conn.release();
+        return res.status(400).json({
+          error: 'invalid_total',
+          message: 'Serviço sem preço configurado',
+        });
+      }
+    }
+
+    if (depositRequired) {
+      await conn.query(
+        `UPDATE agendamentos
+            SET total_centavos=?,
+                deposit_centavos=?
+          WHERE id=?`,
+        [totalCentavosFinal, depositCentavosFinal, appointmentId]
+      );
+      await conn.query(
+        `UPDATE appointment_payments
+            SET amount_centavos=?,
+                percent=?
+          WHERE id=?`,
+        [depositCentavosFinal, depositPercent, depositPaymentId]
+      );
+    } else {
+      await conn.query(
+        'UPDATE agendamentos SET total_centavos=? WHERE id=?',
+        [totalCentavosFinal, appointmentId]
       );
     }
 
@@ -903,7 +964,7 @@ router.post('/', async (req, res) => {
       };
       try {
         const { payment, pix } = await createMercadoPagoPixPayment({
-          amountCents: depositCentavos,
+          amountCents: depositCentavosFinal,
           description: `Sinal - ${serviceLabel}`,
           externalReference,
           metadata,
@@ -920,10 +981,10 @@ router.post('/', async (req, res) => {
           id: appointmentId,
           agendamentoId: appointmentId,
           status: 'pendente_pagamento',
-          total_centavos: totalCentavos,
+          total_centavos: totalCentavosFinal,
           deposit_required: 1,
           deposit_percent: depositPercent,
-          deposit_centavos: depositCentavos,
+          deposit_centavos: depositCentavosFinal,
           deposit_expires_at: expiresIso,
           paymentId: depositPaymentId,
           expiresAt: expiresIso,
@@ -931,7 +992,7 @@ router.post('/', async (req, res) => {
           pix_qr_raw: pix?.qr_code || null,
           pix_copia_cola: pix?.copia_e_cola || pix?.qr_code || null,
           pix_ticket_url: pix?.ticket_url || null,
-          amount_centavos: depositCentavos,
+          amount_centavos: depositCentavosFinal,
           pix,
         });
       } catch (err) {
@@ -969,7 +1030,7 @@ router.post('/', async (req, res) => {
       servicos: serviceItems,
       duracao_total: summary.duracaoTotal,
       preco_total: summary.precoTotal,
-      total_centavos: totalCentavos,
+      total_centavos: totalCentavosFinal,
       profissional_id: profissional_id || null,
       inicio: inicioDate,
       fim: fimDate,

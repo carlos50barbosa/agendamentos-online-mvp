@@ -587,7 +587,18 @@ pool.query = async (sql, params = []) => {
   }
 
   if (norm.includes('FROM agendamentos a') && norm.includes('receita_perdida')) {
-    return [[clone(state.report.totals)], []]
+    const totals = state.report.totals || {}
+    const row = {
+      agendados_total: Number(totals.total ?? totals.agendados_total ?? 0),
+      confirmados_total: Number(totals.confirmados ?? totals.confirmados_total ?? 0),
+      concluidos_total: Number(totals.concluidos ?? totals.concluidos_total ?? 0),
+      cancelados_total: Number(totals.cancelados ?? totals.cancelados_total ?? 0),
+      no_show_total: Number(totals.no_show ?? totals.no_show_total ?? 0),
+      receita_prevista: Number(totals.receita_confirmada ?? totals.receita_prevista ?? totals.receita_futura ?? 0),
+      receita_concluida: Number(totals.receita_concluida ?? 0),
+      receita_perdida: Number(totals.receita_perdida ?? 0),
+    }
+    return [[row], []]
   }
 
   if (norm.includes('GROUP BY dia')) {
@@ -596,6 +607,34 @@ pool.query = async (sql, params = []) => {
 
   if (norm.includes('GROUP BY s.id, s.nome')) {
     return [clone(state.report.services), []]
+  }
+
+  if (norm.includes('GROUP BY dow')) {
+    return [[], []]
+  }
+
+  if (norm.includes('GROUP BY bucket')) {
+    return [[], []]
+  }
+
+  if (norm.includes('GROUP BY origem')) {
+    return [[], []]
+  }
+
+  if (norm.startsWith('CREATE TABLE IF NOT EXISTS whatsapp_contacts')) {
+    return [{ affectedRows: 0 }, []]
+  }
+
+  if (norm.startsWith('INSERT INTO whatsapp_contacts')) {
+    return [{ affectedRows: 1, insertId: 1 }, []]
+  }
+
+  if (norm.startsWith('SELECT last_inbound_at FROM whatsapp_contacts WHERE recipient_id=? LIMIT 1')) {
+    return [[{ last_inbound_at: null }], []]
+  }
+
+  if (norm.startsWith('SELECT id, estabelecimento_id, waba_id, phone_number_id, display_phone_number, business_id, access_token_enc, token_last4, status, connected_at, updated_at FROM wa_accounts WHERE estabelecimento_id=? LIMIT 1')) {
+    return [[], []]
   }
 
   if (norm.startsWith("UPDATE usuarios SET")) {
@@ -1176,7 +1215,8 @@ async function callHandler(handler, { params = {}, body = {}, query = {}, user =
         finished = true
         resolve({ status: statusCode, body: payload }); return this
       },
-      setHeader() { return this }
+      setHeader() { return this },
+      set() { return this }
     }
     const runHandler = () => {
       if (finished) return
@@ -1383,7 +1423,7 @@ const res11 = await callHandler(relatorioHandler, {
 results.push({ name: 'relatorio permitido', response: res11 })
 assert.equal(res11.status, 200)
 assert.equal(res11.body?.plan?.allow_advanced, true)
-assert.equal(res11.body?.totals?.total, 5)
+assert.equal(res11.body?.totals?.agendados_total, 5)
 
 // 12) relatorio bloqueado por inadimplencia
 seedScenario({ user: { plan_status: 'delinquent' } })
