@@ -7,6 +7,8 @@ import { auth as authRequired, isCliente, isEstabelecimento } from '../middlewar
 import { notifyEmail } from '../lib/notifications.js';
 import { sendAppointmentWhatsApp } from '../lib/whatsapp_outbox.js';
 import { buildConfirmacaoAgendamentoV2Components, isConfirmacaoAgendamentoV2 } from '../lib/whatsapp_templates.js';
+import { createMercadoPagoPixPayment } from '../lib/billing.js';
+import { resolveMpAccessToken } from '../services/mpAccounts.js';
 import bcrypt from 'bcryptjs';
 import { checkMonthlyAppointmentLimit, notifyAppointmentLimitReached } from '../lib/appointment_limits.js';
 import { estabNotificationsDisabled } from '../lib/estab_notifications.js';
@@ -75,6 +77,46 @@ const APPOINTMENT_BUFFER_MIN = (() => {
   const parsed = Number(raw);
   return Number.isFinite(parsed) && parsed > 0 ? Math.round(parsed) : 0;
 })();
+const DEFAULT_DEPOSIT_HOLD_MINUTES = 15;
+const DEPOSIT_ALLOWED_PLANS = new Set(['pro', 'premium']);
+
+const safeJson = (payload) => {
+  try {
+    return JSON.stringify(payload);
+  } catch {
+    return null;
+  }
+};
+
+function resolveApiBaseUrl() {
+  const frontBase = String(process.env.FRONTEND_BASE_URL || process.env.APP_URL || 'http://localhost:3001').replace(/\/$/, '');
+  const isDevFront = /^(https?:\/\/)?(localhost|127\.0\.0\.1):3001$/i.test(frontBase);
+  const defaultApi = isDevFront ? 'http://localhost:3002' : `${frontBase}/api`;
+  return String(process.env.API_BASE_URL || process.env.BACKEND_BASE_URL || defaultApi).replace(/\/$/, '');
+}
+
+function resolveBillingWebhookUrl(apiBase) {
+  const base = String(apiBase || '').replace(/\/$/, '');
+  if (base.endsWith('/api')) return `${base}/billing/webhook`;
+  return `${base}/api/billing/webhook`;
+}
+
+async function resolveDepositConfig(estabelecimentoId, planContext) {
+  const allowed = DEPOSIT_ALLOWED_PLANS.has(String(planContext?.plan || '').toLowerCase());
+  if (!allowed) {
+    return { allowed: false, enabled: false, percent: null, holdMinutes: DEFAULT_DEPOSIT_HOLD_MINUTES };
+  }
+  const [rows] = await pool.query(
+    'SELECT deposit_enabled, deposit_percent, deposit_hold_minutes FROM establishment_settings WHERE estabelecimento_id=? LIMIT 1',
+    [estabelecimentoId]
+  );
+  const row = rows?.[0];
+  const enabledFlag = row ? Number(row.deposit_enabled || 0) : 0;
+  const percent = row?.deposit_percent != null ? Number(row.deposit_percent) : null;
+  const holdMinutes = Number(row?.deposit_hold_minutes || DEFAULT_DEPOSIT_HOLD_MINUTES) || DEFAULT_DEPOSIT_HOLD_MINUTES;
+  const enabled = Boolean(enabledFlag) && Number.isFinite(percent) && percent > 0;
+  return { allowed: true, enabled, percent, holdMinutes };
+}
 const normalizeServiceIds = (value) => {
   const ids = [];
   const pushId = (entry) => {
@@ -456,6 +498,36 @@ router.post('/', authRequired, isCliente, async (req, res) => {
       });
     }
 
+    const totalCentavosPreview = Math.max(0, Math.round(summary.precoTotal || 0));
+    const depositConfig = await resolveDepositConfig(estabelecimento_id, planContext);
+    const depositEnabled = depositConfig.allowed && depositConfig.enabled;
+    const depositPercent = depositEnabled ? Number(depositConfig.percent || 0) : null;
+    let depositCentavos = null;
+    let depositHoldMinutes = DEFAULT_DEPOSIT_HOLD_MINUTES;
+    let depositExpiresAt = null;
+    let mpAccessToken = null;
+    if (depositEnabled) {
+      depositCentavos = Math.ceil(totalCentavosPreview * (depositPercent || 0) / 100);
+      depositHoldMinutes = Number(depositConfig.holdMinutes || DEFAULT_DEPOSIT_HOLD_MINUTES) || DEFAULT_DEPOSIT_HOLD_MINUTES;
+      depositExpiresAt = new Date(Date.now() + depositHoldMinutes * 60_000);
+      const mpAccess = await resolveMpAccessToken(estabelecimento_id, { allowFallback: false });
+      const mpStatus = mpAccess.account?.status || null;
+      if (mpStatus !== 'connected' || !mpAccess.accessToken) {
+        console.warn('[deposit] mp_not_connected', {
+          estabelecimento_id,
+          status: mpStatus,
+          reason: mpAccess.reason || 'missing_token',
+        });
+        return res.status(409).json({
+          error: 'mp_not_connected_for_deposit',
+          message: 'Conecte seu Mercado Pago para receber o sinal.',
+        });
+      }
+      mpAccessToken = mpAccess.accessToken;
+    }
+    const depositRequired = Boolean(depositEnabled);
+    const origem = 'cliente_app';
+
     // 3) transacao + checagem de conflito
     conn = await pool.getConnection();
     await conn.beginTransaction();
@@ -464,8 +536,12 @@ router.post('/', authRequired, isCliente, async (req, res) => {
     // Conflito por sobreposicao: a.inicio < novoFim AND a.fim > novoInicio
     let conflictSql = `
       SELECT id FROM agendamentos
-      WHERE estabelecimento_id = ? AND status IN ('confirmado','pendente')
-        AND (status <> 'pendente' OR public_confirm_expires_at IS NULL OR public_confirm_expires_at >= NOW())
+      WHERE estabelecimento_id=? AND status IN ('confirmado','pendente','pendente_pagamento')
+        AND (
+          status = 'confirmado'
+          OR (status = 'pendente' AND (public_confirm_expires_at IS NULL OR public_confirm_expires_at >= NOW()))
+          OR (status = 'pendente_pagamento' AND (deposit_expires_at IS NULL OR deposit_expires_at >= NOW()))
+        )
         AND (inicio < ? AND fim > ?)
     `;
     const conflictParams = [estabelecimento_id, fimDate, inicioDate];
@@ -485,18 +561,82 @@ router.post('/', authRequired, isCliente, async (req, res) => {
       return res.status(409).json({ error: 'slot_ocupado', message: 'Horário indisponível.' });
     }
 
-    // 4) insere (status usa default 'confirmado')
-    const [r] = await conn.query(
-      'INSERT INTO agendamentos (cliente_id, estabelecimento_id, servico_id, profissional_id, inicio, fim) VALUES (?,?,?,?,?,?)',
-      [req.user.id, estabelecimento_id, primaryServiceId, profissional_id || null, inicioDate, fimDate]
-    );
-    const itemValues = serviceItems.map((item, idx) => ([
-      r.insertId,
-      item.id,
-      idx + 1,
-      Math.max(0, Math.round(item.duracao_min || 0)),
-      Math.max(0, Math.round(item.preco_centavos || 0)),
-    ]));
+    // 4) insere (deposito: pendente_pagamento | sem deposito: confirmado)
+    let appointmentId = null;
+    let depositPaymentId = null;
+    let totalCentavosFinal = 0;
+    let depositCentavosFinal = depositCentavos;
+    if (depositRequired) {
+      const [r] = await conn.query(
+        `INSERT INTO agendamentos
+          (cliente_id, estabelecimento_id, servico_id, profissional_id, inicio, fim, status, origem, total_centavos,
+           deposit_required, deposit_percent, deposit_centavos, deposit_expires_at)
+         VALUES (?,?,?,?,?,?, 'pendente_pagamento', ?, ?, 1, ?, ?, ?)`,
+        [
+          req.user.id,
+          estabelecimento_id,
+          primaryServiceId,
+          profissional_id || null,
+          inicioDate,
+          fimDate,
+          origem,
+          totalCentavosPreview,
+          depositPercent,
+          Math.max(0, Math.round(depositCentavos || 0)),
+          depositExpiresAt,
+        ]
+      );
+      appointmentId = r.insertId;
+      const [payIns] = await conn.query(
+        `INSERT INTO appointment_payments
+          (agendamento_id, estabelecimento_id, type, status, amount_centavos, percent, expires_at)
+         VALUES (?,?,?,?,?,?,?)`,
+        [
+          appointmentId,
+          estabelecimento_id,
+          'deposit',
+          'pending',
+          Math.max(0, Math.round(depositCentavos || 0)),
+          depositPercent,
+          depositExpiresAt,
+        ]
+      );
+      depositPaymentId = payIns.insertId;
+    } else {
+      const [r] = await conn.query(
+        `INSERT INTO agendamentos
+          (cliente_id, estabelecimento_id, servico_id, profissional_id, inicio, fim, status, origem, total_centavos)
+         VALUES (?,?,?,?,?,?, 'confirmado', ?, ?)`,
+        [
+          req.user.id,
+          estabelecimento_id,
+          primaryServiceId,
+          profissional_id || null,
+          inicioDate,
+          fimDate,
+          origem,
+          totalCentavosPreview,
+        ]
+      );
+      appointmentId = r.insertId;
+    }
+    const itemValues = serviceItems.map((item, idx) => {
+      const precoSnapshot = Math.max(0, Math.round(item.preco_centavos || 0));
+      if (precoSnapshot <= 0) {
+        console.warn('[agendamentos][preco_snapshot_zero]', {
+          estabelecimento_id,
+          servico_id: item.id,
+          preco_centavos: item.preco_centavos,
+        });
+      }
+      return [
+        appointmentId,
+        item.id,
+        idx + 1,
+        Math.max(0, Math.round(item.duracao_min || 0)),
+        precoSnapshot,
+      ];
+    });
     if (itemValues.length) {
       const placeholders = itemValues.map(() => '(?,?,?,?,?)').join(',');
       await conn.query(
@@ -505,14 +645,144 @@ router.post('/', authRequired, isCliente, async (req, res) => {
       );
     }
 
+    const [[totalRow]] = await conn.query(
+      'SELECT COALESCE(SUM(preco_snapshot), 0) AS total_centavos FROM agendamento_itens WHERE agendamento_id=?',
+      [appointmentId]
+    );
+    totalCentavosFinal = Number(totalRow?.total_centavos || 0);
+    console.info('[agendamentos][total]', { appointmentId, totalCentavosFinal });
+    if (!Number.isFinite(totalCentavosFinal) || totalCentavosFinal <= 0) {
+      if (txStarted && conn) {
+        await conn.rollback();
+      }
+      txStarted = false;
+      if (conn) {
+        conn.release();
+        conn = null;
+      }
+      return res.status(400).json({
+        error: 'invalid_total',
+        message: 'ServiÃ§o sem preÃ§o configurado',
+      });
+    }
+
+    if (depositRequired) {
+      depositCentavosFinal = Math.ceil(totalCentavosFinal * (depositPercent || 0) / 100);
+      if (!Number.isFinite(depositCentavosFinal) || depositCentavosFinal <= 0) {
+        if (txStarted && conn) {
+          await conn.rollback();
+        }
+        txStarted = false;
+        if (conn) {
+          conn.release();
+          conn = null;
+        }
+        return res.status(400).json({
+          error: 'invalid_total',
+          message: 'ServiÃ§o sem preÃ§o configurado',
+        });
+      }
+    }
+
+    if (depositRequired) {
+      console.info('[deposit]', {
+        estabelecimento_id,
+        enabled: depositEnabled,
+        percent: depositPercent,
+        total_centavos: totalCentavosFinal,
+        deposit_centavos: depositCentavosFinal,
+        hold_minutes: depositHoldMinutes,
+      });
+    }
+
+    if (depositRequired) {
+      await conn.query(
+        `UPDATE agendamentos
+            SET total_centavos=?,
+                deposit_centavos=?
+          WHERE id=?`,
+        [totalCentavosFinal, depositCentavosFinal, appointmentId]
+      );
+      await conn.query(
+        `UPDATE appointment_payments
+            SET amount_centavos=?,
+                percent=?
+          WHERE id=?`,
+        [depositCentavosFinal, depositPercent, depositPaymentId]
+      );
+    } else {
+      await conn.query('UPDATE agendamentos SET total_centavos=? WHERE id=?', [totalCentavosFinal, appointmentId]);
+    }
+
     // 5) le dados consistentes ainda na transacao
-    const [[novo]] = await conn.query('SELECT * FROM agendamentos WHERE id=?', [r.insertId]);
+    const [[novo]] = await conn.query('SELECT * FROM agendamentos WHERE id=?', [appointmentId]);
     const [[cli]]  = await conn.query('SELECT email, telefone, nome FROM usuarios WHERE id=?', [req.user.id]);
     const [[est]]  = await conn.query('SELECT email, telefone, nome, notify_email_estab, notify_whatsapp_estab FROM usuarios WHERE id=?', [estabelecimento_id]);
 
     await conn.commit();
     txStarted = false;
     conn.release(); conn = null;
+
+    if (depositRequired) {
+      const expiresIso = depositExpiresAt ? depositExpiresAt.toISOString() : null;
+      const apiBase = resolveApiBaseUrl();
+      const webhookUrl = resolveBillingWebhookUrl(apiBase);
+      const externalReference = `dep:ag:${appointmentId}:pay:${depositPaymentId}:est:${estabelecimento_id}`;
+      const metadata = {
+        agendamento_id: String(appointmentId),
+        estabelecimento_id: String(estabelecimento_id),
+        type: 'deposit',
+      };
+      try {
+        const { payment, pix } = await createMercadoPagoPixPayment({
+          amountCents: depositCentavosFinal,
+          description: `Sinal - ${serviceLabel}`,
+          externalReference,
+          metadata,
+          notificationUrl: webhookUrl,
+          payerEmail: cli?.email ? String(cli.email).trim().toLowerCase() : null,
+          expiresAt: depositExpiresAt,
+          accessToken: mpAccessToken,
+        });
+        await pool.query(
+          'UPDATE appointment_payments SET provider_payment_id=?, provider_reference=?, raw_payload=? WHERE id=?',
+          [String(payment.id), externalReference, safeJson(payment), depositPaymentId]
+        );
+        return res.status(201).json({
+          id: appointmentId,
+          agendamentoId: appointmentId,
+          status: 'pendente_pagamento',
+          total_centavos: totalCentavosFinal,
+          deposit_required: 1,
+          deposit_percent: depositPercent,
+          deposit_centavos: depositCentavosFinal,
+          deposit_expires_at: expiresIso,
+          paymentId: depositPaymentId,
+          expiresAt: expiresIso,
+          pix_qr: pix?.qr_code_base64 || null,
+          pix_qr_raw: pix?.qr_code || null,
+          pix_copia_cola: pix?.copia_e_cola || pix?.qr_code || null,
+          pix_ticket_url: pix?.ticket_url || null,
+          amount_centavos: depositCentavosFinal,
+          pix,
+        });
+      } catch (err) {
+        console.error('[agendamentos][deposit] erro ao criar PIX:', err?.message || err);
+        const payload = safeJson({ error: err?.message || String(err) });
+        await pool.query(
+          'UPDATE appointment_payments SET status=?, raw_payload=? WHERE id=?',
+          ['failed', payload, depositPaymentId]
+        );
+        await pool.query(
+          "UPDATE agendamentos SET status='cancelado', deposit_expires_at=NOW() WHERE id=? AND status='pendente_pagamento'",
+          [appointmentId]
+        );
+        return res.status(502).json({
+          error: 'payment_create_failed',
+          message: 'Nao foi possivel gerar o PIX do sinal. Tente novamente.',
+        });
+      }
+    }
 
     // 6) notificacao "best-effort" (NUNCA bloqueia a resposta)
     const inicioISO = new Date(novo.inicio).toISOString();
@@ -945,13 +1215,19 @@ router.post('/estabelecimento', authRequired, isEstabelecimento, async (req, res
       } catch {}
     }
 
+    const origem = 'estabelecimento_painel';
+
     conn = await pool.getConnection();
     await conn.beginTransaction();
     txStarted = true;
 
     let conflictSql = `SELECT id FROM agendamentos
-       WHERE estabelecimento_id=? AND status IN ('confirmado','pendente')
-         AND (status <> 'pendente' OR public_confirm_expires_at IS NULL OR public_confirm_expires_at >= NOW())
+       WHERE estabelecimento_id=? AND status IN ('confirmado','pendente','pendente_pagamento')
+         AND (
+           status = 'confirmado'
+           OR (status = 'pendente' AND (public_confirm_expires_at IS NULL OR public_confirm_expires_at >= NOW()))
+           OR (status = 'pendente_pagamento' AND (deposit_expires_at IS NULL OR deposit_expires_at >= NOW()))
+         )
          AND (inicio < ? AND fim > ?)`;
     const conflictParams = [estabelecimento_id, fimDate, inicioDate];
     if (profissional_id != null && requiresProfessional) {
@@ -969,16 +1245,26 @@ router.post('/estabelecimento', authRequired, isEstabelecimento, async (req, res
     }
 
     const [ins] = await conn.query(
-      'INSERT INTO agendamentos (cliente_id, estabelecimento_id, servico_id, profissional_id, inicio, fim) VALUES (?,?,?,?,?,?)',
-      [userId, estabelecimento_id, primaryServiceId, profissional_id || null, inicioDate, fimDate]
+      'INSERT INTO agendamentos (cliente_id, estabelecimento_id, servico_id, profissional_id, inicio, fim, origem) VALUES (?,?,?,?,?,?,?)',
+      [userId, estabelecimento_id, primaryServiceId, profissional_id || null, inicioDate, fimDate, origem]
     );
-    const itemValues = serviceItems.map((item, idx) => ([
-      ins.insertId,
-      item.id,
-      idx + 1,
-      Math.max(0, Math.round(item.duracao_min || 0)),
-      Math.max(0, Math.round(item.preco_centavos || 0)),
-    ]));
+    const itemValues = serviceItems.map((item, idx) => {
+      const precoSnapshot = Math.max(0, Math.round(item.preco_centavos || 0));
+      if (precoSnapshot <= 0) {
+        console.warn('[agendamentos][preco_snapshot_zero]', {
+          estabelecimento_id,
+          servico_id: item.id,
+          preco_centavos: item.preco_centavos,
+        });
+      }
+      return [
+        ins.insertId,
+        item.id,
+        idx + 1,
+        Math.max(0, Math.round(item.duracao_min || 0)),
+        precoSnapshot,
+      ];
+    });
     if (itemValues.length) {
       const placeholders = itemValues.map(() => '(?,?,?,?,?)').join(',');
       await conn.query(

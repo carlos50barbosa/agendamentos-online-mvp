@@ -809,20 +809,7 @@ router.post('/', async (req, res) => {
       return res.status(409).json({ error: 'slot_ocupado' });
     }
 
-    const origem =
-      normalizeOrigem(
-        req.body?.origem ??
-        req.body?.canal ??
-        req.body?.channel ??
-        req.body?.utm_source ??
-        req.body?.utmSource ??
-        req.body?.source ??
-        req.query?.origem ??
-        req.query?.canal ??
-        req.query?.utm_source ??
-        req.query?.utmSource ??
-        req.query?.source
-      ) || 'site';
+    const origem = 'public';
 
     let appointmentId = null;
     let depositPaymentId = null;
@@ -897,7 +884,12 @@ router.post('/', async (req, res) => {
       );
     }
 
-    const totalCentavosFinal = itemValues.reduce((sum, item) => sum + Number(item[4] || 0), 0);
+    const [[totalRow]] = await conn.query(
+      'SELECT COALESCE(SUM(preco_snapshot), 0) AS total_centavos FROM agendamento_itens WHERE agendamento_id=?',
+      [appointmentId]
+    );
+    const totalCentavosFinal = Number(totalRow?.total_centavos || 0);
+    console.info('[public/agendamento][total]', { appointmentId, totalCentavosFinal });
     if (!Number.isFinite(totalCentavosFinal) || totalCentavosFinal <= 0) {
       if (txStarted && conn) {
         await conn.rollback();

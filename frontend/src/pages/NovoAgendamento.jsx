@@ -4291,6 +4291,9 @@ useEffect(() => {
 
       const response = await Api.agendar(payload);
       const depositPayload = extractDepositPayload(response);
+      const depositRequired =
+        response?.status === "pendente_pagamento" ||
+        Number(response?.deposit_required || 0) === 1;
       success = true;
       setModal((p) => ({ ...p, isOpen: false }));
       if (depositPayload) {
@@ -4300,6 +4303,8 @@ useEffect(() => {
           estabelecimentoNome: selectedEstablishment?.name || "seu estabelecimento",
         });
         showToast("info", "Agendamento pendente do pagamento do sinal.");
+      } else if (depositRequired) {
+        showToast("error", "Não foi possível carregar o PIX do sinal.");
       } else {
         await scheduleWhatsAppReminders({
           inicioISO: selectedSlot.datetime,
@@ -4309,7 +4314,7 @@ useEffect(() => {
         showToast("success", "Agendado com sucesso!");
       }
     } catch (e) {
-      if (e?.data?.error === 'mp_not_connected') {
+      if (e?.data?.error === 'mp_not_connected' || e?.data?.error === 'mp_not_connected_for_deposit') {
         showToast('error', 'Estabelecimento ainda não configurou recebimento do sinal.');
       } else if (e?.data?.error === 'plan_limit_agendamentos') {
         const details = e?.data?.details || {};
@@ -4727,9 +4732,10 @@ useEffect(() => {
 
         }
 
-        const msg = e?.data?.error === 'mp_not_connected'
-           ? 'Estabelecimento ainda não configurou recebimento do sinal.'
-          : e?.data?.message || e?.message || "Falha ao agendar.";
+        const msg =
+          e?.data?.error === 'mp_not_connected' || e?.data?.error === 'mp_not_connected_for_deposit'
+            ? 'Estabelecimento ainda não configurou recebimento do sinal.'
+            : e?.data?.message || e?.message || "Falha ao agendar.";
         setGuestModal((prev) => ({ ...prev, loading: false, error: msg }));
       } finally {
 
@@ -7195,4 +7201,3 @@ useEffect(() => {
   );
 
 }
-
