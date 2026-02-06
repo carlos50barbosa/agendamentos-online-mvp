@@ -1,11 +1,22 @@
 // src/pages/DashboardCliente.jsx
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import { Api } from '../utils/api';
+import Modal from '../components/Modal.jsx';
 
 export default function DashboardCliente() {
   const [itens, setItens] = useState([]);
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState('todos');
+  const [depositModal, setDepositModal] = useState({
+    open: false,
+    status: 'pending',
+    paymentId: null,
+    appointmentId: null,
+    expiresAt: null,
+    amountCents: null,
+    pix: null,
+  });
+  const [depositLoadingId, setDepositLoadingId] = useState(null);
 
   const fmt = useMemo(
     () =>
@@ -48,8 +59,121 @@ export default function DashboardCliente() {
     if (s === 'confirmado') return { cls: 'ok', label: 'Confirmado' };
     if (s === 'concluido') return { cls: 'done', label: 'Concluído' };
     if (s === 'cancelado') return { cls: 'out', label: 'Cancelado' };
+    if (s === 'pendente_pagamento') return { cls: 'pending', label: 'Aguardando pagamento' };
     return { cls: 'pending', label: s ? s : 'Pendente' };
   };
+
+  const depositExpired =
+    depositModal.open &&
+    depositModal.expiresAt &&
+    new Date(depositModal.expiresAt).getTime() <= Date.now();
+  const depositStatusTone = depositExpired ? 'error' : 'pending';
+  const depositStatusText = depositExpired
+    ? 'Tempo esgotado, agendamento cancelado'
+    : 'Aguardando pagamento do sinal';
+  const depositStatusIcon = depositExpired ? '!' : '...';
+  const depositPixCode = depositModal?.pix?.copia_e_cola || depositModal?.pix?.qr_code || '';
+  const depositQrBase64 = depositModal?.pix?.qr_code_base64 || '';
+  const depositTicketUrl = depositModal?.pix?.ticket_url || '';
+  const depositAmountLabel =
+    typeof depositModal?.amountCents === 'number'
+      ? (depositModal.amountCents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+      : '';
+
+  const extractDepositPayload = useCallback((response) => {
+    if (!response || typeof response !== 'object') return null;
+    const paymentId =
+      response.paymentId ||
+      response.payment_id ||
+      response?.deposit?.payment_id ||
+      response?.payment?.id ||
+      null;
+    if (!paymentId) return null;
+    const pix = response.pix || response.deposit?.pix || {};
+    const appointmentId = response.agendamentoId || response.id || response.agendamento_id || null;
+    const expiresAt =
+      response.expiresAt ||
+      response.expires_at ||
+      response.deposit_expires_at ||
+      response.deposit?.expires_at ||
+      pix?.expires_at ||
+      null;
+    const amountCents =
+      response.amount_centavos ||
+      response.deposit_centavos ||
+      response.deposit?.amount_centavos ||
+      pix?.amount_cents ||
+      null;
+    return {
+      paymentId,
+      appointmentId,
+      expiresAt,
+      amountCents,
+      pix: {
+        qr_code_base64: pix?.qr_code_base64 || response.pix_qr || null,
+        qr_code: pix?.qr_code || response.pix_qr_raw || null,
+        copia_e_cola: pix?.copia_e_cola || response.pix_copia_cola || pix?.qr_code || null,
+        ticket_url: pix?.ticket_url || response.pix_ticket_url || null,
+        expires_at: pix?.expires_at || null,
+        amount_cents: pix?.amount_cents || null,
+      },
+    };
+  }, []);
+
+  const openDepositModal = useCallback((payload) => {
+    if (!payload?.paymentId) return;
+    setDepositModal({
+      open: true,
+      status: 'pending',
+      paymentId: payload.paymentId,
+      appointmentId: payload.appointmentId || null,
+      expiresAt: payload.expiresAt || null,
+      amountCents: payload.amountCents ?? null,
+      pix: payload.pix || null,
+    });
+  }, []);
+
+  const closeDepositModal = useCallback(() => {
+    setDepositModal({
+      open: false,
+      status: 'pending',
+      paymentId: null,
+      appointmentId: null,
+      expiresAt: null,
+      amountCents: null,
+      pix: null,
+    });
+  }, []);
+
+  const handleDepositPix = useCallback(async (item) => {
+    if (!item?.id) return;
+    setDepositLoadingId(item.id);
+    try {
+      const response = await Api.agendamentoDepositPix(item.id);
+      const payload = extractDepositPayload(response);
+      if (!payload) {
+        alert('PIX indisponível para este agendamento.');
+        return;
+      }
+      openDepositModal(payload);
+      setItens((xs) =>
+        xs.map((y) =>
+          y.id === item.id
+            ? {
+                ...y,
+                status: 'pendente_pagamento',
+                deposit_expires_at: response?.deposit_expires_at || response?.expiresAt || y.deposit_expires_at,
+              }
+            : y
+        )
+      );
+    } catch (e) {
+      const msg = e?.data?.message || e?.message || 'Não foi possível gerar o PIX.';
+      alert(msg);
+    } finally {
+      setDepositLoadingId(null);
+    }
+  }, [extractDepositPayload, openDepositModal]);
 
   const cancelar = async (id) => {
     const ok = window.confirm('Cancelar este agendamento?');
@@ -124,6 +248,10 @@ export default function DashboardCliente() {
                    ? 'concluido'
                   : i.status;
                 const canCancel = String(i.status||'').toLowerCase() === 'confirmado' && !past;
+                const statusNorm = String(i.status || '').toLowerCase();
+                const depositRequired = Number(i.deposit_required || 0) === 1;
+                const pendingDeposit = statusNorm === 'pendente_pagamento';
+                const canRegenerateDeposit = statusNorm === 'cancelado' && depositRequired && !i.deposit_paid_at;
                 const { cls, label } = statusMeta(effective);
                 const serviceNames = Array.isArray(i.servicos)
                    ? i.servicos.map((svc) => svc?.nome).filter(Boolean)
@@ -156,6 +284,28 @@ export default function DashboardCliente() {
                           </button>
                         </span>
                       )}
+                      {pendingDeposit && (
+                        <span className="only-mobile" style={{ marginTop: 6, marginLeft: 8 }}>
+                          <button
+                            className="btn btn--primary btn--sm"
+                            onClick={() => handleDepositPix(i)}
+                            disabled={depositLoadingId === i.id}
+                          >
+                            {depositLoadingId === i.id ? 'Carregando...' : 'Ver PIX'}
+                          </button>
+                        </span>
+                      )}
+                      {canRegenerateDeposit && (
+                        <span className="only-mobile" style={{ marginTop: 6, marginLeft: 8 }}>
+                          <button
+                            className="btn btn--primary btn--sm"
+                            onClick={() => handleDepositPix(i)}
+                            disabled={depositLoadingId === i.id}
+                          >
+                            {depositLoadingId === i.id ? 'Carregando...' : 'Gerar novo PIX'}
+                          </button>
+                        </span>
+                      )}
                     </td>
                     <td>
                       {canCancel && (
@@ -166,6 +316,26 @@ export default function DashboardCliente() {
                           Cancelar
                         </button>
                       )}
+                      {pendingDeposit && (
+                        <button
+                          className="btn btn--primary btn--sm"
+                          onClick={() => handleDepositPix(i)}
+                          disabled={depositLoadingId === i.id}
+                          style={{ marginLeft: canCancel ? 8 : 0 }}
+                        >
+                          {depositLoadingId === i.id ? 'Carregando...' : 'Ver PIX'}
+                        </button>
+                      )}
+                      {canRegenerateDeposit && (
+                        <button
+                          className="btn btn--primary btn--sm"
+                          onClick={() => handleDepositPix(i)}
+                          disabled={depositLoadingId === i.id}
+                          style={{ marginLeft: canCancel ? 8 : 0 }}
+                        >
+                          {depositLoadingId === i.id ? 'Carregando...' : 'Gerar novo PIX'}
+                        </button>
+                      )}
                     </td>
                   </tr>
                 );
@@ -174,6 +344,73 @@ export default function DashboardCliente() {
           </table>
         )}
       </div>
+      {depositModal.open && (
+        <Modal
+          title="Pagamento do sinal via PIX"
+          onClose={closeDepositModal}
+          closeButton
+          actions={[
+            !depositExpired && depositTicketUrl ? (
+              <a
+                key="open"
+                className="btn btn--primary"
+                href={depositTicketUrl}
+                target="_blank"
+                rel="noreferrer"
+              >
+                Abrir no app do banco
+              </a>
+            ) : null,
+            <button key="close" type="button" className="btn btn--outline" onClick={closeDepositModal}>
+              Fechar
+            </button>,
+          ].filter(Boolean)}
+        >
+          <div className="pix-checkout">
+            <div
+              className={`pix-checkout__status pix-checkout__status--${depositStatusTone}`}
+              role="status"
+              aria-live="polite"
+            >
+              <div className="pix-checkout__status-main">
+                <span className="pix-checkout__status-icon" aria-hidden="true">{depositStatusIcon}</span>
+                <span>{depositStatusText}</span>
+              </div>
+            </div>
+            {depositAmountLabel && (
+              <div className="pix-checkout__amount">
+                Valor do sinal: {depositAmountLabel}
+              </div>
+            )}
+            {depositQrBase64 ? (
+              <img
+                src={`data:image/png;base64,${depositQrBase64}`}
+                alt="QR Code PIX"
+                className="pix-checkout__qr"
+              />
+            ) : (
+              <p className="muted pix-checkout__hint">Abra o link acima para visualizar o QR Code.</p>
+            )}
+            {depositPixCode && (
+              <div className="pix-checkout__code">
+                <label htmlFor="deposit-pix-code">Chave copia e cola</label>
+                <textarea id="deposit-pix-code" readOnly value={depositPixCode} rows={3} className="input" />
+              </div>
+            )}
+            {depositModal?.expiresAt && (
+              <p className="muted pix-checkout__expires">
+                Expira em{' '}
+                {new Date(depositModal.expiresAt).toLocaleString('pt-BR', {
+                  day: '2-digit',
+                  month: 'short',
+                  hour: '2-digit',
+                  minute: '2-digit',
+                })}
+              </p>
+            )}
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }

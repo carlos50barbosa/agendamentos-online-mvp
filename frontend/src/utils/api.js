@@ -458,6 +458,7 @@ export const Api = {
     }),
 
   meusAgendamentos: () => req('/agendamentos'),
+  getAgendamento: (id) => req(`/agendamentos/${id}`),
 
   agendamentosEstabelecimento: (status) => req(`/agendamentos/estabelecimento${toQuery({ status })}`),
 
@@ -468,6 +469,14 @@ export const Api = {
   reagendarAgendamentoEstab: (id, payload) =>
 
     req(`/agendamentos/${id}/reschedule-estab`, { method: 'PUT', body: JSON.stringify(payload) }),
+
+  agendamentoDepositPix: (id) =>
+    req(`/agendamentos/${id}/deposit/pix`, { method: 'POST', body: JSON.stringify({}) }),
+
+  publicGetAgendamento: (id, token) => req(`/public/agendamentos/${id}${toQuery({ token })}`),
+
+  publicAgendamentoDepositPix: (id, token) =>
+    req(`/public/agendamentos/${id}/deposit/pix`, { method: 'POST', body: JSON.stringify({ token }) }),
 
 
 

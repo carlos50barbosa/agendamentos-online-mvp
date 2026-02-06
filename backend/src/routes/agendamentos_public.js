@@ -14,6 +14,12 @@ import { estabNotificationsDisabled } from '../lib/estab_notifications.js';
 import { clientWhatsappDisabled, whatsappImmediateDisabled, whatsappConfirmationDisabled } from '../lib/client_notifications.js';
 import jwt from 'jsonwebtoken';
 import { checkMonthlyAppointmentLimit, notifyAppointmentLimitReached } from '../lib/appointment_limits.js';
+import {
+  extractPixPayloadFromRaw,
+  fetchPendingDepositPayment,
+  isExpiredAt,
+  markDepositPaymentExpired,
+} from '../lib/deposit_payments.js';
 
 const router = Router();
 const TZ = 'America/Sao_Paulo';
@@ -26,6 +32,7 @@ const APPOINTMENT_BUFFER_MIN = (() => {
 })();
 const DEFAULT_DEPOSIT_HOLD_MINUTES = 15;
 const DEPOSIT_ALLOWED_PLANS = new Set(['pro', 'premium']);
+const PUBLIC_DEPOSIT_TOKEN_DAYS = Number(process.env.PUBLIC_DEPOSIT_TOKEN_DAYS || 30);
 
 const safeJson = (payload) => {
   try {
@@ -34,6 +41,67 @@ const safeJson = (payload) => {
     return null;
   }
 };
+
+function buildDepositPixPayload(paymentRow) {
+  if (!paymentRow) return null;
+  const pix = extractPixPayloadFromRaw(paymentRow.raw_payload, paymentRow.amount_centavos);
+  if (!pix) return null;
+  const expiresIso = paymentRow.expires_at ? new Date(paymentRow.expires_at).toISOString() : null;
+  return {
+    paymentId: paymentRow.id,
+    expiresAt: expiresIso,
+    amountCents: paymentRow.amount_centavos,
+    pix,
+  };
+}
+
+function attachDepositPixToResponse(target, paymentRow, payload) {
+  if (!target || !paymentRow || !payload) return;
+  const expiresIso = payload.expiresAt || (paymentRow.expires_at ? new Date(paymentRow.expires_at).toISOString() : null);
+  target.paymentId = paymentRow.id;
+  target.expiresAt = expiresIso;
+  target.deposit_expires_at = expiresIso;
+  target.amount_centavos = paymentRow.amount_centavos;
+  target.pix = payload.pix;
+  target.deposit = {
+    payment_id: paymentRow.id,
+    amount_centavos: paymentRow.amount_centavos,
+    expires_at: expiresIso,
+    pix: payload.pix,
+  };
+}
+
+function buildPublicDepositToken({ agendamentoId, clienteId, estabelecimentoId }) {
+  const secret = process.env.JWT_SECRET;
+  if (!secret) return null;
+  const payload = {
+    scope: 'public_deposit',
+    agendamento_id: Number(agendamentoId),
+    cliente_id: Number(clienteId),
+    estabelecimento_id: Number(estabelecimentoId),
+  };
+  try {
+    return jwt.sign(payload, secret, { expiresIn: `${PUBLIC_DEPOSIT_TOKEN_DAYS}d` });
+  } catch {
+    return null;
+  }
+}
+
+function verifyPublicDepositToken(rawToken) {
+  const token = String(rawToken || '').trim();
+  if (!token) return { ok: false, reason: 'missing_token' };
+  const secret = process.env.JWT_SECRET;
+  if (!secret) return { ok: false, reason: 'missing_secret' };
+  try {
+    const payload = jwt.verify(token, secret);
+    if (payload?.scope !== 'public_deposit') {
+      return { ok: false, reason: 'invalid_scope' };
+    }
+    return { ok: true, payload };
+  } catch (err) {
+    return { ok: false, reason: err?.name || 'invalid_token', error: err };
+  }
+}
 
 function resolveApiBaseUrl() {
   const frontBase = String(process.env.FRONTEND_BASE_URL || process.env.APP_URL || 'http://localhost:3001').replace(/\/$/, '');
@@ -969,6 +1037,11 @@ router.post('/', async (req, res) => {
           'UPDATE appointment_payments SET provider_payment_id=?, provider_reference=?, raw_payload=? WHERE id=?',
           [String(payment.id), externalReference, safeJson(payment), depositPaymentId]
         );
+        const depositToken = buildPublicDepositToken({
+          agendamentoId: appointmentId,
+          clienteId: userId,
+          estabelecimentoId: estabelecimento_id,
+        });
         return res.status(201).json({
           id: appointmentId,
           agendamentoId: appointmentId,
@@ -978,6 +1051,7 @@ router.post('/', async (req, res) => {
           deposit_percent: depositPercent,
           deposit_centavos: depositCentavosFinal,
           deposit_expires_at: expiresIso,
+          deposit_token: depositToken,
           paymentId: depositPaymentId,
           expiresAt: expiresIso,
           pix_qr: pix?.qr_code_base64 || null,
@@ -1098,6 +1172,269 @@ router.get('/confirm', async (req, res) => {
       title: 'Erro na confirmacao',
       message: 'Nao foi possivel confirmar agora. Tente novamente.',
     }));
+  }
+});
+
+// GET /public/agendamentos/:id?token=... (detalhe com PIX reaproveitado)
+router.get('/:id', async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) {
+      return res.status(400).json({ error: 'invalid_id' });
+    }
+    const token = req.query?.token || req.headers['x-deposit-token'];
+    const verification = verifyPublicDepositToken(token);
+    if (!verification.ok) {
+      console.warn('[public/agendamentos][deposit] invalid_token', verification.reason);
+      return res.status(401).json({ error: 'invalid_token' });
+    }
+    if (Number(verification.payload?.agendamento_id || 0) !== id) {
+      return res.status(403).json({ error: 'forbidden' });
+    }
+
+    const [rows] = await pool.query(
+      `SELECT a.*,
+              u.nome AS estabelecimento_nome,
+              p.nome AS profissional_nome,
+              p.avatar_url AS profissional_avatar_url
+         FROM agendamentos a
+         JOIN usuarios u ON u.id=a.estabelecimento_id
+         LEFT JOIN profissionais p ON p.id = a.profissional_id
+        WHERE a.id=?
+        LIMIT 1`,
+      [id]
+    );
+    if (!rows?.length) {
+      return res.status(404).json({ error: 'not_found' });
+    }
+    const item = rows[0];
+    await hydrateAppointmentsWithItems(pool, [item]);
+
+    const statusNorm = String(item.status || '').toLowerCase();
+    if (statusNorm === 'pendente_pagamento') {
+      const paymentRow = await fetchPendingDepositPayment(pool, item.id);
+      if (paymentRow) {
+        if (isExpiredAt(paymentRow.expires_at)) {
+          await markDepositPaymentExpired(pool, paymentRow);
+          item.status = 'cancelado';
+          item.deposit_expires_at = new Date().toISOString();
+        } else {
+          const payload = buildDepositPixPayload(paymentRow);
+          attachDepositPixToResponse(item, paymentRow, payload);
+        }
+      }
+    }
+
+    item.deposit_token = String(token || '') || null;
+    return res.json(item);
+  } catch (err) {
+    console.error('[public/agendamentos][GET]', err);
+    return res.status(500).json({ error: 'server_error' });
+  }
+});
+
+// POST /public/agendamentos/:id/deposit/pix (regenera PIX)
+router.post('/:id/deposit/pix', async (req, res) => {
+  let conn;
+  let txStarted = false;
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) {
+      return res.status(400).json({ error: 'invalid_id' });
+    }
+    const token = req.body?.token || req.query?.token || req.headers['x-deposit-token'];
+    const verification = verifyPublicDepositToken(token);
+    if (!verification.ok) {
+      console.warn('[public/agendamentos][deposit] invalid_token', verification.reason);
+      return res.status(401).json({ error: 'invalid_token' });
+    }
+    if (Number(verification.payload?.agendamento_id || 0) !== id) {
+      return res.status(403).json({ error: 'forbidden' });
+    }
+
+    conn = await pool.getConnection();
+    await conn.beginTransaction();
+    txStarted = true;
+
+    const [[ag]] = await conn.query('SELECT * FROM agendamentos WHERE id=? FOR UPDATE', [id]);
+    if (!ag) {
+      await conn.rollback();
+      return res.status(404).json({ error: 'not_found' });
+    }
+    if (Number(ag.deposit_required || 0) !== 1 || Number(ag.deposit_percent || 0) <= 0) {
+      await conn.rollback();
+      return res.status(409).json({ error: 'deposit_not_required' });
+    }
+    if (ag.deposit_paid_at) {
+      await conn.rollback();
+      return res.status(409).json({ error: 'deposit_already_paid' });
+    }
+
+    const totalCentavos = Number(ag.total_centavos || 0);
+    if (!Number.isFinite(totalCentavos) || totalCentavos <= 0) {
+      await conn.rollback();
+      return res.status(400).json({ error: 'invalid_total', message: 'Serviço sem preço configurado' });
+    }
+
+    const pending = await fetchPendingDepositPayment(conn, id, { forUpdate: true });
+    if (pending) {
+      if (isExpiredAt(pending.expires_at)) {
+        await markDepositPaymentExpired(conn, pending);
+      } else {
+        await conn.commit();
+        txStarted = false;
+        conn.release();
+        conn = null;
+        const payload = buildDepositPixPayload(pending);
+        if (!payload) {
+          return res.status(409).json({ error: 'pix_unavailable' });
+        }
+        return res.status(200).json({
+          id,
+          agendamentoId: id,
+          status: 'pendente_pagamento',
+          deposit_required: 1,
+          deposit_percent: Number(ag.deposit_percent || 0),
+          deposit_centavos: pending.amount_centavos,
+          deposit_expires_at: payload.expiresAt,
+          deposit_token: String(token || '') || null,
+          paymentId: pending.id,
+          expiresAt: payload.expiresAt,
+          amount_centavos: pending.amount_centavos,
+          pix: payload.pix,
+          pix_qr: payload.pix?.qr_code_base64 || null,
+          pix_qr_raw: payload.pix?.qr_code || null,
+          pix_copia_cola: payload.pix?.copia_e_cola || payload.pix?.qr_code || null,
+          pix_ticket_url: payload.pix?.ticket_url || null,
+        });
+      }
+    }
+
+    const [[settings]] = await conn.query(
+      'SELECT deposit_hold_minutes FROM establishment_settings WHERE estabelecimento_id=? LIMIT 1',
+      [ag.estabelecimento_id]
+    );
+    const holdMinutes =
+      Number(settings?.deposit_hold_minutes || DEFAULT_DEPOSIT_HOLD_MINUTES) || DEFAULT_DEPOSIT_HOLD_MINUTES;
+    const depositPercent = Number(ag.deposit_percent || 0);
+    const depositCentavos = Math.ceil(totalCentavos * depositPercent / 100);
+    if (!Number.isFinite(depositCentavos) || depositCentavos <= 0) {
+      await conn.rollback();
+      return res.status(400).json({ error: 'invalid_total', message: 'Serviço sem preço configurado' });
+    }
+
+    const mpAccess = await resolveMpAccessToken(ag.estabelecimento_id, { allowFallback: false });
+    const mpStatus = mpAccess.account?.status || null;
+    if (mpStatus !== 'connected' || !mpAccess.accessToken) {
+      await conn.rollback();
+      return res.status(409).json({ error: 'mp_not_connected_for_deposit' });
+    }
+    const depositExpiresAt = new Date(Date.now() + holdMinutes * 60_000);
+
+    const [payIns] = await conn.query(
+      `INSERT INTO appointment_payments
+        (agendamento_id, estabelecimento_id, type, status, amount_centavos, percent, expires_at)
+       VALUES (?,?,?,?,?,?,?)`,
+      [
+        id,
+        ag.estabelecimento_id,
+        'deposit',
+        'pending',
+        depositCentavos,
+        depositPercent,
+        depositExpiresAt,
+      ]
+    );
+    const paymentId = payIns.insertId;
+    await conn.query(
+      `UPDATE agendamentos
+          SET status='pendente_pagamento',
+              deposit_centavos=?,
+              deposit_expires_at=?
+        WHERE id=?`,
+      [depositCentavos, depositExpiresAt, id]
+    );
+
+    const itemsByAppointment = await fetchAppointmentItems(conn, [id]);
+    let serviceItems = itemsByAppointment.get(Number(id)) || [];
+    if (!serviceItems.length && ag.servico_id) {
+      const fallback = await fetchServicesForAppointment(conn, ag.estabelecimento_id, [ag.servico_id]);
+      serviceItems = fallback.items || [];
+    }
+    const summary = summarizeServices(serviceItems);
+    const serviceLabel = summary.serviceLabel || serviceItems[0]?.nome || 'servico';
+    const [[cli]] = await conn.query('SELECT email FROM usuarios WHERE id=?', [ag.cliente_id]);
+
+    await conn.commit();
+    txStarted = false;
+    conn.release();
+    conn = null;
+
+    const apiBase = resolveApiBaseUrl();
+    const webhookUrl = resolveBillingWebhookUrl(apiBase);
+    const externalReference = `dep:ag:${id}:pay:${paymentId}:est:${ag.estabelecimento_id}`;
+    const metadata = {
+      agendamento_id: String(id),
+      estabelecimento_id: String(ag.estabelecimento_id),
+      type: 'deposit',
+    };
+
+    try {
+      const { payment, pix } = await createMercadoPagoPixPayment({
+        amountCents: depositCentavos,
+        description: `Sinal - ${serviceLabel}`,
+        externalReference,
+        metadata,
+        notificationUrl: webhookUrl,
+        payerEmail: cli?.email ? String(cli.email).trim().toLowerCase() : null,
+        expiresAt: depositExpiresAt,
+        accessToken: mpAccess.accessToken,
+      });
+      await pool.query(
+        'UPDATE appointment_payments SET provider_payment_id=?, provider_reference=?, raw_payload=? WHERE id=?',
+        [String(payment.id), externalReference, safeJson(payment), paymentId]
+      );
+      const expiresIso = depositExpiresAt.toISOString();
+      return res.status(201).json({
+        id,
+        agendamentoId: id,
+        status: 'pendente_pagamento',
+        deposit_required: 1,
+        deposit_percent: depositPercent,
+        deposit_centavos: depositCentavos,
+        deposit_expires_at: expiresIso,
+        deposit_token: String(token || '') || null,
+        paymentId,
+        expiresAt: expiresIso,
+        amount_centavos: depositCentavos,
+        pix,
+        pix_qr: pix?.qr_code_base64 || null,
+        pix_qr_raw: pix?.qr_code || null,
+        pix_copia_cola: pix?.copia_e_cola || pix?.qr_code || null,
+        pix_ticket_url: pix?.ticket_url || null,
+      });
+    } catch (err) {
+      console.error('[public/agendamentos][deposit][refresh] erro ao criar PIX:', err?.message || err);
+      const payload = safeJson({ error: err?.message || String(err) });
+      await pool.query(
+        'UPDATE appointment_payments SET status=?, raw_payload=? WHERE id=?',
+        ['failed', payload, paymentId]
+      );
+      await pool.query(
+        "UPDATE agendamentos SET status='cancelado', deposit_expires_at=NOW() WHERE id=? AND status='pendente_pagamento'",
+        [id]
+      );
+      return res.status(502).json({ error: 'payment_create_failed' });
+    }
+  } catch (err) {
+    try {
+      if (txStarted && conn) await conn.rollback();
+    } catch {}
+    try {
+      if (conn) conn.release();
+    } catch {}
+    console.error('[public/agendamentos][deposit][refresh]', err);
+    return res.status(500).json({ error: 'server_error' });
   }
 });
 

@@ -458,6 +458,7 @@ const createDepositModalState = () => ({
   expiresAt: null,
   amountCents: null,
   pix: null,
+  depositToken: null,
   appointmentInfo: null,
 });
 const formatCountdown = (ms) => {
@@ -477,6 +478,12 @@ const extractDepositPayload = (response) => {
     null;
   if (!paymentId) return null;
   const pix = response.pix || response.deposit?.pix || {};
+  const depositToken =
+    response.deposit_token ||
+    response?.deposit?.token ||
+    response?.deposit?.deposit_token ||
+    response?.token ||
+    null;
   const appointmentId = response.agendamentoId || response.id || response.agendamento_id || null;
   const expiresAt =
     response.expiresAt ||
@@ -500,6 +507,7 @@ const extractDepositPayload = (response) => {
     appointmentId,
     expiresAt,
     amountCents,
+    depositToken,
     pix: {
       qr_code_base64: qrCodeBase64,
       qr_code: qrCodeRaw,
@@ -2161,6 +2169,7 @@ export default function NovoAgendamento() {
   const [depositModal, setDepositModal] = useState(createDepositModalState());
   const [depositCountdown, setDepositCountdown] = useState("");
   const depositHandledRef = useRef({ paid: false, expired: false });
+  const [depositRefreshing, setDepositRefreshing] = useState(false);
   const [toast, setToast] = useState(null);
   const [viewMode] = useState('month'); // por ora, Mês é o padrão
 
@@ -3056,6 +3065,7 @@ export default function NovoAgendamento() {
       expiresAt: payload.expiresAt || null,
       amountCents: payload.amountCents ?? null,
       pix: payload.pix || null,
+      depositToken: payload.depositToken || null,
       appointmentInfo: appointmentInfo || null,
     });
   }, []);
@@ -3076,6 +3086,33 @@ export default function NovoAgendamento() {
       showToast("error", "Não foi possível copiar o código PIX.");
     }
   }, [showToast]);
+  const handleRefreshDepositPix = useCallback(async () => {
+    if (!depositModal?.appointmentId) {
+      showToast("error", "Agendamento inválido para gerar PIX.");
+      return;
+    }
+    if (!isAuthenticated && !depositModal?.depositToken) {
+      showToast("error", "Token do agendamento não encontrado.");
+      return;
+    }
+    setDepositRefreshing(true);
+    try {
+      const response = isAuthenticated
+        ? await Api.agendamentoDepositPix(depositModal.appointmentId)
+        : await Api.publicAgendamentoDepositPix(depositModal.appointmentId, depositModal.depositToken);
+      const payload = extractDepositPayload(response);
+      if (!payload) {
+        showToast("error", "Não foi possível carregar o PIX do sinal.");
+        return;
+      }
+      openDepositModal(payload, depositModal.appointmentInfo);
+    } catch (e) {
+      const msg = e?.data?.message || e?.message || "Falha ao gerar novo PIX.";
+      showToast("error", msg);
+    } finally {
+      setDepositRefreshing(false);
+    }
+  }, [depositModal, isAuthenticated, openDepositModal, showToast]);
   /* ====== Carregar Estabelecimentos ====== */
 
   useEffect(() => {
@@ -7184,6 +7221,8 @@ useEffect(() => {
             depositCountdown={depositCountdown}
             handleCloseDepositModal={closeDepositModal}
             handleCopyPixCode={handleCopyPixCode}
+            handleRefreshDepositPix={handleRefreshDepositPix}
+            depositRefreshing={depositRefreshing}
             selectedProfessional={selectedProfessional}
             serviceDuration={serviceDuration}
             servicePrice={servicePrice}

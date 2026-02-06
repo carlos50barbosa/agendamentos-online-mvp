@@ -9,6 +9,12 @@ import { sendAppointmentWhatsApp } from '../lib/whatsapp_outbox.js';
 import { buildConfirmacaoAgendamentoV2Components, isConfirmacaoAgendamentoV2 } from '../lib/whatsapp_templates.js';
 import { createMercadoPagoPixPayment } from '../lib/billing.js';
 import { resolveMpAccessToken } from '../services/mpAccounts.js';
+import {
+  extractPixPayloadFromRaw,
+  fetchPendingDepositPayment,
+  isExpiredAt,
+  markDepositPaymentExpired,
+} from '../lib/deposit_payments.js';
 import bcrypt from 'bcryptjs';
 import { checkMonthlyAppointmentLimit, notifyAppointmentLimitReached } from '../lib/appointment_limits.js';
 import { estabNotificationsDisabled } from '../lib/estab_notifications.js';
@@ -116,6 +122,35 @@ async function resolveDepositConfig(estabelecimentoId, planContext) {
   const holdMinutes = Number(row?.deposit_hold_minutes || DEFAULT_DEPOSIT_HOLD_MINUTES) || DEFAULT_DEPOSIT_HOLD_MINUTES;
   const enabled = Boolean(enabledFlag) && Number.isFinite(percent) && percent > 0;
   return { allowed: true, enabled, percent, holdMinutes };
+}
+
+function buildDepositPixPayload(paymentRow) {
+  if (!paymentRow) return null;
+  const pix = extractPixPayloadFromRaw(paymentRow.raw_payload, paymentRow.amount_centavos);
+  if (!pix) return null;
+  const expiresIso = paymentRow.expires_at ? new Date(paymentRow.expires_at).toISOString() : null;
+  return {
+    paymentId: paymentRow.id,
+    expiresAt: expiresIso,
+    amountCents: paymentRow.amount_centavos,
+    pix,
+  };
+}
+
+function attachDepositPixToResponse(target, paymentRow, payload) {
+  if (!target || !paymentRow || !payload) return;
+  const expiresIso = payload.expiresAt || (paymentRow.expires_at ? new Date(paymentRow.expires_at).toISOString() : null);
+  target.paymentId = paymentRow.id;
+  target.expiresAt = expiresIso;
+  target.deposit_expires_at = expiresIso;
+  target.amount_centavos = paymentRow.amount_centavos;
+  target.pix = payload.pix;
+  target.deposit = {
+    payment_id: paymentRow.id,
+    amount_centavos: paymentRow.amount_centavos,
+    expires_at: expiresIso,
+    pix: payload.pix,
+  };
 }
 const normalizeServiceIds = (value) => {
   const ids = [];
@@ -362,6 +397,250 @@ router.get('/estabelecimento', authRequired, isEstabelecimento, async (req, res)
   );
   await hydrateAppointmentsWithItems(pool, rows);
   res.json(rows);
+});
+
+// Detalhe do agendamento (cliente)
+router.get('/:id', authRequired, isCliente, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) {
+      return res.status(400).json({ error: 'invalid_id' });
+    }
+    const [rows] = await pool.query(
+      `SELECT a.*,
+              u.nome AS estabelecimento_nome,
+              p.nome AS profissional_nome,
+              p.avatar_url AS profissional_avatar_url
+         FROM agendamentos a
+         JOIN usuarios u ON u.id=a.estabelecimento_id
+         LEFT JOIN profissionais p ON p.id = a.profissional_id
+        WHERE a.id=? AND a.cliente_id=?
+        LIMIT 1`,
+      [id, req.user.id]
+    );
+    if (!rows?.length) {
+      return res.status(404).json({ error: 'not_found' });
+    }
+    const item = rows[0];
+    await hydrateAppointmentsWithItems(pool, [item]);
+
+    const statusNorm = String(item.status || '').toLowerCase();
+    if (statusNorm === 'pendente_pagamento') {
+      const paymentRow = await fetchPendingDepositPayment(pool, item.id);
+      if (paymentRow) {
+        if (isExpiredAt(paymentRow.expires_at)) {
+          await markDepositPaymentExpired(pool, paymentRow);
+          item.status = 'cancelado';
+          item.deposit_expires_at = new Date().toISOString();
+        } else {
+          const payload = buildDepositPixPayload(paymentRow);
+          attachDepositPixToResponse(item, paymentRow, payload);
+        }
+      }
+    }
+
+    return res.json(item);
+  } catch (err) {
+    console.error('[agendamentos][GET]', err);
+    return res.status(500).json({ error: 'server_error' });
+  }
+});
+
+// Regerar PIX do sinal (cliente)
+router.post('/:id/deposit/pix', authRequired, isCliente, async (req, res) => {
+  let conn;
+  let txStarted = false;
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) {
+      return res.status(400).json({ error: 'invalid_id' });
+    }
+
+    conn = await pool.getConnection();
+    await conn.beginTransaction();
+    txStarted = true;
+
+    const [[ag]] = await conn.query(
+      'SELECT * FROM agendamentos WHERE id=? AND cliente_id=? FOR UPDATE',
+      [id, req.user.id]
+    );
+    if (!ag) {
+      await conn.rollback();
+      return res.status(404).json({ error: 'not_found' });
+    }
+    if (Number(ag.deposit_required || 0) !== 1 || Number(ag.deposit_percent || 0) <= 0) {
+      await conn.rollback();
+      return res.status(409).json({ error: 'deposit_not_required' });
+    }
+    if (ag.deposit_paid_at) {
+      await conn.rollback();
+      return res.status(409).json({ error: 'deposit_already_paid' });
+    }
+
+    const totalCentavos = Number(ag.total_centavos || 0);
+    if (!Number.isFinite(totalCentavos) || totalCentavos <= 0) {
+      await conn.rollback();
+      return res.status(400).json({ error: 'invalid_total', message: 'Serviço sem preço configurado' });
+    }
+
+    const pending = await fetchPendingDepositPayment(conn, id, { forUpdate: true });
+    if (pending) {
+      if (isExpiredAt(pending.expires_at)) {
+        await markDepositPaymentExpired(conn, pending);
+      } else {
+        await conn.commit();
+        txStarted = false;
+        conn.release();
+        conn = null;
+        const payload = buildDepositPixPayload(pending);
+        if (!payload) {
+          return res.status(409).json({ error: 'pix_unavailable' });
+        }
+        return res.status(200).json({
+          id,
+          agendamentoId: id,
+          status: 'pendente_pagamento',
+          deposit_required: 1,
+          deposit_percent: Number(ag.deposit_percent || 0),
+          deposit_centavos: pending.amount_centavos,
+          deposit_expires_at: payload.expiresAt,
+          paymentId: pending.id,
+          expiresAt: payload.expiresAt,
+          amount_centavos: pending.amount_centavos,
+          pix: payload.pix,
+          pix_qr: payload.pix?.qr_code_base64 || null,
+          pix_qr_raw: payload.pix?.qr_code || null,
+          pix_copia_cola: payload.pix?.copia_e_cola || payload.pix?.qr_code || null,
+          pix_ticket_url: payload.pix?.ticket_url || null,
+        });
+      }
+    }
+
+    const [[settings]] = await conn.query(
+      'SELECT deposit_hold_minutes FROM establishment_settings WHERE estabelecimento_id=? LIMIT 1',
+      [ag.estabelecimento_id]
+    );
+    const holdMinutes =
+      Number(settings?.deposit_hold_minutes || DEFAULT_DEPOSIT_HOLD_MINUTES) || DEFAULT_DEPOSIT_HOLD_MINUTES;
+    const depositPercent = Number(ag.deposit_percent || 0);
+    const depositCentavos = Math.ceil(totalCentavos * depositPercent / 100);
+    if (!Number.isFinite(depositCentavos) || depositCentavos <= 0) {
+      await conn.rollback();
+      return res.status(400).json({ error: 'invalid_total', message: 'Serviço sem preço configurado' });
+    }
+
+    const mpAccess = await resolveMpAccessToken(ag.estabelecimento_id, { allowFallback: false });
+    const mpStatus = mpAccess.account?.status || null;
+    if (mpStatus !== 'connected' || !mpAccess.accessToken) {
+      await conn.rollback();
+      return res.status(409).json({ error: 'mp_not_connected_for_deposit' });
+    }
+    const depositExpiresAt = new Date(Date.now() + holdMinutes * 60_000);
+
+    const [payIns] = await conn.query(
+      `INSERT INTO appointment_payments
+        (agendamento_id, estabelecimento_id, type, status, amount_centavos, percent, expires_at)
+       VALUES (?,?,?,?,?,?,?)`,
+      [
+        id,
+        ag.estabelecimento_id,
+        'deposit',
+        'pending',
+        depositCentavos,
+        depositPercent,
+        depositExpiresAt,
+      ]
+    );
+    const paymentId = payIns.insertId;
+    await conn.query(
+      `UPDATE agendamentos
+          SET status='pendente_pagamento',
+              deposit_centavos=?,
+              deposit_expires_at=?
+        WHERE id=?`,
+      [depositCentavos, depositExpiresAt, id]
+    );
+
+    const itemsByAppointment = await fetchAppointmentItems(conn, [id]);
+    let serviceItems = itemsByAppointment.get(Number(id)) || [];
+    if (!serviceItems.length && ag.servico_id) {
+      const fallback = await fetchServicesForAppointment(conn, ag.estabelecimento_id, [ag.servico_id]);
+      serviceItems = fallback.items || [];
+    }
+    const summary = summarizeServices(serviceItems);
+    const serviceLabel = summary.serviceLabel || serviceItems[0]?.nome || 'servico';
+    const [[cli]] = await conn.query('SELECT email FROM usuarios WHERE id=?', [ag.cliente_id]);
+
+    await conn.commit();
+    txStarted = false;
+    conn.release();
+    conn = null;
+
+    const apiBase = resolveApiBaseUrl();
+    const webhookUrl = resolveBillingWebhookUrl(apiBase);
+    const externalReference = `dep:ag:${id}:pay:${paymentId}:est:${ag.estabelecimento_id}`;
+    const metadata = {
+      agendamento_id: String(id),
+      estabelecimento_id: String(ag.estabelecimento_id),
+      type: 'deposit',
+    };
+
+    try {
+      const { payment, pix } = await createMercadoPagoPixPayment({
+        amountCents: depositCentavos,
+        description: `Sinal - ${serviceLabel}`,
+        externalReference,
+        metadata,
+        notificationUrl: webhookUrl,
+        payerEmail: cli?.email ? String(cli.email).trim().toLowerCase() : null,
+        expiresAt: depositExpiresAt,
+        accessToken: mpAccess.accessToken,
+      });
+      await pool.query(
+        'UPDATE appointment_payments SET provider_payment_id=?, provider_reference=?, raw_payload=? WHERE id=?',
+        [String(payment.id), externalReference, safeJson(payment), paymentId]
+      );
+      const expiresIso = depositExpiresAt.toISOString();
+      return res.status(201).json({
+        id,
+        agendamentoId: id,
+        status: 'pendente_pagamento',
+        deposit_required: 1,
+        deposit_percent: depositPercent,
+        deposit_centavos: depositCentavos,
+        deposit_expires_at: expiresIso,
+        paymentId,
+        expiresAt: expiresIso,
+        amount_centavos: depositCentavos,
+        pix,
+        pix_qr: pix?.qr_code_base64 || null,
+        pix_qr_raw: pix?.qr_code || null,
+        pix_copia_cola: pix?.copia_e_cola || pix?.qr_code || null,
+        pix_ticket_url: pix?.ticket_url || null,
+      });
+    } catch (err) {
+      console.error('[agendamentos][deposit][refresh] erro ao criar PIX:', err?.message || err);
+      const payload = safeJson({ error: err?.message || String(err) });
+      await pool.query(
+        'UPDATE appointment_payments SET status=?, raw_payload=? WHERE id=?',
+        ['failed', payload, paymentId]
+      );
+      await pool.query(
+        "UPDATE agendamentos SET status='cancelado', deposit_expires_at=NOW() WHERE id=? AND status='pendente_pagamento'",
+        [id]
+      );
+      return res.status(502).json({ error: 'payment_create_failed' });
+    }
+  } catch (err) {
+    try {
+      if (txStarted && conn) await conn.rollback();
+    } catch {}
+    try {
+      if (conn) conn.release();
+    } catch {}
+    console.error('[agendamentos][deposit][refresh]', err);
+    return res.status(500).json({ error: 'server_error' });
+  }
 });
 
 /* =================== Criacao =================== */
