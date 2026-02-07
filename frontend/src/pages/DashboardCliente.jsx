@@ -1,5 +1,6 @@
 // src/pages/DashboardCliente.jsx
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Api } from '../utils/api';
 import Modal from '../components/Modal.jsx';
 
@@ -7,6 +8,7 @@ export default function DashboardCliente() {
   const [itens, setItens] = useState([]);
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState('todos');
+  const nav = useNavigate();
   const [depositModal, setDepositModal] = useState({
     open: false,
     status: 'pending',
@@ -168,12 +170,17 @@ export default function DashboardCliente() {
         )
       );
     } catch (e) {
-      const msg = e?.data?.message || e?.message || 'Não foi possível gerar o PIX.';
-      alert(msg);
+      if (e?.data?.error === 'deposit_canceled_requires_new_booking') {
+        alert(e?.data?.message || 'Agendamento cancelado por falta de pagamento. Faça um novo agendamento.');
+        nav('/novo');
+      } else {
+        const msg = e?.data?.message || e?.message || 'Não foi possível gerar o PIX.';
+        alert(msg);
+      }
     } finally {
       setDepositLoadingId(null);
     }
-  }, [extractDepositPayload, openDepositModal]);
+  }, [extractDepositPayload, nav, openDepositModal]);
 
   const cancelar = async (id) => {
     const ok = window.confirm('Cancelar este agendamento?');
@@ -249,9 +256,12 @@ export default function DashboardCliente() {
                   : i.status;
                 const canCancel = String(i.status||'').toLowerCase() === 'confirmado' && !past;
                 const statusNorm = String(i.status || '').toLowerCase();
-                const depositRequired = Number(i.deposit_required || 0) === 1;
                 const pendingDeposit = statusNorm === 'pendente_pagamento';
-                const canRegenerateDeposit = statusNorm === 'cancelado' && depositRequired && !i.deposit_paid_at;
+                const pendingExpired =
+                  pendingDeposit &&
+                  i.deposit_expires_at &&
+                  new Date(i.deposit_expires_at).getTime() <= Date.now();
+                const canViewPix = pendingDeposit && !pendingExpired;
                 const { cls, label } = statusMeta(effective);
                 const serviceNames = Array.isArray(i.servicos)
                    ? i.servicos.map((svc) => svc?.nome).filter(Boolean)
@@ -284,7 +294,7 @@ export default function DashboardCliente() {
                           </button>
                         </span>
                       )}
-                      {pendingDeposit && (
+                      {canViewPix && (
                         <span className="only-mobile" style={{ marginTop: 6, marginLeft: 8 }}>
                           <button
                             className="btn btn--primary btn--sm"
@@ -292,17 +302,6 @@ export default function DashboardCliente() {
                             disabled={depositLoadingId === i.id}
                           >
                             {depositLoadingId === i.id ? 'Carregando...' : 'Ver PIX'}
-                          </button>
-                        </span>
-                      )}
-                      {canRegenerateDeposit && (
-                        <span className="only-mobile" style={{ marginTop: 6, marginLeft: 8 }}>
-                          <button
-                            className="btn btn--primary btn--sm"
-                            onClick={() => handleDepositPix(i)}
-                            disabled={depositLoadingId === i.id}
-                          >
-                            {depositLoadingId === i.id ? 'Carregando...' : 'Gerar novo PIX'}
                           </button>
                         </span>
                       )}
@@ -316,7 +315,7 @@ export default function DashboardCliente() {
                           Cancelar
                         </button>
                       )}
-                      {pendingDeposit && (
+                      {canViewPix && (
                         <button
                           className="btn btn--primary btn--sm"
                           onClick={() => handleDepositPix(i)}
@@ -324,16 +323,6 @@ export default function DashboardCliente() {
                           style={{ marginLeft: canCancel ? 8 : 0 }}
                         >
                           {depositLoadingId === i.id ? 'Carregando...' : 'Ver PIX'}
-                        </button>
-                      )}
-                      {canRegenerateDeposit && (
-                        <button
-                          className="btn btn--primary btn--sm"
-                          onClick={() => handleDepositPix(i)}
-                          disabled={depositLoadingId === i.id}
-                          style={{ marginLeft: canCancel ? 8 : 0 }}
-                        >
-                          {depositLoadingId === i.id ? 'Carregando...' : 'Gerar novo PIX'}
                         </button>
                       )}
                     </td>

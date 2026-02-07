@@ -2169,7 +2169,6 @@ export default function NovoAgendamento() {
   const [depositModal, setDepositModal] = useState(createDepositModalState());
   const [depositCountdown, setDepositCountdown] = useState("");
   const depositHandledRef = useRef({ paid: false, expired: false });
-  const [depositRefreshing, setDepositRefreshing] = useState(false);
   const [toast, setToast] = useState(null);
   const [viewMode] = useState('month'); // por ora, Mês é o padrão
 
@@ -3086,33 +3085,6 @@ export default function NovoAgendamento() {
       showToast("error", "Não foi possível copiar o código PIX.");
     }
   }, [showToast]);
-  const handleRefreshDepositPix = useCallback(async () => {
-    if (!depositModal?.appointmentId) {
-      showToast("error", "Agendamento inválido para gerar PIX.");
-      return;
-    }
-    if (!isAuthenticated && !depositModal?.depositToken) {
-      showToast("error", "Token do agendamento não encontrado.");
-      return;
-    }
-    setDepositRefreshing(true);
-    try {
-      const response = isAuthenticated
-        ? await Api.agendamentoDepositPix(depositModal.appointmentId)
-        : await Api.publicAgendamentoDepositPix(depositModal.appointmentId, depositModal.depositToken);
-      const payload = extractDepositPayload(response);
-      if (!payload) {
-        showToast("error", "Não foi possível carregar o PIX do sinal.");
-        return;
-      }
-      openDepositModal(payload, depositModal.appointmentInfo);
-    } catch (e) {
-      const msg = e?.data?.message || e?.message || "Falha ao gerar novo PIX.";
-      showToast("error", msg);
-    } finally {
-      setDepositRefreshing(false);
-    }
-  }, [depositModal, isAuthenticated, openDepositModal, showToast]);
   /* ====== Carregar Estabelecimentos ====== */
 
   useEffect(() => {
@@ -7221,8 +7193,6 @@ useEffect(() => {
             depositCountdown={depositCountdown}
             handleCloseDepositModal={closeDepositModal}
             handleCopyPixCode={handleCopyPixCode}
-            handleRefreshDepositPix={handleRefreshDepositPix}
-            depositRefreshing={depositRefreshing}
             selectedProfessional={selectedProfessional}
             serviceDuration={serviceDuration}
             servicePrice={servicePrice}

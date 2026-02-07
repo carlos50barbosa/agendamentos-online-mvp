@@ -470,167 +470,121 @@ router.post('/:id/deposit/pix', authRequired, isCliente, async (req, res) => {
     }
     if (Number(ag.deposit_required || 0) !== 1 || Number(ag.deposit_percent || 0) <= 0) {
       await conn.rollback();
+      txStarted = false;
+      conn.release();
+      conn = null;
       return res.status(409).json({ error: 'deposit_not_required' });
     }
     if (ag.deposit_paid_at) {
       await conn.rollback();
+      txStarted = false;
+      conn.release();
+      conn = null;
       return res.status(409).json({ error: 'deposit_already_paid' });
     }
-
-    const totalCentavos = Number(ag.total_centavos || 0);
-    if (!Number.isFinite(totalCentavos) || totalCentavos <= 0) {
+    const statusNorm = String(ag.status || '').toLowerCase();
+    if (statusNorm === 'cancelado') {
+      console.info('[agendamentos][deposit][refresh] canceled_requires_new', { agendamento_id: id });
       await conn.rollback();
-      return res.status(400).json({ error: 'invalid_total', message: 'Serviço sem preço configurado' });
+      txStarted = false;
+      conn.release();
+      conn = null;
+      return res.status(409).json({
+        error: 'deposit_canceled_requires_new_booking',
+        message: 'Agendamento cancelado por falta de pagamento. Faça um novo agendamento.',
+      });
+    }
+    if (statusNorm !== 'pendente_pagamento') {
+      await conn.rollback();
+      txStarted = false;
+      conn.release();
+      conn = null;
+      return res.status(409).json({ error: 'deposit_not_pending' });
+    }
+
+    const expiredByAgendamento =
+      ag.deposit_expires_at && new Date(ag.deposit_expires_at).getTime() <= Date.now();
+    if (expiredByAgendamento) {
+      await conn.query(
+        "UPDATE agendamentos SET status='cancelado', deposit_expires_at=NOW() WHERE id=? AND status='pendente_pagamento'",
+        [id]
+      );
+      await conn.query(
+        "UPDATE appointment_payments SET status='expired' WHERE agendamento_id=? AND status='pending'",
+        [id]
+      );
+      await conn.commit();
+      txStarted = false;
+      conn.release();
+      conn = null;
+      console.info('[agendamentos][deposit][refresh] expired_requires_new', { agendamento_id: id });
+      return res.status(409).json({
+        error: 'deposit_canceled_requires_new_booking',
+        message: 'Agendamento cancelado por falta de pagamento. Faça um novo agendamento.',
+      });
     }
 
     const pending = await fetchPendingDepositPayment(conn, id, { forUpdate: true });
     if (pending) {
       if (isExpiredAt(pending.expires_at)) {
         await markDepositPaymentExpired(conn, pending);
-      } else {
         await conn.commit();
         txStarted = false;
         conn.release();
         conn = null;
-        const payload = buildDepositPixPayload(pending);
-        if (!payload) {
-          return res.status(409).json({ error: 'pix_unavailable' });
-        }
-        return res.status(200).json({
-          id,
-          agendamentoId: id,
-          status: 'pendente_pagamento',
-          deposit_required: 1,
-          deposit_percent: Number(ag.deposit_percent || 0),
-          deposit_centavos: pending.amount_centavos,
-          deposit_expires_at: payload.expiresAt,
-          paymentId: pending.id,
-          expiresAt: payload.expiresAt,
-          amount_centavos: pending.amount_centavos,
-          pix: payload.pix,
-          pix_qr: payload.pix?.qr_code_base64 || null,
-          pix_qr_raw: payload.pix?.qr_code || null,
-          pix_copia_cola: payload.pix?.copia_e_cola || payload.pix?.qr_code || null,
-          pix_ticket_url: payload.pix?.ticket_url || null,
+        console.info('[agendamentos][deposit][refresh] expired_payment_requires_new', { agendamento_id: id });
+        return res.status(409).json({
+          error: 'deposit_canceled_requires_new_booking',
+          message: 'Agendamento cancelado por falta de pagamento. Faça um novo agendamento.',
         });
       }
-    }
-
-    const [[settings]] = await conn.query(
-      'SELECT deposit_hold_minutes FROM establishment_settings WHERE estabelecimento_id=? LIMIT 1',
-      [ag.estabelecimento_id]
-    );
-    const holdMinutes =
-      Number(settings?.deposit_hold_minutes || DEFAULT_DEPOSIT_HOLD_MINUTES) || DEFAULT_DEPOSIT_HOLD_MINUTES;
-    const depositPercent = Number(ag.deposit_percent || 0);
-    const depositCentavos = Math.ceil(totalCentavos * depositPercent / 100);
-    if (!Number.isFinite(depositCentavos) || depositCentavos <= 0) {
-      await conn.rollback();
-      return res.status(400).json({ error: 'invalid_total', message: 'Serviço sem preço configurado' });
-    }
-
-    const mpAccess = await resolveMpAccessToken(ag.estabelecimento_id, { allowFallback: false });
-    const mpStatus = mpAccess.account?.status || null;
-    if (mpStatus !== 'connected' || !mpAccess.accessToken) {
-      await conn.rollback();
-      return res.status(409).json({ error: 'mp_not_connected_for_deposit' });
-    }
-    const depositExpiresAt = new Date(Date.now() + holdMinutes * 60_000);
-
-    const [payIns] = await conn.query(
-      `INSERT INTO appointment_payments
-        (agendamento_id, estabelecimento_id, type, status, amount_centavos, percent, expires_at)
-       VALUES (?,?,?,?,?,?,?)`,
-      [
-        id,
-        ag.estabelecimento_id,
-        'deposit',
-        'pending',
-        depositCentavos,
-        depositPercent,
-        depositExpiresAt,
-      ]
-    );
-    const paymentId = payIns.insertId;
-    await conn.query(
-      `UPDATE agendamentos
-          SET status='pendente_pagamento',
-              deposit_centavos=?,
-              deposit_expires_at=?
-        WHERE id=?`,
-      [depositCentavos, depositExpiresAt, id]
-    );
-
-    const itemsByAppointment = await fetchAppointmentItems(conn, [id]);
-    let serviceItems = itemsByAppointment.get(Number(id)) || [];
-    if (!serviceItems.length && ag.servico_id) {
-      const fallback = await fetchServicesForAppointment(conn, ag.estabelecimento_id, [ag.servico_id]);
-      serviceItems = fallback.items || [];
-    }
-    const summary = summarizeServices(serviceItems);
-    const serviceLabel = summary.serviceLabel || serviceItems[0]?.nome || 'servico';
-    const [[cli]] = await conn.query('SELECT email FROM usuarios WHERE id=?', [ag.cliente_id]);
-
-    await conn.commit();
-    txStarted = false;
-    conn.release();
-    conn = null;
-
-    const apiBase = resolveApiBaseUrl();
-    const webhookUrl = resolveBillingWebhookUrl(apiBase);
-    const externalReference = `dep:ag:${id}:pay:${paymentId}:est:${ag.estabelecimento_id}`;
-    const metadata = {
-      agendamento_id: String(id),
-      estabelecimento_id: String(ag.estabelecimento_id),
-      type: 'deposit',
-    };
-
-    try {
-      const { payment, pix } = await createMercadoPagoPixPayment({
-        amountCents: depositCentavos,
-        description: `Sinal - ${serviceLabel}`,
-        externalReference,
-        metadata,
-        notificationUrl: webhookUrl,
-        payerEmail: cli?.email ? String(cli.email).trim().toLowerCase() : null,
-        expiresAt: depositExpiresAt,
-        accessToken: mpAccess.accessToken,
-      });
-      await pool.query(
-        'UPDATE appointment_payments SET provider_payment_id=?, provider_reference=?, raw_payload=? WHERE id=?',
-        [String(payment.id), externalReference, safeJson(payment), paymentId]
-      );
-      const expiresIso = depositExpiresAt.toISOString();
-      return res.status(201).json({
+      await conn.commit();
+      txStarted = false;
+      conn.release();
+      conn = null;
+      const payload = buildDepositPixPayload(pending);
+      if (!payload) {
+        console.warn('[agendamentos][deposit][refresh] pix_unavailable', { agendamento_id: id });
+        return res.status(409).json({
+          error: 'deposit_canceled_requires_new_booking',
+          message: 'Agendamento cancelado por falta de pagamento. Faça um novo agendamento.',
+        });
+      }
+      return res.status(200).json({
         id,
         agendamentoId: id,
         status: 'pendente_pagamento',
         deposit_required: 1,
-        deposit_percent: depositPercent,
-        deposit_centavos: depositCentavos,
-        deposit_expires_at: expiresIso,
-        paymentId,
-        expiresAt: expiresIso,
-        amount_centavos: depositCentavos,
-        pix,
-        pix_qr: pix?.qr_code_base64 || null,
-        pix_qr_raw: pix?.qr_code || null,
-        pix_copia_cola: pix?.copia_e_cola || pix?.qr_code || null,
-        pix_ticket_url: pix?.ticket_url || null,
+        deposit_percent: Number(ag.deposit_percent || 0),
+        deposit_centavos: pending.amount_centavos,
+        deposit_expires_at: payload.expiresAt,
+        paymentId: pending.id,
+        expiresAt: payload.expiresAt,
+        amount_centavos: pending.amount_centavos,
+        pix: payload.pix,
+        pix_qr: payload.pix?.qr_code_base64 || null,
+        pix_qr_raw: payload.pix?.qr_code || null,
+        pix_copia_cola: payload.pix?.copia_e_cola || payload.pix?.qr_code || null,
+        pix_ticket_url: payload.pix?.ticket_url || null,
       });
-    } catch (err) {
-      console.error('[agendamentos][deposit][refresh] erro ao criar PIX:', err?.message || err);
-      const payload = safeJson({ error: err?.message || String(err) });
-      await pool.query(
-        'UPDATE appointment_payments SET status=?, raw_payload=? WHERE id=?',
-        ['failed', payload, paymentId]
-      );
-      await pool.query(
-        "UPDATE agendamentos SET status='cancelado', deposit_expires_at=NOW() WHERE id=? AND status='pendente_pagamento'",
-        [id]
-      );
-      return res.status(502).json({ error: 'payment_create_failed' });
     }
+    await conn.query(
+      "UPDATE agendamentos SET status='cancelado', deposit_expires_at=NOW() WHERE id=? AND status='pendente_pagamento'",
+      [id]
+    );
+    await conn.query(
+      "UPDATE appointment_payments SET status='expired' WHERE agendamento_id=? AND status='pending'",
+      [id]
+    );
+    await conn.commit();
+    txStarted = false;
+    conn.release();
+    conn = null;
+    console.warn('[agendamentos][deposit][refresh] no_pending_payment', { agendamento_id: id });
+    return res.status(409).json({
+      error: 'deposit_canceled_requires_new_booking',
+      message: 'Agendamento cancelado por falta de pagamento. Faça um novo agendamento.',
+    });
   } catch (err) {
     try {
       if (txStarted && conn) await conn.rollback();

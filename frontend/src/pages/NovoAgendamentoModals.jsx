@@ -147,8 +147,6 @@ export default function NovoAgendamentoModals(props) {
     depositCountdown,
     handleCloseDepositModal,
     handleCopyPixCode,
-    handleRefreshDepositPix,
-    depositRefreshing,
     selectedProfessional,
     serviceDuration,
     servicePrice,
@@ -1816,17 +1814,6 @@ export default function NovoAgendamentoModals(props) {
                     >
                       Abrir no app do banco
                     </a>
-                  ) : null,
-                  depositExpired ? (
-                    <button
-                      key="refresh"
-                      type="button"
-                      className="btn btn--primary"
-                      onClick={handleRefreshDepositPix}
-                      disabled={depositRefreshing}
-                    >
-                      {depositRefreshing ? "Gerando..." : "Gerar novo PIX"}
-                    </button>
                   ) : null,
                   <button key="close" type="button" className="btn btn--outline" onClick={handleCloseDepositModal}>
                     Fechar
