@@ -2,11 +2,13 @@ import { Router } from 'express';
 import crypto from 'node:crypto';
 import jwt from 'jsonwebtoken';
 import { auth, isEstabelecimento } from '../middleware/auth.js';
+import { getPlanContext } from '../lib/plans.js';
 import { encryptMpToken } from '../services/mpCrypto.js';
 import {
 getMpAccountByEstabelecimentoId, upsertMpAccount, disconnectMpAccount,
 } from '../services/mpAccounts.js';
 const router = Router();
+const DEPOSIT_ALLOWED_PLANS = new Set(['pro', 'premium']);
 const FRONTEND_BASE = (process.env.FRONTEND_BASE_URL || process.env.APP_URL || 'http://localhost:3001').replace(/\/$/, '');
 const MP_AUTH_URL = process.env.MP_AUTH_URL || 'https://auth.mercadopago.com/authorization';
 const MP_TOKEN_URL = process.env.MP_TOKEN_URL || 'https://api.mercadopago.com/oauth/token';
@@ -90,6 +92,21 @@ console.warn('[mp/connect] config missing', { missing });
 return res.status(400).json({
 ok: false, error: 'mp_config_missing', missing, hint: 'check backend/.env and dotenv loading', });
 }
+    const planContext = await getPlanContext(req.user.id);
+    if (!planContext) {
+      return res.status(404).json({
+        ok: false,
+        error: 'plan_context_not_found',
+      });
+    }
+    const allowed = DEPOSIT_ALLOWED_PLANS.has(String(planContext.plan || '').toLowerCase());
+    if (!allowed) {
+      return res.status(403).json({
+        ok: false,
+        error: 'plan_not_allowed',
+        message: 'Disponivel apenas para planos Pro ou Premium.',
+      });
+    }
     const state = buildState(req.user.id);
 const url = buildConnectUrl(state);
 if (wantsJson) return res.json({ url });

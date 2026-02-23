@@ -121,6 +121,8 @@ const APP_ROUTES = [
 
   { path: '/novo', element: <NovoAgendamento /> },
 
+  { path: '/novo-agendamento', element: <NovoAgendamento /> },
+
   { path: '/configuracoes', element: <Configuracoes />, auth: true },
 
   { path: '/loading', element: <Loading /> },
@@ -320,7 +322,7 @@ function BillingStatusBanner({ status, user, planInfo }) {
     const remaining = Number.isNaN(remainingRaw) ? 0 : Math.max(0, remainingRaw);
 
     const remainingText = remaining
-      ? `Bloqueio em ${remaining} ${remaining === 1 ? 'dia' : 'dias'}${graceDeadline ? ` (at? ${graceDeadline})` : ''}.`
+      ? `Bloqueio em ${remaining} ${remaining === 1 ? 'dia' : 'dias'}${graceDeadline ? ` (até ${graceDeadline})` : ''}.`
       : 'Atualize para evitar o bloqueio.';
     body = `${overdueLabel} ${remainingText}`.trim();
 
@@ -548,6 +550,9 @@ function Sidebar({ open, user, isDesktop, isDark, isPlanos, toggleTheme }) {
   const nav = useNavigate();
 
   const resolvedUser = user || getUser();
+  const logoutLoginTarget = resolvedUser?.tipo === 'estabelecimento'
+    ? '/login?tipo=estabelecimento'
+    : '/login?tipo=cliente';
 
   const navigation = useMemo(() => buildNavigation(resolvedUser), [resolvedUser]);
 
@@ -725,7 +730,7 @@ function Sidebar({ open, user, isDesktop, isDark, isPlanos, toggleTheme }) {
 
                         try { logout(); } catch {}
 
-                        nav('/loading?type=logout&next=/', { replace: true });
+                        nav(logoutLoginTarget, { replace: true });
 
                       }}
 
@@ -800,6 +805,9 @@ export default function App() {
   const topbarNavigation = useMemo(() => buildNavigation(currentUser), [currentUser]);
 
   const showTopbarActive = !topbarNavigation.isEstab;
+  const logoutLoginTarget = currentUser?.tipo === 'estabelecimento'
+    ? '/login?tipo=estabelecimento'
+    : '/login?tipo=cliente';
 
   const handleTopbarLogout = useCallback(() => {
 
@@ -807,9 +815,9 @@ export default function App() {
 
     try { logout(); } catch {}
 
-    navigate('/loading?type=logout&next=/', { replace: true });
+    navigate(logoutLoginTarget, { replace: true });
 
-  }, [navigate]);
+  }, [navigate, logoutLoginTarget]);
 
 
 

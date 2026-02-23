@@ -18,6 +18,7 @@ moment.updateLocale('pt-br', {
 })
 
 const localizer = momentLocalizer(moment)
+const CALENDAR_TIME_ZONE = 'America/Sao_Paulo'
 
 
 
@@ -204,6 +205,58 @@ const DateHelpers = {
   formatTime: (datetime) => {
 
     return formatTime24h(datetime)
+
+  },
+
+  nowInTimeZone: (timeZone = CALENDAR_TIME_ZONE) => {
+
+    const now = new Date()
+
+    const parts = new Intl.DateTimeFormat('en-US', {
+
+      timeZone,
+
+      year: 'numeric',
+
+      month: '2-digit',
+
+      day: '2-digit',
+
+      hour: '2-digit',
+
+      minute: '2-digit',
+
+      second: '2-digit',
+
+      hour12: false,
+
+    }).formatToParts(now)
+
+    const map = {}
+
+    parts.forEach(({ type, value }) => {
+
+      if (type !== 'literal') map[type] = value
+
+    })
+
+    return new Date(
+
+      Number(map.year),
+
+      Number(map.month) - 1,
+
+      Number(map.day),
+
+      Number(map.hour),
+
+      Number(map.minute),
+
+      Number(map.second),
+
+      now.getMilliseconds()
+
+    )
 
   },
 
@@ -1244,7 +1297,7 @@ export default function DashboardEstabelecimento() {
 
   return (
 
-    <div className="dashboard-narrow dashboard-pro">
+    <div className="dashboard-narrow dashboard-pro dashboard-estab-pro">
 
       <div className="agenda-panel">
 
@@ -1258,39 +1311,23 @@ export default function DashboardEstabelecimento() {
 
             </div>
 
-            <div className="agenda-chips">
+            <div className="agenda-chips" role="group" aria-label="Resumo de agendamentos">
 
-              <button
-
-                type="button"
-
-                className="agenda-chip agenda-chip--ok"
-
-                aria-label={`Agendamentos recebidos: ${totals.recebidos}`}
-
-              >
+              <span className="agenda-chip agenda-chip--ok">
 
                 <span className="agenda-chip__value">{totals.recebidos}</span>
 
                 <span className="agenda-chip__label">Recebidos</span>
 
-              </button>
+              </span>
 
-              <button
-
-                type="button"
-
-                className="agenda-chip agenda-chip--danger"
-
-                aria-label={`Agendamentos cancelados: ${totals.cancelados}`}
-
-              >
+              <span className="agenda-chip agenda-chip--danger">
 
                 <span className="agenda-chip__value">{totals.cancelados}</span>
 
                 <span className="agenda-chip__label">Cancelados</span>
 
-              </button>
+              </span>
 
             </div>
 
@@ -1344,7 +1381,7 @@ export default function DashboardEstabelecimento() {
 
               >
 
-                Concluidos
+                Concluídos
 
               </button>
 
@@ -1401,15 +1438,15 @@ const AGENDA_STATUS_THEME = Object.freeze({
 
     label: 'Confirmado (WhatsApp)',
 
-    bg: '#dcfce7',
+    bg: '#d1fae5',
 
-    border: '#86efac',
+    border: '#34d399',
 
-    dot: '#16a34a',
+    dot: '#059669',
 
-    text: '#064e3b',
+    text: '#065f46',
 
-    badge: 'rgba(22,163,74,0.14)',
+    badge: 'rgba(5,150,105,0.2)',
 
   },
 
@@ -1417,31 +1454,31 @@ const AGENDA_STATUS_THEME = Object.freeze({
 
     label: 'Confirmado',
 
-    bg: '#e5e7eb',
+    bg: '#e0f2fe',
 
-    border: '#d1d5db',
+    border: '#7dd3fc',
 
-    dot: '#6b7280',
+    dot: '#0284c7',
 
-    text: '#374151',
+    text: '#0c4a6e',
 
-    badge: 'rgba(107,114,128,0.16)',
+    badge: 'rgba(2,132,199,0.18)',
 
   },
 
   concluido: {
 
-    label: 'Concluido',
+    label: 'Concluído',
 
-    bg: '#e0f2fe',
+    bg: '#e0e7ff',
 
-    border: '#bfdbfe',
+    border: '#a5b4fc',
 
-    dot: '#2563eb',
+    dot: '#4f46e5',
 
-    text: '#0f172a',
+    text: '#312e81',
 
-    badge: 'rgba(37,99,235,0.12)',
+    badge: 'rgba(79,70,229,0.16)',
 
   },
 
@@ -1451,13 +1488,13 @@ const AGENDA_STATUS_THEME = Object.freeze({
 
     bg: '#fee2e2',
 
-    border: '#fecdd3',
+    border: '#fca5a5',
 
     dot: '#dc2626',
 
     text: '#7f1d1d',
 
-    badge: 'rgba(220,38,38,0.14)',
+    badge: 'rgba(220,38,38,0.16)',
 
   },
 
@@ -1465,15 +1502,15 @@ const AGENDA_STATUS_THEME = Object.freeze({
 
     label: 'Pendente',
 
-    bg: '#FFE699',
+    bg: '#fef3c7',
 
-    border: '#E5C65A',
+    border: '#fbbf24',
 
-    dot: '#B08900',
+    dot: '#d97706',
 
-    text: '#3B2F00',
+    text: '#78350f',
 
-    badge: 'rgba(176,137,0,0.18)',
+    badge: 'rgba(217,119,6,0.2)',
 
   },
 
@@ -1737,6 +1774,8 @@ function ProfessionalAgendaView({
   const [filterOpen, setFilterOpen] = useState(false)
 
   const filterRef = React.useRef(null)
+
+  const calendarScrollRef = useRef(null)
 
   const [selectedEvent, setSelectedEvent] = useState(null)
 
@@ -2170,13 +2209,17 @@ function ProfessionalAgendaView({
 
       : isDone
 
-         ? 'pro-agenda__badge pro-agenda__badge--muted'
+         ? 'pro-agenda__badge pro-agenda__badge--info'
+
+        : hasWhatsappConfirm
+
+           ? 'pro-agenda__badge pro-agenda__badge--success-strong'
 
         : isConfirmed
 
-           ? 'pro-agenda__badge'
+           ? 'pro-agenda__badge pro-agenda__badge--success'
 
-          : 'pro-agenda__badge pro-agenda__badge--muted'
+          : 'pro-agenda__badge pro-agenda__badge--warning'
 
     return { label, badgeClass, isCancelled, isDone, isConfirmed }
 
@@ -2331,6 +2374,203 @@ function ProfessionalAgendaView({
     [events, resourceFilter]
 
   )
+
+  useEffect(() => {
+
+    const calendarEl = calendarScrollRef.current
+
+    if (!calendarEl) return undefined
+
+    const timeContentEl = calendarEl.querySelector('.rbc-time-content')
+
+    if (!timeContentEl) return undefined
+
+    let frameId = 0
+    let headerOffset = 0
+
+    const getLastDaySlot = () => {
+
+      const daySlots = timeContentEl.querySelectorAll('.rbc-day-slot')
+
+      return daySlots.length ? daySlots[daySlots.length - 1] : null
+
+    }
+
+    const getWeekMaxScrollLeft = (scrollContainer) => {
+
+      const lastDaySlot = getLastDaySlot()
+
+      if (!lastDaySlot || !scrollContainer) return 0
+
+      const containerRect = scrollContainer.getBoundingClientRect()
+
+      const lastRect = lastDaySlot.getBoundingClientRect()
+
+      const rightEdgeFromContainerStart = scrollContainer.scrollLeft + (lastRect.right - containerRect.left)
+
+      if (!Number.isFinite(rightEdgeFromContainerStart)) return 0
+
+      return Math.max(0, Math.ceil(rightEdgeFromContainerStart - scrollContainer.clientWidth))
+
+    }
+
+    const clampWeekHorizontalScroll = () => {
+
+      const clampContainer = (scrollContainer) => {
+
+        if (!scrollContainer) return
+
+        const measuredMaxScrollLeft = getWeekMaxScrollLeft(scrollContainer)
+
+        const nativeMaxScrollLeft = Math.max(0, scrollContainer.scrollWidth - scrollContainer.clientWidth)
+
+        const maxScrollLeft = Math.max(measuredMaxScrollLeft, nativeMaxScrollLeft)
+
+        if (!Number.isFinite(maxScrollLeft)) return
+
+        if (maxScrollLeft <= 0) return
+
+        if (scrollContainer.scrollLeft > maxScrollLeft) {
+
+          scrollContainer.scrollLeft = maxScrollLeft
+
+        } else if (scrollContainer.scrollLeft < 0) {
+
+          scrollContainer.scrollLeft = 0
+
+        }
+
+      }
+
+      clampContainer(timeContentEl)
+
+      clampContainer(calendarEl)
+
+    }
+
+    const applyHeaderOffset = () => {
+
+      const headerContentEls = calendarEl.querySelectorAll('.rbc-time-header-content')
+
+      headerContentEls.forEach((headerContentEl) => {
+
+        headerContentEl.style.transform = headerOffset
+          ? `translate3d(${headerOffset}px, 0, 0)`
+          : 'translate3d(0, 0, 0)'
+
+      })
+
+    }
+
+    const enforceDesktopNoHorizontalScroll = () => {
+
+      if (timeContentEl.scrollLeft !== 0) {
+
+        timeContentEl.scrollLeft = 0
+
+      }
+
+      if (calendarEl.scrollLeft !== 0) {
+
+        calendarEl.scrollLeft = 0
+
+      }
+
+      if (headerOffset !== 0) {
+
+        headerOffset = 0
+
+        applyHeaderOffset()
+
+      }
+
+    }
+
+    const alignHeadersWithEvents = () => {
+
+      const firstHeaderCell = calendarEl.querySelector('.rbc-time-header-content .rbc-header')
+
+      const firstDaySlot = calendarEl.querySelector('.rbc-time-content .rbc-day-slot')
+
+      if (!firstHeaderCell || !firstDaySlot) return
+
+      const delta = firstHeaderCell.getBoundingClientRect().left - firstDaySlot.getBoundingClientRect().left
+
+      if (Math.abs(delta) < 0.5) return
+
+      headerOffset -= delta
+
+      applyHeaderOffset()
+
+    }
+
+    const scheduleSync = () => {
+
+      window.cancelAnimationFrame(frameId)
+
+      frameId = window.requestAnimationFrame(() => {
+
+        const isMobileViewport = window.matchMedia('(max-width: 780px)').matches
+
+        const hasHorizontalOverflow =
+          (timeContentEl.scrollWidth - timeContentEl.clientWidth) > 1 ||
+          (calendarEl.scrollWidth - calendarEl.clientWidth) > 1
+
+        if (!isMobileViewport && !hasHorizontalOverflow) {
+
+          enforceDesktopNoHorizontalScroll()
+
+          return
+
+        }
+
+        clampWeekHorizontalScroll()
+
+        alignHeadersWithEvents()
+
+      })
+
+    }
+
+    const resizeObserver = typeof ResizeObserver === 'function' ? new ResizeObserver(scheduleSync) : null
+
+    resizeObserver?.observe(calendarEl)
+
+    resizeObserver?.observe(timeContentEl)
+
+    applyHeaderOffset()
+
+    scheduleSync()
+
+    timeContentEl.addEventListener('scroll', scheduleSync, { passive: true })
+
+    calendarEl.addEventListener('scroll', scheduleSync, { passive: true })
+
+    window.addEventListener('resize', scheduleSync)
+
+    return () => {
+
+      window.cancelAnimationFrame(frameId)
+
+      resizeObserver?.disconnect()
+
+      const headerContentEls = calendarEl.querySelectorAll('.rbc-time-header-content')
+
+      headerContentEls.forEach((headerContentEl) => {
+
+        headerContentEl.style.transform = ''
+
+      })
+
+      timeContentEl.removeEventListener('scroll', scheduleSync)
+
+      calendarEl.removeEventListener('scroll', scheduleSync)
+
+      window.removeEventListener('resize', scheduleSync)
+
+    }
+
+  }, [resourceFilter, filteredEvents.length, resources.length])
 
 
 
@@ -2809,9 +3049,21 @@ function ProfessionalAgendaView({
 
     const isCancelled = status === 'cancelado'
 
-    const isConfirmed = Boolean(event?.confirmedAt) || status === 'confirmado_wa'
+    const isDone = status === 'concluido'
 
-    const statusClass = isCancelled ? 'is-cancelled' : isConfirmed ? 'is-confirmed' : 'is-pending'
+    const hasWhatsappConfirm = Boolean(event?.confirmedAt) || status === 'confirmado_wa'
+
+    const isConfirmed = hasWhatsappConfirm || status === 'confirmado'
+
+    const statusClass = isCancelled
+      ? 'is-cancelled'
+      : isDone
+        ? 'is-done'
+        : hasWhatsappConfirm
+          ? 'is-confirmed-wa'
+          : isConfirmed
+            ? 'is-confirmed'
+            : 'is-pending'
 
     return {
 
@@ -2949,7 +3201,9 @@ function ProfessionalAgendaView({
 
     setCurrentDate((d) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + 7))
 
-  const handleToday = () => setCurrentDate(new Date())
+  const handleToday = () => setCurrentDate(DateHelpers.nowInTimeZone(CALENDAR_TIME_ZONE))
+
+  const getCalendarNow = useCallback(() => DateHelpers.nowInTimeZone(CALENDAR_TIME_ZONE), [])
 
   const handleSelectResource = (id) => {
 
@@ -3569,11 +3823,17 @@ function ProfessionalAgendaView({
 
           <div className="pro-agenda__kpis">
 
-            <div className="pro-agenda__kpi">
+            <div className={`pro-agenda__kpi${!nextAppointment ? ' is-empty' : ''}`}>
 
               <span>Proximo agendamento</span>
 
               <b title={nextAppointmentInfo.title}>{nextAppointmentInfo.label}</b>
+
+              {!nextAppointment ? (
+                <button type="button" className="pro-agenda__kpi-cta" onClick={handleOpenSelfBooking}>
+                  Novo agendamento
+                </button>
+              ) : null}
 
             </div>
 
@@ -3759,7 +4019,7 @@ function ProfessionalAgendaView({
 
 
 
-      <div className="pro-agenda__calendar">
+      <div className="pro-agenda__calendar" ref={calendarScrollRef}>
 
         <BigCalendar
 
@@ -3810,6 +4070,8 @@ function ProfessionalAgendaView({
           max={timeBounds.max}
 
           scrollToTime={timeBounds.scrollToTime}
+
+          getNow={getCalendarNow}
 
           date={currentDate}
 

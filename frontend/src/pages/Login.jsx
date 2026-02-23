@@ -1,6 +1,6 @@
 // src/pages/Login.jsx
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 
@@ -8,7 +8,6 @@ import { Api } from '../utils/api';
 
 import { clearPlanCache, saveToken, saveUser } from '../utils/auth';
 
-import LogoAO from '../components/LogoAO.jsx';
 
 
 
@@ -26,7 +25,6 @@ export default function Login() {
 
   const [lastProfile, setLastProfile] = useState('');
 
-  const [showChooser, setShowChooser] = useState(true);
 
   const [email, setEmail] = useState('');
 
@@ -43,6 +41,12 @@ export default function Login() {
   const [successMsg, setSuccessMsg] = useState('');
 
   const [sessionMsg, setSessionMsg] = useState('');
+
+  const [capsLockOn, setCapsLockOn] = useState(false);
+
+  const emailRef = useRef(null);
+
+  const passRef = useRef(null);
 
 
 
@@ -128,7 +132,6 @@ export default function Login() {
 
         setLastProfile(stored);
 
-        if (!tipoParam) setShowChooser(false);
 
       }
 
@@ -146,8 +149,6 @@ export default function Login() {
 
       setTipo('CLIENTE');
 
-      setShowChooser(false);
-
       setLastProfile('cliente');
 
       try { localStorage.setItem('ao:last_profile', 'cliente'); } catch {}
@@ -159,8 +160,6 @@ export default function Login() {
     if (['estab', 'estabelecimento', 'empresa', 'business'].includes(normalized)) {
 
       setTipo('ESTABELECIMENTO');
-
-      setShowChooser(false);
 
       setLastProfile('estabelecimento');
 
@@ -208,6 +207,32 @@ export default function Login() {
 
   }, [lastProfileValue]);
 
+  const hasRedirectTarget = Boolean(nextParam || storedNext);
+
+  const redirectHint = useMemo(() => {
+
+    const raw = nextParam || storedNext || '';
+
+    if (!raw) return '';
+
+    let value = String(raw || '');
+
+    try {
+
+      if (/^https?:\/\//i.test(value)) {
+
+        const parsed = new URL(value);
+
+        value = `${parsed.pathname || '/'}${parsed.search || ''}`;
+
+      }
+
+    } catch {}
+
+    return value.length > 46 ? `${value.slice(0, 43)}...` : value;
+
+  }, [nextParam, storedNext]);
+
 
 
   const buildLoginSearch = (value) => {
@@ -242,7 +267,6 @@ export default function Login() {
 
     setSuccessMsg('');
 
-    setShowChooser(false);
 
     const stored = value === 'ESTABELECIMENTO' ? 'estabelecimento' : 'cliente';
 
@@ -264,7 +288,8 @@ export default function Login() {
 
     setSuccessMsg('');
 
-    setShowChooser(true);
+    setCapsLockOn(false);
+
 
     nav(buildLoginSearch(''), { replace: true });
 
@@ -284,7 +309,29 @@ export default function Login() {
 
     }
 
-    if (!canSubmit || loading) return;
+    if (loading) return;
+
+    if (!email || !isValidEmail(email)) {
+
+      setErrorMsg('Informe um e-mail valido para continuar.');
+
+      emailRef.current?.focus();
+
+      return;
+
+    }
+
+    if (!senha || senha.length < 6) {
+
+      setErrorMsg('A senha deve ter pelo menos 6 caracteres.');
+
+      passRef.current?.focus();
+
+      return;
+
+    }
+
+    if (!canSubmit) return;
 
 
 
@@ -306,9 +353,9 @@ export default function Login() {
 
       clearPlanCache();
 
-      saveToken(token);
+      saveToken(token, { remember });
 
-      saveUser(user);
+      saveUser(user, { remember });
 
       try { sessionStorage.removeItem('next_after_login'); } catch {}
 
@@ -320,9 +367,9 @@ export default function Login() {
 
         err?.message === 'tipo_incorreto'
           ? (tipo === 'CLIENTE'
-              ? 'Este acesso e para clientes. Use a op??o de estabelecimento.'
-              : 'Este acesso e para estabelecimentos. Use a op??o de cliente.')
-          : (err?.data?.message || err?.message || 'Não foi possível entrar. Verifique seus dados.');
+              ? 'Este acesso e para clientes. Use a opcao de estabelecimento.'
+              : 'Este acesso e para estabelecimentos. Use a opcao de cliente.')
+          : (err?.data?.message || err?.message || 'Nao foi possivel entrar. Verifique seus dados.');
 
       setErrorMsg(msg);
 
@@ -337,6 +384,35 @@ export default function Login() {
 
 
   const hasTipo = Boolean(tipo);
+
+  useEffect(() => {
+
+    if (!tipo) return;
+
+    const id = setTimeout(() => {
+
+      emailRef.current?.focus();
+
+    }, 0);
+
+    return () => clearTimeout(id);
+
+  }, [tipo]);
+
+  const ProfileGlyph = ({ isCliente = false }) => (
+    isCliente ? (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <circle cx="12" cy="8" r="4" />
+        <path d="M4 20c0-3.3 3.6-6 8-6s8 2.7 8 6" />
+      </svg>
+    ) : (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M4 20h16" />
+        <path d="M6 20V7l6-3 6 3v13" />
+        <path d="M9 10h2M13 10h2M9 14h2M13 14h2" />
+      </svg>
+    )
+  );
 
   const Tab = ({ value, title, hint }) => {
 
@@ -363,30 +439,7 @@ export default function Login() {
       >
 
         <span className="login-preview__tab-icon" aria-hidden="true">
-
-          {isCliente ? (
-
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-
-              <circle cx="12" cy="8" r="4" />
-
-              <path d="M4 20c0-3.3 3.6-6 8-6s8 2.7 8 6" />
-
-            </svg>
-
-          ) : (
-
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-
-              <path d="M4 20h16" />
-
-              <path d="M6 20V7l6-3 6 3v13" />
-
-              <path d="M9 10h2M13 10h2M9 14h2M13 14h2" />
-
-            </svg>
-
-          )}
+          <ProfileGlyph isCliente={isCliente} />
 
         </span>
 
@@ -394,20 +447,7 @@ export default function Login() {
 
           <span className="login-preview__tab-title">{title}</span>
 
-          <span className="login-preview__tab-hint">{hint}</span>
-
-        </span>
-
-        <span className="login-preview__tab-arrow" aria-hidden="true">
-
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-
-            <path d="M5 12h14" />
-
-            <path d="M13 6l6 6-6 6" />
-
-          </svg>
-
+          {hint ? <span className="login-preview__tab-hint">{hint}</span> : null}
         </span>
 
       </button>
@@ -422,15 +462,6 @@ export default function Login() {
 
     <div className="login-preview">
 
-      <div className="login-preview__bg" aria-hidden="true" />
-
-      <div className="login-preview__pattern" aria-hidden="true" />
-
-      <div className="login-preview__orb login-preview__orb--violet" aria-hidden="true" />
-
-      <div className="login-preview__orb login-preview__orb--green" aria-hidden="true" />
-
-
 
       <main className="login-preview__main">
 
@@ -438,83 +469,33 @@ export default function Login() {
 
           <div className="login-preview__grid">
 
-            <aside className="login-preview__aside">
-
-              <div className="login-preview__brand">
-
-                <LogoAO size={44} className="login-preview__logo-mark" />
-
-                <div>
-
-                  <div className="login-preview__brand-title">Agendamentos Online</div>
-
-                  <div className="login-preview__brand-subtitle">Acesso seguro a sua conta</div>
-
-                </div>
-
-              </div>
-
-
-
-              <div className="login-preview__aside-card">
-
-                <h2>Mais praticidade no dia a dia</h2>
-
-                <p>
-
-                  Entre para acompanhar seus agendamentos ou administrar sua agenda com rapidez.
-
-                </p>
-
-
-
-                <ul>
-
-                  <li>Login por perfil (Cliente/Estabelecimento)</li>
-
-                  <li>Interface rápida e responsiva</li>
-
-                  <li>Validação e feedback em tempo real</li>
-
-                </ul>
-
-
-
-                <div className="login-preview__aside-tip">
-
-                  Dica: use "Lembrar de mim" em dispositivos pessoais.
-
-                </div>
-
-              </div>
-
-            </aside>
-
-
-
             <div className="login-preview__panel">
 
               <header className="login-preview__header">
 
-                <h1>Como você quer entrar?</h1>
+                <h1>{tipo ? 'Entrar' : 'Escolha o perfil'}</h1>
 
-                <p>Escolha o perfil e acesse sua conta.</p>
+                <p>{tipo ? 'E-mail e senha.' : 'Cliente ou Estabelecimento.'}</p>
 
               </header>
 
-
-
               {tipo ? (
 
-                <button type="button" className="login-preview__swap" onClick={handleTipoReset}>
-
-                  Trocar perfil
-
-                </button>
+                <div
+                  className={`login-preview__selected-simple login-preview__selected-simple--${tipo === 'ESTABELECIMENTO' ? 'estab' : 'cliente'}`}
+                  role="status"
+                >
+                  <div className="login-preview__selected-simple-label">
+                    Perfil: <strong>{tipo === 'ESTABELECIMENTO' ? 'Estabelecimento' : 'Cliente'}</strong>
+                  </div>
+                  <button type="button" className="login-preview__selected-simple-change" onClick={handleTipoReset}>
+                    Trocar
+                  </button>
+                </div>
 
               ) : null}
 
-              {!showChooser && lastProfileValue && !tipo ? (
+              {!tipo && lastProfileValue ? (
 
                 <div className="login-preview__continue">
 
@@ -531,14 +512,13 @@ export default function Login() {
                   >
 
                     <div className="login-preview__continue-title">
-                      Continuar como{' '}
+                      Continuar:{' '}
                       <span
                         className={`login-preview__continue-highlight login-preview__continue-highlight--${lastProfileValue === 'ESTABELECIMENTO' ? 'estab' : 'cliente'}`}
                       >
                         {lastProfileLabel}
                       </span>
                     </div>
-                    <div className="login-preview__continue-hint">Usar o último perfil selecionado.</div>
 
                   </button>
 
@@ -560,44 +540,30 @@ export default function Login() {
 
               ) : null}
 
-              {showChooser || !lastProfileValue ? (
+              {!tipo ? (
 
                 <div className="login-preview__tabs" role="tablist" aria-label="Escolher perfil">
 
-                  <Tab value="CLIENTE" title="Cliente" hint="Acesse seus agendamentos e histórico" />
+                  <Tab value="CLIENTE" title="Cliente" />
 
-                  <Tab value="ESTABELECIMENTO" title="Estabelecimento" hint="Gerencie agenda, serviços e clientes" />
+                  <Tab value="ESTABELECIMENTO" title="Estabelecimento" />
 
                 </div>
 
               ) : null}
 
-              {!tipo && (showChooser || !lastProfileValue) ? (
+              {!tipo ? (
+                <div className="login-preview__actions">
+                  <Link to={cadastroTarget} className="login-preview__ghost">
+                    Criar conta
+                  </Link>
+                </div>
+              ) : null}
 
-                <>
-
-                  <div className="login-preview__hint">Selecione um perfil para continuar.</div>
-
-                  <div className="login-preview__chooser-note">Você pode trocar depois.</div>
-
-                  <div className="login-preview__chooser-links">
-
-                    <Link to="/cadastro" className="login-preview__chooser-link">
-
-                      Não tenho conta
-
-                    </Link>
-
-                    <Link to="/recuperar-senha" className="login-preview__chooser-link">
-
-                      Esqueci minha senha
-
-                    </Link>
-
-                  </div>
-
-                </>
-
+              {hasRedirectTarget ? (
+                <div className="login-preview__redirect" role="status" aria-live="polite">
+                  Redirecionamento: <strong>{redirectHint}</strong>.
+                </div>
               ) : null}
 
 
@@ -609,8 +575,6 @@ export default function Login() {
                   <span className="login-preview__alert-dot" aria-hidden="true" />
 
                   <div>
-
-                    <div className="login-preview__alert-title">Aviso</div>
 
                     <div className="login-preview__alert-text">{sessionMsg}</div>
 
@@ -630,8 +594,6 @@ export default function Login() {
 
                   <div>
 
-                    <div className="login-preview__alert-title">Ops!</div>
-
                     <div className="login-preview__alert-text">{errorMsg}</div>
 
                   </div>
@@ -650,8 +612,6 @@ export default function Login() {
 
                   <div>
 
-                    <div className="login-preview__alert-title">Tudo certo</div>
-
                     <div className="login-preview__alert-text">{successMsg}</div>
 
                   </div>
@@ -666,7 +626,7 @@ export default function Login() {
 
                 <form className="login-preview__form" onSubmit={handleSubmit}>
 
-                  <div className="login-preview__field">
+                  <div className={`login-preview__field${emailInvalid ? ' is-error' : ''}`}>
 
                     <label className="login-preview__label" htmlFor="login-email">E-mail</label>
 
@@ -674,7 +634,7 @@ export default function Login() {
 
                       id="login-email"
 
-                      className="login-preview__input"
+                      className={`login-preview__input${emailInvalid ? ' is-error' : ''}`}
 
                       type="email"
 
@@ -683,6 +643,8 @@ export default function Login() {
                       autoComplete="email"
 
                       placeholder="voce@exemplo.com"
+
+                      ref={emailRef}
 
                       value={email}
 
@@ -700,17 +662,15 @@ export default function Login() {
 
                     />
 
-                    <div className={`login-preview__hint${emailInvalid ? ' is-error' : ''}`}>
-
-                      {emailInvalid ? 'Digite um e-mail válido.' : 'Use o e-mail cadastrado.'}
-
-                    </div>
+                    {emailInvalid ? (
+                      <div className="login-preview__hint is-error">E-mail invalido.</div>
+                    ) : null}
 
                   </div>
 
 
 
-                  <div className="login-preview__field">
+                  <div className={`login-preview__field${senhaInvalid ? ' is-error' : ''}`}>
 
                     <label className="login-preview__label" htmlFor="login-pass">Senha</label>
 
@@ -720,13 +680,15 @@ export default function Login() {
 
                         id="login-pass"
 
-                        className="login-preview__input"
+                        className={`login-preview__input${senhaInvalid ? ' is-error' : ''}`}
 
                         type={showPass ? 'text' : 'password'}
 
                         autoComplete="current-password"
 
                         placeholder="********"
+
+                        ref={passRef}
 
                         value={senha}
 
@@ -739,6 +701,14 @@ export default function Login() {
                           setSuccessMsg('');
 
                         }}
+
+                        onKeyUp={(e) => {
+                          if (typeof e.getModifierState === 'function') {
+                            setCapsLockOn(Boolean(e.getModifierState('CapsLock')));
+                          }
+                        }}
+
+                        onBlur={() => setCapsLockOn(false)}
 
                         aria-invalid={senha ? senha.length < 6 : false}
 
@@ -762,15 +732,11 @@ export default function Login() {
 
                     </div>
 
-                    <div className={`login-preview__hint${senhaInvalid ? ' is-error' : ''}`}>
-
-                      {senhaInvalid
-
-                         ? 'A senha deve ter pelo menos 6 caracteres.'
-
-                        : 'Não compartilhe sua senha com ninguém.'}
-
-                    </div>
+                    {capsLockOn || senhaInvalid ? (
+                      <div className={`login-preview__hint${senhaInvalid ? ' is-error' : ' is-warn'}`}>
+                        {capsLockOn ? 'Caps Lock ativo.' : 'Minimo de 6 caracteres.'}
+                      </div>
+                    ) : null}
 
                   </div>
 
@@ -790,7 +756,7 @@ export default function Login() {
 
                       />
 
-                      <span>Lembrar de mim</span>
+                      <span>Lembrar</span>
 
                     </label>
 
@@ -801,8 +767,6 @@ export default function Login() {
                     </Link>
 
                   </div>
-
-
 
                   <button
 
@@ -826,23 +790,11 @@ export default function Login() {
 
                     ) : (
 
-                      <>Entrar como {tipo === 'CLIENTE' ? 'Cliente' : 'Estabelecimento'}</>
+                      <>Entrar</>
 
                     )}
 
                   </button>
-
-
-
-                  <div className="login-preview__divider">
-
-                    <span />
-
-                    <div>ou</div>
-
-                    <span />
-
-                  </div>
 
 
 
@@ -853,20 +805,6 @@ export default function Login() {
                       Criar conta
 
                     </Link>
-
-                    <Link to="/" className="login-preview__ghost">
-
-                      Voltar ao site
-
-                    </Link>
-
-                  </div>
-
-
-
-                  <div className="login-preview__note">
-
-                    Ao entrar, você concorda com os termos e políticas da plataforma.
 
                   </div>
 
@@ -887,4 +825,5 @@ export default function Login() {
   );
 
 }
+
 

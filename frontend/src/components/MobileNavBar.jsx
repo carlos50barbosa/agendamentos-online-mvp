@@ -10,6 +10,9 @@ function MobileNavBar({ user }) {
   const items = useMemo(() => flattenNavigationSections(navigation), [navigation]);
   const [logoutOpen, setLogoutOpen] = useState(false);
   const showLabels = !navigation.isAuthenticated;
+  const logoutLoginTarget = user?.tipo === 'estabelecimento'
+    ? '/login?tipo=estabelecimento'
+    : '/login?tipo=cliente';
 
   if (!items.length) return null;
 
@@ -18,7 +21,7 @@ function MobileNavBar({ user }) {
     try { logout(); } catch (error) {
       console.error('Erro ao sair da conta:', error);
     }
-    navigate('/loading?type=logout&next=/', { replace: true });
+    navigate(logoutLoginTarget, { replace: true });
   };
 
   return (
