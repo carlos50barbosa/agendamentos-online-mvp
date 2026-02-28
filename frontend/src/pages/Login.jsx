@@ -7,6 +7,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { Api } from '../utils/api';
 
 import { clearPlanCache, saveToken, saveUser } from '../utils/auth';
+import styles from './LoginProfileChoice.module.css';
 
 
 
@@ -434,6 +435,8 @@ export default function Login() {
 
         aria-selected={active}
 
+        aria-label={`Selecionar perfil ${title}`}
+
         tabIndex={active || !hasTipo ? 0 : -1}
 
       >
@@ -460,7 +463,7 @@ export default function Login() {
 
   return (
 
-    <div className="login-preview">
+    <div className={`login-preview ${styles.page}`}>
 
 
       <main className="login-preview__main">
@@ -495,69 +498,69 @@ export default function Login() {
 
               ) : null}
 
-              {!tipo && lastProfileValue ? (
+              {!tipo ? (
 
-                <div className="login-preview__continue">
+                <div className="login-preview__chooser">
+                  {lastProfileValue ? (
 
-                  <button
+                    <div className="login-preview__continue">
 
-                    type="button"
+                      <button
 
-                    className="login-preview__continue-card"
+                        type="button"
 
-                    onClick={() => handleTipoSelect(lastProfileValue)}
+                        className="login-preview__continue-card"
 
-                    aria-label={`Continuar como ${lastProfileLabel}`}
+                        onClick={() => handleTipoSelect(lastProfileValue)}
 
-                  >
+                        aria-label={`Continuar como ${lastProfileLabel}`}
 
-                    <div className="login-preview__continue-title">
-                      Continuar:{' '}
-                      <span
-                        className={`login-preview__continue-highlight login-preview__continue-highlight--${lastProfileValue === 'ESTABELECIMENTO' ? 'estab' : 'cliente'}`}
                       >
-                        {lastProfileLabel}
-                      </span>
+
+                        <div className={styles.continueSummary}>
+                          <span className={styles.continueLabel}>Continuar:</span>
+                          <span
+                            className={`login-preview__continue-highlight login-preview__continue-highlight--${lastProfileValue === 'ESTABELECIMENTO' ? 'estab' : 'cliente'} ${styles.continueValue}`}
+                          >
+                            {lastProfileLabel}
+                          </span>
+                        </div>
+
+                      </button>
+
+                      <button
+
+                        type="button"
+
+                        className="login-preview__continue-link"
+
+                        onClick={handleTipoReset}
+
+                      >
+
+                        Trocar perfil
+
+                      </button>
+
                     </div>
 
-                  </button>
+                  ) : null}
 
-                  <button
+                  <div className="login-preview__tabs" role="tablist" aria-label="Escolher perfil">
 
-                    type="button"
+                    <Tab value="CLIENTE" title="Cliente" />
 
-                    className="login-preview__continue-link"
+                    <Tab value="ESTABELECIMENTO" title="Estabelecimento" />
 
-                    onClick={handleTipoReset}
+                  </div>
 
-                  >
-
-                    Trocar perfil
-
-                  </button>
-
+                  <div className="login-preview__actions">
+                    <Link to={cadastroTarget} className="login-preview__ghost">
+                      Criar conta
+                    </Link>
+                  </div>
                 </div>
 
-              ) : null}
-
-              {!tipo ? (
-
-                <div className="login-preview__tabs" role="tablist" aria-label="Escolher perfil">
-
-                  <Tab value="CLIENTE" title="Cliente" />
-
-                  <Tab value="ESTABELECIMENTO" title="Estabelecimento" />
-
-                </div>
-
-              ) : null}
-
-              {!tipo ? (
-                <div className="login-preview__actions">
-                  <Link to={cadastroTarget} className="login-preview__ghost">
-                    Criar conta
-                  </Link>
-                </div>
               ) : null}
 
               {hasRedirectTarget ? (
