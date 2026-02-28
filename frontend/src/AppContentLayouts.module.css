@@ -1,0 +1,17 @@
+.authStage {
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  padding: 24px;
+  min-height: calc((var(--vh, 1vh) * 100) - var(--topbar-current-h, 56px));
+  min-height: calc(100svh - var(--topbar-current-h, 56px));
+  display: grid;
+  place-items: center;
+  align-content: center;
+}
+
+@media (max-width: 780px) {
+  .authStage {
+    padding: 16px 12px;
+  }
+}

@@ -1,17 +1,15 @@
 .page {
-  min-height: 100svh;
-  display: grid;
-  place-items: center;
-  padding: 24px 16px calc(var(--mobile-nav-h, 64px) + 24px);
-  background:
-    radial-gradient(circle at top, rgba(255, 255, 255, 0.9), transparent 38%),
-    linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%);
+  width: 100%;
+  min-height: auto;
+  padding: 0;
+  background: transparent;
 }
 
 .page :global(.login-preview__main) {
   width: 100%;
   display: flex;
   justify-content: center;
+  min-height: 0;
 }
 
 .page :global(.login-preview__card) {
@@ -303,10 +301,6 @@
 }
 
 @media (max-width: 640px) {
-  .page {
-    padding: 16px 12px calc(var(--mobile-nav-h, 64px) + 16px);
-  }
-
   .page :global(.login-preview__panel) {
     padding: 24px 18px;
   }

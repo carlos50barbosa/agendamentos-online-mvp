@@ -45,6 +45,7 @@ import {
   broadcastPreferences,
 
 } from './utils/preferences.js';
+import layoutStyles from './AppContentLayouts.module.css';
 
 
 
@@ -780,6 +781,7 @@ export default function App() {
   const loc = useLocation();
   const navigate = useNavigate();
   const isLanding = (loc?.pathname || '') === '/';
+  const isLoginRoute = (loc?.pathname || '') === '/login';
   const isNovo = (loc?.pathname || '').startsWith('/novo');
   const [currentUser, setCurrentUser] = useState(() => getUser());
 
@@ -1255,7 +1257,11 @@ const topbarAlert = useMemo(() => {
 
   const shellClassName = `app-shell ${hideShell ? 'app-shell--public' : (sidebarOpen ? 'sidebar-open' : 'is-collapsed')}`;
   const mainClassName = `app-main${hideShell ? ' app-main--public' : ''}`;
-  const contentWrapperClass = hideShell ? 'landing-shell' : `container${isConfiguracoes ? ' container--wide' : ''}`;
+  const contentWrapperClass = hideShell
+    ? 'landing-shell'
+    : isLoginRoute
+      ? `container ${layoutStyles.authStage}`
+      : `container${isConfiguracoes ? ' container--wide' : ''}`;
 
   return (
     <>
