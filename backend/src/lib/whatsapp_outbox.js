@@ -117,6 +117,24 @@ function extractProviderMessageId(resp) {
   }
 }
 
+function safeJson(value) {
+  try {
+    return JSON.stringify(value ?? null);
+  } catch {
+    return null;
+  }
+}
+
+function parseJson(raw) {
+  if (!raw) return null;
+  if (typeof raw === 'object') return raw;
+  try {
+    return JSON.parse(String(raw));
+  } catch {
+    return null;
+  }
+}
+
 export async function sendAppointmentWhatsApp({
   estabelecimentoId,
   agendamentoId,
@@ -170,6 +188,7 @@ export async function sendAppointmentWhatsApp({
     let templateToSend = template && template.name ? {
       name: template.name,
       lang: template.lang,
+      components: Array.isArray(template.components) ? template.components : undefined,
       bodyParams: template.bodyParams || [],
       headerImageUrl: template.headerImageUrl,
       headerDocumentUrl: template.headerDocumentUrl,
@@ -226,4 +245,123 @@ export async function sendAppointmentWhatsApp({
   }
 
   return { ok: true, sent: true, provider_message_id: providerMessageId, result: resp };
+}
+
+export async function enqueueWhatsAppOutbox({
+  tenantId,
+  to,
+  kind = 'bot',
+  message = null,
+  template = null,
+  metadata = null,
+}) {
+  const tenant = toInt(tenantId, 0);
+  const toPhone = String(to || '').trim();
+  if (!tenant || !toPhone) return { ok: false, error: 'invalid_payload' };
+  const payload = {
+    message: message != null ? String(message) : null,
+    template: template && typeof template === 'object' ? template : null,
+    metadata: metadata && typeof metadata === 'object' ? metadata : null,
+  };
+  try {
+    const [result] = await pool.query(
+      `INSERT INTO whatsapp_outbox
+        (tenant_id, to_phone, kind, payload_json, status, provider_message_id, attempt_count, last_error, created_at, updated_at, sent_at)
+       VALUES (?,?,?,?, 'pending', NULL, 0, NULL, NOW(), NOW(), NULL)`,
+      [tenant, toPhone, String(kind || 'bot').slice(0, 64), safeJson(payload)]
+    );
+    return { ok: true, outboxId: Number(result?.insertId || 0), payload };
+  } catch (err) {
+    if (err?.code === 'ER_NO_SUCH_TABLE' || err?.errno === 1146) {
+      return { ok: false, error: 'outbox_table_missing' };
+    }
+    throw err;
+  }
+}
+
+export async function processWhatsAppOutboxItem(outboxId) {
+  const id = toInt(outboxId, 0);
+  if (!id) return { ok: false, error: 'invalid_id' };
+  try {
+    const [rows] = await pool.query(
+      `SELECT id, tenant_id, to_phone, kind, payload_json, status, attempt_count
+         FROM whatsapp_outbox
+        WHERE id=?
+        LIMIT 1`,
+      [id]
+    );
+    const row = rows?.[0];
+    if (!row) return { ok: false, error: 'not_found' };
+    if (String(row.status || '').toLowerCase() === 'sent') {
+      return { ok: true, alreadySent: true, outboxId: id, providerMessageId: null };
+    }
+    const payload = parseJson(row.payload_json) || {};
+    const template = payload?.template && typeof payload.template === 'object'
+      ? payload.template
+      : null;
+    const message = payload?.message != null ? String(payload.message) : null;
+
+    const sendResult = await sendAppointmentWhatsApp({
+      estabelecimentoId: row.tenant_id,
+      agendamentoId: null,
+      to: row.to_phone,
+      kind: row.kind || 'bot',
+      message,
+      template,
+      metadata: payload?.metadata || null,
+    });
+
+    const providerMessageId = sendResult?.provider_message_id || null;
+    const ok = Boolean(sendResult?.ok && sendResult?.sent !== false);
+    const status = ok ? 'sent' : 'error';
+    const lastError = ok ? null : String(sendResult?.detail || sendResult?.error || 'send_failed').slice(0, 1000);
+    await pool.query(
+      `UPDATE whatsapp_outbox
+          SET status=?,
+              provider_message_id=COALESCE(?, provider_message_id),
+              attempt_count=attempt_count+1,
+              last_error=?,
+              sent_at=CASE WHEN ?='sent' THEN NOW() ELSE sent_at END,
+              updated_at=NOW()
+        WHERE id=?`,
+      [status, providerMessageId, lastError, status, id]
+    );
+    return {
+      ok: true,
+      status,
+      outboxId: id,
+      providerMessageId,
+      sendResult,
+      errorCode: ok ? null : 'BOT_TEMPLATE_SEND_FAILED',
+    };
+  } catch (err) {
+    if (err?.code === 'ER_NO_SUCH_TABLE' || err?.errno === 1146) {
+      return { ok: false, error: 'outbox_table_missing' };
+    }
+    throw err;
+  }
+}
+
+export async function enqueueAndSendWhatsAppOutbox(payload) {
+  const queued = await enqueueWhatsAppOutbox(payload);
+  if (!queued.ok) {
+    return { ok: false, error: queued.error, errorCode: queued.error === 'outbox_table_missing' ? 'BOT_OUTBOX_UNAVAILABLE' : null };
+  }
+  const processed = await processWhatsAppOutboxItem(queued.outboxId);
+  if (!processed.ok) {
+    return {
+      ok: false,
+      outboxId: queued.outboxId,
+      error: processed.error,
+      errorCode: processed.error === 'outbox_table_missing' ? 'BOT_OUTBOX_UNAVAILABLE' : 'BOT_TEMPLATE_SEND_FAILED',
+    };
+  }
+  return {
+    ok: processed.status === 'sent',
+    outboxId: queued.outboxId,
+    providerMessageId: processed.providerMessageId || null,
+    sendResult: processed.sendResult || null,
+    status: processed.status || 'error',
+    errorCode: processed.status === 'sent' ? null : processed.errorCode || 'BOT_TEMPLATE_SEND_FAILED',
+  };
 }

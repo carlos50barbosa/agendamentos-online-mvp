@@ -178,7 +178,7 @@ const PORT = Number(process.env.PORT || 3002);
 
 app.listen(PORT, HOST, () => {
   console.log(`✅ Backend ouvindo em http://${HOST}:${PORT}`);
-  console.log('[routes] whatsapp: /webhooks/whatsapp, /api/webhooks/whatsapp | wa: /wa/webhook, /api/wa/webhook');
+  console.log('[routes] whatsapp oficial: /api/webhooks/whatsapp (aliases: /webhooks/whatsapp, /wa/webhook, /api/wa/webhook)');
 });
 
 // Tarefas de manutencao: limpeza de tokens expirados e lembretes de cobranca

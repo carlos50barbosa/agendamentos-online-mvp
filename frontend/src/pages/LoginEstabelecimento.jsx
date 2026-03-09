@@ -1,20 +1,15 @@
-import React, { useEffect, useMemo } from 'react';
+import React, { useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 
 export default function LoginEstabelecimento() {
   const nav = useNavigate();
   const loc = useLocation();
-  const nextParam = useMemo(
-    () => new URLSearchParams(loc.search).get('next') || '',
-    [loc.search]
-  );
 
   useEffect(() => {
-    const params = new URLSearchParams();
+    const params = new URLSearchParams(loc.search);
     params.set('tipo', 'estabelecimento');
-    if (nextParam) params.set('next', nextParam);
     nav(`/login?${params.toString()}`, { replace: true });
-  }, [nav, nextParam]);
+  }, [loc.search, nav]);
 
   return null;
 }

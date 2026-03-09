@@ -66,6 +66,9 @@ const ProfissionaisEstabelecimento = React.lazy(() => import('./pages/Profission
 const NovoAgendamento = React.lazy(() => import('./pages/NovoAgendamento.jsx'));
 
 const Configuracoes = React.lazy(() => import('./pages/Configuracoes.jsx'));
+const Assinatura = React.lazy(() => import('./pages/Assinatura.jsx'));
+const WhatsAppBusiness = React.lazy(() => import('./pages/WhatsAppBusiness.jsx'));
+const SinalAgendamentos = React.lazy(() => import('./pages/SinalAgendamentos.jsx'));
 
 const Ajuda = React.lazy(() => import('./pages/Ajuda.jsx'));
 
@@ -125,6 +128,9 @@ const APP_ROUTES = [
   { path: '/novo-agendamento', element: <NovoAgendamento /> },
 
   { path: '/configuracoes', element: <Configuracoes />, auth: true },
+  { path: '/assinatura', element: <Assinatura />, auth: true, role: 'estabelecimento' },
+  { path: '/whatsappbusiness', element: <WhatsAppBusiness />, auth: true, role: 'estabelecimento' },
+  { path: '/sinal', element: <SinalAgendamentos />, auth: true, role: 'estabelecimento' },
 
   { path: '/loading', element: <Loading /> },
 
@@ -291,7 +297,7 @@ function BillingStatusBanner({ status, user, planInfo }) {
   let body = '';
 
   let ctaLabel = 'Pagar agora';
-  let ctaTo = '/configuracoes';
+  let ctaTo = '/assinatura';
   let secondaryCtaLabel = '';
   let secondaryCtaTo = '';
 
@@ -350,7 +356,7 @@ function BillingStatusBanner({ status, user, planInfo }) {
     body = 'Escolha um plano para continuar usando a plataforma sem interrupções.';
 
     ctaLabel = 'Reativar agora (Gerar PIX)';
-    ctaTo = '/configuracoes?tab=plano&action=gerar_pix';
+    ctaTo = '/assinatura?action=gerar_pix';
     secondaryCtaLabel = 'Ver planos';
     secondaryCtaTo = '/planos#planos';
   }
@@ -557,7 +563,7 @@ function Sidebar({ open, user, isDesktop, isDark, isPlanos, toggleTheme }) {
 
   const navigation = useMemo(() => buildNavigation(resolvedUser), [resolvedUser]);
 
-  const showActive = resolvedUser?.tipo !== 'estabelecimento';
+  const showActive = true;
 
 
 
@@ -780,9 +786,14 @@ function Sidebar({ open, user, isDesktop, isDark, isPlanos, toggleTheme }) {
 export default function App() {
   const loc = useLocation();
   const navigate = useNavigate();
+  const pathname = loc?.pathname || '';
   const isLanding = (loc?.pathname || '') === '/';
-  const isLoginRoute = (loc?.pathname || '') === '/login';
-  const isNovo = (loc?.pathname || '').startsWith('/novo');
+  const isLoginRoute = pathname.startsWith('/login');
+  const isAuthRoute =
+    isLoginRoute ||
+    pathname.startsWith('/cadastro') ||
+    pathname.startsWith('/recuperar-senha');
+  const isNovo = pathname.startsWith('/novo');
   const [currentUser, setCurrentUser] = useState(() => getUser());
 
   const [billingStatus, setBillingStatus] = useState(null);
@@ -793,7 +804,11 @@ export default function App() {
 
   const [planBarInfo, setPlanBarInfo] = useState({ plan: '', status: '', trialEnd: null, trialDaysLeft: null });
   const isPlanos = (loc?.pathname || '') === '/planos';
-  const isConfiguracoes = (loc?.pathname || '').startsWith('/configuracoes');
+  const isConfiguracoes =
+    (loc?.pathname || '').startsWith('/configuracoes') ||
+    (loc?.pathname || '').startsWith('/assinatura') ||
+    (loc?.pathname || '').startsWith('/whatsappbusiness') ||
+    (loc?.pathname || '').startsWith('/sinal');
   const hideShell = isLanding;
   const topbarRef = useRef(null);
   const topbarMenuButtonRef = useRef(null);
@@ -1259,8 +1274,8 @@ const topbarAlert = useMemo(() => {
   const mainClassName = `app-main${hideShell ? ' app-main--public' : ''}`;
   const contentWrapperClass = hideShell
     ? 'landing-shell'
-    : isLoginRoute
-      ? `container ${layoutStyles.authStage}`
+    : isAuthRoute
+      ? layoutStyles.authStage
       : `container${isConfiguracoes ? ' container--wide' : ''}`;
 
   return (
@@ -1419,7 +1434,7 @@ const topbarAlert = useMemo(() => {
             {topbarAlert && (
               <div className={`app-topbar__alert app-topbar__alert--${topbarAlert.variant}`}>
                 <span>{topbarAlert.message}</span>
-                <NavLink className="btn btn--primary btn--sm" to="/configuracoes">
+                <NavLink className="btn btn--primary btn--sm" to={currentUser?.tipo === 'estabelecimento' ? '/assinatura' : '/configuracoes'}>
                   Ver planos
                 </NavLink>
               </div>
@@ -1451,7 +1466,11 @@ const topbarAlert = useMemo(() => {
 
               fallback={
 
-                <div className="card" role="status" aria-live="polite">
+                <div
+                  className={`card${isAuthRoute ? ` ${layoutStyles.authFallback}` : ''}`}
+                  role="status"
+                  aria-live="polite"
+                >
 
                   <span className="spinner" /> Carregando...
 

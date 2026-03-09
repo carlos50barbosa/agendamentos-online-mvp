@@ -1,9 +1,11 @@
 // backend/src/lib/wa_store.js
 import { pool } from './db.js';
 
+let initialized = false;
+
 async function ensureTables() {
   await pool.query(`
-    CREATE TABLE IF NOT EXISTS wa_sessions (
+    CREATE TABLE IF NOT EXISTS wa_legacy_sessions (
       phone VARCHAR(32) PRIMARY KEY,
       state JSON NOT NULL,
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
@@ -21,32 +23,47 @@ async function ensureTables() {
 }
 
 export async function initWAStore() {
-  try { await ensureTables(); } catch (e) { console.error('[wa_store] ensureTables', e); }
+  try {
+    await ensureTables();
+    initialized = true;
+  } catch (e) {
+    console.error('[wa_store] ensureTables', e);
+  }
+}
+
+async function ensureInit() {
+  if (initialized) return;
+  await initWAStore();
 }
 
 export async function getSession(phone) {
-  const [rows] = await pool.query('SELECT state FROM wa_sessions WHERE phone=? LIMIT 1', [phone]);
+  await ensureInit();
+  const [rows] = await pool.query('SELECT state FROM wa_legacy_sessions WHERE phone=? LIMIT 1', [phone]);
   if (!rows.length) return null;
   try { return JSON.parse(rows[0].state); } catch { return null; }
 }
 
 export async function setSession(phone, state) {
+  await ensureInit();
   const json = JSON.stringify(state || {});
   await pool.query(
-    'INSERT INTO wa_sessions (phone, state) VALUES (?,?) ON DUPLICATE KEY UPDATE state=VALUES(state), updated_at=CURRENT_TIMESTAMP',
+    'INSERT INTO wa_legacy_sessions (phone, state) VALUES (?,?) ON DUPLICATE KEY UPDATE state=VALUES(state), updated_at=CURRENT_TIMESTAMP',
     [phone, json]
   );
 }
 
 export async function clearSession(phone) {
-  await pool.query('DELETE FROM wa_sessions WHERE phone=?', [phone]);
+  await ensureInit();
+  await pool.query('DELETE FROM wa_legacy_sessions WHERE phone=?', [phone]);
 }
 
 export async function createLinkToken(phone, token) {
+  await ensureInit();
   await pool.query('INSERT INTO wa_links (token, phone) VALUES (?,?) ON DUPLICATE KEY UPDATE phone=VALUES(phone), used=0, created_at=CURRENT_TIMESTAMP, used_at=NULL', [token, phone]);
 }
 
 export async function consumeLinkToken(token) {
+  await ensureInit();
   const [rows] = await pool.query('SELECT token, phone, used FROM wa_links WHERE token=? LIMIT 1', [token]);
   const row = rows?.[0];
   if (!row || row.used) return null;

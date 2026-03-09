@@ -7,7 +7,12 @@
   min-height: calc(100svh - var(--topbar-current-h, 56px));
   display: grid;
   place-items: center;
-  align-content: center;
+}
+
+.authFallback {
+  width: 100%;
+  max-width: 620px;
+  margin: 0 auto;
 }
 
 @media (max-width: 780px) {

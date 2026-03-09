@@ -126,6 +126,15 @@ export function IconChart(props){
   );
 }
 
+export function IconMoney(props){
+  return (
+    <svg {...base} viewBox="0 0 24 24" aria-hidden="true" {...props}>
+      <path d="M12 3v18"/>
+      <path d="M16.5 7.5a4.5 4.5 0 00-9 0c0 2.49 2.01 4.5 4.5 4.5h0c2.49 0 4.5 2.01 4.5 4.5a4.5 4.5 0 01-9 0"/>
+    </svg>
+  );
+}
+
 export function IconStar({ filled = false, ...props }) {
   return (
     <svg {...base} viewBox="0 0 24 24" aria-hidden="true" {...props}>
@@ -225,6 +234,7 @@ export default {
   IconChevronRight,
   IconList,
   IconChart,
+  IconMoney,
   IconDownload,
   IconSearch,
   IconMapPin,

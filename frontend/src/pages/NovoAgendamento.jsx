@@ -2,7 +2,7 @@
 
 import React, { Suspense, useEffect, useMemo, useState, useCallback, useRef } from "react";
 
-import { Link, useSearchParams, useLocation } from "react-router-dom";
+import { Link, useSearchParams, useLocation, useParams } from "react-router-dom";
 
 import { Api, resolveAssetUrl } from "../utils/api";
 
@@ -36,7 +36,55 @@ const getEstablishmentsPageSize = () => {
 
 };
 
-const QUERY_DEBOUNCE_MS = 350;
+const QUERY_DEBOUNCE_MS = 180;
+
+const PUBLIC_PAGE_THEME_DEFAULTS = Object.freeze({
+  accent: "#0f766e",
+  accentStrong: "#164e63",
+});
+
+function normalizeHexColor(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  const prefixed = raw.startsWith("#") ? raw : `#${raw}`;
+  if (!/^#([\da-f]{3}|[\da-f]{6})$/i.test(prefixed)) return "";
+  if (prefixed.length === 4) {
+    return `#${prefixed[1]}${prefixed[1]}${prefixed[2]}${prefixed[2]}${prefixed[3]}${prefixed[3]}`.toLowerCase();
+  }
+  return prefixed.toLowerCase();
+}
+
+function hexToRgb(hex) {
+  const normalized = normalizeHexColor(hex);
+  if (!normalized) return null;
+  const value = normalized.slice(1);
+  return {
+    r: Number.parseInt(value.slice(0, 2), 16),
+    g: Number.parseInt(value.slice(2, 4), 16),
+    b: Number.parseInt(value.slice(4, 6), 16),
+  };
+}
+
+function toRgba(hex, alpha) {
+  const rgb = hexToRgb(hex);
+  if (!rgb) return "";
+  const safeAlpha = Math.max(0, Math.min(1, alpha));
+  return `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${safeAlpha})`;
+}
+
+function mixColors(hexA, hexB, weight = 0.5) {
+  const colorA = hexToRgb(hexA);
+  const colorB = hexToRgb(hexB);
+  if (!colorA || !colorB) return normalizeHexColor(hexA) || normalizeHexColor(hexB) || "";
+
+  const safeWeight = Math.max(0, Math.min(1, weight));
+  const mixChannel = (channel) => Math.round((colorA[channel] * safeWeight) + (colorB[channel] * (1 - safeWeight)));
+  const mixed = [mixChannel("r"), mixChannel("g"), mixChannel("b")]
+    .map((value) => value.toString(16).padStart(2, "0"))
+    .join("");
+
+  return `#${mixed}`;
+}
 
 /* =================== Helpers de Data =================== */
 
@@ -1891,6 +1939,7 @@ const EstablishmentCard = ({ est, selected, onSelect }) => {
 export default function NovoAgendamento() {
 
   const user = getUser();
+  const { estabelecimentoSlug = "" } = useParams();
 
   const isAuthenticated = Boolean(user?.id);
 
@@ -1899,8 +1948,10 @@ export default function NovoAgendamento() {
   const liveRef = useRef(null);
 
   const toastTimeoutRef = useRef(null);
+  const slugBootstrapRef = useRef("");
 
   const location = useLocation();
+  const routeSlug = useMemo(() => String(estabelecimentoSlug || "").trim(), [estabelecimentoSlug]);
 
   const loginHref = useMemo(() => {
 
@@ -1979,6 +2030,7 @@ export default function NovoAgendamento() {
   const servicesSectionRef = useRef(null);
 
   const ensureEstParamPendingRef = useRef(false);
+  const establishmentsCacheRef = useRef(new Map());
 
   const [distanceMap, setDistanceMap] = useState({});
 
@@ -2374,6 +2426,64 @@ export default function NovoAgendamento() {
 
   const profileData = selectedExtras?.profile || null;
 
+  const publicPageThemeStyle = useMemo(() => {
+    const accent =
+      normalizeHexColor(
+        searchParams.get("accent") ||
+        searchParams.get("cor") ||
+        profileData?.accent_color ||
+        profileData?.brand_color ||
+        profileData?.cor_primaria
+      ) || PUBLIC_PAGE_THEME_DEFAULTS.accent;
+
+    const accentStrong =
+      normalizeHexColor(
+        searchParams.get("accentStrong") ||
+        searchParams.get("corStrong") ||
+        profileData?.accent_strong_color ||
+        profileData?.secondary_color ||
+        profileData?.cor_secundaria
+      ) || mixColors(accent, PUBLIC_PAGE_THEME_DEFAULTS.accentStrong, 0.46);
+
+    const accentSoft = toRgba(accent, 0.1);
+    const accentSoftStrong = toRgba(accent, 0.18);
+    const accentBorder = toRgba(accent, 0.22);
+    const accentRing = toRgba(accent, 0.18);
+    const accentShadow = toRgba(accentStrong, 0.18);
+
+    return {
+      "--brand": accent,
+      "--brand-100": mixColors(accent, "#ffffff", 0.12),
+      "--brand-200": mixColors(accent, "#ffffff", 0.24),
+      "--primary-50": accentSoft,
+      "--primary-100": toRgba(accent, 0.14),
+      "--primary-200": accentBorder,
+      "--primary-500": accent,
+      "--primary-600": accentStrong,
+      "--primary-700": mixColors(accentStrong, "#0f172a", 0.72),
+      "--booking-accent": accent,
+      "--booking-accent-strong": accentStrong,
+      "--booking-accent-soft": accentSoft,
+      "--booking-accent-soft-strong": accentSoftStrong,
+      "--booking-accent-border": accentBorder,
+      "--booking-accent-ring": accentRing,
+      "--booking-accent-shadow": accentShadow,
+      "--booking-surface-top": mixColors(accent, "#ffffff", 0.1),
+      "--booking-surface-bottom": mixColors(accentStrong, "#ffffff", 0.06),
+      "--booking-page-bg":
+        `radial-gradient(circle at top right, ${accentSoftStrong}, transparent 28%), ` +
+        `radial-gradient(circle at bottom left, ${toRgba(accentStrong, 0.14)}, transparent 30%)`,
+      "--booking-card-shadow": `0 24px 56px ${accentShadow}`,
+    };
+  }, [profileData, searchParams]);
+
+  const hasPublicPageTheme = Boolean(
+    routeSlug ||
+    selectedEstablishmentId ||
+    searchParams.get("accent") ||
+    searchParams.get("cor")
+  );
+
   const galleryImages = Array.isArray(selectedExtras?.gallery) ? selectedExtras.gallery : [];
 
   const publicShareLink = useMemo(() => {
@@ -2413,6 +2523,10 @@ export default function NovoAgendamento() {
       const url = new URL(`/novo/${targetSlug}`, origin);
 
       url.searchParams.set('estabelecimento', id);
+      ['accent', 'accentStrong', 'cor', 'corStrong'].forEach((key) => {
+        const value = searchParams.get(key);
+        if (value) url.searchParams.set(key, value);
+      });
 
       return url.toString();
 
@@ -2431,6 +2545,8 @@ export default function NovoAgendamento() {
     selectedEstablishment?.slug,
 
     selectedEstablishmentName,
+
+    searchParams,
 
     user?.id,
 
@@ -2702,7 +2818,7 @@ export default function NovoAgendamento() {
 
   }, [selectedEstablishment]);
 
-  const normalizedQuery = useMemo(() => normalizeText(debouncedEstQuery.trim()), [debouncedEstQuery]);
+  const normalizedQuery = useMemo(() => normalizeText(estQuery.trim()), [estQuery]);
 
   const queryTokens = useMemo(
 
@@ -3090,8 +3206,39 @@ export default function NovoAgendamento() {
   useEffect(() => {
 
     let cancelled = false;
+    const controller = new AbortController();
 
     const isFirstPage = establishmentsPage === 1;
+    const requestKey = `${debouncedEstQuery}::${establishmentsPage}::${establishmentsPageSize}`;
+    const cachedEntry = establishmentsCacheRef.current.get(requestKey);
+
+    if (cachedEntry) {
+
+      setState((prev) => ({
+
+        ...prev,
+
+        establishments: isFirstPage ? cachedEntry.list : [...prev.establishments, ...cachedEntry.list],
+
+      }));
+
+      setEstablishmentsHasMore(cachedEntry.hasMore);
+
+      setEstablishmentsError('');
+
+      setEstablishmentsLoading(false);
+
+      setEstablishmentsLoadingMore(false);
+
+      return () => {
+
+        cancelled = true;
+
+        controller.abort();
+
+      };
+
+    }
 
     if (isFirstPage) {
 
@@ -3121,7 +3268,7 @@ export default function NovoAgendamento() {
 
           limit: establishmentsPageSize,
 
-        });
+        }, { signal: controller.signal });
 
         if (cancelled) return;
 
@@ -3133,6 +3280,13 @@ export default function NovoAgendamento() {
 
           : Boolean(response?.has_more ?? list.length > establishmentsPageSize);
 
+        const cache = establishmentsCacheRef.current;
+        cache.set(requestKey, { list, hasMore: nextHasMore });
+        if (cache.size > 40) {
+          const oldestKey = cache.keys().next().value;
+          if (oldestKey && oldestKey !== requestKey) cache.delete(oldestKey);
+        }
+
         setState((prev) => ({
 
           ...prev,
@@ -3143,9 +3297,9 @@ export default function NovoAgendamento() {
 
         setEstablishmentsHasMore(nextHasMore);
 
-      } catch {
+      } catch (err) {
 
-        if (cancelled) return;
+        if (cancelled || controller.signal.aborted || err?.name === 'AbortError') return;
 
         if (isFirstPage) {
 
@@ -3157,7 +3311,7 @@ export default function NovoAgendamento() {
 
       } finally {
 
-        if (!cancelled) {
+        if (!cancelled && !controller.signal.aborted) {
 
           setEstablishmentsLoading(false);
 
@@ -3172,6 +3326,8 @@ export default function NovoAgendamento() {
     return () => {
 
       cancelled = true;
+
+      controller.abort();
 
     };
 
@@ -3235,6 +3391,78 @@ export default function NovoAgendamento() {
     };
 
   }, [establishments, searchParams]);
+
+  useEffect(() => {
+    const slug = String(routeSlug || '').trim().toLowerCase();
+    if (!slug) return;
+
+    const explicitEstParam = (searchParams.get('estabelecimento') || searchParams.get('estabelecimentoId') || '').trim();
+    const matched = establishments.find((est) => String(est?.slug || '').trim().toLowerCase() === slug);
+
+    if (matched?.id) {
+      const matchedId = String(matched.id);
+
+      if (state.establishmentId !== matchedId) {
+        setState((prev) => ({
+          ...prev,
+          establishmentId: matchedId,
+          serviceIds: [],
+          serviceSelectionConfirmed: false,
+          professionalId: "",
+          slots: [],
+          selectedSlot: null,
+        }));
+      }
+
+      if (!explicitEstParam) {
+        const sp = new URLSearchParams(searchParams);
+        sp.set('estabelecimento', matchedId);
+        setSearchParams(sp, { replace: true });
+      }
+      return;
+    }
+
+    if (explicitEstParam || slugBootstrapRef.current === slug) return;
+
+    slugBootstrapRef.current = slug;
+
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const data = await Api.getEstablishment(slug);
+        if (cancelled || !data?.id) return;
+
+        const nextId = String(data.id);
+
+        setState((prev) => ({
+          ...prev,
+          establishments: [
+            data,
+            ...prev.establishments.filter((est) => String(est.id) !== nextId),
+          ],
+          establishmentId: nextId,
+          serviceIds: [],
+          serviceSelectionConfirmed: false,
+          professionalId: "",
+          slots: [],
+          selectedSlot: null,
+        }));
+
+        const sp = new URLSearchParams(searchParams);
+        sp.set('estabelecimento', nextId);
+        setSearchParams(sp, { replace: true });
+      } catch {
+        if (!cancelled) {
+          showToast('error', 'Nao foi possivel carregar a pagina do estabelecimento.');
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [establishments, routeSlug, searchParams, setSearchParams, showToast, state.establishmentId]);
 
   // Se vier estabelecimento= ou estabelecimentoId= na URL, seleciona automaticamente apos carregar a lista
   useEffect(() => {
@@ -5921,7 +6149,7 @@ useEffect(() => {
 
   const renderEstablishmentResults = () => {
 
-    if (establishmentsLoading) {
+    if (establishmentsLoading && !establishmentResults.length) {
 
       return (
 
@@ -6625,7 +6853,10 @@ useEffect(() => {
 
   return (
 
-    <div className="novo-agendamento">
+    <div
+      className={`novo-agendamento${hasPublicPageTheme ? ' novo-agendamento--brand' : ''}`}
+      style={hasPublicPageTheme ? publicPageThemeStyle : undefined}
+    >
 
       {toast && (
 
@@ -6867,7 +7098,7 @@ useEffect(() => {
 
                   <button type="button" className="summary-action" onClick={handleOpenInfo}>
 
-                    <IconList aria-hidden style={{ width: 14, height: 14, color: '#6c2bd9' }} />
+                    <IconList aria-hidden style={{ width: 14, height: 14, color: 'var(--booking-accent-strong, var(--primary-600))' }} />
 
                     Inf.
 

@@ -190,9 +190,9 @@ export default function Planos() {
     } catch {}
     const u = getUser();
     if (u && u.tipo === 'estabelecimento') {
-      nav('/configuracoes');
+      nav('/assinatura');
     } else {
-      nav('/cadastro?next=/configuracoes&tipo=estabelecimento');
+      nav('/cadastro?next=/assinatura&tipo=estabelecimento');
     }
   };
 
@@ -200,7 +200,7 @@ export default function Planos() {
     try {
       localStorage.setItem('intent_kind', 'renewal');
     } catch {}
-    nav('/configuracoes');
+    nav('/assinatura');
   };
 
   const goTrial = (plano) => () => {
@@ -211,7 +211,7 @@ export default function Planos() {
     } catch {}
     const u = getUser();
     if (u && u.tipo === 'estabelecimento') {
-      nav('/configuracoes');
+      nav('/assinatura');
     } else {
       const trialNext = encodeURIComponent('/estab?trial=sucesso');
       nav(

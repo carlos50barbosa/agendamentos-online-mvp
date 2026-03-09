@@ -291,7 +291,7 @@ export const Api = {
 
   // Estabelecimentos + Serviços (NOVOS)
 
-  listEstablishments: (params = {}) => req(`/establishments${toQuery(params)}`),
+  listEstablishments: (params = {}, opt = {}) => req(`/establishments${toQuery(params)}`, opt),
   getEstablishment: (idOrSlug) => req(`/establishments/${idOrSlug}`),
   getEstablishmentClients: (id, params = {}) =>
     req(`/establishments/${id}/clients${toQuery(params)}`),

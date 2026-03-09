@@ -1,7 +1,10 @@
 import { Router } from 'express';
-import crypto from 'node:crypto';
-import jwt from 'jsonwebtoken';
 import { auth, isEstabelecimento } from '../middleware/auth.js';
+import {
+  buildOAuthState,
+  describeOAuthStateError,
+  verifyOAuthState,
+} from '../lib/oauth_state.js';
 import { encryptAccessToken } from '../services/waCrypto.js';
 import { exchangeOAuthCode, getGraph } from '../services/waGraph.js';
 import {
@@ -17,6 +20,8 @@ const APP_ID = process.env.WA_APP_ID;
 const APP_SECRET = process.env.WA_APP_SECRET;
 const REDIRECT_URI = process.env.META_REDIRECT_URI;
 const DIALOG_VERSION = process.env.WA_API_VERSION || 'v23.0';
+const WA_STATE_SECRET = process.env.WA_STATE_SECRET || process.env.JWT_SECRET;
+const WA_STATE_TTL = String(process.env.WA_STATE_TTL || '1h').trim() || '1h';
 const FRONTEND_BASE = (process.env.FRONTEND_BASE_URL || process.env.APP_URL || 'http://localhost:3001').replace(/\/$/, '');
 
 const SCOPES = [
@@ -36,22 +41,25 @@ function buildConnectUrl(state) {
 }
 
 function buildState(estabelecimentoId) {
-  const payload = {
-    estabelecimentoId,
-    nonce: crypto.randomBytes(8).toString('hex'),
-    ts: Date.now(),
-  };
-  return jwt.sign(payload, process.env.JWT_SECRET || 'secret', { expiresIn: '15m' });
+  return buildOAuthState(
+    { estabelecimentoId },
+    { secret: WA_STATE_SECRET, expiresIn: WA_STATE_TTL },
+  );
 }
 
-function resolveRedirect(status) {
-  const safe = status || 'connected';
-  return `${FRONTEND_BASE}/configuracoes?wa=${encodeURIComponent(safe)}`;
+function resolveRedirect(status, reason) {
+  const url = new URL(`${FRONTEND_BASE}/whatsappbusiness`);
+  url.searchParams.set('wa', status || 'connected');
+  if (reason) url.searchParams.set('reason', reason);
+  return url.toString();
 }
 
 router.get('/connect/start', auth, isEstabelecimento, async (req, res) => {
   if (!APP_ID || !APP_SECRET || !REDIRECT_URI) {
     return res.status(500).json({ error: 'wa_config_missing' });
+  }
+  if (!WA_STATE_SECRET) {
+    return res.status(500).json({ error: 'wa_state_secret_missing' });
   }
   try {
     const state = buildState(req.user.id);
@@ -96,23 +104,24 @@ router.get('/connect/callback', async (req, res) => {
   const code = typeof req.query?.code === 'string' ? req.query.code : null;
   const state = typeof req.query?.state === 'string' ? req.query.state : null;
   if (!code || !state) {
-    return res.status(400).send('Missing code/state');
+    return res.redirect(302, resolveRedirect('error', 'missing_code_or_state'));
   }
   if (!APP_ID || !APP_SECRET || !REDIRECT_URI) {
-    return res.status(500).send('WA config missing');
+    return res.redirect(302, resolveRedirect('error', 'wa_config_missing'));
   }
 
   let estabelecimentoId = null;
   try {
-    const payload = jwt.verify(state, process.env.JWT_SECRET || 'secret');
+    const payload = verifyOAuthState(state, { secret: WA_STATE_SECRET });
     estabelecimentoId = Number(payload?.estabelecimentoId);
   } catch (err) {
-    console.error('[wa/connect/callback][state]', err?.message || err);
-    return res.status(400).send('Invalid state');
+    const stateError = describeOAuthStateError(err);
+    console.warn('[wa/connect/callback][state]', stateError);
+    return res.redirect(302, resolveRedirect('error', stateError.reason));
   }
 
   if (!Number.isFinite(estabelecimentoId) || estabelecimentoId <= 0) {
-    return res.status(400).send('Invalid state');
+    return res.redirect(302, resolveRedirect('error', 'state_invalid'));
   }
 
   try {
@@ -179,7 +188,7 @@ router.get('/connect/callback', async (req, res) => {
         phone_numbers_count: phoneNumbersCount,
         raw_keys: rawKeys,
       });
-      return res.redirect(302, `${FRONTEND_BASE}/configuracoes?wa=error&reason=missing_phone_number`);
+      return res.redirect(302, resolveRedirect('error', 'missing_phone_number'));
     }
 
     const existingPhone = await getWaAccountByPhoneNumberId(phoneNumberId);
@@ -203,7 +212,7 @@ router.get('/connect/callback', async (req, res) => {
     return res.redirect(302, resolveRedirect('connected'));
   } catch (err) {
     console.error('[wa/connect/callback]', err?.message || err);
-    return res.redirect(302, resolveRedirect('error'));
+    return res.redirect(302, resolveRedirect('error', 'oauth_exchange_failed'));
   }
 });
 

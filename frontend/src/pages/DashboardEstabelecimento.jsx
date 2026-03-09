@@ -2670,6 +2670,42 @@ function ProfessionalAgendaView({
 
 
 
+  const summaryCards = useMemo(() => {
+
+    const counts = {
+      total: filteredEvents.length,
+      pending: 0,
+      confirmed: 0,
+      done: 0,
+      canceled: 0,
+    }
+
+    ;(filteredEvents || []).forEach((eventItem) => {
+
+      const status = String(eventItem?.status || '').toLowerCase()
+
+      if (status === 'cancelado') counts.canceled += 1
+
+      else if (status === 'concluido') counts.done += 1
+
+      else if (status === 'confirmado' || status === 'confirmado_wa') counts.confirmed += 1
+
+      else counts.pending += 1
+
+    })
+
+    return [
+      { key: 'total', label: 'Total', value: counts.total, tone: 'neutral' },
+      { key: 'pending', label: 'Pendentes', value: counts.pending, tone: 'warning' },
+      { key: 'confirmed', label: 'Confirmados', value: counts.confirmed, tone: 'success' },
+      { key: 'done', label: 'Concluidos', value: counts.done, tone: 'info' },
+      { key: 'canceled', label: 'Cancelados', value: counts.canceled, tone: 'danger' },
+    ]
+
+  }, [filteredEvents])
+
+
+
   const selectedService = useMemo(
 
     () => services.find((svc) => String(svc?.id || '') === String(selfBookingServiceId)) || null,
@@ -3127,13 +3163,60 @@ function ProfessionalAgendaView({
 
 
 
+  const AgendaDayHeader = ({ date }) => {
+
+    const dt = date instanceof Date ? date : new Date(date)
+
+    const weekday = WEEKDAY_SHORT_LABELS[dt.getDay()] || ''
+
+    const day = String(dt.getDate()).padStart(2, '0')
+
+    const month = String(dt.getMonth() + 1).padStart(2, '0')
+
+    const isToday =
+      DateHelpers.toISODate(dt) === DateHelpers.toISODate(DateHelpers.nowInTimeZone(CALENDAR_TIME_ZONE))
+
+    return (
+
+      <span className={`pro-agenda__header-cell${isToday ? ' is-today' : ''}`}>
+
+        <span className="pro-agenda__header-weekday">{weekday}</span>
+
+        <span className="pro-agenda__header-date">
+
+          <span className="pro-agenda__header-day">{day}</span>
+
+          <span className="pro-agenda__header-divider">/</span>
+
+          <span className="pro-agenda__header-month">{month}</span>
+
+        </span>
+
+      </span>
+
+    )
+
+  }
+
+
+
   const AgendaEvent = ({ event }) => {
 
     const theme = event?._theme || getAgendaTheme(event?.status)
 
     const serviceLabel = event?.service || event?.title || 'Servico'
 
-    const clientLabel = event?.client ? ` - ${event.client}` : ''
+    const clientLabel = event?.client || 'Cliente nao informado'
+
+    const timeLabel = formatHourRange(event?.start, event?.end)
+
+    const statusLabel = theme.label || 'Agendamento'
+
+    const statusStyle = {
+      '--status-badge-bg': theme.badge || 'rgba(148,163,184,0.16)',
+      '--status-badge-border': theme.border || 'rgba(148,163,184,0.3)',
+      '--status-badge-color': theme.text || '#334155',
+    }
 
     const handleOpenDetails = () => setSelectedEvent(event)
 
@@ -3161,6 +3244,8 @@ function ProfessionalAgendaView({
 
         tabIndex={0}
 
+        aria-label={`${serviceLabel}, ${clientLabel}, ${timeLabel}, ${statusLabel}`}
+
         onClick={handleOpenDetails}
 
         onKeyDown={handleKeyDown}
@@ -3173,13 +3258,17 @@ function ProfessionalAgendaView({
 
           <div className="pro-agenda__event-lines">
 
-            <div className="pro-agenda__event-title" title={`${serviceLabel}${clientLabel}`}>
+            <div className="pro-agenda__event-title" title={serviceLabel}>{serviceLabel}</div>
 
-              {serviceLabel}{clientLabel}
+            <div className="pro-agenda__event-client" title={clientLabel}>{clientLabel}</div>
+
+            <div className="pro-agenda__event-meta">
+
+              <span className="pro-agenda__event-time">{timeLabel}</span>
+
+              <span className="pro-agenda__status-badge" style={statusStyle}>{statusLabel}</span>
 
             </div>
-
-            <div className="pro-agenda__event-sub">{formatHourRange(event?.start, event?.end)}</div>
 
           </div>
 
@@ -3821,21 +3910,115 @@ function ProfessionalAgendaView({
 
         <div className="pro-agenda__toolbar-row pro-agenda__toolbar-row--top">
 
-          <div className="pro-agenda__kpis">
+          <div className="pro-agenda__heading">
 
-            <div className={`pro-agenda__kpi${!nextAppointment ? ' is-empty' : ''}`}>
+            <span className="pro-agenda__eyebrow">Planejamento semanal</span>
 
-              <span>Proximo agendamento</span>
+            <div className="pro-agenda__heading-copy">
 
-              <b title={nextAppointmentInfo.title}>{nextAppointmentInfo.label}</b>
+              <h3 className="pro-agenda__title">Agenda da semana</h3>
 
-              {!nextAppointment ? (
-                <button type="button" className="pro-agenda__kpi-cta" onClick={handleOpenSelfBooking}>
-                  Novo agendamento
-                </button>
-              ) : null}
+              <p className="pro-agenda__subtitle">Visualize horarios, confirmacoes e status dos atendimentos</p>
 
             </div>
+
+          </div>
+
+          <div className="pro-agenda__toolbar-actions">
+
+            <div className="pro-agenda__date-pill">{weekLabel}</div>
+
+            <div className="pro-agenda__nav">
+
+              <button
+
+                className="pro-agenda__mini"
+
+                type="button"
+
+                aria-label="Semana anterior"
+
+                onClick={handlePrevWeek}
+
+              >
+
+                {'<'}
+
+              </button>
+
+              <button className="pro-agenda__btn" type="button" onClick={handleToday}>
+
+                Hoje
+
+              </button>
+
+              <button
+
+                className="pro-agenda__mini"
+
+                type="button"
+
+                aria-label="Proxima semana"
+
+                onClick={handleNextWeek}
+
+              >
+
+                {'>'}
+
+              </button>
+
+            </div>
+
+            <button
+
+              type="button"
+
+              className="pro-agenda__add"
+
+              onClick={handleOpenSelfBooking}
+
+              title="Novo agendamento"
+
+              aria-label="Novo agendamento"
+
+            >
+
+              <span className="pro-agenda__add-icon" aria-hidden="true">+</span>
+
+              <span>Novo</span>
+
+            </button>
+
+          </div>
+
+        </div>
+
+        <div className="pro-agenda__toolbar-row pro-agenda__toolbar-row--meta">
+
+          <div className={`pro-agenda__spotlight${!nextAppointment ? ' is-empty' : ''}`}>
+
+            <span className="pro-agenda__spotlight-label">Proximo atendimento</span>
+
+            <b title={nextAppointmentInfo.title}>{nextAppointmentInfo.label}</b>
+
+            {nextAppointment ? (
+
+              <span className="pro-agenda__spotlight-note">Acompanhe confirmacoes, horarios e status em tempo real.</span>
+
+            ) : (
+
+              <button type="button" className="pro-agenda__kpi-cta" onClick={handleOpenSelfBooking}>
+                Novo agendamento
+              </button>
+
+            )}
+
+          </div>
+
+          <div className="pro-agenda__filter-panel">
+
+            <span className="pro-agenda__filter-label">Profissional</span>
 
             <div className="pro-agenda__filter" ref={filterRef}>
 
@@ -3949,69 +4132,19 @@ function ProfessionalAgendaView({
 
         </div>
 
-        <div className="pro-agenda__toolbar-row pro-agenda__toolbar-row--bottom">
+        <div className="pro-agenda__summary" role="list" aria-label="Resumo da agenda">
 
-          <div className="pro-agenda__nav">
+          {summaryCards.map((item) => (
 
-            <button
+            <div key={item.key} className={`pro-agenda__summary-card is-${item.tone}`} role="listitem">
 
-              className="pro-agenda__mini"
+              <span>{item.label}</span>
 
-              type="button"
+              <strong>{item.value}</strong>
 
-              aria-label="Semana anterior"
+            </div>
 
-              onClick={handlePrevWeek}
-
-            >
-
-              {'<'}
-
-            </button>
-
-            <button className="pro-agenda__btn" type="button" onClick={handleToday}>
-
-              Hoje
-
-            </button>
-
-            <button
-
-              className="pro-agenda__mini"
-
-              type="button"
-
-              aria-label="Proxima semana"
-
-              onClick={handleNextWeek}
-
-            >
-
-              {'>'}
-
-            </button>
-
-          </div>
-
-          <div className="pro-agenda__date-pill">{weekLabel}</div>
-
-          <button
-
-            type="button"
-
-            className="pro-agenda__add"
-
-            onClick={handleOpenSelfBooking}
-
-            title="Novo agendamento"
-
-            aria-label="Novo agendamento"
-
-          >
-
-            +
-
-          </button>
+          ))}
 
         </div>
 
@@ -4060,6 +4193,8 @@ function ProfessionalAgendaView({
           components={{
 
             event: AgendaEvent,
+
+            header: AgendaDayHeader,
 
             timeGutterHeader: () => <span className="pro-agenda__gutter-head">Hora</span>,
 

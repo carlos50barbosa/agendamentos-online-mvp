@@ -3,6 +3,7 @@ import { Link as Yt, useLocation as Ai } from "react-router-dom";
 import { jsx, jsxs, Fragment } from "react/jsx-runtime";
 import Modal from "../components/Modal.jsx";
 import { IconChevronRight } from "../components/Icons.jsx";
+import walletStyles from "../components/WhatsAppWalletPanel.module.css";
 import { Api, resolveAssetUrl } from "../utils/api";
 import { getUser, saveUser, saveToken } from "../utils/auth";
 import { trackAnalyticsEvent, trackMetaEvent } from "../utils/analytics.js";
@@ -16,6 +17,20 @@ const Ii = saveUser;
 const Kt = saveToken;
 const Bo = trackAnalyticsEvent;
 const Fo = trackMetaEvent;
+const PUBLIC_PROFILE_THEME_DEFAULTS = Object.freeze({
+  accent: "#0f766e",
+  accentStrong: "#164e63",
+});
+function normalizeHexColor(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  const prefixed = raw.startsWith("#") ? raw : `#${raw}`;
+  if (!/^#([\da-f]{3}|[\da-f]{6})$/i.test(prefixed)) return "";
+  if (prefixed.length === 4) {
+    return `#${prefixed[1]}${prefixed[1]}${prefixed[2]}${prefixed[2]}${prefixed[3]}${prefixed[3]}`.toLowerCase();
+  }
+  return prefixed.toLowerCase();
+}
 const Ri = "_whatsLayout_1qokc_8",
   Ti = "_mainCol_1qokc_18",
   Mi = "_asideCol_1qokc_22",
@@ -90,82 +105,7 @@ const Ri = "_whatsLayout_1qokc_8",
   Yr = "_helpBodyOpen_1qokc_640",
   Qr = "_helpTitle_1qokc_646",
   Jr = "_helpList_1qokc_652",
-  m = {
-    whatsLayout: Ri,
-    mainCol: Ti,
-    asideCol: Mi,
-    planColLeft: Di,
-    walletPanel: qi,
-    panelMain: Hi,
-    panelHeader: Bi,
-    titleGroup: Fi,
-    title: Wi,
-    subtitle: $i,
-    badge: Ui,
-    statGrid: zi,
-    statCard: Oi,
-    statHighlight: Gi,
-    statLabel: Xi,
-    statHeader: Vi,
-    statRemaining: Ki,
-    statValue: Yi,
-    statHint: Qi,
-    progress: Ji,
-    progressFill: Zi,
-    progressMeta: er,
-    progressLabel: ar,
-    progressPercent: sr,
-    section: tr,
-    sectionHeader: nr,
-    sectionTitle: or,
-    sectionHint: ir,
-    packageList: rr,
-    packageRow: lr,
-    packageRowHighlight: cr,
-    packageInfo: ur,
-    packageTop: dr,
-    packageTitle: mr,
-    packageAmount: pr,
-    packageBadge: hr,
-    packagePrices: gr,
-    oldPrice: fr,
-    priceLabel: br,
-    priceHint: xr,
-    packageMeta: _r,
-    packageDescription: yr,
-    packageAction: vr,
-    actionButton: jr,
-    emptyRow: Nr,
-    historyList: kr,
-    historyHeading: wr,
-    historySubtext: Cr,
-    historyActions: Sr,
-    historyToggle: Pr,
-    historyPanel: Lr,
-    historyFilters: Er,
-    historyFilter: Ar,
-    historyLoadMore: Ir,
-    historyItem: Rr,
-    historyMain: Tr,
-    historyAmount: Mr,
-    historyPrice: Dr,
-    historyMeta: qr,
-    historyDate: Hr,
-    statusChip: Br,
-    statusSuccess: Fr,
-    statusPending: Wr,
-    statusError: $r,
-    statusNeutral: Ur,
-    inlineNotice: zr,
-    helpCard: Or,
-    helpCardOpen: Gr,
-    helpToggle: Xr,
-    helpIcon: Vr,
-    helpBody: Kr,
-    helpBodyOpen: Yr,
-    helpTitle: Qr,
-    helpList: Jr,
-  },
+  m = walletStyles,
   st = (n = "") => {
     let r = n.replace(/\D/g, "");
     return r
@@ -668,6 +608,8 @@ function _l() {
       linkedin_url: "",
       youtube_url: "",
       tiktok_url: "",
+      accent_color: "",
+      accent_strong_color: "",
       horarios_text: "",
     }),
     [ua, Ue] = o.useState({ type: "", message: "" }),
@@ -744,6 +686,20 @@ function _l() {
             linkedin_url: (a == null ? void 0 : a.linkedin_url) || "",
             youtube_url: (a == null ? void 0 : a.youtube_url) || "",
             tiktok_url: (a == null ? void 0 : a.tiktok_url) || "",
+            accent_color:
+              normalizeHexColor(
+                (a == null ? void 0 : a.accent_color) ||
+                  (a == null ? void 0 : a.brand_color) ||
+                  (a == null ? void 0 : a.cor_primaria) ||
+                  "",
+              ) || "",
+            accent_strong_color:
+              normalizeHexColor(
+                (a == null ? void 0 : a.accent_strong_color) ||
+                  (a == null ? void 0 : a.secondary_color) ||
+                  (a == null ? void 0 : a.cor_secundaria) ||
+                  "",
+              ) || "",
             horarios_text: s || "",
           }));
       },
@@ -2754,6 +2710,9 @@ function _l() {
                 ((j = M.youtube_url) == null ? void 0 : j.trim()) || null,
               tiktok_url:
                 ((d = M.tiktok_url) == null ? void 0 : d.trim()) || null,
+              accent_color: normalizeHexColor(M.accent_color) || null,
+              accent_strong_color:
+                normalizeHexColor(M.accent_strong_color) || null,
               horarios: fl(ne, M.horarios_text),
             },
             y = await I.updateEstablishmentProfile(n.id, _);
@@ -2897,17 +2856,45 @@ function _l() {
         ],
         ra = He.reduce((u, W) => u + (W.done ? 1 : 0), 0),
         Ys = Math.round((ra / He.length) * 100);
+      const publicAccentValue =
+          normalizeHexColor(M.accent_color) ||
+          PUBLIC_PROFILE_THEME_DEFAULTS.accent,
+        publicAccentStrongValue =
+          normalizeHexColor(M.accent_strong_color) ||
+          PUBLIC_PROFILE_THEME_DEFAULTS.accentStrong,
+        publicThemePreviewStyle = {
+          "--public-theme-accent": publicAccentValue,
+          "--public-theme-accent-strong": publicAccentStrongValue,
+        };
       if (
         (a.push({
           id: "profile",
           title: "Perfil e Segurança",
           content: e.jsxs("form", {
             onSubmit: Bt,
-            className: "grid",
-            style: { gap: 10 },
+            className: "grid config-profile-form",
+            style: { gap: 12 },
             children: [
               e.jsxs("div", {
-                className: "profile-avatar",
+                className: "config-profile-form__intro",
+                children: [
+                  e.jsx("span", {
+                    className: "config-profile-form__eyebrow",
+                    children: "Conta",
+                  }),
+                  e.jsx("h4", {
+                    className: "config-profile-form__title",
+                    children: "Atualize seus dados principais e preferências de acesso.",
+                  }),
+                  e.jsx("p", {
+                    className: "muted config-profile-form__subtitle",
+                    children:
+                      "Mantenha nome, contato, endereço, foto e segurança da conta organizados em um único fluxo.",
+                  }),
+                ],
+              }),
+              e.jsxs("div", {
+                className: "profile-avatar config-profile-form__hero",
                 children: [
                   e.jsx("div", {
                     className: "profile-avatar__preview",
@@ -2919,6 +2906,20 @@ function _l() {
                   e.jsxs("div", {
                     className: "profile-avatar__controls",
                     children: [
+                      e.jsxs("div", {
+                        className: "config-profile-form__hero-copy",
+                        children: [
+                          e.jsx("strong", {
+                            className: "config-profile-form__hero-title",
+                            children: "Foto do perfil",
+                          }),
+                          e.jsx("span", {
+                            className: "config-profile-form__hero-text",
+                            children:
+                              "Use uma imagem clara para identificação rápida no painel.",
+                          }),
+                        ],
+                      }),
                       e.jsx("input", {
                         ref: Oa,
                         type: "file",
@@ -2953,58 +2954,120 @@ function _l() {
                         : e.jsx("span", {
                             className: "profile-avatar__hint",
                             children: "PNG, JPG ou WEBP ate 2MB.",
-                          }),
+                      }),
                     ],
                   }),
                 ],
               }),
-              e.jsxs("label", {
-                className: "label",
+              e.jsxs("div", {
+                className: "config-profile-form__section",
                 children: [
-                  e.jsx("span", { children: "Nome" }),
-                  e.jsx("input", {
-                    className: "input",
-                    value: T.nome,
-                    onChange: (u) => fe("nome", u.target.value),
-                    required: !0,
+                  e.jsxs("div", {
+                    className: "config-profile-form__section-head",
+                    children: [
+                      e.jsx("h5", {
+                        className: "config-profile-form__section-title",
+                        children: "Informações básicas",
+                      }),
+                      e.jsx("p", {
+                        className: "muted",
+                        children:
+                          "Esses dados são usados para identificação, contato e confirmações da conta.",
+                      }),
+                    ],
                   }),
-                ],
-              }),
-              e.jsxs("label", {
-                className: "label",
-                children: [
-                  e.jsx("span", { children: "Email" }),
-                  e.jsx("input", {
-                    className: "input",
-                    type: "email",
-                    value: T.email,
-                    onChange: (u) => fe("email", u.target.value),
-                    required: !0,
+                  e.jsxs("div", {
+                    className: "config-profile-form__grid config-profile-form__grid--basic",
+                    children: [
+                      e.jsxs("label", {
+                        className: "label config-profile-form__field",
+                        children: [
+                          e.jsx("span", { children: "Nome" }),
+                          e.jsx("input", {
+                            className: "input",
+                            value: T.nome,
+                            onChange: (u) => fe("nome", u.target.value),
+                            required: !0,
+                          }),
+                        ],
+                      }),
+                      e.jsxs("label", {
+                        className: "label config-profile-form__field",
+                        children: [
+                          e.jsx("span", { children: "Email" }),
+                          e.jsx("input", {
+                            className: "input",
+                            type: "email",
+                            value: T.email,
+                            onChange: (u) => fe("email", u.target.value),
+                            required: !0,
+                          }),
+                        ],
+                      }),
+                      e.jsxs("label", {
+                        className: "label config-profile-form__field",
+                        children: [
+                          e.jsx("span", { children: "Telefone (WhatsApp)" }),
+                          e.jsx("input", {
+                            className: "input",
+                            value: st(T.telefone),
+                            onChange: (u) => fe("telefone", u.target.value),
+                            inputMode: "tel",
+                            required: !0,
+                          }),
+                        ],
+                      }),
+                    ],
                   }),
-                ],
-              }),
-              e.jsxs("label", {
-                className: "label",
-                children: [
-                  e.jsx("span", { children: "Telefone (WhatsApp)" }),
-                  e.jsx("input", {
-                    className: "input",
-                    value: st(T.telefone),
-                    onChange: (u) => fe("telefone", u.target.value),
-                    inputMode: "tel",
-                    required: !0,
-                  }),
+                  (B == null ? void 0 : B.pending) &&
+                    e.jsxs("div", {
+                      className: "notice notice--info config-profile-form__pending",
+                      role: "status",
+                      children: [
+                        e.jsxs("span", {
+                          children: [
+                            "Enviamos um código para ",
+                            e.jsx("strong", { children: B.newEmail }),
+                            ".",
+                            t
+                              ? " Expira em ".concat(t, ".")
+                              : " O código vale 30 minutos.",
+                          ],
+                        }),
+                        e.jsx("button", {
+                          type: "button",
+                          className: "btn btn--ghost btn--sm",
+                          onClick: Xn,
+                          children: "Informar código agora",
+                        }),
+                      ],
+                    }),
                 ],
               }),
               r &&
-                e.jsxs(e.Fragment, {
+                e.jsxs("div", {
+                  className: "config-profile-form__section",
                   children: [
                     e.jsxs("div", {
-                      className: "row",
+                      className: "config-profile-form__section-head",
+                      children: [
+                        e.jsx("h5", {
+                          className: "config-profile-form__section-title",
+                          children: "Endereço e notificações",
+                        }),
+                        e.jsx("p", {
+                          className: "muted",
+                          children:
+                            "Use um endereço completo para a operação do estabelecimento e escolha como deseja receber alertas.",
+                        }),
+                      ],
+                    }),
+                    e.jsxs("div", {
+                      className: "row config-profile-form__row",
                       style: { gap: 8, flexWrap: "wrap" },
                       children: [
                         e.jsxs("label", {
-                          className: "label",
+                          className: "label config-profile-form__field",
                           style: { flex: "1 1 160px" },
                           children: [
                             e.jsx("span", { children: "CEP" }),
@@ -3018,7 +3081,7 @@ function _l() {
                           ],
                         }),
                         e.jsxs("label", {
-                          className: "label",
+                          className: "label config-profile-form__field",
                           style: { flex: "1 1 240px" },
                           children: [
                             e.jsx("span", { children: "Endereco" }),
@@ -3033,11 +3096,11 @@ function _l() {
                       ],
                     }),
                     e.jsxs("div", {
-                      className: "row",
+                      className: "row config-profile-form__row",
                       style: { gap: 8, flexWrap: "wrap" },
                       children: [
                         e.jsxs("label", {
-                          className: "label",
+                          className: "label config-profile-form__field",
                           style: { flex: "0 1 120px" },
                           children: [
                             e.jsx("span", { children: "Número" }),
@@ -3050,7 +3113,7 @@ function _l() {
                           ],
                         }),
                         e.jsxs("label", {
-                          className: "label",
+                          className: "label config-profile-form__field",
                           style: { flex: "1 1 200px" },
                           children: [
                             e.jsx("span", { children: "Complemento" }),
@@ -3065,11 +3128,11 @@ function _l() {
                       ],
                     }),
                     e.jsxs("div", {
-                      className: "row",
+                      className: "row config-profile-form__row",
                       style: { gap: 8, flexWrap: "wrap" },
                       children: [
                         e.jsxs("label", {
-                          className: "label",
+                          className: "label config-profile-form__field",
                           style: { flex: "1 1 200px" },
                           children: [
                             e.jsx("span", { children: "Bairro" }),
@@ -3082,7 +3145,7 @@ function _l() {
                           ],
                         }),
                         e.jsxs("label", {
-                          className: "label",
+                          className: "label config-profile-form__field",
                           style: { flex: "1 1 200px" },
                           children: [
                             e.jsx("span", { children: "Cidade" }),
@@ -3095,7 +3158,7 @@ function _l() {
                           ],
                         }),
                         e.jsxs("label", {
-                          className: "label",
+                          className: "label config-profile-form__field",
                           style: { width: 80 },
                           children: [
                             e.jsx("span", { children: "Estado" }),
@@ -3114,15 +3177,11 @@ function _l() {
                       ],
                     }),
                     e.jsxs("div", {
-                      className: "row",
-                      style: {
-                        gap: 12,
-                        flexDirection: "column",
-                        alignItems: "flex-start",
-                      },
+                      className: "config-profile-form__preferences",
                       children: [
                         e.jsxs("label", {
-                          className: "switch",
+                          className:
+                            "switch config-profile-form__switch-card",
                           children: [
                             e.jsx("input", {
                               type: "checkbox",
@@ -3136,7 +3195,8 @@ function _l() {
                           ],
                         }),
                         e.jsxs("label", {
-                          className: "switch",
+                          className:
+                            "switch config-profile-form__switch-card",
                           children: [
                             e.jsx("input", {
                               type: "checkbox",
@@ -3153,34 +3213,54 @@ function _l() {
                     }),
                   ],
                 }),
-              e.jsx("div", {
-                className: "row",
-                style: { gap: 8, alignItems: "center", flexWrap: "wrap" },
-                children: mt
-                  ? e.jsx("button", {
-                      type: "button",
-                      className: "btn btn--ghost btn--sm",
-                      onClick: Gn,
-                      children: "Cancelar alteração",
-                    })
-                  : e.jsx("button", {
-                      type: "button",
-                      className: "btn btn--outline btn--sm",
-                      onClick: () => {
-                        (sn(!0), ws({ atual: "", nova: "", confirmar: "" }));
-                      },
-                      children: "Alterar senha",
-                    }),
-              }),
-              mt &&
-                e.jsxs(e.Fragment, {
-                  children: [
+              e.jsxs("div", {
+                className: "config-profile-form__section",
+                children: [
+                  e.jsxs("div", {
+                    className: "config-profile-form__section-head",
+                    children: [
+                      e.jsx("h5", {
+                        className: "config-profile-form__section-title",
+                        children: "Segurança da conta",
+                      }),
+                      e.jsx("p", {
+                        className: "muted",
+                        children:
+                          "Atualize a senha quando necessário. A confirmação da senha atual continua obrigatória no salvamento.",
+                      }),
+                    ],
+                  }),
+                  e.jsx("div", {
+                    className:
+                      "row config-profile-form__security-actions",
+                    style: {
+                      gap: 8,
+                      alignItems: "center",
+                      flexWrap: "wrap",
+                    },
+                    children: mt
+                      ? e.jsx("button", {
+                          type: "button",
+                          className: "btn btn--ghost btn--sm",
+                          onClick: Gn,
+                          children: "Cancelar alteração",
+                        })
+                      : e.jsx("button", {
+                          type: "button",
+                          className: "btn btn--outline btn--sm",
+                          onClick: () => {
+                            (sn(!0), ws({ atual: "", nova: "", confirmar: "" }));
+                          },
+                          children: "Alterar senha",
+                        }),
+                  }),
+                  mt &&
                     e.jsxs("div", {
-                      className: "row",
+                      className: "row config-profile-form__row",
                       style: { gap: 8, flexWrap: "wrap" },
                       children: [
                         e.jsxs("label", {
-                          className: "label",
+                          className: "label config-profile-form__field",
                           style: { flex: "1 1 260px" },
                           children: [
                             e.jsx("span", { children: "Nova senha" }),
@@ -3193,7 +3273,7 @@ function _l() {
                           ],
                         }),
                         e.jsxs("label", {
-                          className: "label",
+                          className: "label config-profile-form__field",
                           style: { flex: "1 1 260px" },
                           children: [
                             e.jsx("span", { children: "Confirmar nova senha" }),
@@ -3207,46 +3287,27 @@ function _l() {
                         }),
                       ],
                     }),
+                  mt &&
                     e.jsx("p", {
-                      className: "small muted",
+                      className: "small muted config-profile-form__security-hint",
                       style: { margin: "-4px 0 0" },
                       children:
                         "Vamos pedir sua senha atual ao salvar as alteracoes.",
                     }),
-                  ],
-                }),
+                ],
+              }),
               Ss.message &&
                 e.jsx("div", {
-                  className: "notice notice--".concat(Ss.type),
+                  className:
+                    "notice notice--".concat(
+                      Ss.type,
+                      " config-profile-form__feedback",
+                    ),
                   role: "alert",
                   children: Ss.message,
                 }),
-              (B == null ? void 0 : B.pending) &&
-                e.jsxs("div", {
-                  className: "notice notice--info",
-                  role: "status",
-                  style: { display: "flex", flexDirection: "column", gap: 6 },
-                  children: [
-                    e.jsxs("span", {
-                      children: [
-                        "Enviamos um código para ",
-                        e.jsx("strong", { children: B.newEmail }),
-                        ".",
-                        t
-                          ? " Expira em ".concat(t, ".")
-                          : " O código vale 30 minutos.",
-                      ],
-                    }),
-                    e.jsx("button", {
-                      type: "button",
-                      className: "btn btn--ghost btn--sm",
-                      onClick: Xn,
-                      children: "Informar código agora",
-                    }),
-                  ],
-                }),
               e.jsx("div", {
-                className: "row",
+                className: "row config-profile-form__actions",
                 style: { justifyContent: "flex-end", gap: 8 },
                 children: e.jsx("button", {
                   type: "submit",
@@ -3513,10 +3574,11 @@ function _l() {
                 ],
               }),
               e.jsxs("section", {
-                className: "box",
+                className: "box config-page__wallet-box",
                 style: { display: "grid", gap: 12 },
                 children: [
                   e.jsxs("div", {
+                    className: "config-page__wallet-box-head",
                     children: [
                       e.jsx("h4", {
                         style: { margin: 0 },
@@ -4405,6 +4467,176 @@ function _l() {
                       }),
                     ],
                   }),
+                }),
+                e.jsxs("section", {
+                  className: "public-profile__theme",
+                  children: [
+                    e.jsxs("div", {
+                      className: "public-profile__theme-head",
+                      children: [
+                        e.jsxs("div", {
+                          children: [
+                            e.jsx("h4", {
+                              className: "public-profile__theme-title",
+                              children: "Identidade visual da pagina publica",
+                            }),
+                            e.jsx("p", {
+                              className: "public-profile__theme-subtitle",
+                              children:
+                                "Defina as cores usadas nos botoes, destaques e elementos principais da sua pagina publica de agendamento.",
+                            }),
+                          ],
+                        }),
+                        e.jsx("button", {
+                          type: "button",
+                          className: "btn btn--outline btn--sm",
+                          onClick: () => {
+                            (De("accent_color", ""),
+                              De("accent_strong_color", ""));
+                          },
+                          disabled: C || A,
+                          children: "Usar padrao",
+                        }),
+                      ],
+                    }),
+                    e.jsxs("div", {
+                      className: "public-profile__theme-preview",
+                      style: publicThemePreviewStyle,
+                      children: [
+                        e.jsx("span", {
+                          className: "public-profile__theme-preview-tag",
+                          children: "Previa",
+                        }),
+                        e.jsx("strong", {
+                          children: "Sua pagina com identidade propria",
+                        }),
+                        e.jsx("p", {
+                          children:
+                            "Clientes vao ver essas cores no topo, nos destaques e nas chamadas principais do fluxo de agendamento.",
+                        }),
+                        e.jsxs("div", {
+                          className: "public-profile__theme-preview-actions",
+                          children: [
+                            e.jsx("span", {
+                              className:
+                                "public-profile__theme-preview-chip is-primary",
+                              children: "Botao principal",
+                            }),
+                            e.jsx("span", {
+                              className:
+                                "public-profile__theme-preview-chip is-secondary",
+                              children: "Destaque",
+                            }),
+                          ],
+                        }),
+                      ],
+                    }),
+                    e.jsxs("div", {
+                      className: "grid public-profile__theme-grid",
+                      style: {
+                        gap: 10,
+                        gridTemplateColumns:
+                          "repeat(auto-fit, minmax(220px, 1fr))",
+                      },
+                      children: [
+                        e.jsxs("label", {
+                          className: "label public-profile__theme-field",
+                          children: [
+                            e.jsx("span", { children: "Cor principal" }),
+                            e.jsxs("div", {
+                              className: "public-profile__color-control",
+                              children: [
+                                e.jsx("input", {
+                                  className: "public-profile__color-swatch",
+                                  type: "color",
+                                  value: publicAccentValue,
+                                  onChange: (u) =>
+                                    De(
+                                      "accent_color",
+                                      normalizeHexColor(u.target.value) || "",
+                                    ),
+                                  disabled: C || A,
+                                  "aria-label": "Selecionar cor principal",
+                                }),
+                                e.jsx("input", {
+                                  className: "input",
+                                  value: M.accent_color,
+                                  onChange: (u) =>
+                                    De("accent_color", u.target.value),
+                                  onBlur: (u) =>
+                                    De(
+                                      "accent_color",
+                                      normalizeHexColor(u.target.value) || "",
+                                    ),
+                                  disabled: C || A,
+                                  autoComplete: "off",
+                                  spellCheck: !1,
+                                  maxLength: 7,
+                                  placeholder:
+                                    PUBLIC_PROFILE_THEME_DEFAULTS.accent,
+                                }),
+                              ],
+                            }),
+                            e.jsx("span", {
+                              className: "muted",
+                              style: { fontSize: 12 },
+                              children:
+                                "Use um hexadecimal como #0f766e. Deixe vazio para usar o tema padrao.",
+                            }),
+                          ],
+                        }),
+                        e.jsxs("label", {
+                          className: "label public-profile__theme-field",
+                          children: [
+                            e.jsx("span", { children: "Cor de destaque" }),
+                            e.jsxs("div", {
+                              className: "public-profile__color-control",
+                              children: [
+                                e.jsx("input", {
+                                  className: "public-profile__color-swatch",
+                                  type: "color",
+                                  value: publicAccentStrongValue,
+                                  onChange: (u) =>
+                                    De(
+                                      "accent_strong_color",
+                                      normalizeHexColor(u.target.value) || "",
+                                    ),
+                                  disabled: C || A,
+                                  "aria-label": "Selecionar cor de destaque",
+                                }),
+                                e.jsx("input", {
+                                  className: "input",
+                                  value: M.accent_strong_color,
+                                  onChange: (u) =>
+                                    De(
+                                      "accent_strong_color",
+                                      u.target.value,
+                                    ),
+                                  onBlur: (u) =>
+                                    De(
+                                      "accent_strong_color",
+                                      normalizeHexColor(u.target.value) || "",
+                                    ),
+                                  disabled: C || A,
+                                  autoComplete: "off",
+                                  spellCheck: !1,
+                                  maxLength: 7,
+                                  placeholder:
+                                    PUBLIC_PROFILE_THEME_DEFAULTS.accentStrong,
+                                }),
+                              ],
+                            }),
+                            e.jsx("span", {
+                              className: "muted",
+                              style: { fontSize: 12 },
+                              children:
+                                "Ideal para contrastes, gradientes e estados de foco na pagina publica.",
+                            }),
+                          ],
+                        }),
+                      ],
+                    }),
+                  ],
                 }),
                 e.jsxs("div", {
                   className: "label",
@@ -5781,7 +6013,42 @@ function _l() {
             ? void 0
             : be.wa_messages) != null
         ? fo
-        : null;
+        : null,
+    businessHubCards = r
+      ? [
+          {
+            id: "subscription-hub",
+            title: "Plano e assinatura",
+            description:
+              "Plano atual, limites, historico da assinatura e cobranca via PIX em pagina propria.",
+            to: "/assinatura",
+            cta: "Abrir modulo",
+          },
+          {
+            id: "whatsapp-business-hub",
+            title: "WhatsApp Business",
+            description:
+              "Conexao oficial, franquia mensal, creditos extras e historico de recargas.",
+            to: "/whatsappbusiness",
+            cta: "Abrir modulo",
+          },
+          {
+            id: "deposit-hub",
+            title: "Sinal e Mercado Pago",
+            description:
+              "Conecte a conta Mercado Pago e defina o percentual de sinal nos agendamentos.",
+            to: "/sinal",
+            cta: "Abrir modulo",
+          },
+        ]
+      : [],
+    visibleSections = wi.filter(
+      ({ id: a }) =>
+        a !== "plan" &&
+        a !== "whatsapp-connect" &&
+        a !== "mercadopago-connect" &&
+        a !== "deposit",
+    );
   return e.jsxs("div", {
     className: "grid config-page",
     style: { gap: 12 },
@@ -5797,7 +6064,57 @@ function _l() {
           }),
         ],
       }),
-      wi.map(({ id: a, title: t, content: s }) => {
+      businessHubCards.length
+        ? e.jsxs("section", {
+            className: "card settings-hub",
+            children: [
+              e.jsxs("div", {
+                className: "settings-hub__head",
+                children: [
+                  e.jsx("h3", {
+                    style: { margin: 0 },
+                    children: "Modulos especializados",
+                  }),
+                  e.jsx("p", {
+                    className: "muted",
+                    style: { margin: "4px 0 0" },
+                    children:
+                      "Assinatura, WhatsApp Business e Sinal agora possuem paginas proprias para reduzir acoplamento e manter os fluxos isolados.",
+                  }),
+                ],
+              }),
+              e.jsx("div", {
+                className: "settings-hub__grid",
+                children: businessHubCards.map((a) =>
+                  e.jsxs(
+                    Yt,
+                    {
+                      className: "settings-hub__card",
+                      to: a.to,
+                      children: [
+                        e.jsx("span", {
+                          className: "settings-hub__card-label",
+                          children: "Modulo",
+                        }),
+                        e.jsx("strong", { children: a.title }),
+                        e.jsx("p", {
+                          className: "muted",
+                          children: a.description,
+                        }),
+                        e.jsxs("span", {
+                          className: "settings-hub__card-link",
+                          children: [a.cta, " ", "›"],
+                        }),
+                      ],
+                    },
+                    a.id,
+                  ),
+                ),
+              }),
+            ],
+          })
+        : null,
+      visibleSections.map(({ id: a, title: t, content: s }) => {
         const i = !!v[a],
           c = S === a;
         return e.jsxs(

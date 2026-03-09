@@ -14,6 +14,55 @@ import styles from './LoginProfileChoice.module.css';
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+const ESTAB_THEME_DEFAULTS = Object.freeze({
+  accent: '#0f766e',
+  accentStrong: '#164e63',
+});
+
+function normalizeHexColor(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  const prefixed = raw.startsWith('#') ? raw : `#${raw}`;
+  if (!/^#([\da-f]{3}|[\da-f]{6})$/i.test(prefixed)) return '';
+  if (prefixed.length === 4) {
+    return `#${prefixed[1]}${prefixed[1]}${prefixed[2]}${prefixed[2]}${prefixed[3]}${prefixed[3]}`.toLowerCase();
+  }
+  return prefixed.toLowerCase();
+}
+
+function hexToRgb(hex) {
+  const normalized = normalizeHexColor(hex);
+  if (!normalized) return null;
+  const value = normalized.slice(1);
+  return {
+    r: Number.parseInt(value.slice(0, 2), 16),
+    g: Number.parseInt(value.slice(2, 4), 16),
+    b: Number.parseInt(value.slice(4, 6), 16),
+  };
+}
+
+function toRgba(hex, alpha) {
+  const rgb = hexToRgb(hex);
+  if (!rgb) return '';
+  const safeAlpha = Math.max(0, Math.min(1, alpha));
+  return `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${safeAlpha})`;
+}
+
+function mixColors(hexA, hexB, weight = 0.5) {
+  const colorA = hexToRgb(hexA);
+  const colorB = hexToRgb(hexB);
+  if (!colorA || !colorB) return normalizeHexColor(hexA) || normalizeHexColor(hexB) || '';
+
+  const safeWeight = Math.max(0, Math.min(1, weight));
+  const mixChannel = (channel) => Math.round((colorA[channel] * safeWeight) + (colorB[channel] * (1 - safeWeight)));
+
+  const mixed = [mixChannel('r'), mixChannel('g'), mixChannel('b')]
+    .map((value) => value.toString(16).padStart(2, '0'))
+    .join('');
+
+  return `#${mixed}`;
+}
+
 
 
 export default function Login() {
@@ -66,6 +115,20 @@ export default function Login() {
     [loc.search]
 
   );
+
+  const normalizedTipoParam = useMemo(() => {
+
+    const normalized = String(tipoParam || '').toLowerCase();
+
+    if (normalized === 'cliente') return 'cliente';
+
+    if (['estab', 'estabelecimento', 'empresa', 'business'].includes(normalized)) {
+      return 'estabelecimento';
+    }
+
+    return '';
+
+  }, [tipoParam]);
 
   const storedNext = useMemo(() => {
 
@@ -207,6 +270,58 @@ export default function Login() {
     return lastProfileValue === 'ESTABELECIMENTO' ? 'Estabelecimento' : 'Cliente';
 
   }, [lastProfileValue]);
+
+  const effectiveTipo = useMemo(() => {
+
+    if (tipo) return tipo;
+
+    if (normalizedTipoParam === 'estabelecimento') return 'ESTABELECIMENTO';
+
+    if (normalizedTipoParam === 'cliente') return 'CLIENTE';
+
+    return '';
+
+  }, [normalizedTipoParam, tipo]);
+
+  const isEstablishmentContext = effectiveTipo === 'ESTABELECIMENTO';
+
+  const establishmentThemeStyle = useMemo(() => {
+
+    const params = new URLSearchParams(loc.search);
+    const accent = normalizeHexColor(params.get('accent') || params.get('cor')) || ESTAB_THEME_DEFAULTS.accent;
+    const accentStrong =
+      normalizeHexColor(params.get('accentStrong') || params.get('corStrong')) ||
+      mixColors(accent, ESTAB_THEME_DEFAULTS.accentStrong, 0.42);
+
+    return {
+      '--estab-accent': accent,
+      '--estab-accent-strong': accentStrong,
+      '--estab-accent-soft': toRgba(accent, 0.1),
+      '--estab-accent-soft-strong': toRgba(accent, 0.18),
+      '--estab-accent-border': toRgba(accent, 0.24),
+      '--estab-accent-ring': toRgba(accent, 0.2),
+      '--estab-accent-shadow': toRgba(accentStrong, 0.18),
+      '--estab-surface-top': mixColors(accent, '#ffffff', 0.1),
+      '--estab-surface-bottom': mixColors(accentStrong, '#ffffff', 0.06),
+      '--estab-badge-bg': mixColors(accent, '#ffffff', 0.14),
+      '--estab-badge-border': toRgba(accent, 0.18),
+    };
+
+  }, [loc.search]);
+
+  const headerTitle =
+    effectiveTipo === 'ESTABELECIMENTO'
+      ? 'Painel do estabelecimento'
+      : effectiveTipo
+        ? 'Entrar'
+        : 'Escolha o perfil';
+
+  const headerDescription =
+    effectiveTipo === 'ESTABELECIMENTO'
+      ? 'Acesse agenda, equipe, servicos e clientes em um fluxo mais profissional.'
+      : effectiveTipo === 'CLIENTE'
+        ? 'Use seu e-mail e senha para continuar.'
+        : 'Cliente ou Estabelecimento.';
 
   const hasRedirectTarget = Boolean(nextParam || storedNext);
 
@@ -463,7 +578,10 @@ export default function Login() {
 
   return (
 
-    <div className={`login-preview ${styles.page}`}>
+    <div
+      className={`login-preview ${styles.page}${isEstablishmentContext ? ` ${styles.pageEstab}` : ''}`}
+      style={establishmentThemeStyle}
+    >
 
 
       <main className="login-preview__main">
@@ -476,11 +594,27 @@ export default function Login() {
 
               <header className="login-preview__header">
 
-                <h1>{tipo ? 'Entrar' : 'Escolha o perfil'}</h1>
+                {isEstablishmentContext ? (
+                  <span className={styles.headerBadge}>Acesso profissional</span>
+                ) : null}
 
-                <p>{tipo ? 'E-mail e senha.' : 'Cliente ou Estabelecimento.'}</p>
+                <h1>{headerTitle}</h1>
+
+                <p>{headerDescription}</p>
 
               </header>
+
+              {isEstablishmentContext ? (
+                <section className={styles.estabHero} aria-label="Resumo do acesso profissional">
+                  <div className={styles.estabHeroEyebrow}>Mais controle na rotina</div>
+                  <div className={styles.estabHeroTitle}>Agenda, equipe e atendimento no mesmo lugar.</div>
+                  <div className={styles.estabHeroList}>
+                    <span className={styles.estabHeroItem}>Agenda centralizada</span>
+                    <span className={styles.estabHeroItem}>Servicos e equipe</span>
+                    <span className={styles.estabHeroItem}>Clientes recorrentes</span>
+                  </div>
+                </section>
+              ) : null}
 
               {tipo ? (
 
@@ -548,9 +682,9 @@ export default function Login() {
 
                   <div className="login-preview__tabs" role="tablist" aria-label="Escolher perfil">
 
-                    <Tab value="CLIENTE" title="Cliente" />
+                    <Tab value="CLIENTE" title="Cliente" hint="Acompanhe seus agendamentos e historico." />
 
-                    <Tab value="ESTABELECIMENTO" title="Estabelecimento" />
+                    <Tab value="ESTABELECIMENTO" title="Estabelecimento" hint="Gerencie agenda, equipe e clientes." />
 
                   </div>
 

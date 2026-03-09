@@ -531,6 +531,7 @@ export async function sendWhatsAppSmart({
       to: phone,
       name: templatePayload.name,
       lang: templatePayload.lang,
+      components: templatePayload.components,
       bodyParams: templatePayload.bodyParams || [],
       headerImageUrl: templatePayload.headerImageUrl,
       headerDocumentUrl: templatePayload.headerDocumentUrl,

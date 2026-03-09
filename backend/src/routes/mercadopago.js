@@ -59,7 +59,7 @@ return jwt.sign(payload, MP_STATE_SECRET, { expiresIn: '15m' });
 }
 function resolveRedirect(status) {
 const safe = status || 'connected';
-return `${FRONTEND_BASE}/configuracoes?mp=${encodeURIComponent(safe)}`;
+return `${FRONTEND_BASE}/sinal?mp=${encodeURIComponent(safe)}`;
 }
 async function exchangeOAuthCode({ code }) {
 const body = new URLSearchParams();

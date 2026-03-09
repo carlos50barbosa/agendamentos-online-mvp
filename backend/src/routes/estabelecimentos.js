@@ -162,6 +162,18 @@ function sanitizeUrl(value) {
   }
 }
 
+function sanitizeHexColor(value) {
+  if (value == null) return null;
+  const raw = String(value).trim();
+  if (!raw) return null;
+  const prefixed = raw.startsWith('#') ? raw : `#${raw}`;
+  if (!/^#([\da-f]{3}|[\da-f]{6})$/i.test(prefixed)) return null;
+  if (prefixed.length === 4) {
+    return `#${prefixed[1]}${prefixed[1]}${prefixed[2]}${prefixed[2]}${prefixed[3]}${prefixed[3]}`.toLowerCase();
+  }
+  return prefixed.toLowerCase();
+}
+
 const WEEKDAY_TOKEN_MAP = Object.freeze({
   monday: ['segunda', 'segunda-feira', 'seg', 'mon', 'monday'],
   tuesday: ['terca', 'terca-feira', 'ter', 'tue', 'tuesday'],
@@ -410,6 +422,30 @@ function buildProfileUpdatePayload(body = {}) {
     errors.push({ field: 'tiktok_url', code: 'invalid_url' });
   }
 
+  const accentColorInput =
+    body.accent_color ??
+    body.brand_color ??
+    body.cor_primaria ??
+    null;
+  const accent_color =
+    accentColorInput != null ? sanitizeHexColor(accentColorInput) : null;
+  if (accentColorInput && !accent_color) {
+    errors.push({ field: 'accent_color', code: 'invalid_hex_color' });
+  }
+
+  const accentStrongColorInput =
+    body.accent_strong_color ??
+    body.secondary_color ??
+    body.cor_secundaria ??
+    null;
+  const accent_strong_color =
+    accentStrongColorInput != null
+      ? sanitizeHexColor(accentStrongColorInput)
+      : null;
+  if (accentStrongColorInput && !accent_strong_color) {
+    errors.push({ field: 'accent_strong_color', code: 'invalid_hex_color' });
+  }
+
   const horariosInput =
     body.horarios ??
     body.horarios_json ??
@@ -427,6 +463,8 @@ function buildProfileUpdatePayload(body = {}) {
       linkedin_url,
       youtube_url,
       tiktok_url,
+      accent_color,
+      accent_strong_color,
       horarios_json,
     },
     errors,
@@ -640,6 +678,18 @@ function normalizeProfile(establishmentRow, profileRow) {
 
       tiktok_url: null,
 
+      accent_color: null,
+
+      brand_color: null,
+
+      cor_primaria: null,
+
+      accent_strong_color: null,
+
+      secondary_color: null,
+
+      cor_secundaria: null,
+
       horarios: [],
 
       horarios_raw: null,
@@ -669,6 +719,18 @@ function normalizeProfile(establishmentRow, profileRow) {
     youtube_url: profileRow.youtube_url || null,
 
     tiktok_url: profileRow.tiktok_url || null,
+
+    accent_color: profileRow.accent_color || null,
+
+    brand_color: profileRow.accent_color || null,
+
+    cor_primaria: profileRow.accent_color || null,
+
+    accent_strong_color: profileRow.accent_strong_color || null,
+
+    secondary_color: profileRow.accent_strong_color || null,
+
+    cor_secundaria: profileRow.accent_strong_color || null,
 
     horarios: parseHorarios(profileRow.horarios_json),
 
@@ -1001,7 +1063,7 @@ router.get('/:idOrSlug', async (req, res) => {
 
       [rows] = await pool.query(
 
-        "SELECT id, nome, email, telefone, slug, avatar_url, plan, plan_status, plan_trial_ends_at, plan_active_until, plan_subscription_id FROM usuarios WHERE id=? AND tipo='estabelecimento' LIMIT 1",
+        "SELECT id, nome, email, telefone, cep, endereco, numero, complemento, bairro, cidade, estado, slug, avatar_url, plan, plan_status, plan_trial_ends_at, plan_active_until, plan_subscription_id FROM usuarios WHERE id=? AND tipo='estabelecimento' LIMIT 1",
 
         [id]
 
@@ -1011,7 +1073,7 @@ router.get('/:idOrSlug', async (req, res) => {
 
       [rows] = await pool.query(
 
-        "SELECT id, nome, email, telefone, slug, avatar_url, plan, plan_status, plan_trial_ends_at, plan_active_until, plan_subscription_id FROM usuarios WHERE slug=? AND tipo='estabelecimento' LIMIT 1",
+        "SELECT id, nome, email, telefone, cep, endereco, numero, complemento, bairro, cidade, estado, slug, avatar_url, plan, plan_status, plan_trial_ends_at, plan_active_until, plan_subscription_id FROM usuarios WHERE slug=? AND tipo='estabelecimento' LIMIT 1",
 
         [idOrSlug]
 
@@ -1035,7 +1097,7 @@ router.get('/:idOrSlug', async (req, res) => {
 
       pool.query(
 
-        "SELECT estabelecimento_id, sobre, contato_telefone, site_url, instagram_url, facebook_url, linkedin_url, youtube_url, tiktok_url, horarios_json, updated_at FROM estabelecimento_perfis WHERE estabelecimento_id=? LIMIT 1",
+        "SELECT estabelecimento_id, sobre, contato_telefone, site_url, instagram_url, facebook_url, linkedin_url, youtube_url, tiktok_url, accent_color, accent_strong_color, horarios_json, updated_at FROM estabelecimento_perfis WHERE estabelecimento_id=? LIMIT 1",
 
         [est.id]
 
@@ -1234,8 +1296,8 @@ router.put('/:id/profile', auth, isEstabelecimento, async (req, res) => {
       `INSERT INTO estabelecimento_perfis (
          estabelecimento_id, sobre, contato_telefone,
          site_url, instagram_url, facebook_url, linkedin_url,
-         youtube_url, tiktok_url, horarios_json
-       ) VALUES (?,?,?,?,?,?,?,?,?,?)
+         youtube_url, tiktok_url, accent_color, accent_strong_color, horarios_json
+       ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
        ON DUPLICATE KEY UPDATE
          sobre=VALUES(sobre),
          contato_telefone=VALUES(contato_telefone),
@@ -1245,6 +1307,8 @@ router.put('/:id/profile', auth, isEstabelecimento, async (req, res) => {
          linkedin_url=VALUES(linkedin_url),
          youtube_url=VALUES(youtube_url),
          tiktok_url=VALUES(tiktok_url),
+         accent_color=VALUES(accent_color),
+         accent_strong_color=VALUES(accent_strong_color),
          horarios_json=VALUES(horarios_json)`,
       [
         estabelecimentoId,
@@ -1256,6 +1320,8 @@ router.put('/:id/profile', auth, isEstabelecimento, async (req, res) => {
         values.linkedin_url,
         values.youtube_url,
         values.tiktok_url,
+        values.accent_color,
+        values.accent_strong_color,
         values.horarios_json,
       ]
     );
@@ -1263,7 +1329,7 @@ router.put('/:id/profile', auth, isEstabelecimento, async (req, res) => {
     const [profileRows] = await pool.query(
       `SELECT estabelecimento_id, sobre, contato_telefone,
               site_url, instagram_url, facebook_url, linkedin_url,
-              youtube_url, tiktok_url, horarios_json, updated_at
+              youtube_url, tiktok_url, accent_color, accent_strong_color, horarios_json, updated_at
          FROM estabelecimento_perfis
         WHERE estabelecimento_id=? LIMIT 1`,
       [estabelecimentoId]
