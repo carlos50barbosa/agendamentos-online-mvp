@@ -131,6 +131,7 @@ if (BILLING_ROUTES_ENABLED) {
 }
 app.use('/payments', paymentsRouter);
 app.use('/wa', waConnectRouter);
+app.use('/whatsapp', waConnectRouter);
 app.use('/mercadopago', mercadoPagoRouter);
 app.use('/wa/webhook', waTenantWebhookRouter);
 app.use('/webhooks/whatsapp', whatsappWebhookRouter);
@@ -155,6 +156,7 @@ if (BILLING_ROUTES_ENABLED) {
 }
 app.use('/api/payments', paymentsRouter);
 app.use('/api/wa', waConnectRouter);
+app.use('/api/whatsapp', waConnectRouter);
 app.use('/api/mercadopago', mercadoPagoRouter);
 app.use('/api/wa/webhook', waTenantWebhookRouter);
 app.use('/api/webhooks/whatsapp', whatsappWebhookRouter);

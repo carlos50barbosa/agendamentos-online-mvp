@@ -1,6 +1,6 @@
 // src/utils/api.js
 
-import { getToken, logout } from './auth';
+import { getToken, logout } from './auth.js';
 
 
 
@@ -495,9 +495,19 @@ export const Api = {
 
 
   // WhatsApp Cloud API (multi-tenant)
+  waManualValidate: (payload) =>
+    req('/whatsapp/manual/validate', { method: 'POST', body: JSON.stringify(payload || {}) }),
+  waManualConnect: (payload) =>
+    req('/whatsapp/manual/connect', { method: 'POST', body: JSON.stringify(payload || {}) }),
+  // Legacy / deprecated
+  waEmbeddedSignupConfig: () => req('/whatsapp/embedded-signup/config'),
+  waEmbeddedSignupExchange: (payload) =>
+    req('/whatsapp/embedded-signup/exchange', { method: 'POST', body: JSON.stringify(payload || {}) }),
+  waAccount: () => req('/whatsapp/account'),
+  waAccountDisconnect: () => req('/whatsapp/account/disconnect', { method: 'POST' }),
   waConnectStart: () => req('/wa/connect/start'),
-  waConnectStatus: () => req('/wa/connect/status'),
-  waConnectDisconnect: () => req('/wa/connect/disconnect', { method: 'POST' }),
+  waConnectStatus: () => req('/whatsapp/account'),
+  waConnectDisconnect: () => req('/whatsapp/account/disconnect', { method: 'POST' }),
 
   // Mercado Pago OAuth (estabelecimento)
   mpConnectStart: () => req('/mercadopago/connect?json=1'),

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Api } from '../utils/api.js';
 import { getUser } from '../utils/auth';
+import { getWhatsAppConnectFeatureState, isWhatsAppConnectEnabled } from '../utils/features.js';
 
 const DEFAULT_PLAN_INFO = Object.freeze({
   plan: 'starter',
@@ -187,12 +188,51 @@ async function copyText(value) {
   return ok;
 }
 
+const DEFAULT_WHATSAPP_MANUAL_FORM = Object.freeze({
+  business_account_id: '',
+  waba_id: '',
+  phone_number_id: '',
+  access_token: '',
+  descriptive_name: '',
+});
+
+function createWhatsappManualForm(account = null) {
+  return {
+    ...DEFAULT_WHATSAPP_MANUAL_FORM,
+    business_account_id: account?.business_account_id || '',
+    waba_id: account?.waba_id || '',
+    phone_number_id: account?.phone_number_id || '',
+    descriptive_name: account?.descriptive_name || '',
+  };
+}
+
+function createWhatsappState(account = null) {
+  const feature = getWhatsAppConnectFeatureState();
+  return {
+    loading: false,
+    validationLoading: false,
+    saveLoading: false,
+    disconnectLoading: false,
+    featureEnabled: feature.featureEnabled,
+    mode: feature.mode,
+    message: feature.message,
+    account,
+    error: '',
+    notice: '',
+    editing: !account,
+    validated: false,
+    preview: null,
+    form: createWhatsappManualForm(account),
+  };
+}
+
 export function useBusinessSettings(options = {}) {
   const { loadWhatsApp = false, loadMercadoPago = false, loadDeposit = false } = options;
 
   const user = useMemo(() => getUser(), []);
   const isEstablishment = user?.tipo === 'estabelecimento';
   const establishmentId = user?.id || null;
+  const whatsappConnectEnabled = useMemo(() => isWhatsAppConnectEnabled(), []);
 
   const [planInfo, setPlanInfo] = useState(DEFAULT_PLAN_INFO);
   const [billing, setBilling] = useState({
@@ -203,14 +243,7 @@ export function useBusinessSettings(options = {}) {
     history: [],
     subscription: null,
   });
-  const [whatsapp, setWhatsapp] = useState({
-    loading: false,
-    connectLoading: false,
-    disconnectLoading: false,
-    account: null,
-    error: '',
-    notice: '',
-  });
+  const [whatsapp, setWhatsapp] = useState(() => createWhatsappState(null));
   const [mercadoPago, setMercadoPago] = useState({
     loading: false,
     connectLoading: false,
@@ -319,15 +352,44 @@ export function useBusinessSettings(options = {}) {
 
   const refreshWhatsAppConnection = useCallback(async () => {
     if (!isEstablishment || !establishmentId || !loadWhatsApp) return null;
+    if (!whatsappConnectEnabled) {
+      const feature = getWhatsAppConnectFeatureState();
+      setWhatsapp((current) => ({
+        ...current,
+        featureEnabled: feature.featureEnabled,
+        mode: feature.mode,
+        message: feature.message,
+        loading: false,
+        account: null,
+        error: '',
+        notice: '',
+        editing: false,
+        validated: false,
+        preview: null,
+        form: createWhatsappManualForm(null),
+      }));
+      return {
+        ok: true,
+        connected: false,
+        status: 'coming_soon',
+        account: null,
+        feature_enabled: false,
+        mode: feature.mode,
+        message: feature.message,
+      };
+    }
 
     setWhatsapp((current) => ({ ...current, loading: true, error: '' }));
 
     try {
-      const response = await Api.waConnectStatus();
+      const response = await Api.waAccount();
+      const nextAccount = response?.account || response || null;
       setWhatsapp((current) => ({
         ...current,
         loading: false,
-        account: response?.account || response || null,
+        account: nextAccount,
+        editing: current.editing && current.account ? current.editing : !nextAccount,
+        form: current.editing ? current.form : createWhatsappManualForm(nextAccount),
       }));
       return response;
     } catch (error) {
@@ -338,7 +400,7 @@ export function useBusinessSettings(options = {}) {
       }));
       return null;
     }
-  }, [establishmentId, isEstablishment, loadWhatsApp]);
+  }, [establishmentId, isEstablishment, loadWhatsApp, whatsappConnectEnabled]);
 
   const refreshMercadoPagoConnection = useCallback(async () => {
     if (!isEstablishment || !establishmentId || !loadMercadoPago) return null;
@@ -428,6 +490,15 @@ export function useBusinessSettings(options = {}) {
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
+    if (!whatsappConnectEnabled) {
+      const url = new URL(window.location.href);
+      if (url.searchParams.has('wa') || url.searchParams.has('reason')) {
+        url.searchParams.delete('wa');
+        url.searchParams.delete('reason');
+        window.history.replaceState({}, '', url.toString());
+      }
+      return;
+    }
 
     const url = new URL(window.location.href);
     const waStatus = String(url.searchParams.get('wa') || '').toLowerCase();
@@ -437,14 +508,8 @@ export function useBusinessSettings(options = {}) {
 
     if (waStatus) {
       const waErrorByReason = {
-        missing_phone_number: 'O Meta autorizou o app, mas nao encontrou um numero de telefone na conta selecionada.',
-        state_expired: 'A conexao expirou antes da confirmacao. Tente novamente e conclua o fluxo em ate 1 hora.',
-        state_invalid_signature: 'Nao foi possivel validar a conexao do WhatsApp. Inicie o processo novamente pelo painel.',
-        state_invalid: 'Nao foi possivel validar a conexao do WhatsApp. Inicie o processo novamente pelo painel.',
-        state_secret_missing: 'A configuracao interna do OAuth do WhatsApp esta incompleta.',
-        missing_code_or_state: 'O retorno do Meta veio incompleto. Inicie a conexao novamente.',
-        wa_config_missing: 'A configuracao do WhatsApp Business esta incompleta no backend.',
-        oauth_exchange_failed: 'O Meta autorizou o app, mas falhou ao concluir a conexao. Tente novamente.',
+        manual_connection_required: 'O fluxo automatico foi aposentado. Use a conexao manual assistida abaixo.',
+        legacy_oauth_deprecated: 'O fluxo antigo foi aposentado. Use a conexao manual assistida abaixo.',
       };
       const waMessageMap = {
         connected: { notice: 'WhatsApp conectado com sucesso.' },
@@ -486,7 +551,7 @@ export function useBusinessSettings(options = {}) {
     if (changed) {
       window.history.replaceState({}, '', url.toString());
     }
-  }, []);
+  }, [whatsappConnectEnabled]);
 
   const whatsappConnected = useMemo(() => {
     const account = whatsapp.account || null;
@@ -630,29 +695,121 @@ export function useBusinessSettings(options = {}) {
     };
   }, [billing.wallet, planInfo.activeUntil, planInfo.allowAdvanced]);
 
-  const startWhatsAppConnect = useCallback(async () => {
-    if (!isEstablishment) return;
+  const beginWhatsAppManualConnect = useCallback(() => {
+    if (!isEstablishment || !whatsappConnectEnabled) return;
     setWhatsapp((current) => ({
       ...current,
-      connectLoading: true,
+      editing: true,
+      validated: false,
+      preview: null,
+      error: '',
+      notice: '',
+      form: createWhatsappManualForm(current.account),
+    }));
+  }, [isEstablishment, whatsappConnectEnabled]);
+
+  const updateWhatsAppManualField = useCallback((field, value) => {
+    if (!isEstablishment || !whatsappConnectEnabled) return;
+    setWhatsapp((current) => ({
+      ...current,
+      editing: true,
+      validated: false,
+      preview: null,
+      error: '',
+      notice: '',
+      form: {
+        ...current.form,
+        [field]: value,
+      },
+    }));
+  }, [isEstablishment, whatsappConnectEnabled]);
+
+  const cancelWhatsAppManualEdit = useCallback(() => {
+    if (!isEstablishment || !whatsappConnectEnabled) return;
+    setWhatsapp((current) => ({
+      ...current,
+      editing: !current.account,
+      validated: false,
+      preview: null,
+      error: '',
+      notice: '',
+      form: createWhatsappManualForm(current.account),
+    }));
+  }, [isEstablishment, whatsappConnectEnabled]);
+
+  const validateWhatsAppManualConnection = useCallback(async () => {
+    if (!isEstablishment || !whatsappConnectEnabled) return null;
+    setWhatsapp((current) => ({
+      ...current,
+      validationLoading: true,
+      validated: false,
+      preview: null,
       error: '',
       notice: '',
     }));
     try {
-      const response = await Api.waConnectStart();
-      if (!response?.url) throw new Error('URL de conexao indisponivel.');
-      window.location.assign(response.url);
+      const response = await Api.waManualValidate(whatsapp.form);
+      setWhatsapp((current) => ({
+        ...current,
+        validationLoading: false,
+        validated: true,
+        preview: response?.preview || null,
+        notice: 'Dados validados com sucesso na Meta. Revise o resumo e salve a conexao.',
+      }));
+      return response;
     } catch (error) {
       setWhatsapp((current) => ({
         ...current,
-        connectLoading: false,
-        error: getErrorMessage(error, 'Nao foi possivel iniciar a conexao.'),
+        validationLoading: false,
+        validated: false,
+        preview: null,
+        error: getErrorMessage(error, 'Nao foi possivel validar os dados do WhatsApp na Meta.'),
       }));
+      return null;
     }
-  }, [isEstablishment]);
+  }, [isEstablishment, whatsapp.form, whatsappConnectEnabled]);
+
+  const saveWhatsAppManualConnection = useCallback(async () => {
+    if (!isEstablishment || !whatsappConnectEnabled) return null;
+    if (!whatsapp.validated) {
+      setWhatsapp((current) => ({
+        ...current,
+        error: 'Valide a conexao antes de salvar.',
+      }));
+      return null;
+    }
+    setWhatsapp((current) => ({
+      ...current,
+      saveLoading: true,
+      error: '',
+      notice: '',
+    }));
+    try {
+      const response = await Api.waManualConnect(whatsapp.form);
+      const nextAccount = response?.account || null;
+      setWhatsapp((current) => ({
+        ...current,
+        saveLoading: false,
+        account: nextAccount,
+        editing: false,
+        validated: false,
+        preview: null,
+        form: createWhatsappManualForm(nextAccount),
+        notice: 'WhatsApp conectado com sucesso.',
+      }));
+      return response;
+    } catch (error) {
+      setWhatsapp((current) => ({
+        ...current,
+        saveLoading: false,
+        error: getErrorMessage(error, 'Nao foi possivel salvar a conexao manual do WhatsApp.'),
+      }));
+      return null;
+    }
+  }, [isEstablishment, whatsapp.form, whatsapp.validated, whatsappConnectEnabled]);
 
   const disconnectWhatsApp = useCallback(async () => {
-    if (!isEstablishment) return;
+    if (!isEstablishment || !whatsappConnectEnabled) return;
     setWhatsapp((current) => ({
       ...current,
       disconnectLoading: true,
@@ -660,11 +817,15 @@ export function useBusinessSettings(options = {}) {
       notice: '',
     }));
     try {
-      await Api.waConnectDisconnect();
-      await refreshWhatsAppConnection();
+      const response = await Api.waAccountDisconnect();
       setWhatsapp((current) => ({
         ...current,
         disconnectLoading: false,
+        account: response?.account || null,
+        editing: !(response?.account),
+        validated: false,
+        preview: null,
+        form: createWhatsappManualForm(response?.account || null),
         notice: 'WhatsApp desconectado.',
       }));
     } catch (error) {
@@ -674,7 +835,7 @@ export function useBusinessSettings(options = {}) {
         error: getErrorMessage(error, 'Nao foi possivel desconectar o WhatsApp.'),
       }));
     }
-  }, [isEstablishment, refreshWhatsAppConnection]);
+  }, [isEstablishment, whatsappConnectEnabled]);
 
   const startMercadoPagoConnect = useCallback(async () => {
     if (!isEstablishment) return;
@@ -954,6 +1115,7 @@ export function useBusinessSettings(options = {}) {
     user,
     isEstablishment,
     establishmentId,
+    whatsappConnectEnabled,
     planInfo,
     billing,
     whatsapp,
@@ -993,7 +1155,12 @@ export function useBusinessSettings(options = {}) {
     refreshWhatsAppConnection,
     refreshMercadoPagoConnection,
     refreshDepositSettings,
-    startWhatsAppConnect,
+    beginWhatsAppManualConnect,
+    updateWhatsAppManualField,
+    validateWhatsAppManualConnection,
+    saveWhatsAppManualConnection,
+    cancelWhatsAppManualEdit,
+    startWhatsAppConnect: beginWhatsAppManualConnect,
     disconnectWhatsApp,
     startMercadoPagoConnect,
     disconnectMercadoPago,

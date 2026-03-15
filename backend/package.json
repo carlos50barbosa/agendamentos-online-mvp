@@ -7,7 +7,7 @@
     "start": "node src/index.js",
     "test:plan": "node scripts/test-plan-flows.mjs",
     "test:reports": "node --test tests/relatorios.test.js",
-    "test:wa": "node --test tests/wa-normalize.test.js tests/wa-intents.test.js tests/wa-engine-transitions.test.js tests/wa-remarcar-flow.test.js tests/wa-cancelar-flow.test.js tests/wa-window-24h.test.js tests/wa-rollout-settings.test.js tests/wa-handoff-pause.test.js tests/wa-templates-outside-window.test.js tests/wa-metrics-daily.test.js"
+    "test:wa": "node --test tests/wa-normalize.test.js tests/wa-intents.test.js tests/wa-engine-transitions.test.js tests/wa-remarcar-flow.test.js tests/wa-cancelar-flow.test.js tests/wa-window-24h.test.js tests/wa-rollout-settings.test.js tests/wa-handoff-pause.test.js tests/wa-templates-outside-window.test.js tests/wa-metrics-daily.test.js tests/wa-graph-assets.test.js tests/wa-embedded-signup-service.test.js tests/wa-manual-connect-service.test.js tests/wa-account-resolver.test.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

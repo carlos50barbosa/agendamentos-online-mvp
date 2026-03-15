@@ -188,6 +188,52 @@ CREATE TABLE IF NOT EXISTS mercadopago_accounts (
     REFERENCES usuarios(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
+CREATE TABLE IF NOT EXISTS wa_accounts (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  estabelecimento_id INT NOT NULL,
+  provider VARCHAR(32) NOT NULL DEFAULT 'meta_cloud',
+  waba_id VARCHAR(64) NULL,
+  phone_number_id VARCHAR(64) NULL,
+  display_phone_number VARCHAR(32) NULL,
+  verified_name VARCHAR(255) NULL,
+  business_id VARCHAR(64) NULL,
+  access_token_enc TEXT NULL,
+  token_last4 VARCHAR(4) NULL,
+  status ENUM('connected','disconnected','error','connecting','validating') NOT NULL DEFAULT 'disconnected',
+  connected_at DATETIME NULL,
+  disconnected_at DATETIME NULL,
+  token_last_validated_at DATETIME NULL,
+  last_sync_at DATETIME NULL,
+  last_error VARCHAR(255) NULL,
+  metadata_json LONGTEXT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_wa_accounts_estabelecimento (estabelecimento_id),
+  UNIQUE KEY uk_wa_accounts_phone (phone_number_id),
+  INDEX idx_wa_accounts_status (status),
+  INDEX idx_wa_accounts_provider (provider),
+  INDEX idx_wa_accounts_last_sync (last_sync_at),
+  CONSTRAINT fk_wa_accounts_estab FOREIGN KEY (estabelecimento_id)
+    REFERENCES usuarios(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+CREATE TABLE IF NOT EXISTS wa_messages (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  estabelecimento_id INT NOT NULL,
+  direction ENUM('in','out') NOT NULL,
+  wa_id VARCHAR(64) NULL,
+  wamid VARCHAR(128) NULL,
+  phone_number_id VARCHAR(64) NULL,
+  payload_json LONGTEXT NULL,
+  status VARCHAR(64) NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_wa_messages_phone (phone_number_id),
+  INDEX idx_wa_messages_estab (estabelecimento_id),
+  INDEX idx_wa_messages_wamid (wamid),
+  CONSTRAINT fk_wa_messages_estab FOREIGN KEY (estabelecimento_id)
+    REFERENCES usuarios(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
 -- Contatos WhatsApp (ultima mensagem inbound)
 CREATE TABLE IF NOT EXISTS whatsapp_contacts (
   recipient_id VARCHAR(32) PRIMARY KEY,

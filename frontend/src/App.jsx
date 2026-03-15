@@ -793,7 +793,9 @@ export default function App() {
     isLoginRoute ||
     pathname.startsWith('/cadastro') ||
     pathname.startsWith('/recuperar-senha');
-  const isNovo = pathname.startsWith('/novo');
+  const isAppointmentFlow =
+    pathname.startsWith('/novo') ||
+    pathname.startsWith('/novo-agendamento');
   const [currentUser, setCurrentUser] = useState(() => getUser());
 
   const [billingStatus, setBillingStatus] = useState(null);
@@ -1276,7 +1278,7 @@ const topbarAlert = useMemo(() => {
     ? 'landing-shell'
     : isAuthRoute
       ? layoutStyles.authStage
-      : `container${isConfiguracoes ? ' container--wide' : ''}`;
+      : `container${isConfiguracoes ? ' container--wide' : ''}${isAppointmentFlow ? ' container--appointment' : ''}`;
 
   return (
     <>

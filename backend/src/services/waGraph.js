@@ -74,77 +74,205 @@ export async function exchangeOAuthCode({ code, redirectUri, appId, appSecret })
   return callGraph({ method: 'GET', url: url.toString() });
 }
 
-export async function fetchWabaAssets(accessToken) {
+function shouldRetryAccessTokenExchange(err) {
+  const message = String(
+    err?.body?.error?.message ||
+    err?.body?.message ||
+    err?.message ||
+    ''
+  ).toLowerCase();
+  return message.includes('redirect_uri');
+}
+
+async function exchangeCodeWithOptionalRedirectUri({
+  code,
+  appId,
+  appSecret,
+  redirectUri,
+  forceRedirectUri = false,
+}) {
+  if (!code || !appId || !appSecret) {
+    throw new Error('oauth_missing_params');
+  }
+  const url = new URL(`${GRAPH_BASE}/${API_VERSION}/oauth/access_token`);
+  url.searchParams.set('client_id', String(appId));
+  url.searchParams.set('client_secret', String(appSecret));
+  url.searchParams.set('code', String(code));
+  if (forceRedirectUri && redirectUri) {
+    url.searchParams.set('redirect_uri', String(redirectUri));
+  }
+  return callGraph({ method: 'GET', url: url.toString() });
+}
+
+export async function exchangeEmbeddedSignupCode({ code, appId, appSecret, redirectUri }) {
+  const allowRedirectRetry = Boolean(String(redirectUri || '').trim());
+  try {
+    return await exchangeCodeWithOptionalRedirectUri({
+      code,
+      appId,
+      appSecret,
+      redirectUri,
+      forceRedirectUri: false,
+    });
+  } catch (err) {
+    if (!allowRedirectRetry || !shouldRetryAccessTokenExchange(err)) {
+      throw err;
+    }
+    return exchangeCodeWithOptionalRedirectUri({
+      code,
+      appId,
+      appSecret,
+      redirectUri,
+      forceRedirectUri: true,
+    });
+  }
+}
+
+function listData(value) {
+  return Array.isArray(value?.data) ? value.data : [];
+}
+
+function mergeWabas(target, source, items) {
+  items.forEach((item, index) => {
+    if (!item || typeof item !== 'object') return;
+    const key = item.id ? String(item.id) : `${source}:${index}`;
+    const current = target.get(key);
+    if (!current) {
+      target.set(key, { ...item, _source: source });
+      return;
+    }
+    const nextPhones = listData(item.phone_numbers);
+    target.set(key, {
+      ...current,
+      ...item,
+      phone_numbers: nextPhones.length ? item.phone_numbers : current.phone_numbers,
+      _source: current._source === source ? current._source : `${current._source},${source}`,
+    });
+  });
+}
+
+export async function fetchWabaAssets(accessToken, options = {}) {
+  const graphGet = typeof options.graphGet === 'function' ? options.graphGet : getGraph;
   const result = {
     businessId: null,
+    businessName: null,
     wabaId: null,
+    wabaName: null,
     phoneNumberId: null,
     displayPhoneNumber: null,
+    verifiedName: null,
+    trace: {
+      meId: null,
+      sources: [],
+      rawKeys: {},
+      wabaCount: 0,
+      phoneNumbersCount: 0,
+    },
   };
+  const wabaMap = new Map();
 
   try {
-    const businesses = await getGraph('me/businesses', accessToken, { fields: 'id,name', limit: 1 });
+    const businesses = await graphGet('me/businesses', accessToken, { fields: 'id,name', limit: 1 });
+    result.trace.sources.push('me/businesses');
+    result.trace.rawKeys.me_businesses = Object.keys(businesses || {});
     result.businessId = businesses?.data?.[0]?.id || null;
+    result.businessName = businesses?.data?.[0]?.name || null;
   } catch {}
 
-  let wabas = [];
   try {
-    const me = await getGraph('me', accessToken, {
+    const me = await graphGet('me', accessToken, {
       fields: 'id,name,whatsapp_business_accounts{id,name,phone_numbers{id,display_phone_number,verified_name}}',
     });
-    wabas = me?.whatsapp_business_accounts?.data || [];
+    result.trace.sources.push('me');
+    result.trace.rawKeys.me = Object.keys(me || {});
+    result.trace.meId = me?.id ? String(me.id) : null;
+    mergeWabas(wabaMap, 'me', listData(me?.whatsapp_business_accounts));
   } catch {}
 
-  if (!wabas.length) {
+  try {
+    const direct = await graphGet('me/whatsapp_business_accounts', accessToken, {
+      fields: 'id,name,phone_numbers{id,display_phone_number,verified_name}',
+      limit: 10,
+    });
+    result.trace.sources.push('me/whatsapp_business_accounts');
+    result.trace.rawKeys.me_whatsapp_business_accounts = Object.keys(direct || {});
+    mergeWabas(wabaMap, 'me/whatsapp_business_accounts', listData(direct));
+  } catch {}
+
+  if (result.businessId) {
     try {
-      const direct = await getGraph('me/whatsapp_business_accounts', accessToken, {
+      const owned = await graphGet(`${result.businessId}/owned_whatsapp_business_accounts`, accessToken, {
         fields: 'id,name,phone_numbers{id,display_phone_number,verified_name}',
-        limit: 5,
-      });
-      wabas = direct?.data || [];
-    } catch {}
-  }
-
-  if (!wabas.length && result.businessId) {
-    try {
-      const owned = await getGraph(`${result.businessId}/owned_whatsapp_business_accounts`, accessToken, {
-        fields: 'id,name,phone_numbers{id,display_phone_number,verified_name}',
-        limit: 5,
-      });
-      wabas = owned?.data || [];
-    } catch {}
-  }
-
-  const waba = wabas[0];
-  if (waba?.id) result.wabaId = String(waba.id);
-
-  let phones = waba?.phone_numbers?.data || [];
-  if (!phones.length && result.wabaId) {
-    try {
-      const phoneResp = await getGraph(`${result.wabaId}/phone_numbers`, accessToken, {
-        fields: 'id,display_phone_number,verified_name',
         limit: 10,
       });
-      phones = phoneResp?.data || [];
+      result.trace.sources.push('owned_whatsapp_business_accounts');
+      result.trace.rawKeys.owned_whatsapp_business_accounts = Object.keys(owned || {});
+      mergeWabas(wabaMap, 'owned_whatsapp_business_accounts', listData(owned));
     } catch {}
   }
 
-  const phone = phones[0];
-  if (phone?.id) result.phoneNumberId = String(phone.id);
-  if (phone?.display_phone_number) result.displayPhoneNumber = String(phone.display_phone_number);
+  const wabas = Array.from(wabaMap.values());
+  result.trace.wabaCount = wabas.length;
+
+  for (const waba of wabas) {
+    if (!waba?.id) continue;
+    let phones = listData(waba.phone_numbers);
+    result.trace.phoneNumbersCount += phones.length;
+    if (!phones.length) {
+      try {
+        const phoneResp = await graphGet(`${waba.id}/phone_numbers`, accessToken, {
+          fields: 'id,display_phone_number,verified_name',
+          limit: 10,
+        });
+        result.trace.rawKeys[`phone_numbers:${waba.id}`] = Object.keys(phoneResp || {});
+        phones = listData(phoneResp);
+        result.trace.phoneNumbersCount += phones.length;
+      } catch {}
+    }
+    const phone = phones[0];
+    if (!phone?.id) continue;
+    result.wabaId = String(waba.id);
+    result.wabaName = waba?.name ? String(waba.name) : null;
+    result.phoneNumberId = String(phone.id);
+    if (phone?.display_phone_number) {
+      result.displayPhoneNumber = String(phone.display_phone_number);
+    }
+    if (phone?.verified_name) {
+      result.verifiedName = String(phone.verified_name);
+    }
+    break;
+  }
 
   if (!result.displayPhoneNumber && result.phoneNumberId) {
     try {
-      const phoneDetails = await getGraph(result.phoneNumberId, accessToken, {
-        fields: 'display_phone_number,verified_name',
+      const phoneDetails = await graphGet(result.phoneNumberId, accessToken, {
+        fields: 'id,display_phone_number,verified_name',
       });
+      result.trace.rawKeys.phone_details = Object.keys(phoneDetails || {});
       if (phoneDetails?.display_phone_number) {
         result.displayPhoneNumber = String(phoneDetails.display_phone_number);
+      }
+      if (phoneDetails?.verified_name) {
+        result.verifiedName = String(phoneDetails.verified_name);
       }
     } catch {}
   }
 
   return result;
+}
+
+export async function fetchPhoneNumberDetails(accessToken, phoneNumberId) {
+  if (!accessToken || !phoneNumberId) return null;
+  return getGraph(String(phoneNumberId), accessToken, {
+    fields: 'id,display_phone_number,verified_name,name_status,quality_rating',
+  });
+}
+
+export async function fetchWabaDetails(accessToken, wabaId) {
+  if (!accessToken || !wabaId) return null;
+  return getGraph(String(wabaId), accessToken, {
+    fields: 'id,name',
+  });
 }
 
 export async function sendWhatsAppMessage({ accessToken, phoneNumberId, payload }) {

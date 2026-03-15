@@ -1,219 +1,239 @@
 import { Router } from 'express';
 import { auth, isEstabelecimento } from '../middleware/auth.js';
+import { getWhatsAppConnectFeatureState, isWhatsAppConnectEnabled } from '../lib/featureFlags.js';
 import {
-  buildOAuthState,
-  describeOAuthStateError,
-  verifyOAuthState,
-} from '../lib/oauth_state.js';
-import { encryptAccessToken } from '../services/waCrypto.js';
-import { exchangeOAuthCode, getGraph } from '../services/waGraph.js';
-import {
-  getWaAccountByEstabelecimentoId,
-  getWaAccountByPhoneNumberId,
-  upsertWaAccount,
-  disconnectWaAccount,
-} from '../services/waTenant.js';
+  connectManualWhatsAppAccount,
+  disconnectTenantWhatsAppAccount,
+  getTenantWhatsAppAccount,
+  validateManualWhatsAppAccount,
+} from '../services/whatsappManualConnectService.js';
 
 const router = Router();
-
-const APP_ID = process.env.WA_APP_ID;
-const APP_SECRET = process.env.WA_APP_SECRET;
-const REDIRECT_URI = process.env.META_REDIRECT_URI;
-const DIALOG_VERSION = process.env.WA_API_VERSION || 'v23.0';
-const WA_STATE_SECRET = process.env.WA_STATE_SECRET || process.env.JWT_SECRET;
-const WA_STATE_TTL = String(process.env.WA_STATE_TTL || '1h').trim() || '1h';
 const FRONTEND_BASE = (process.env.FRONTEND_BASE_URL || process.env.APP_URL || 'http://localhost:3001').replace(/\/$/, '');
 
-const SCOPES = [
-  'business_management',
-  'whatsapp_business_management',
-  'whatsapp_business_messaging',
-].join(',');
-
-function buildConnectUrl(state) {
-  const url = new URL(`https://www.facebook.com/${DIALOG_VERSION}/dialog/oauth`);
-  url.searchParams.set('client_id', String(APP_ID || ''));
-  url.searchParams.set('redirect_uri', String(REDIRECT_URI || ''));
-  url.searchParams.set('response_type', 'code');
-  url.searchParams.set('scope', SCOPES);
-  if (state) url.searchParams.set('state', state);
-  return url.toString();
-}
-
-function buildState(estabelecimentoId) {
-  return buildOAuthState(
-    { estabelecimentoId },
-    { secret: WA_STATE_SECRET, expiresIn: WA_STATE_TTL },
-  );
-}
-
-function resolveRedirect(status, reason) {
+function buildPanelUrl(params = {}) {
   const url = new URL(`${FRONTEND_BASE}/whatsappbusiness`);
-  url.searchParams.set('wa', status || 'connected');
-  if (reason) url.searchParams.set('reason', reason);
+  Object.entries(params).forEach(([key, value]) => {
+    if (value === undefined || value === null || value === '') return;
+    url.searchParams.set(key, String(value));
+  });
   return url.toString();
 }
 
-router.get('/connect/start', auth, isEstabelecimento, async (req, res) => {
-  if (!APP_ID || !APP_SECRET || !REDIRECT_URI) {
-    return res.status(500).json({ error: 'wa_config_missing' });
+function buildAccountResponse(payload) {
+  const account = payload?.account || null;
+  return {
+    ok: true,
+    connected: Boolean(payload?.connected),
+    status: payload?.status || 'not_connected',
+    account,
+    provider: account?.provider || null,
+    display_phone_number: account?.display_phone_number || null,
+    verified_name: account?.verified_name || null,
+    phone_number_id: account?.phone_number_id || null,
+    waba_id: account?.waba_id || null,
+    business_account_id: account?.business_account_id || null,
+    business_name: account?.business_name || null,
+    descriptive_name: account?.descriptive_name || null,
+    connected_at: account?.connected_at || null,
+    disconnected_at: account?.disconnected_at || null,
+    last_sync_at: account?.last_sync_at || null,
+    token_last_validated_at: account?.token_last_validated_at || null,
+    last_error: account?.last_error || null,
+  };
+}
+
+function sendRouteError(res, err, fallbackCode, fallbackMessage) {
+  const status = Number(err?.status || 500) || 500;
+  const code = err?.code || fallbackCode || 'wa_manual_connect_error';
+  const message = err?.message || fallbackMessage || 'Falha no fluxo manual do WhatsApp Business.';
+  const body = { ok: false, error: code, message };
+  if (err?.details !== undefined) {
+    body.details = err.details;
   }
-  if (!WA_STATE_SECRET) {
-    return res.status(500).json({ error: 'wa_state_secret_missing' });
+  return res.status(status).json(body);
+}
+
+function buildFeatureDisabledResponse() {
+  return {
+    ok: true,
+    connected: false,
+    status: 'coming_soon',
+    account: null,
+    ...getWhatsAppConnectFeatureState(),
+  };
+}
+
+function sendFeatureDisabled(res) {
+  return res.status(403).json({
+    ok: false,
+    error: 'wa_connect_disabled',
+    ...getWhatsAppConnectFeatureState(),
+  });
+}
+
+router.get('/account', auth, isEstabelecimento, async (req, res) => {
+  if (!isWhatsAppConnectEnabled()) {
+    return res.json(buildFeatureDisabledResponse());
   }
   try {
-    const state = buildState(req.user.id);
-    const url = buildConnectUrl(state);
-    return res.json({ url });
+    const result = await getTenantWhatsAppAccount(req.user.id);
+    return res.json({
+      ...buildAccountResponse(result),
+      ...getWhatsAppConnectFeatureState(),
+    });
   } catch (err) {
-    console.error('[wa/connect/start]', err?.message || err);
-    return res.status(500).json({ error: 'wa_connect_failed' });
+    console.error('[wa][account]', err?.message || err);
+    return sendRouteError(
+      res,
+      err,
+      'wa_account_status_failed',
+      'Falha ao carregar o status do WhatsApp Business.'
+    );
   }
 });
 
-router.get('/connect/status', auth, isEstabelecimento, async (req, res) => {
+router.post('/manual/validate', auth, isEstabelecimento, async (req, res) => {
+  if (!isWhatsAppConnectEnabled()) {
+    return sendFeatureDisabled(res);
+  }
   try {
-    const account = await getWaAccountByEstabelecimentoId(req.user.id);
-    if (!account) return res.json({ ok: true, connected: false });
+    const result = await validateManualWhatsAppAccount({
+      estabelecimentoId: req.user.id,
+      payload: req.body && typeof req.body === 'object' ? req.body : {},
+    });
     return res.json({
       ok: true,
-      connected: account.status === 'connected',
-      status: account.status,
-      display_phone_number: account.display_phone_number,
-      phone_number_id: account.phone_number_id,
-      waba_id: account.waba_id,
-      connected_at: account.connected_at,
+      valid: Boolean(result?.valid),
+      preview: result?.preview || null,
     });
   } catch (err) {
-    console.error('[wa/connect/status]', err);
-    return res.json({ ok: true, connected: false, degraded: true });
+    console.error('[wa][manual][validate]', err?.code || err?.message || err);
+    return sendRouteError(
+      res,
+      err,
+      'wa_manual_validate_failed',
+      'Nao foi possivel validar os dados do WhatsApp na Meta.'
+    );
   }
 });
 
-router.post('/connect/disconnect', auth, isEstabelecimento, async (req, res) => {
+router.post('/manual/connect', auth, isEstabelecimento, async (req, res) => {
+  if (!isWhatsAppConnectEnabled()) {
+    return sendFeatureDisabled(res);
+  }
   try {
-    const result = await disconnectWaAccount(req.user.id);
-    return res.json({ ok: !!result.ok });
+    const result = await connectManualWhatsAppAccount({
+      estabelecimentoId: req.user.id,
+      payload: req.body && typeof req.body === 'object' ? req.body : {},
+    });
+    return res.json(buildAccountResponse(result));
   } catch (err) {
-    console.error('[wa/connect/disconnect]', err?.message || err);
-    return res.status(500).json({ error: 'wa_disconnect_failed' });
+    console.error('[wa][manual][connect]', err?.code || err?.message || err);
+    return sendRouteError(
+      res,
+      err,
+      'wa_manual_connect_failed',
+      'Nao foi possivel salvar a conexao manual do WhatsApp.'
+    );
   }
 });
 
-router.get('/connect/callback', async (req, res) => {
-  const code = typeof req.query?.code === 'string' ? req.query.code : null;
-  const state = typeof req.query?.state === 'string' ? req.query.state : null;
-  if (!code || !state) {
-    return res.redirect(302, resolveRedirect('error', 'missing_code_or_state'));
+async function handleDisconnect(req, res) {
+  if (!isWhatsAppConnectEnabled()) {
+    return sendFeatureDisabled(res);
   }
-  if (!APP_ID || !APP_SECRET || !REDIRECT_URI) {
-    return res.redirect(302, resolveRedirect('error', 'wa_config_missing'));
-  }
-
-  let estabelecimentoId = null;
   try {
-    const payload = verifyOAuthState(state, { secret: WA_STATE_SECRET });
-    estabelecimentoId = Number(payload?.estabelecimentoId);
+    const result = await disconnectTenantWhatsAppAccount(req.user.id);
+    return res.json(buildAccountResponse(result));
   } catch (err) {
-    const stateError = describeOAuthStateError(err);
-    console.warn('[wa/connect/callback][state]', stateError);
-    return res.redirect(302, resolveRedirect('error', stateError.reason));
+    console.error('[wa][account][disconnect]', err?.message || err);
+    return sendRouteError(
+      res,
+      err,
+      'wa_account_disconnect_failed',
+      'Falha ao desconectar o WhatsApp Business.'
+    );
   }
+}
 
-  if (!Number.isFinite(estabelecimentoId) || estabelecimentoId <= 0) {
-    return res.redirect(302, resolveRedirect('error', 'state_invalid'));
+router.post('/account/disconnect', auth, isEstabelecimento, handleDisconnect);
+router.delete('/account/disconnect', auth, isEstabelecimento, handleDisconnect);
+
+// Compatibilidade temporaria para consumidores antigos.
+router.get('/connect/status', auth, isEstabelecimento, async (req, res) => {
+  if (!isWhatsAppConnectEnabled()) {
+    return res.json(buildFeatureDisabledResponse());
   }
-
   try {
-    const tokenResp = await exchangeOAuthCode({
-      code,
-      redirectUri: REDIRECT_URI,
-      appId: APP_ID,
-      appSecret: APP_SECRET,
+    const result = await getTenantWhatsAppAccount(req.user.id);
+    return res.json({
+      ...buildAccountResponse(result),
+      ...getWhatsAppConnectFeatureState(),
     });
-    const accessToken = tokenResp?.access_token;
-    if (!accessToken) throw new Error('missing_access_token');
-
-    let businessId = null;
-    try {
-      const businesses = await getGraph('me/businesses', accessToken, { fields: 'id,name', limit: 1 });
-      businessId = businesses?.data?.[0]?.id || null;
-    } catch {}
-    if (!businessId) {
-      try {
-        const me = await getGraph('me', accessToken, { fields: 'id' });
-        businessId = me?.id || null;
-      } catch {}
-    }
-
-    let wabaId = null;
-    let phoneNumberId = null;
-    let displayPhoneNumber = null;
-    let phoneNumbersCount = 0;
-    let rawKeys = {};
-
-    if (businessId) {
-      const wabaResp = await getGraph(
-        `${businessId}/owned_whatsapp_business_accounts`,
-        accessToken,
-        { fields: 'id,name', limit: 10 }
-      );
-      const wabas = Array.isArray(wabaResp?.data) ? wabaResp.data : [];
-      rawKeys.waba_keys = Object.keys(wabaResp || {});
-      for (const waba of wabas) {
-        if (!waba?.id) continue;
-        const phonesResp = await getGraph(
-          `${waba.id}/phone_numbers`,
-          accessToken,
-          { fields: 'id,display_phone_number,verified_name', limit: 10 }
-        );
-        const phones = Array.isArray(phonesResp?.data) ? phonesResp.data : [];
-        phoneNumbersCount += phones.length;
-        rawKeys.phone_keys = Object.keys(phonesResp || {});
-        if (!phones.length) continue;
-        const first = phones[0];
-        if (first?.id) {
-          wabaId = String(waba.id);
-          phoneNumberId = String(first.id);
-          displayPhoneNumber = first.display_phone_number ? String(first.display_phone_number) : null;
-          break;
-        }
-      }
-    }
-
-    if (!phoneNumberId) {
-      console.warn('[wa/connect/callback] missing phone_number', {
-        business_id: businessId,
-        waba_id: wabaId,
-        phone_numbers_count: phoneNumbersCount,
-        raw_keys: rawKeys,
-      });
-      return res.redirect(302, resolveRedirect('error', 'missing_phone_number'));
-    }
-
-    const existingPhone = await getWaAccountByPhoneNumberId(phoneNumberId);
-    if (existingPhone && Number(existingPhone.estabelecimento_id) !== Number(estabelecimentoId)) {
-      return res.redirect(302, resolveRedirect('phone_in_use'));
-    }
-
-    const { enc, last4 } = encryptAccessToken(accessToken);
-    await upsertWaAccount({
-      estabelecimentoId,
-      wabaId,
-      phoneNumberId,
-      displayPhoneNumber,
-      businessId,
-      accessTokenEnc: enc,
-      tokenLast4: last4,
-      status: 'connected',
-      connectedAt: new Date(),
-    });
-
-    return res.redirect(302, resolveRedirect('connected'));
   } catch (err) {
-    console.error('[wa/connect/callback]', err?.message || err);
-    return res.redirect(302, resolveRedirect('error', 'oauth_exchange_failed'));
+    console.error('[wa][connect/status]', err?.message || err);
+    return res.json({ ok: true, connected: false, status: 'error', degraded: true });
   }
+});
+
+router.post('/connect/disconnect', auth, isEstabelecimento, handleDisconnect);
+
+router.get('/connect/start', auth, isEstabelecimento, async (req, res) => {
+  if (!isWhatsAppConnectEnabled()) {
+    return res.json({
+      ok: true,
+      deprecated: true,
+      url: buildPanelUrl(),
+      ...getWhatsAppConnectFeatureState(),
+    });
+  }
+  console.info('[wa][connect/start][legacy_redirect]', {
+    estabelecimento_id: req.user.id,
+  });
+  return res.json({
+    ok: true,
+    deprecated: true,
+    url: buildPanelUrl(),
+    message: 'O fluxo Embedded Signup foi aposentado. Use a conexao manual assistida no painel.',
+  });
+});
+
+router.get('/connect/callback', async (_req, res) => {
+  if (!isWhatsAppConnectEnabled()) {
+    return res.redirect(302, buildPanelUrl());
+  }
+  return res.redirect(
+    302,
+    buildPanelUrl({
+      wa: 'error',
+      reason: 'manual_connection_required',
+    })
+  );
+});
+
+router.get('/embedded-signup/config', auth, isEstabelecimento, (_req, res) => {
+  if (!isWhatsAppConnectEnabled()) {
+    return sendFeatureDisabled(res);
+  }
+  return res.status(410).json({
+    ok: false,
+    deprecated: true,
+    error: 'wa_embedded_signup_deprecated',
+    message: 'O Embedded Signup nao faz mais parte da experiencia principal. Use a conexao manual assistida.',
+  });
+});
+
+router.post('/embedded-signup/exchange', auth, isEstabelecimento, (_req, res) => {
+  if (!isWhatsAppConnectEnabled()) {
+    return sendFeatureDisabled(res);
+  }
+  return res.status(410).json({
+    ok: false,
+    deprecated: true,
+    error: 'wa_embedded_signup_deprecated',
+    message: 'O Embedded Signup nao faz mais parte da experiencia principal. Use a conexao manual assistida.',
+  });
 });
 
 export default router;

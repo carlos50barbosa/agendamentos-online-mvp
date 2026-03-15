@@ -21,6 +21,9 @@ const PUBLIC_PROFILE_THEME_DEFAULTS = Object.freeze({
   accent: "#0f766e",
   accentStrong: "#164e63",
 });
+const WHATSAPP_CONNECT_ENABLED = /^(1|true|yes|on)$/i.test(
+  String(import.meta.env.VITE_WHATSAPP_CONNECT_ENABLED || "").trim()
+);
 function normalizeHexColor(value) {
   const raw = String(value || "").trim();
   if (!raw) return "";
@@ -1394,6 +1397,16 @@ function _l() {
     Xs = o.useCallback(async () => {
       var a;
       if (!r || !(n != null && n.id)) return null;
+      if (!WHATSAPP_CONNECT_ENABLED)
+        return (
+          Re((t) => ({ ...t, loading: !1, account: null, error: "", notice: "" })),
+          {
+            connected: !1,
+            status: "coming_soon",
+            feature_enabled: !1,
+            mode: "coming_soon",
+          }
+        );
       Re((t) => ({ ...t, loading: !0, error: "" }));
       try {
         const t = await I.waConnectStatus();
@@ -1429,22 +1442,7 @@ function _l() {
       }
     }, [r, n == null ? void 0 : n.id]),
     Pn = o.useCallback(async () => {
-      var a;
-      if (r) {
-        Re((t) => ({ ...t, connectLoading: !0, error: "", notice: "" }));
-        try {
-          const t = await I.waConnectStart();
-          if (!(t != null && t.url))
-            throw new Error("URL de conexao indisponivel.");
-          window.location.assign(t.url);
-        } catch (t) {
-          const s =
-            ((a = t == null ? void 0 : t.data) == null ? void 0 : a.message) ||
-            (t == null ? void 0 : t.message) ||
-            "Nao foi possivel iniciar a conexao.";
-          Re((i) => ({ ...i, connectLoading: !1, error: s }));
-        }
-      }
+      return null;
     }, [r]),
     Et = o.useCallback(async () => {
       var a;
@@ -1476,6 +1474,7 @@ function _l() {
     Ln = o.useCallback(async () => {
       var a;
       if (r) {
+        if (!WHATSAPP_CONNECT_ENABLED) return null;
         Re((t) => ({ ...t, disconnectLoading: !0, error: "", notice: "" }));
         try {
           (await I.waConnectDisconnect(),
@@ -3491,11 +3490,11 @@ function _l() {
                         className: "muted",
                         style: { margin: "4px 0 0" },
                         children:
-                          "Conecte o número do estabelecimento para enviar mensagens com o seu próprio WhatsApp Business.",
+                          "A integracao oficial com WhatsApp Business esta em fase final de liberacao para o seu estabelecimento.",
                       }),
                     ],
                   }),
-                  pe.loading &&
+                  !1 &&
                     e.jsxs("div", {
                       className: "row",
                       style: { gap: 8, alignItems: "center" },
@@ -3511,8 +3510,7 @@ function _l() {
                         }),
                       ],
                     }),
-                  !pe.loading &&
-                    W &&
+                  !1 &&
                     e.jsxs("div", {
                       className: "notice notice--success",
                       children: [
@@ -3521,26 +3519,25 @@ function _l() {
                         ".",
                       ],
                     }),
-                  !pe.loading &&
-                    !W &&
+                  !1 &&
                     e.jsx("div", {
                       className: "notice notice--warn",
                       children:
                         "WhatsApp não conectado. Conecte seu número para ativar os envios.",
                     }),
-                  (u == null ? void 0 : u.phone_number_id) &&
+                  !1 &&
                     e.jsxs("span", {
                       className: "muted",
                       style: { fontSize: 12 },
                       children: ["phone_number_id: ", u.phone_number_id],
                     }),
-                  pe.error &&
+                  !1 &&
                     e.jsx("div", {
                       className: "notice notice--error",
                       role: "alert",
                       children: pe.error,
                     }),
-                  pe.notice &&
+                  !1 &&
                     e.jsx("div", {
                       className: "notice notice--success",
                       role: "status",
@@ -3554,12 +3551,10 @@ function _l() {
                         type: "button",
                         className: "btn btn--primary",
                         onClick: Pn,
-                        disabled: pe.connectLoading,
-                        children: pe.connectLoading
-                          ? e.jsx("span", { className: "spinner" })
-                          : "Em desenvolvimento... Conectar WhatsApp",
+                        disabled: !0,
+                        children: "Disponivel em breve",
                       }),
-                      W &&
+                      !1 &&
                         e.jsx("button", {
                           type: "button",
                           className: "btn btn--outline",

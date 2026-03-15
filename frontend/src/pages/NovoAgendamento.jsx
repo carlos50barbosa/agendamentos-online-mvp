@@ -8,7 +8,7 @@ import { Api, resolveAssetUrl } from "../utils/api";
 
 import { getUser } from "../utils/auth";
 
-import EstablishmentsHero from "../components/EstablishmentsHero.jsx";
+import AppointmentDiscoveryHero from "../components/AppointmentDiscoveryHero.jsx";
 
 import { IconMapPin, IconList, IconStar, IconGear } from "../components/Icons.jsx";
 
@@ -42,6 +42,33 @@ const PUBLIC_PAGE_THEME_DEFAULTS = Object.freeze({
   accent: "#0f766e",
   accentStrong: "#164e63",
 });
+
+const APPOINTMENT_FLOW_STEPS = Object.freeze([
+  "Estabelecimento",
+  "Servico",
+  "Horario",
+  "Confirmacao",
+]);
+
+const APPOINTMENT_FLOW_STEP_SHORT_LABELS = Object.freeze({
+  Estabelecimento: "Local",
+  Servico: "Servico",
+  Horario: "Horario",
+  Confirmacao: "Confirmar",
+});
+
+const DISCOVERY_SORT_OPTIONS = Object.freeze([
+  { value: "relevance", label: "Relevancia" },
+  { value: "proximity", label: "Proximidade" },
+  { value: "rating", label: "Melhor avaliacao" },
+  { value: "availability", label: "Disponibilidade", disabled: true },
+]);
+
+const DISCOVERY_CATEGORY_FILTERS = Object.freeze([
+  { value: "barbearia", label: "Barbearia" },
+  { value: "salao", label: "Salao" },
+  { value: "clinica", label: "Clinica" },
+]);
 
 function normalizeHexColor(value) {
   const raw = String(value || "").trim();
@@ -1358,9 +1385,67 @@ const formatAddress = (est) => {
 
 const fallbackAvatar = (label) => {
 
-  const name = encodeURIComponent(String(label || 'AO'));
+  const initials = String(label || 'AO')
 
-  return `https://ui-avatars.com/api/?name=${name}&size=128&background=1C64F2&color=ffffff&rounded=true`;
+    .trim()
+
+    .split(/\s+/)
+
+    .filter(Boolean)
+
+    .slice(0, 2)
+
+    .map((word) => word.charAt(0).toUpperCase())
+
+    .join('') || 'AO';
+
+  const svg = `
+
+    <svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128" fill="none">
+
+      <rect width="128" height="128" rx="36" fill="url(#g)" />
+
+      <defs>
+
+        <linearGradient id="g" x1="8" y1="10" x2="118" y2="120" gradientUnits="userSpaceOnUse">
+
+          <stop stop-color="#0f766e" />
+
+          <stop offset="1" stop-color="#164e63" />
+
+        </linearGradient>
+
+      </defs>
+
+      <text
+
+        x="50%"
+
+        y="52%"
+
+        text-anchor="middle"
+
+        dominant-baseline="middle"
+
+        fill="#ffffff"
+
+        font-family="Arial, sans-serif"
+
+        font-size="40"
+
+        font-weight="700"
+
+      >
+
+        ${initials}
+
+      </text>
+
+    </svg>
+
+  `.replace(/\s+/g, ' ').trim();
+
+  return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
 
 };
 
@@ -1508,6 +1593,118 @@ const displayEstablishmentAddress = (est) => {
 
 };
 
+const getEstablishmentCategoryLabel = (est) => {
+
+  const raw = String(
+
+    est?.categoria ||
+
+    est?.category ||
+
+    est?.segmento ||
+
+    est?.segment ||
+
+    est?.tipo_estabelecimento ||
+
+    est?.tipo ||
+
+    est?.business_type ||
+
+    est?.businessType ||
+
+    est?.nicho ||
+
+    ''
+
+  ).trim();
+
+  if (!raw) return '';
+
+  return raw
+
+    .split(/\s+/)
+
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+
+    .join(' ');
+
+};
+
+const matchesDiscoveryCategory = (est, filterValue) => {
+
+  if (!filterValue || filterValue === 'all') return true;
+
+  const haystack = normalizeText(
+
+    [
+
+      getEstablishmentCategoryLabel(est),
+
+      est?.categoria,
+
+      est?.category,
+
+      est?.segmento,
+
+      est?.segment,
+
+      est?.tipo_estabelecimento,
+
+      est?.tipo,
+
+      est?.business_type,
+
+      est?.businessType,
+
+      est?.nicho,
+
+    ]
+
+      .filter(Boolean)
+
+      .join(' ')
+
+  );
+
+  if (!haystack) return false;
+
+  if (filterValue === 'barbearia') {
+
+    return haystack.includes('barbear') || haystack.includes('barber');
+
+  }
+
+  if (filterValue === 'salao') {
+
+    return haystack.includes('salao') || haystack.includes('beleza') || haystack.includes('cabelo');
+
+  }
+
+  if (filterValue === 'clinica') {
+
+    return haystack.includes('clinica') || haystack.includes('estetica') || haystack.includes('saude');
+
+  }
+
+  return false;
+
+};
+
+const formatDistanceLabel = (distanceKm) => {
+
+  if (!Number.isFinite(distanceKm)) return '';
+
+  return `${distanceKm.toLocaleString('pt-BR', {
+
+    minimumFractionDigits: distanceKm < 10 ? 1 : 0,
+
+    maximumFractionDigits: 1,
+
+  })} km`;
+
+};
+
 /* =================== UI Components =================== */
 
 const Toast = ({ type, message, onDismiss }) => (
@@ -1539,6 +1736,210 @@ const Chip = ({ active, onClick, children, title }) => (
     {children}
 
   </button>
+
+);
+
+const AppointmentFlowStepper = ({ currentStep = 1, compact = false, className = '' }) => (
+
+  <ol
+    className={`appointment-stepper${compact ? ' appointment-stepper--compact' : ''}${className ? ` ${className}` : ''}`}
+    aria-label="Etapas do agendamento"
+  >
+
+    {APPOINTMENT_FLOW_STEPS.map((label, index) => {
+
+      const stepNumber = index + 1;
+      const shortLabel = APPOINTMENT_FLOW_STEP_SHORT_LABELS[label] || label;
+
+      const status =
+
+        stepNumber < currentStep
+
+          ? 'done'
+
+          : stepNumber === currentStep
+
+            ? 'current'
+
+            : 'upcoming';
+
+      return (
+
+        <li key={label} className={`appointment-stepper__item is-${status}`}>
+
+          <span className="appointment-stepper__marker" aria-hidden="true">
+
+            {stepNumber}
+
+          </span>
+
+          <span className="appointment-stepper__label appointment-stepper__label--full">{label}</span>
+
+          <span className="appointment-stepper__label appointment-stepper__label--short">{shortLabel}</span>
+
+        </li>
+
+      );
+
+    })}
+
+  </ol>
+
+);
+
+const AppointmentServiceDock = ({
+  currentStep = 2,
+  selectedCount = 0,
+  duration = 0,
+  priceLabel = '',
+  onContinue = () => {},
+  dockRef = null,
+}) => {
+  const countLabel =
+    selectedCount === 1
+      ? '1 servico selecionado'
+      : selectedCount > 1
+        ? `${selectedCount} servicos selecionados`
+        : 'Nenhum servico selecionado';
+
+  const hasSelection = selectedCount > 0;
+  const metaItems = [];
+
+  if (hasSelection && duration > 0) metaItems.push(`${duration} min`);
+  if (hasSelection && priceLabel) metaItems.push(priceLabel);
+
+  return (
+    <div
+      ref={dockRef}
+      className={`novo-agendamento__service-dock${hasSelection ? ' is-active' : ''}`}
+    >
+      <div className="novo-agendamento__service-dock-inner">
+        <div
+          className="novo-agendamento__service-dock-bar"
+          role="region"
+          aria-label="Resumo da selecao de servicos"
+        >
+          <div className="novo-agendamento__service-dock-copy" aria-live="polite">
+            <span className="novo-agendamento__service-dock-kicker">Resumo da selecao</span>
+            <strong className="novo-agendamento__service-dock-title">{countLabel}</strong>
+            {hasSelection ? (
+              <div className="novo-agendamento__service-dock-meta">
+                {metaItems.map((item) => (
+                  <span key={item}>{item}</span>
+                ))}
+              </div>
+            ) : (
+              <p className="novo-agendamento__service-dock-hint">
+                Escolha um ou mais servicos para continuar para horarios.
+              </p>
+            )}
+          </div>
+          <button
+            type="button"
+            className="btn btn--primary novo-agendamento__service-dock-button"
+            disabled={!hasSelection}
+            onClick={onContinue}
+          >
+            Continuar
+          </button>
+        </div>
+        <div className="novo-agendamento__service-dock-stepper">
+          <AppointmentFlowStepper
+            currentStep={currentStep}
+            compact
+            className="appointment-stepper--dock"
+          />
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const DiscoveryFilterChip = ({ active, disabled = false, note = '', onClick, children }) => (
+
+  <button
+
+    type="button"
+
+    className={`discovery-filter-chip${active ? ' is-active' : ''}${disabled ? ' is-disabled' : ''}`}
+
+    onClick={onClick}
+
+    disabled={disabled}
+
+    title={note || undefined}
+
+  >
+
+    <span>{children}</span>
+
+    {note ? <small>{note}</small> : null}
+
+  </button>
+
+);
+
+const DiscoveryEmptyState = ({ title, description, action = null, tone = 'default' }) => (
+
+  <div className={`discovery-empty-state discovery-empty-state--${tone}`}>
+
+    <div className="discovery-empty-state__icon" aria-hidden="true">
+
+      {tone === 'error' ? '!' : '...'}
+
+    </div>
+
+    <div className="discovery-empty-state__body">
+
+      <h3>{title}</h3>
+
+      <p>{description}</p>
+
+    </div>
+
+    {action ? <div className="discovery-empty-state__action">{action}</div> : null}
+
+  </div>
+
+);
+
+const EstablishmentCardSkeleton = () => (
+
+  <div className="establishment-card establishment-card--skeleton" aria-hidden="true">
+
+    <div className="establishment-card__top">
+
+      <div className="establishment-card__avatar shimmer" />
+
+      <div className="establishment-card__header">
+
+        <div className="establishment-card__heading">
+
+          <span className="establishment-card__skeleton-chip shimmer" />
+
+          <span className="establishment-card__skeleton-line establishment-card__skeleton-line--title shimmer" />
+
+        </div>
+
+        <span className="establishment-card__skeleton-chip establishment-card__skeleton-chip--rating shimmer" />
+
+      </div>
+
+    </div>
+
+    <span className="establishment-card__skeleton-line establishment-card__skeleton-line--body shimmer" />
+
+    <span className="establishment-card__skeleton-line establishment-card__skeleton-line--body-short shimmer" />
+
+    <div className="establishment-card__footer">
+
+      <span className="establishment-card__skeleton-link shimmer" />
+
+      <span className="establishment-card__skeleton-button shimmer" />
+
+    </div>
+
+  </div>
 
 );
 
@@ -1760,7 +2161,7 @@ const ProfessionalTile = ({ professional, selected, onSelect }) => {
 
 };
 
-const EstablishmentCard = ({ est, selected, onSelect }) => {
+const EstablishmentCardLegacy = ({ est, selected, onSelect }) => {
 
   const name = est?.nome || est?.name || est?.fantasia || est?.razao_social || `Estabelecimento #${est?.id || ''}`;
 
@@ -1936,6 +2337,284 @@ const EstablishmentCard = ({ est, selected, onSelect }) => {
 
 /* =================== Página Principal =================== */
 
+const EstablishmentCard = ({ est, selected, onSelect, distanceKm = null }) => {
+
+  const name = displayEstablishmentName(est) || `Estabelecimento #${est?.id || ''}`;
+
+  const address = formatAddress(est);
+
+  const avatarSource = resolveAssetUrl(est?.foto_url || est?.avatar_url || est?.logo_url || '');
+
+  const ratingAverageRaw = Number(est?.rating_average ?? est?.ratingAverage ?? NaN);
+
+  const ratingCount = Number(est?.rating_count ?? est?.ratingCount ?? 0);
+
+  const hasRatings = Number.isFinite(ratingAverageRaw) && ratingCount > 0;
+
+  const ratingLabel = hasRatings ? ratingNumberFormatter.format(ratingAverageRaw) : 'Sem avaliacoes';
+
+  const categoryLabel = getEstablishmentCategoryLabel(est);
+
+  const distanceLabel = formatDistanceLabel(distanceKm);
+
+  const isFavorite = Boolean(est?.is_favorite || est?.isFavorite);
+
+  const coords = (() => {
+
+    const lat = Number(est?.latitude ?? est?.lat ?? est?.coord_lat ?? null);
+
+    const lng = Number(est?.longitude ?? est?.lng ?? est?.coord_lng ?? null);
+
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+
+    if (lat === 0 && lng === 0) return null;
+
+    return { lat, lng };
+
+  })();
+
+  const mapLink = (() => {
+
+    if (coords) return `https://www.google.com/maps/search/?api=1&query=${coords.lat},${coords.lng}`;
+
+    if (address) return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`;
+
+    return '';
+
+  })();
+
+  const badges = [];
+
+  if (isFavorite) {
+
+    badges.push({ label: 'Favorito', tone: 'highlight' });
+
+  }
+
+  if (Number.isFinite(distanceKm) && distanceKm <= 3) {
+
+    badges.push({ label: 'Perto de voce', tone: 'neutral' });
+
+  }
+
+  if (hasRatings && ratingAverageRaw >= 4.7 && ratingCount >= 5) {
+
+    badges.push({ label: 'Bem avaliado', tone: 'success' });
+
+  }
+
+  const handleKeyDown = (event) => {
+
+    if (event.key === 'Enter' || event.key === ' ') {
+
+      event.preventDefault();
+
+      onSelect(est);
+
+    }
+
+  };
+
+  const handleMapClick = (event) => {
+
+    event.preventDefault();
+
+    event.stopPropagation();
+
+    if (!mapLink) return;
+
+    try {
+
+      window.open(mapLink, '_blank', 'noopener,noreferrer');
+
+    } catch {
+
+      window.location.href = mapLink;
+
+    }
+
+  };
+
+  const handlePrimaryAction = (event) => {
+
+    event.preventDefault();
+
+    event.stopPropagation();
+
+    onSelect(est);
+
+  };
+
+  return (
+
+    <article
+
+      className={`establishment-card${selected ? ' establishment-card--selected' : ''}`}
+
+      role="button"
+
+      tabIndex={0}
+
+      aria-pressed={selected}
+
+      onClick={() => onSelect(est)}
+
+      onKeyDown={handleKeyDown}
+
+    >
+
+      <div className="establishment-card__top">
+
+        <div className={`establishment-card__avatar${avatarSource ? '' : ' establishment-card__avatar--fallback'}`}>
+
+          {avatarSource ? (
+
+            <img
+
+              src={avatarSource}
+
+              alt={`Foto do estabelecimento ${name}`}
+
+              onError={(event) => {
+
+                const target = event.currentTarget;
+
+                if (!target.dataset.fallback) {
+
+                  target.dataset.fallback = '1';
+
+                  target.src = fallbackAvatar(name);
+
+                }
+
+              }}
+
+            />
+
+          ) : (
+
+            <span>{professionalInitials(name)}</span>
+
+          )}
+
+        </div>
+
+        <div className="establishment-card__header">
+
+          <div className="establishment-card__heading">
+
+            <div className="establishment-card__eyebrow-row">
+
+              <span className={`establishment-card__category${categoryLabel ? '' : ' establishment-card__category--muted'}`}>
+
+                {categoryLabel || 'Agendamento online'}
+
+              </span>
+
+              {distanceLabel ? (
+
+                <span className="establishment-card__distance-pill">
+
+                  <IconMapPin aria-hidden style={{ width: 14, height: 14 }} />
+
+                  {distanceLabel}
+
+                </span>
+
+              ) : null}
+
+            </div>
+
+            <div className="establishment-card__title-row">
+
+              <h3 className="establishment-card__name">{name}</h3>
+
+              <span
+
+                className={`establishment-card__rating${hasRatings ? '' : ' establishment-card__rating--muted'}`}
+
+                aria-label={
+
+                  hasRatings
+
+                    ? `Avaliacao ${ratingLabel} de 5, com ${ratingCount} ${ratingCount === 1 ? 'avaliacao' : 'avaliacoes'}`
+
+                    : 'Estabelecimento ainda sem avaliacoes'
+
+                }
+
+              >
+
+                <span aria-hidden>★</span>
+
+                {hasRatings ? ratingLabel : 'Sem avaliacoes'}
+
+              </span>
+
+            </div>
+
+          </div>
+
+          {badges.length ? (
+
+            <div className="establishment-card__badges">
+
+              {badges.slice(0, 2).map((badge) => (
+
+                <span key={badge.label} className={`establishment-card__badge establishment-card__badge--${badge.tone}`}>
+
+                  {badge.label}
+
+                </span>
+
+              ))}
+
+            </div>
+
+          ) : null}
+
+        </div>
+
+      </div>
+
+      <p className="establishment-card__address">{address || 'Endereco nao informado'}</p>
+
+      <div className="establishment-card__footer">
+
+        {mapLink ? (
+
+          <button type="button" className="establishment-card__map-link" onClick={handleMapClick}>
+
+            <IconMapPin aria-hidden style={{ width: 14, height: 14 }} />
+
+            Ver no mapa
+
+          </button>
+
+        ) : (
+
+          <span className="establishment-card__map-link establishment-card__map-link--muted">
+
+            Mapa indisponivel
+
+          </span>
+
+        )}
+
+        <button type="button" className="btn btn--primary establishment-card__cta" onClick={handlePrimaryAction}>
+
+          Ver horarios
+
+        </button>
+
+      </div>
+
+    </article>
+
+  );
+
+};
+
 export default function NovoAgendamento() {
 
   const user = getUser();
@@ -2028,11 +2707,13 @@ export default function NovoAgendamento() {
   const estSearchInputRef = useRef(null);
 
   const servicesSectionRef = useRef(null);
+  const serviceDockRef = useRef(null);
 
   const ensureEstParamPendingRef = useRef(false);
   const establishmentsCacheRef = useRef(new Map());
 
   const [distanceMap, setDistanceMap] = useState({});
+  const [serviceDockHeight, setServiceDockHeight] = useState(0);
 
   const [favoriteIds, setFavoriteIds] = useState(() => {
 
@@ -2830,6 +3511,12 @@ export default function NovoAgendamento() {
 
   const [favoritesOnly, setFavoritesOnly] = useState(false);
 
+  const [discoverySort, setDiscoverySort] = useState('relevance');
+
+  const [discoveryCategory, setDiscoveryCategory] = useState('all');
+
+  const [establishmentsReloadTick, setEstablishmentsReloadTick] = useState(0);
+
   const filteredEstablishments = useMemo(() => {
 
     return establishments.filter((est) => {
@@ -2849,14 +3536,6 @@ export default function NovoAgendamento() {
     });
 
   }, [establishments, queryTokens, favoritesOnly, favoriteIds]);
-
-  const kmFormatter = useMemo(
-
-    () => new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 }),
-
-    []
-
-  );
 
   const ratingFormatter = useMemo(
 
@@ -3038,17 +3717,139 @@ export default function NovoAgendamento() {
 
   }, [filteredEstablishments, userLocation]);
 
+  const discoveryCategoryCounts = useMemo(() => (
+
+    DISCOVERY_CATEGORY_FILTERS.reduce((acc, filter) => {
+
+      acc[filter.value] = filteredEstablishments.filter((est) => matchesDiscoveryCategory(est, filter.value)).length;
+
+      return acc;
+
+    }, {})
+
+  ), [filteredEstablishments]);
+
   const establishmentResults = useMemo(() => {
 
-    const mapped = filteredEstablishments.map((est) => ({ est }));
+    const mapped = filteredEstablishments.map((est) => {
 
-    const sortKey = (value) =>
+      const id = String(est?.id || '');
 
-      normalizeText(value?.nome || value?.name || value?.fantasia || value?.razao_social || `est-${value?.id || ''}`);
+      const distanceKm = Number(distanceMap[id]);
 
-    return [...mapped].sort((a, b) => sortKey(a.est).localeCompare(sortKey(b.est)));
+      return {
 
-  }, [filteredEstablishments]);
+        est,
+
+        distanceKm: Number.isFinite(distanceKm) ? distanceKm : null,
+
+        ratingAverage: Number(est?.rating_average ?? est?.ratingAverage ?? NaN),
+
+        ratingCount: Number(est?.rating_count ?? est?.ratingCount ?? 0),
+
+        categoryLabel: getEstablishmentCategoryLabel(est),
+
+      };
+
+    });
+
+    const filtered = discoveryCategory === 'all'
+
+      ? mapped
+
+      : mapped.filter(({ est }) => matchesDiscoveryCategory(est, discoveryCategory));
+
+    const compareByName = (a, b) =>
+
+      normalizeText(displayEstablishmentName(a.est) || `est-${a.est?.id || ''}`).localeCompare(
+
+        normalizeText(displayEstablishmentName(b.est) || `est-${b.est?.id || ''}`)
+
+      );
+
+    const compareByQueryRelevance = (a, b) => {
+
+      if (!normalizedQuery) return compareByName(a, b);
+
+      const aName = normalizeText(displayEstablishmentName(a.est));
+
+      const bName = normalizeText(displayEstablishmentName(b.est));
+
+      const aStarts = aName.startsWith(normalizedQuery) ? 1 : 0;
+
+      const bStarts = bName.startsWith(normalizedQuery) ? 1 : 0;
+
+      if (aStarts !== bStarts) return bStarts - aStarts;
+
+      const aContains = buildEstablishmentSearchText(a.est).includes(normalizedQuery) ? 1 : 0;
+
+      const bContains = buildEstablishmentSearchText(b.est).includes(normalizedQuery) ? 1 : 0;
+
+      if (aContains !== bContains) return bContains - aContains;
+
+      return compareByName(a, b);
+
+    };
+
+    const compareByRating = (a, b) => {
+
+      const aHasRating = Number.isFinite(a.ratingAverage) && a.ratingCount > 0 ? 1 : 0;
+
+      const bHasRating = Number.isFinite(b.ratingAverage) && b.ratingCount > 0 ? 1 : 0;
+
+      if (aHasRating !== bHasRating) return bHasRating - aHasRating;
+
+      if (aHasRating && bHasRating && a.ratingAverage !== b.ratingAverage) {
+
+        return b.ratingAverage - a.ratingAverage;
+
+      }
+
+      if (a.ratingCount !== b.ratingCount) {
+
+        return b.ratingCount - a.ratingCount;
+
+      }
+
+      return compareByName(a, b);
+
+    };
+
+    const compareByDistance = (a, b) => {
+
+      const aDistance = Number.isFinite(a.distanceKm) ? a.distanceKm : Number.POSITIVE_INFINITY;
+
+      const bDistance = Number.isFinite(b.distanceKm) ? b.distanceKm : Number.POSITIVE_INFINITY;
+
+      if (aDistance !== bDistance) return aDistance - bDistance;
+
+      return compareByName(a, b);
+
+    };
+
+    const next = [...filtered];
+
+    if (discoverySort === 'rating') {
+
+      next.sort(compareByRating);
+
+      return next;
+
+    }
+
+    if (discoverySort === 'proximity') {
+
+      next.sort(compareByDistance);
+
+      return next;
+
+    }
+
+    next.sort(compareByQueryRelevance);
+
+    return next;
+
+  }, [filteredEstablishments, distanceMap, discoveryCategory, discoverySort, normalizedQuery]);
 
   // Passo da grade
 
@@ -3209,7 +4010,7 @@ export default function NovoAgendamento() {
     const controller = new AbortController();
 
     const isFirstPage = establishmentsPage === 1;
-    const requestKey = `${debouncedEstQuery}::${establishmentsPage}::${establishmentsPageSize}`;
+    const requestKey = `${debouncedEstQuery}::${establishmentsPage}::${establishmentsPageSize}::${establishmentsReloadTick}`;
     const cachedEntry = establishmentsCacheRef.current.get(requestKey);
 
     if (cachedEntry) {
@@ -3331,7 +4132,7 @@ export default function NovoAgendamento() {
 
     };
 
-  }, [debouncedEstQuery, establishmentsPage, establishmentsPageSize, showToast]);
+  }, [debouncedEstQuery, establishmentsPage, establishmentsPageSize, establishmentsReloadTick, showToast]);
 
   useEffect(() => {
     const estParam = (searchParams.get('estabelecimento') || searchParams.get('estabelecimentoId') || '').trim();
@@ -5206,6 +6007,32 @@ useEffect(() => {
 
   }, []);
 
+  const handleRetryEstablishments = useCallback(() => {
+
+    establishmentsCacheRef.current.clear();
+
+    setEstablishmentsReloadTick((value) => value + 1);
+
+  }, []);
+
+  const handleDiscoverySortChange = useCallback((nextValue) => {
+
+    setDiscoverySort(nextValue);
+
+    if (nextValue === 'proximity' && !userLocation && !locating) {
+
+      handleUseLocation();
+
+    }
+
+  }, [handleUseLocation, locating, userLocation]);
+
+  const handleDiscoveryCategoryToggle = useCallback((nextValue) => {
+
+    setDiscoveryCategory((current) => (current === nextValue ? 'all' : nextValue));
+
+  }, []);
+
   const handleEstablishmentClick = (est) => {
 
     setState((p) => ({
@@ -6113,6 +6940,65 @@ useEffect(() => {
 
   // Ao clicar num dia do Mês, define a semana correspondente e marca o dia
 
+  const flowStepIndicator = confirmModalOpen || guestModal.open ? 4 : step;
+
+  useEffect(() => {
+
+    if (typeof window === 'undefined') return undefined;
+
+    if (step !== 2) {
+
+      setServiceDockHeight(0);
+
+      return undefined;
+
+    }
+
+    const node = serviceDockRef.current;
+
+    if (!node) return undefined;
+
+    const updateDockHeight = () => {
+
+      const nextHeight = Math.ceil(node.getBoundingClientRect().height || 0);
+
+      setServiceDockHeight((current) => (Math.abs(current - nextHeight) > 1 ? nextHeight : current));
+
+    };
+
+    updateDockHeight();
+
+    const resizeObserver =
+      typeof ResizeObserver !== 'undefined' ? new ResizeObserver(updateDockHeight) : null;
+
+    resizeObserver?.observe(node);
+
+    window.addEventListener('resize', updateDockHeight);
+
+    return () => {
+
+      resizeObserver?.disconnect();
+
+      window.removeEventListener('resize', updateDockHeight);
+
+    };
+
+  }, [step, selectedServices.length, serviceDuration, servicePrice]);
+
+  const appointmentPageStyle = useMemo(() => {
+
+    const style = hasPublicPageTheme ? { ...publicPageThemeStyle } : {};
+
+    if (step === 2 && serviceDockHeight > 0) {
+
+      style["--novo-agendamento-dock-space"] = `${serviceDockHeight}px`;
+
+    }
+
+    return Object.keys(style).length ? style : undefined;
+
+  }, [hasPublicPageTheme, publicPageThemeStyle, serviceDockHeight, step]);
+
   const handlePickDay = useCallback((isoDay) => {
 
     setSelectedDate(isoDay);
@@ -6145,7 +7031,107 @@ useEffect(() => {
 
   }, [monthStart, selectedDate, currentWeek]);
 
-  const introSubtitle = 'Encontre um estabelecimento para iniciar um novo agendamento.';
+  const flowHeading =
+
+    step === 2
+
+      ? 'Defina os servicos do atendimento'
+
+      : 'Escolha o melhor horario';
+
+  const flowSubtitle =
+
+    step === 2
+
+      ? 'Selecione os servicos para liberar profissionais e disponibilidade.'
+
+      : 'Revise o estabelecimento, escolha o profissional e confirme o melhor horario disponivel.';
+
+  const hasDiscoveryCategoryData = useMemo(
+
+    () => Object.values(discoveryCategoryCounts).some((count) => count > 0),
+
+    [discoveryCategoryCounts]
+
+  );
+
+  const activeDiscoveryCategoryLabel =
+
+    DISCOVERY_CATEGORY_FILTERS.find((item) => item.value === discoveryCategory)?.label || '';
+
+  const discoveryResultsCountLabel =
+
+    establishmentsLoading && !establishmentResults.length
+
+      ? 'Carregando estabelecimentos'
+
+      : `${establishmentResults.length} ${establishmentResults.length === 1 ? 'estabelecimento encontrado' : 'estabelecimentos encontrados'}`;
+
+  const discoveryResultsDescription = (() => {
+
+    if (normalizedQuery) {
+
+      return 'Escolha um estabelecimento para seguir para servicos e horarios.';
+
+    }
+
+    if (favoritesOnly) {
+
+      return 'Mostrando apenas estabelecimentos marcados como favoritos.';
+
+    }
+
+    if (discoveryCategory !== 'all' && activeDiscoveryCategoryLabel) {
+
+      return `Mostrando resultados preparados para a categoria ${activeDiscoveryCategoryLabel}.`;
+
+    }
+
+    if (discoverySort === 'rating') {
+
+      return 'Resultados priorizados por confianca e qualidade percebida.';
+
+    }
+
+    if (discoverySort === 'proximity' && userLocation) {
+
+      return geocoding
+
+        ? 'Atualizando distancias para destacar opcoes mais proximas.'
+
+        : 'Resultados priorizados pela menor distancia em relacao a voce.';
+
+    }
+
+    return 'Selecione um estabelecimento para iniciar o agendamento em poucos cliques.';
+
+  })();
+
+  const discoveryHeroMeta = geoError ? (
+
+    <span className="appointment-discovery-hero__meta-text is-error">{geoError}</span>
+
+  ) : locating ? (
+
+    <span className="appointment-discovery-hero__meta-text">Obtendo sua localizacao...</span>
+
+  ) : userLocation ? (
+
+    <span className="appointment-discovery-hero__meta-text">
+
+      {geocoding ? 'Calculando distancias dos estabelecimentos...' : 'Localizacao ativa para destacar opcoes mais proximas.'}
+
+    </span>
+
+  ) : (
+
+    <span className="appointment-discovery-hero__meta-text">
+
+      Ative sua localizacao para ordenar por proximidade.
+
+    </span>
+
+  );
 
   const renderEstablishmentResults = () => {
 
@@ -6153,9 +7139,13 @@ useEffect(() => {
 
       return (
 
-        <div className="card">
+        <div className="establishments__grid establishments__grid--premium">
 
-          <div className="empty">Carregando...</div>
+          {Array.from({ length: 6 }).map((_, index) => (
+
+            <EstablishmentCardSkeleton key={`establishment-skeleton-${index}`} />
+
+          ))}
 
         </div>
 
@@ -6167,11 +7157,25 @@ useEffect(() => {
 
       return (
 
-        <div className="card">
+        <DiscoveryEmptyState
 
-          <div className="empty error">{establishmentsError}</div>
+          tone="error"
 
-        </div>
+          title="Nao foi possivel carregar os estabelecimentos"
+
+          description="Atualize a busca ou tente novamente em instantes."
+
+          action={(
+
+            <button type="button" className="btn btn--outline" onClick={handleRetryEstablishments}>
+
+              Tentar novamente
+
+            </button>
+
+          )}
+
+        />
 
       );
 
@@ -6179,13 +7183,71 @@ useEffect(() => {
 
     if (!establishmentResults.length) {
 
+      const emptyTitle = favoritesOnly
+
+        ? 'Voce ainda nao tem favoritos por aqui'
+
+        : discoveryCategory !== 'all' && activeDiscoveryCategoryLabel
+
+          ? `Sem resultados em ${activeDiscoveryCategoryLabel}`
+
+          : normalizedQuery
+
+            ? 'Nenhum estabelecimento encontrado'
+
+            : 'Ainda nao encontramos opcoes para exibir';
+
+      const emptyDescription = favoritesOnly
+
+        ? 'Explore estabelecimentos, favorite os melhores e volte para agendar mais rapido.'
+
+        : normalizedQuery
+
+          ? 'Tente buscar por nome, servico, bairro ou cidade com termos mais amplos.'
+
+          : 'Ajuste os filtros ou tente novamente mais tarde.';
+
       return (
 
-        <div className="card">
+        <DiscoveryEmptyState
 
-          <div className="empty">Nenhum estabelecimento encontrado.</div>
+          title={emptyTitle}
 
-        </div>
+          description={emptyDescription}
+
+          action={normalizedQuery ? (
+
+            <button
+
+              type="button"
+
+              className="btn btn--outline"
+
+              onClick={() => {
+
+                setEstQuery('');
+
+                setDebouncedEstQuery('');
+
+                setDiscoveryCategory('all');
+
+                setDiscoverySort('relevance');
+
+                setFavoritesOnly(false);
+
+                setEstablishmentsPage(1);
+
+              }}
+
+            >
+
+              Limpar busca
+
+            </button>
+
+          ) : null}
+
+        />
 
       );
 
@@ -6195,15 +7257,17 @@ useEffect(() => {
 
       <>
 
-        <div className="establishments__grid">
+        <div className="establishments__grid establishments__grid--premium">
 
-          {establishmentResults.map(({ est }) => (
+          {establishmentResults.map(({ est, distanceKm }) => (
 
             <EstablishmentCard
 
               key={est.id}
 
               est={est}
+
+              distanceKm={distanceKm}
 
               selected={String(est.id) === establishmentId}
 
@@ -6217,13 +7281,13 @@ useEffect(() => {
 
         {establishmentsHasMore && (
 
-          <div style={{ marginTop: 12, display: 'flex', justifyContent: 'center' }}>
+          <div className="novo-agendamento__load-more">
 
             <button
 
               type="button"
 
-              className="btn btn--outline"
+              className="btn btn--outline novo-agendamento__load-more-btn"
 
               onClick={() => setEstablishmentsPage((prev) => prev + 1)}
 
@@ -6231,7 +7295,7 @@ useEffect(() => {
 
             >
 
-              {establishmentsLoadingMore ? <span className="spinner" /> : 'Carregar mais'}
+              {establishmentsLoadingMore ? <span className="spinner" /> : 'Carregar mais estabelecimentos'}
 
             </button>
 
@@ -6248,6 +7312,12 @@ useEffect(() => {
   const renderServiceStep = () => {
 
     const summaryNames = serviceSummary.names || [];
+    const selectedServicesLabel =
+      !selectedServices.length
+        ? 'Nenhum servico selecionado'
+        : selectedServices.length === 1
+        ? '1 servico selecionado'
+        : `${selectedServices.length} servicos selecionados`;
 
     const summaryLabel =
 
@@ -6291,50 +7361,38 @@ useEffect(() => {
 
         </div>
 
-        {selectedServices.length > 0 && (
+        <div className="novo-agendamento__services-bottom-spacer" aria-hidden="true" />
 
-          <div className="novo-agendamento__section" style={{ marginTop: 12 }}>
-
-            <div className="novo-agendamento__inline-summary">
-
-              <div className="inline-summary__item inline-summary__item--service">
-
-                <span className="inline-summary__value">{summaryLabel}</span>
-
-                <div className="inline-summary__meta">
-
-                  <span>{serviceSummary.duration} min</span>
-
-                  <span>{ServiceHelpers.formatPrice(serviceSummary.price)}</span>
-
+        <div
+          className={`novo-agendamento__service-cta${selectedServices.length ? ' is-active' : ''}`}
+          aria-live="polite"
+        >
+          <div className="novo-agendamento__service-cta-copy">
+            <span className="novo-agendamento__service-cta-kicker">{selectedServicesLabel}</span>
+            {selectedServices.length > 0 ? (
+              <div className="novo-agendamento__inline-summary">
+                <div className="inline-summary__item inline-summary__item--service">
+                  <span className="inline-summary__value">{summaryLabel}</span>
+                  <div className="inline-summary__meta">
+                    <span>{serviceSummary.duration} min</span>
+                    <span>{ServiceHelpers.formatPrice(serviceSummary.price)}</span>
+                  </div>
                 </div>
-
               </div>
-
-            </div>
-
+            ) : (
+              <p className="novo-agendamento__service-cta-hint">
+                Selecione um ou mais servicos para liberar a agenda.
+              </p>
+            )}
           </div>
-
-        )}
-
-        <div style={{ marginTop: 12, display: 'flex', justifyContent: 'flex-end' }}>
-
           <button
-
             type="button"
-
-            className="btn btn--primary"
-
+            className="btn btn--primary novo-agendamento__service-cta-button"
             disabled={!selectedServices.length}
-
             onClick={handleContinueFromServices}
-
           >
-
             Continuar
-
           </button>
-
         </div>
 
       </>
@@ -6854,8 +7912,8 @@ useEffect(() => {
   return (
 
     <div
-      className={`novo-agendamento${hasPublicPageTheme ? ' novo-agendamento--brand' : ''}`}
-      style={hasPublicPageTheme ? publicPageThemeStyle : undefined}
+      className={`novo-agendamento${hasPublicPageTheme ? ' novo-agendamento--brand' : ''}${step === 2 ? ' novo-agendamento--service-step' : ''}`}
+      style={appointmentPageStyle}
     >
 
       {toast && (
@@ -6872,107 +7930,235 @@ useEffect(() => {
 
         {step === 1 ? (
 
-          <EstablishmentsHero
+          <>
 
-            heading="Novo agendamento"
+            <AppointmentDiscoveryHero
 
-            subtitle={introSubtitle}
+              heading="Escolha um estabelecimento"
 
-            query={estQuery}
+              subtitle="Busque por nome, servico, bairro ou cidade para iniciar seu agendamento"
 
-            onChange={handleQueryChange}
+              query={estQuery}
 
-            onSubmit={handleSearchSubmit}
+              onChange={handleQueryChange}
 
-            placeholder="Buscar por nome, bairro ou cidade"
+              onSubmit={handleSearchSubmit}
 
-            inputRef={estSearchInputRef}
+              placeholder="Buscar por estabelecimento, servico, bairro ou cidade"
 
-            headingId="novo-agendamento-hero-title"
+              inputRef={estSearchInputRef}
 
-          >
+              headingId="novo-agendamento-hero-title"
 
-            <button
+              stepper={<AppointmentFlowStepper currentStep={step} />}
 
-              type="button"
-
-              className={`pill-btn${favoritesOnly ? ' pill-btn--active' : ''}`}
-
-              onClick={() => setFavoritesOnly((prev) => !prev)}
-
-              style={{
-
-                borderRadius: 9999,
-
-                padding: '6px',
-
-                border: '1px solid var(--border, #e5e7eb)',
-
-                background: favoritesOnly ? '#fef9c3' : 'var(--surface, #fff)',
-
-                color: favoritesOnly ? '#b45309' : 'var(--primary-700, #6c2bd9)',
-
-                fontWeight: 700,
-
-                cursor: 'pointer',
-
-                boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
-
-                width: 32,
-
-                height: 32,
-
-                display: 'inline-flex',
-
-                alignItems: 'center',
-
-                justifyContent: 'center',
-
-                margin: 0,
-
-              }}
-
-              aria-pressed={favoritesOnly}
-
-              aria-label={favoritesOnly ? 'Favoritos' : 'Favoritos'}
-
-              title={favoritesOnly ? 'Favoritos' : 'Favoritos'}
+              meta={discoveryHeroMeta}
 
             >
 
-              <IconStar
+              <button
 
-                filled={favoritesOnly}
+                type="button"
 
-                style={{
+                className="appointment-search-panel__secondary-btn"
 
-                  width: 14,
+                onClick={handleUseLocation}
 
-                  height: 14,
+                disabled={locating}
 
-                  color: favoritesOnly ? '#d97706' : '#6c2bd9',
+              >
 
-                }}
+                {locating ? 'Localizando...' : userLocation ? 'Perto de mim ativo' : 'Perto de mim'}
 
-              />
+              </button>
 
-            </button>
+              <button
 
-          </EstablishmentsHero>
+                type="button"
+
+                className={`appointment-search-panel__icon-btn${favoritesOnly ? ' is-active' : ''}`}
+
+                onClick={() => setFavoritesOnly((prev) => !prev)}
+
+                aria-pressed={favoritesOnly}
+
+                aria-label="Favoritos"
+
+                title="Favoritos"
+
+              >
+
+                <IconStar filled={favoritesOnly} style={{ width: 14, height: 14 }} />
+
+              </button>
+
+            </AppointmentDiscoveryHero>
+
+            <section className="novo-agendamento__discovery-shell">
+
+              <div className="novo-agendamento__quick-filters-panel">
+
+                <div className="novo-agendamento__quick-filters-copy">
+
+                  <span className="novo-agendamento__section-eyebrow">Filtros rapidos</span>
+
+                  <p>Refine a lista para encontrar o melhor local e agendar mais rapido.</p>
+
+                </div>
+
+                <div className="novo-agendamento__quick-filters" role="group" aria-label="Filtros rapidos">
+
+                  <DiscoveryFilterChip
+
+                    active={discoverySort === 'proximity'}
+
+                    onClick={() => handleDiscoverySortChange(discoverySort === 'proximity' ? 'relevance' : 'proximity')}
+
+                  >
+
+                    Mais proximos
+
+                  </DiscoveryFilterChip>
+
+                  <DiscoveryFilterChip
+
+                    active={discoverySort === 'rating'}
+
+                    onClick={() => handleDiscoverySortChange(discoverySort === 'rating' ? 'relevance' : 'rating')}
+
+                  >
+
+                    Melhor avaliados
+
+                  </DiscoveryFilterChip>
+
+                  <DiscoveryFilterChip disabled note="Em breve">
+
+                    Com horarios hoje
+
+                  </DiscoveryFilterChip>
+
+                  {DISCOVERY_CATEGORY_FILTERS.map((filter) => {
+
+                    const isEnabled = hasDiscoveryCategoryData && discoveryCategoryCounts[filter.value] > 0;
+
+                    return (
+
+                      <DiscoveryFilterChip
+
+                        key={filter.value}
+
+                        active={discoveryCategory === filter.value}
+
+                        disabled={!isEnabled}
+
+                        note={!hasDiscoveryCategoryData ? 'Em breve' : ''}
+
+                        onClick={() => handleDiscoveryCategoryToggle(filter.value)}
+
+                      >
+
+                        {filter.label}
+
+                      </DiscoveryFilterChip>
+
+                    );
+
+                  })}
+
+                </div>
+
+              </div>
+
+              <div className="novo-agendamento__results-shell">
+
+                <div className="novo-agendamento__results-toolbar">
+
+                  <div className="novo-agendamento__results-copy">
+
+                    <span className="novo-agendamento__section-eyebrow">
+
+                      {normalizedQuery ? 'Resultados da busca' : 'Pronto para agendar'}
+
+                    </span>
+
+                    <h2 className="novo-agendamento__results-title">{discoveryResultsCountLabel}</h2>
+
+                    <p className="novo-agendamento__results-description">{discoveryResultsDescription}</p>
+
+                  </div>
+
+                  <label className="novo-agendamento__sort-field">
+
+                    <span>Ordenar por</span>
+
+                    <select
+
+                      className="novo-agendamento__sort-select"
+
+                      value={discoverySort}
+
+                      onChange={(event) => handleDiscoverySortChange(event.target.value)}
+
+                      aria-label="Ordenar estabelecimentos"
+
+                    >
+
+                      {DISCOVERY_SORT_OPTIONS.map((option) => (
+
+                        <option key={option.value} value={option.value} disabled={option.disabled}>
+
+                          {option.disabled ? `${option.label} (em breve)` : option.label}
+
+                        </option>
+
+                      ))}
+
+                    </select>
+
+                  </label>
+
+                </div>
+
+                {renderEstablishmentResults()}
+
+              </div>
+
+            </section>
+
+          </>
 
         ) : (
 
           <div className="card establishments__intro novo-agendamento__intro">
 
+            <div className="novo-agendamento__flow-head">
+
+              <div className="novo-agendamento__flow-copy">
+
+                <span className="novo-agendamento__section-eyebrow">Novo agendamento</span>
+
+                <h1 className="novo-agendamento__flow-title">{flowHeading}</h1>
+
+                <p className="novo-agendamento__flow-subtitle">{flowSubtitle}</p>
+
+              </div>
+
+              <div className="novo-agendamento__flow-stepper">
+                <AppointmentFlowStepper currentStep={flowStepIndicator} compact />
+              </div>
+
+            </div>
+
             <div className="novo-agendamento__summary novo-agendamento__summary--establishment">
 
               <div className="novo-agendamento__summary-head">
 
-                <a
+                <Link
 
                   className="novo-agendamento__back"
 
-                  href="https://agendamentosonline.com/novo"
+                  to="/novo-agendamento"
 
                   aria-label="Voltar"
 
@@ -6982,7 +8168,7 @@ useEffect(() => {
 
                   <span className="novo-agendamento__back-icon" aria-hidden="true">&lt;</span>
 
-                </a>
+                </Link>
 
                 <button
 
@@ -7263,7 +8449,7 @@ useEffect(() => {
 
           {step === 2 && (
 
-            <div className="card novo-agendamento__panel">
+            <div className="card novo-agendamento__panel novo-agendamento__panel--services">
 
               {renderServiceStep()}
 
@@ -7282,6 +8468,19 @@ useEffect(() => {
           )}
 
         </div>
+
+        {step === 2 && (
+
+          <AppointmentServiceDock
+            currentStep={step}
+            selectedCount={selectedServices.length}
+            duration={serviceDuration}
+            priceLabel={servicePrice}
+            onContinue={handleContinueFromServices}
+            dockRef={serviceDockRef}
+          />
+
+        )}
 
       </div>
 

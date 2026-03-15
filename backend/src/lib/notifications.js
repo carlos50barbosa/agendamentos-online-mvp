@@ -5,6 +5,7 @@ import { decryptAccessToken } from '../services/waCrypto.js';
 import { extractWamid, sendWhatsAppMessage } from '../services/waGraph.js';
 import { buildConfirmacaoAgendamentoV2Components, isConfirmacaoAgendamentoV2 } from './whatsapp_templates.js';
 import { getWaAccountByEstabelecimentoId, recordWaMessage } from '../services/waTenant.js';
+import { resolveWhatsAppTenantConfig } from '../services/waAccountResolver.js';
 
 /**
  * Configuração (via ENV)
@@ -202,41 +203,12 @@ function countBodyParams(components) {
 }
 
 async function resolveTenantConfig(context = {}) {
-  const estabelecimentoId = Number(context?.estabelecimentoId || 0) || null;
-  if (estabelecimentoId) {
-    try {
-      const account = await getWaAccountByEstabelecimentoId(estabelecimentoId);
-      if (
-        account &&
-        account.status === 'connected' &&
-        account.phone_number_id &&
-        account.access_token_enc
-      ) {
-        const token = decryptAccessToken(account.access_token_enc);
-        if (token) {
-          return {
-            token,
-            phoneId: account.phone_number_id,
-            estabelecimentoId: account.estabelecimento_id,
-            fallback: false,
-          };
-        }
-      }
-    } catch (err) {
-      console.warn('[wa][tenant] resolve failed', err?.message || err);
-    }
-  }
-
-  if (cfg.defaultToken && cfg.defaultPhoneId) {
-    return {
-      token: cfg.defaultToken,
-      phoneId: cfg.defaultPhoneId,
-      estabelecimentoId,
-      fallback: true,
-    };
-  }
-
-  return { token: null, phoneId: null, estabelecimentoId, fallback: false };
+  return resolveWhatsAppTenantConfig(context, {
+    getWaAccountByEstabelecimentoId,
+    decryptAccessToken,
+    defaultToken: cfg.defaultToken,
+    defaultPhoneId: cfg.defaultPhoneId,
+  });
 }
 
 async function recordOutboundMessage({ tenant, phone, payload, resp }) {
