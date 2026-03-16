@@ -11,6 +11,14 @@ import {
   saveEstablishmentImageFromDataUrl,
   removeEstablishmentImageFile,
 } from "../lib/establishment_images.js";
+import {
+  CRM_DEFAULT_DORMANT_DAYS,
+  CRM_INACTIVE_DAYS,
+  classifyRelationship,
+  computeAverageReturnDays,
+  computeBirthdayInfo,
+  normalizeCrmTags,
+} from "../lib/crm.js";
 
 import { auth, isEstabelecimento, isCliente } from "../middleware/auth.js";
 
@@ -70,6 +78,23 @@ LEFT JOIN (
 const LIST_ORDER = 'ORDER BY u.nome';
 const DEFAULT_PAGE_SIZE = 5;
 const MAX_PAGE_SIZE = 100;
+const CRM_PERIOD_DAYS = Object.freeze({
+  '7d': 7,
+  '30d': 30,
+  '90d': 90,
+});
+const CRM_SORT_COLUMNS = Object.freeze({
+  name: 'base.nome',
+  last: 'base.last_appointment_at',
+  appointments: 'base.total_appointments',
+  cancelled: 'base.total_cancelled',
+  revenue: 'base.revenue_centavos',
+  ticket: 'base.ticket_medio_centavos',
+  dormant: 'base.days_since_last_visit',
+});
+const CRM_RELATIONSHIP_FILTERS = new Set(['novo', 'recorrente', 'vip', 'inativo', 'sumido']);
+const CRM_DAY_FILTER_OPTIONS = Object.freeze([15, 30, 45, 60, 90]);
+const CRM_REALIZED_VISIT_SQL = "(a.status='concluido' OR (a.status='confirmado' AND a.fim < NOW())) AND COALESCE(a.no_show,0)=0";
 
 
 const toFiniteOrNull = (value) => {
@@ -1362,6 +1387,432 @@ router.get('/:id/messages', auth, isEstabelecimento, async (req, res) => {
 
 });
 
+function parseCrmStatuses(raw) {
+  if (!raw) return [];
+  const allowed = new Set(['confirmado', 'pendente', 'cancelado', 'concluido']);
+  const parts = Array.isArray(raw) ? raw : String(raw).split(',');
+  const out = [];
+  const seen = new Set();
+  parts.forEach((part) => {
+    const value = String(part || '').trim().toLowerCase();
+    if (!value || !allowed.has(value) || seen.has(value)) return;
+    seen.add(value);
+    out.push(value);
+  });
+  return out;
+}
+
+function parsePositiveId(raw) {
+  const parsed = Number(raw);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+function parsePositiveIdList(raw) {
+  if (!raw) return [];
+  const parts = Array.isArray(raw) ? raw : String(raw).split(',');
+  const out = [];
+  const seen = new Set();
+  parts.forEach((part) => {
+    const value = parsePositiveId(part);
+    if (!value || seen.has(value)) return;
+    seen.add(value);
+    out.push(value);
+  });
+  return out;
+}
+
+function normalizeCrmOrigin(raw) {
+  const value = String(raw || '').trim().toLowerCase();
+  if (!value) return null;
+  return value.slice(0, 32);
+}
+
+function resolveCrmFilters(query = {}) {
+  const periodRaw = String(query.period || '30d').trim().toLowerCase();
+  const normalizedPeriod = Object.prototype.hasOwnProperty.call(CRM_PERIOD_DAYS, periodRaw) ? periodRaw : '30d';
+  const sortRaw = String(query.sort || 'last').trim().toLowerCase();
+  const dirRaw = String(query.dir || 'desc').trim().toLowerCase();
+  const relationshipRaw = String(
+    query.relationship || query.statusRelacionamento || query.relationshipStatus || ''
+  )
+    .trim()
+    .toLowerCase();
+  const dormantDaysRaw = Number(
+    query.dormantDays || query.daysWithoutReturn || query.diasSemRetorno || query.days_since_last_visit || 0
+  );
+
+  return {
+    search: String(query.q || '').trim().toLowerCase(),
+    period: normalizedPeriod,
+    periodDays: CRM_PERIOD_DAYS[normalizedPeriod] || null,
+    statuses: parseCrmStatuses(query.status),
+    riskOnly: String(query.risk || '').trim() === '1',
+    vipOnly: String(query.vip || '').trim() === '1',
+    sortKey: Object.prototype.hasOwnProperty.call(CRM_SORT_COLUMNS, sortRaw) ? sortRaw : 'last',
+    sortDir: dirRaw === 'asc' ? 'asc' : 'desc',
+    relationship: CRM_RELATIONSHIP_FILTERS.has(relationshipRaw) ? relationshipRaw : 'all',
+    serviceIds: parsePositiveIdList(
+      query.serviceIds || query.serviceId || query.servicoId || query.servico_ids || query.servico
+    ),
+    profissionalId: parsePositiveId(
+      query.profissionalId || query.profissional_id || query.profissional || query.professionalId
+    ),
+    origin: normalizeCrmOrigin(query.origem || query.origin || query.canal),
+    dormantDays: CRM_DAY_FILTER_OPTIONS.includes(dormantDaysRaw) ? dormantDaysRaw : null,
+  };
+}
+
+function buildCrmAppointmentFilterSql(estabelecimentoId, filters) {
+  const clauses = ['a.estabelecimento_id = ?'];
+  const params = [estabelecimentoId];
+
+  if (filters.period !== 'all' && filters.periodDays) {
+    clauses.push('a.inicio >= DATE_SUB(NOW(), INTERVAL ? DAY)');
+    params.push(filters.periodDays);
+  }
+
+  if (filters.statuses.length) {
+    const placeholders = filters.statuses.map(() => '?').join(', ');
+    clauses.push(`a.status IN (${placeholders})`);
+    params.push(...filters.statuses);
+  }
+
+  if (filters.profissionalId) {
+    clauses.push('a.profissional_id = ?');
+    params.push(filters.profissionalId);
+  }
+
+  if (filters.origin) {
+    if (filters.origin === 'desconhecido') {
+      clauses.push("(a.origem IS NULL OR a.origem='')");
+    } else {
+      clauses.push('a.origem = ?');
+      params.push(filters.origin);
+    }
+  }
+
+  if (filters.serviceIds.length) {
+    const placeholders = filters.serviceIds.map(() => '?').join(', ');
+    clauses.push(
+      `EXISTS (SELECT 1 FROM agendamento_itens ai_filter WHERE ai_filter.agendamento_id = a.id AND ai_filter.servico_id IN (${placeholders}))`
+    );
+    params.push(...filters.serviceIds);
+  }
+
+  return {
+    whereClause: clauses.join(' AND '),
+    params,
+  };
+}
+
+function buildCrmRelationshipClause(relationship) {
+  switch (relationship) {
+    case 'vip':
+      return { clause: 'base.is_vip = 1', params: [] };
+    case 'inativo':
+      return { clause: 'base.is_vip = 0 AND COALESCE(base.days_since_last_visit, 0) >= ?', params: [CRM_INACTIVE_DAYS] };
+    case 'sumido':
+      return {
+        clause:
+          'base.is_vip = 0 AND COALESCE(base.days_since_last_visit, 0) >= ? AND COALESCE(base.days_since_last_visit, 0) < ?',
+        params: [CRM_DEFAULT_DORMANT_DAYS, CRM_INACTIVE_DAYS],
+      };
+    case 'recorrente':
+      return {
+        clause:
+          'base.is_vip = 0 AND base.lifetime_appointments >= 2 AND COALESCE(base.days_since_last_visit, 0) < ?',
+        params: [CRM_DEFAULT_DORMANT_DAYS],
+      };
+    case 'novo':
+      return {
+        clause:
+          'base.is_vip = 0 AND base.lifetime_appointments < 2 AND (base.days_since_last_visit IS NULL OR base.days_since_last_visit < ?)',
+        params: [CRM_INACTIVE_DAYS],
+      };
+    default:
+      return { clause: '', params: [] };
+  }
+}
+
+function buildCrmOuterFilters(filters) {
+  const clauses = ['1=1'];
+  const params = [];
+
+  if (filters.search) {
+    const like = `%${filters.search}%`;
+    const digits = filters.search.replace(/\D/g, '');
+    const telLike = `%${digits || filters.search.replace(/\s+/g, '')}%`;
+    clauses.push(
+      "(LOWER(base.nome) LIKE ? OR LOWER(base.email) LIKE ? OR REPLACE(REPLACE(REPLACE(base.telefone,'+',''),'-',''),' ','') LIKE ?)"
+    );
+    params.push(like, like, telLike);
+  }
+
+  if (filters.vipOnly) {
+    clauses.push('base.is_vip = 1');
+  }
+
+  if (filters.dormantDays) {
+    clauses.push('COALESCE(base.days_since_last_visit, 0) >= ?');
+    params.push(filters.dormantDays);
+  }
+
+  if (filters.riskOnly) {
+    clauses.push(
+      '(COALESCE(base.days_since_last_visit, 0) >= ? OR (base.total_appointments > 0 AND (base.total_cancelled / base.total_appointments) >= 0.35))'
+    );
+    params.push(CRM_DEFAULT_DORMANT_DAYS);
+  }
+
+  if (filters.relationship !== 'all') {
+    const relationshipFilter = buildCrmRelationshipClause(filters.relationship);
+    if (relationshipFilter.clause) {
+      clauses.push(relationshipFilter.clause);
+      params.push(...relationshipFilter.params);
+    }
+  }
+
+  return {
+    whereClause: clauses.join(' AND '),
+    params,
+  };
+}
+
+function buildCrmBaseQuery(estabelecimentoId, filters) {
+  const appointmentFilters = buildCrmAppointmentFilterSql(estabelecimentoId, filters);
+  const statsSql = `
+    SELECT
+      a.cliente_id,
+      COUNT(*) AS total_appointments,
+      SUM(a.status='cancelado') AS total_cancelled,
+      MAX(a.inicio) AS last_appointment_at,
+      SUBSTRING_INDEX(GROUP_CONCAT(a.status ORDER BY a.inicio DESC, a.id DESC SEPARATOR ','), ',', 1) AS last_status,
+      SUBSTRING_INDEX(GROUP_CONCAT(a.id ORDER BY a.inicio DESC, a.id DESC SEPARATOR ','), ',', 1) AS last_appointment_id,
+      COALESCE(SUM(CASE WHEN a.status <> 'cancelado' THEN a.total_centavos ELSE 0 END), 0) AS revenue_centavos,
+      COUNT(CASE WHEN a.status <> 'cancelado' THEN 1 END) AS billable_appointments
+    FROM agendamentos a
+    WHERE ${appointmentFilters.whereClause}
+    GROUP BY a.cliente_id
+  `;
+
+  const lifetimeSql = `
+    SELECT
+      a.cliente_id,
+      COUNT(DISTINCT CASE WHEN ${CRM_REALIZED_VISIT_SQL} THEN a.id END) AS lifetime_appointments,
+      COALESCE(SUM(CASE WHEN ${CRM_REALIZED_VISIT_SQL} THEN a.total_centavos ELSE 0 END), 0) AS total_spent_centavos,
+      MAX(CASE WHEN ${CRM_REALIZED_VISIT_SQL} THEN a.inicio END) AS last_visit_at
+    FROM agendamentos a
+    WHERE a.estabelecimento_id = ?
+    GROUP BY a.cliente_id
+  `;
+
+  const vipSql = `
+    SELECT cliente_id, 1 AS is_vip
+    FROM cliente_tags
+    WHERE estabelecimento_id = ? AND UPPER(tag) = 'VIP'
+    GROUP BY cliente_id
+  `;
+
+  const baseSql = `
+    SELECT
+      u.id,
+      u.nome,
+      u.email,
+      u.telefone,
+      u.data_nascimento,
+      u.cep,
+      u.endereco,
+      u.numero,
+      u.complemento,
+      u.bairro,
+      u.cidade,
+      u.estado,
+      stats.total_appointments,
+      stats.total_cancelled,
+      stats.last_appointment_at,
+      stats.last_status,
+      stats.last_appointment_id,
+      stats.revenue_centavos,
+      CASE
+        WHEN stats.billable_appointments > 0 THEN ROUND(stats.revenue_centavos / stats.billable_appointments)
+        ELSE 0
+      END AS ticket_medio_centavos,
+      COALESCE(life.lifetime_appointments, 0) AS lifetime_appointments,
+      COALESCE(life.total_spent_centavos, 0) AS total_spent_centavos,
+      life.last_visit_at,
+      CASE
+        WHEN life.last_visit_at IS NULL THEN NULL
+        ELSE DATEDIFF(CURDATE(), DATE(life.last_visit_at))
+      END AS days_since_last_visit,
+      COALESCE(vip.is_vip, 0) AS is_vip
+    FROM (${statsSql}) stats
+    JOIN usuarios u ON u.id = stats.cliente_id
+    LEFT JOIN (${lifetimeSql}) life ON life.cliente_id = stats.cliente_id
+    LEFT JOIN (${vipSql}) vip ON vip.cliente_id = stats.cliente_id
+  `;
+
+  return {
+    baseSql,
+    params: [...appointmentFilters.params, estabelecimentoId, estabelecimentoId],
+  };
+}
+
+async function ensureCrmClient(estabelecimentoId, clientId) {
+  const [rows] = await pool.query(
+    `SELECT
+       u.id,
+       u.nome,
+       u.email,
+       u.telefone,
+       u.data_nascimento,
+       u.cep,
+       u.endereco,
+       u.numero,
+       u.complemento,
+       u.bairro,
+       u.cidade,
+       u.estado
+     FROM usuarios u
+     WHERE u.id = ?
+       AND EXISTS (
+         SELECT 1
+         FROM agendamentos a
+         WHERE a.estabelecimento_id = ?
+           AND a.cliente_id = u.id
+         LIMIT 1
+       )
+     LIMIT 1`,
+    [clientId, estabelecimentoId]
+  );
+  return rows?.[0] || null;
+}
+
+async function loadCrmDerivedMetrics(estabelecimentoId, clientIds = []) {
+  if (!clientIds.length) return new Map();
+
+  const placeholders = clientIds.map(() => '?').join(', ');
+  const baseParams = [estabelecimentoId, ...clientIds];
+
+  const [historyRows, serviceRows, professionalRows] = await Promise.all([
+    pool.query(
+      `SELECT
+         a.id,
+         a.cliente_id,
+         a.inicio,
+         a.fim,
+         a.status,
+         a.total_centavos,
+         p.nome AS profissional,
+         COALESCE(NULLIF(GROUP_CONCAT(DISTINCT s.nome ORDER BY ai.ordem SEPARATOR ' + '), ''), s0.nome) AS service_label
+       FROM agendamentos a
+       LEFT JOIN profissionais p ON p.id = a.profissional_id
+       LEFT JOIN agendamento_itens ai ON ai.agendamento_id = a.id
+       LEFT JOIN servicos s ON s.id = ai.servico_id
+       LEFT JOIN servicos s0 ON s0.id = a.servico_id
+       WHERE a.estabelecimento_id = ?
+         AND a.cliente_id IN (${placeholders})
+         AND ${CRM_REALIZED_VISIT_SQL}
+       GROUP BY a.id, a.cliente_id, a.inicio, a.fim, a.status, a.total_centavos, p.nome, s0.nome
+       ORDER BY a.cliente_id ASC, a.inicio ASC`,
+      baseParams
+    ),
+    pool.query(
+      `SELECT
+         a.cliente_id,
+         s.id AS servico_id,
+         s.nome,
+         COUNT(*) AS total
+       FROM agendamentos a
+       JOIN agendamento_itens ai ON ai.agendamento_id = a.id
+       JOIN servicos s ON s.id = ai.servico_id
+       WHERE a.estabelecimento_id = ?
+         AND a.cliente_id IN (${placeholders})
+         AND ${CRM_REALIZED_VISIT_SQL}
+       GROUP BY a.cliente_id, s.id, s.nome
+       ORDER BY a.cliente_id ASC, total DESC, s.nome ASC`,
+      baseParams
+    ),
+    pool.query(
+      `SELECT
+         a.cliente_id,
+         p.id AS profissional_id,
+         p.nome,
+         COUNT(*) AS total
+       FROM agendamentos a
+       JOIN profissionais p ON p.id = a.profissional_id
+       WHERE a.estabelecimento_id = ?
+         AND a.cliente_id IN (${placeholders})
+         AND ${CRM_REALIZED_VISIT_SQL}
+       GROUP BY a.cliente_id, p.id, p.nome
+       ORDER BY a.cliente_id ASC, total DESC, p.nome ASC`,
+      baseParams
+    ),
+  ]);
+
+  const history = Array.isArray(historyRows?.[0]) ? historyRows[0] : [];
+  const services = Array.isArray(serviceRows?.[0]) ? serviceRows[0] : [];
+  const professionals = Array.isArray(professionalRows?.[0]) ? professionalRows[0] : [];
+
+  const derivedMap = new Map();
+  clientIds.forEach((clientId) => {
+    derivedMap.set(Number(clientId), {
+      visit_dates: [],
+      frequent_services: [],
+      preferred_service: null,
+      preferred_professional: null,
+      last_service: null,
+      avg_return_days: null,
+    });
+  });
+
+  history.forEach((row) => {
+    const clientId = Number(row.cliente_id);
+    const bucket = derivedMap.get(clientId);
+    if (!bucket) return;
+    bucket.visit_dates.push(row.inicio);
+    if (row.service_label) bucket.last_service = row.service_label;
+  });
+
+  const serviceCountMap = new Map();
+  services.forEach((row) => {
+    const clientId = Number(row.cliente_id);
+    const bucket = derivedMap.get(clientId);
+    if (!bucket) return;
+    const item = {
+      servico_id: Number(row.servico_id),
+      nome: row.nome,
+      total: Number(row.total || 0),
+    };
+    if (!serviceCountMap.has(clientId)) serviceCountMap.set(clientId, []);
+    serviceCountMap.get(clientId).push(item);
+  });
+
+  const professionalCountMap = new Map();
+  professionals.forEach((row) => {
+    const clientId = Number(row.cliente_id);
+    const bucket = derivedMap.get(clientId);
+    if (!bucket) return;
+    const item = {
+      profissional_id: Number(row.profissional_id),
+      nome: row.nome,
+      total: Number(row.total || 0),
+    };
+    if (!professionalCountMap.has(clientId)) professionalCountMap.set(clientId, []);
+    professionalCountMap.get(clientId).push(item);
+  });
+
+  derivedMap.forEach((bucket, clientId) => {
+    const clientServices = serviceCountMap.get(clientId) || [];
+    const clientProfessionals = professionalCountMap.get(clientId) || [];
+    bucket.frequent_services = clientServices.slice(0, 5);
+    bucket.preferred_service = clientServices[0] || null;
+    bucket.preferred_professional = clientProfessionals[0] || null;
+    bucket.avg_return_days = computeAverageReturnDays(bucket.visit_dates);
+  });
+
+  return derivedMap;
+}
+
 // Lista clientes do estabelecimento com resumo de agendamentos
 router.get('/:id/clients', auth, isEstabelecimento, async (req, res) => {
   try {
@@ -1373,67 +1824,103 @@ router.get('/:id/clients', auth, isEstabelecimento, async (req, res) => {
     const page = Math.max(1, Number(req.query.page || 1));
     const pageSize = Math.min(100, Math.max(1, Number(req.query.pageSize || req.query.limit || 20)));
     const offset = (page - 1) * pageSize;
-    const searchRaw = String(req.query.q || '').trim().toLowerCase();
-    const searchDigits = searchRaw.replace(/\D/g, '');
-
-    const searchClauses = [];
-    const searchParams = [];
-    if (searchRaw) {
-      const like = `%${searchRaw}%`;
-      const telLike = `%${searchDigits || searchRaw.replace(/\s+/g, '')}%`;
-      searchClauses.push(`(LOWER(u.nome) LIKE ? OR LOWER(u.email) LIKE ? OR REPLACE(REPLACE(REPLACE(u.telefone,'+',''),'-',''),' ','') LIKE ?)`);
-      searchParams.push(like, like, telLike);
-    }
-    const searchWhere = searchClauses.length ? `WHERE ${searchClauses.join(' AND ')}` : '';
-
-    const statsSql = `
-      SELECT
-        a.cliente_id,
-        COUNT(*) AS total_appointments,
-        SUM(a.status='cancelado') AS total_cancelled,
-        MAX(a.inicio) AS last_appointment_at,
-        SUBSTRING_INDEX(GROUP_CONCAT(a.status ORDER BY a.inicio DESC SEPARATOR ','), ',', 1) AS last_status,
-        SUBSTRING_INDEX(GROUP_CONCAT(a.id ORDER BY a.inicio DESC SEPARATOR ','), ',', 1) AS last_appointment_id
-      FROM agendamentos a
-      WHERE a.estabelecimento_id=?
-      GROUP BY a.cliente_id
-    `;
+    const filters = resolveCrmFilters(req.query || {});
+    const { baseSql, params: baseParams } = buildCrmBaseQuery(estabelecimentoId, filters);
+    const outerFilters = buildCrmOuterFilters(filters);
+    const orderColumn = CRM_SORT_COLUMNS[filters.sortKey] || CRM_SORT_COLUMNS.last;
+    const orderDir = filters.sortDir === 'asc' ? 'ASC' : 'DESC';
 
     const countSql = `
       SELECT COUNT(*) AS total
-      FROM (${statsSql}) stats
-      JOIN usuarios u ON u.id = stats.cliente_id
-      ${searchWhere}
+      FROM (${baseSql}) base
+      WHERE ${outerFilters.whereClause}
     `;
-    const [countRows] = await pool.query(countSql, [estabelecimentoId, ...searchParams]);
-    const total = Number(countRows?.[0]?.total || 0);
+
+    const aggregationsSql = `
+      SELECT
+        COUNT(*) AS clients,
+        COALESCE(SUM(base.total_appointments), 0) AS appointments,
+        COALESCE(SUM(base.total_cancelled), 0) AS cancelled,
+        COALESCE(SUM(base.revenue_centavos), 0) AS revenue_centavos,
+        COALESCE(
+          SUM(CASE WHEN base.total_appointments > base.total_cancelled THEN base.total_appointments - base.total_cancelled ELSE 0 END),
+          0
+        ) AS billable_appointments,
+        SUM(CASE WHEN base.is_vip = 1 THEN 1 ELSE 0 END) AS vip_clients,
+        SUM(
+          CASE
+            WHEN COALESCE(base.days_since_last_visit, 0) >= ${CRM_DEFAULT_DORMANT_DAYS}
+              OR (base.total_appointments > 0 AND (base.total_cancelled / base.total_appointments) >= 0.35)
+            THEN 1
+            ELSE 0
+          END
+        ) AS risk_clients,
+        SUM(CASE WHEN base.is_vip = 1 THEN 1 ELSE 0 END) AS relationship_vip,
+        SUM(
+          CASE
+            WHEN base.is_vip = 0 AND COALESCE(base.days_since_last_visit, 0) >= ${CRM_INACTIVE_DAYS}
+            THEN 1
+            ELSE 0
+          END
+        ) AS relationship_inativo,
+        SUM(
+          CASE
+            WHEN base.is_vip = 0
+              AND COALESCE(base.days_since_last_visit, 0) >= ${CRM_DEFAULT_DORMANT_DAYS}
+              AND COALESCE(base.days_since_last_visit, 0) < ${CRM_INACTIVE_DAYS}
+            THEN 1
+            ELSE 0
+          END
+        ) AS relationship_sumido,
+        SUM(
+          CASE
+            WHEN base.is_vip = 0
+              AND base.lifetime_appointments >= 2
+              AND COALESCE(base.days_since_last_visit, 0) < ${CRM_DEFAULT_DORMANT_DAYS}
+            THEN 1
+            ELSE 0
+          END
+        ) AS relationship_recorrente,
+        SUM(
+          CASE
+            WHEN base.is_vip = 0
+              AND base.lifetime_appointments < 2
+              AND (base.days_since_last_visit IS NULL OR base.days_since_last_visit < ${CRM_INACTIVE_DAYS})
+            THEN 1
+            ELSE 0
+          END
+        ) AS relationship_novo
+      FROM (${baseSql}) base
+      WHERE ${outerFilters.whereClause}
+    `;
 
     const dataSql = `
-      SELECT
-        u.id,
-        u.nome,
-        u.email,
-        u.telefone,
-        u.data_nascimento,
-        u.cep,
-        u.endereco,
-        u.numero,
-        u.complemento,
-        u.bairro,
-        u.cidade,
-        u.estado,
-        stats.total_appointments,
-        stats.total_cancelled,
-        stats.last_appointment_at,
-        stats.last_status,
-        stats.last_appointment_id
-      FROM (${statsSql}) stats
-      JOIN usuarios u ON u.id = stats.cliente_id
-      ${searchWhere}
-      ORDER BY stats.last_appointment_at DESC
+      SELECT base.*
+      FROM (${baseSql}) base
+      WHERE ${outerFilters.whereClause}
+      ORDER BY ${orderColumn} ${orderDir}, base.nome ASC
       LIMIT ? OFFSET ?
     `;
-    const [rows] = await pool.query(dataSql, [estabelecimentoId, ...searchParams, pageSize, offset]);
+
+    const originsSql = `
+      SELECT
+        COALESCE(NULLIF(a.origem, ''), 'desconhecido') AS origem,
+        COUNT(*) AS total
+      FROM agendamentos a
+      WHERE a.estabelecimento_id = ?
+      GROUP BY origem
+      ORDER BY total DESC, origem ASC
+      LIMIT 12
+    `;
+
+    const [[countRows], [aggregationRows], [rows], [originRows]] = await Promise.all([
+      pool.query(countSql, [...baseParams, ...outerFilters.params]),
+      pool.query(aggregationsSql, [...baseParams, ...outerFilters.params]),
+      pool.query(dataSql, [...baseParams, ...outerFilters.params, pageSize, offset]),
+      pool.query(originsSql, [estabelecimentoId]),
+    ]);
+
+    const total = Number(countRows?.[0]?.total || 0);
     const lastAppointmentIds = Array.from(
       new Set(
         (rows || [])
@@ -1459,11 +1946,60 @@ router.get('/:id/clients', auth, isEstabelecimento, async (req, res) => {
         (serviceRows || []).map((row) => [Number(row.agendamento_id), row.service_label || ''])
       );
     }
+    const clientIds = (rows || []).map((row) => Number(row.id)).filter((value) => Number.isFinite(value) && value > 0);
+    const derivedMap = await loadCrmDerivedMetrics(estabelecimentoId, clientIds);
+
     const items = (rows || []).map((row) => {
-      const serviceLabel = serviceMap.get(Number(row.last_appointment_id)) || '';
+      const clientId = Number(row.id);
+      const derived = derivedMap.get(clientId) || {};
+      const relationship = classifyRelationship({
+        totalAppointments: Number(row.lifetime_appointments || 0),
+        daysSinceLastVisit: row.days_since_last_visit == null ? null : Number(row.days_since_last_visit),
+        isVip: Boolean(row.is_vip),
+      });
+      const cancelRate = Number(row.total_appointments || 0)
+        ? Math.round((Number(row.total_cancelled || 0) / Math.max(Number(row.total_appointments || 0), 1)) * 100)
+        : 0;
+      const birthday = computeBirthdayInfo(row.data_nascimento);
+      const serviceLabel = serviceMap.get(Number(row.last_appointment_id)) || derived.last_service || '';
       const { last_appointment_id, ...rest } = row;
-      return { ...rest, last_service: serviceLabel };
+      return {
+        ...rest,
+        last_service: serviceLabel,
+        avg_return_days: derived.avg_return_days ?? null,
+        preferred_service: derived.preferred_service || null,
+        preferred_professional: derived.preferred_professional || null,
+        relationship_status: relationship.code,
+        relationship_label: relationship.label,
+        cancel_rate: cancelRate,
+        is_at_risk:
+          (row.days_since_last_visit != null && Number(row.days_since_last_visit) >= CRM_DEFAULT_DORMANT_DAYS) ||
+          cancelRate >= 35,
+        birthday,
+      };
     });
+
+    const aggregationRow = aggregationRows?.[0] || {};
+    const aggregationAppointments = Number(aggregationRow.appointments || 0);
+    const aggregationCancelled = Number(aggregationRow.cancelled || 0);
+    const aggregationRevenue = Number(aggregationRow.revenue_centavos || 0);
+    const aggregationBillable = Number(aggregationRow.billable_appointments || 0);
+    const aggregations = {
+      period: filters.period,
+      clients: Number(aggregationRow.clients || 0),
+      appointments: aggregationAppointments,
+      cancelled: aggregationCancelled,
+      cancel_rate: aggregationAppointments ? Math.round((aggregationCancelled / aggregationAppointments) * 100) : 0,
+      revenue_centavos: aggregationRevenue,
+      ticket_medio_centavos: aggregationBillable ? Math.round(aggregationRevenue / aggregationBillable) : 0,
+      vip_clients: Number(aggregationRow.vip_clients || 0),
+      risk_clients: Number(aggregationRow.risk_clients || 0),
+      relationship_novo: Number(aggregationRow.relationship_novo || 0),
+      relationship_recorrente: Number(aggregationRow.relationship_recorrente || 0),
+      relationship_vip: Number(aggregationRow.relationship_vip || 0),
+      relationship_inativo: Number(aggregationRow.relationship_inativo || 0),
+      relationship_sumido: Number(aggregationRow.relationship_sumido || 0),
+    };
 
     return res.json({
       items,
@@ -1471,10 +2007,281 @@ router.get('/:id/clients', auth, isEstabelecimento, async (req, res) => {
       pageSize,
       total,
       hasNext: offset + (rows?.length || 0) < total,
+      aggregations,
+      meta: {
+        origins: (originRows || []).map((row) => ({
+          origem: row.origem,
+          total: Number(row.total || 0),
+        })),
+        day_filters: CRM_DAY_FILTER_OPTIONS,
+      },
     });
   } catch (err) {
     console.error('GET /establishments/:id/clients', err);
     return res.status(500).json({ error: 'clients_fetch_failed' });
+  }
+});
+
+router.get('/:id/clients/:clientId/details', auth, isEstabelecimento, async (req, res) => {
+  try {
+    const estabelecimentoId = Number(req.params.id);
+    const clientId = Number(req.params.clientId);
+    if (!Number.isFinite(estabelecimentoId) || req.user.id !== estabelecimentoId) {
+      return res.status(403).json({ error: 'forbidden' });
+    }
+    if (!Number.isFinite(clientId) || clientId <= 0) {
+      return res.status(400).json({ error: 'invalid_client' });
+    }
+
+    const cliente = await ensureCrmClient(estabelecimentoId, clientId);
+    if (!cliente) {
+      return res.status(404).json({ error: 'client_not_found' });
+    }
+
+    const periodFilter = resolveCrmFilters({ period: req.query.period || '30d' });
+    const periodAppointmentFilters = buildCrmAppointmentFilterSql(estabelecimentoId, {
+      ...periodFilter,
+      statuses: [],
+      serviceIds: [],
+      profissionalId: null,
+      origin: null,
+    });
+
+    const metricsSql = `
+      SELECT
+        COUNT(*) AS total_appointments,
+        SUM(a.status='cancelado') AS total_cancelled,
+        COALESCE(SUM(CASE WHEN a.status <> 'cancelado' THEN a.total_centavos ELSE 0 END), 0) AS revenue_centavos,
+        COUNT(CASE WHEN a.status <> 'cancelado' THEN 1 END) AS billable_appointments
+      FROM agendamentos a
+      WHERE ${periodAppointmentFilters.whereClause}
+        AND a.cliente_id = ?
+    `;
+
+    const lastAppointmentSql = `
+      SELECT
+        MAX(a.inicio) AS last_appointment_at,
+        SUBSTRING_INDEX(GROUP_CONCAT(a.status ORDER BY a.inicio DESC, a.id DESC SEPARATOR ','), ',', 1) AS last_status
+      FROM agendamentos a
+      WHERE a.estabelecimento_id = ?
+        AND a.cliente_id = ?
+    `;
+
+    const lifetimeSql = `
+      SELECT
+        COUNT(DISTINCT CASE WHEN ${CRM_REALIZED_VISIT_SQL} THEN a.id END) AS lifetime_appointments,
+        COALESCE(SUM(CASE WHEN ${CRM_REALIZED_VISIT_SQL} THEN a.total_centavos ELSE 0 END), 0) AS total_spent_centavos,
+        MAX(CASE WHEN ${CRM_REALIZED_VISIT_SQL} THEN a.inicio END) AS last_visit_at
+      FROM agendamentos a
+      WHERE a.estabelecimento_id = ?
+        AND a.cliente_id = ?
+    `;
+
+    const historySql = `
+      SELECT
+        a.id,
+        a.inicio,
+        a.fim,
+        a.status,
+        a.total_centavos,
+        COALESCE(NULLIF(a.origem, ''), 'desconhecido') AS origem,
+        p.nome AS profissional,
+        COALESCE(NULLIF(GROUP_CONCAT(DISTINCT s.nome ORDER BY ai.ordem SEPARATOR ' + '), ''), s0.nome) AS servico
+      FROM agendamentos a
+      LEFT JOIN profissionais p ON p.id = a.profissional_id
+      LEFT JOIN agendamento_itens ai ON ai.agendamento_id = a.id
+      LEFT JOIN servicos s ON s.id = ai.servico_id
+      LEFT JOIN servicos s0 ON s0.id = a.servico_id
+      WHERE a.estabelecimento_id = ?
+        AND a.cliente_id = ?
+      GROUP BY a.id, a.inicio, a.fim, a.status, a.total_centavos, a.origem, p.nome, s0.nome
+      ORDER BY a.inicio DESC, a.id DESC
+      LIMIT 12
+    `;
+
+    const notesSql = `
+      SELECT notas
+      FROM cliente_notas
+      WHERE estabelecimento_id = ?
+        AND cliente_id = ?
+      LIMIT 1
+    `;
+
+    const tagsSql = `
+      SELECT tag
+      FROM cliente_tags
+      WHERE estabelecimento_id = ?
+        AND cliente_id = ?
+      ORDER BY tag ASC
+    `;
+
+    const [
+      [metricsRows],
+      [lastAppointmentRows],
+      [lifetimeRows],
+      [historyRows],
+      [notesRows],
+      [tagsRows],
+      derivedMap,
+    ] = await Promise.all([
+      pool.query(metricsSql, [...periodAppointmentFilters.params, clientId]),
+      pool.query(lastAppointmentSql, [estabelecimentoId, clientId]),
+      pool.query(lifetimeSql, [estabelecimentoId, clientId]),
+      pool.query(historySql, [estabelecimentoId, clientId]),
+      pool.query(notesSql, [estabelecimentoId, clientId]),
+      pool.query(tagsSql, [estabelecimentoId, clientId]),
+      loadCrmDerivedMetrics(estabelecimentoId, [clientId]),
+    ]);
+
+    const periodMetrics = metricsRows?.[0] || {};
+    const lastAppointment = lastAppointmentRows?.[0] || {};
+    const lifetimeMetrics = lifetimeRows?.[0] || {};
+    const derived = derivedMap.get(clientId) || {};
+    const birthday = computeBirthdayInfo(cliente.data_nascimento);
+    const daysSinceLastVisit =
+      lifetimeMetrics.last_visit_at == null
+        ? null
+        : Math.max(0, Number(new Date() - new Date(lifetimeMetrics.last_visit_at)) / (24 * 60 * 60 * 1000));
+    const relationship = classifyRelationship({
+      totalAppointments: Number(lifetimeMetrics.lifetime_appointments || 0),
+      daysSinceLastVisit:
+        lifetimeMetrics.last_visit_at == null ? null : Math.floor(daysSinceLastVisit),
+      isVip: (tagsRows || []).some((row) => String(row.tag || '').trim().toUpperCase() === 'VIP'),
+    });
+    const totalAppointments = Number(periodMetrics.total_appointments || 0);
+    const totalCancelled = Number(periodMetrics.total_cancelled || 0);
+    const revenueCentavos = Number(periodMetrics.revenue_centavos || 0);
+    const billableAppointments = Number(periodMetrics.billable_appointments || 0);
+    const history = (historyRows || []).map((row) => ({
+      id: Number(row.id),
+      inicio: toISODate(row.inicio),
+      fim: toISODate(row.fim),
+      status: row.status,
+      total_centavos: Number(row.total_centavos || 0),
+      origem: row.origem || 'desconhecido',
+      profissional: row.profissional || null,
+      servico: row.servico || null,
+    }));
+
+    return res.json({
+      cliente: {
+        ...cliente,
+        birthday,
+      },
+      metrics: {
+        total_appointments: totalAppointments,
+        total_cancelled: totalCancelled,
+        cancel_rate: totalAppointments ? Math.round((totalCancelled / totalAppointments) * 100) : 0,
+        revenue_centavos: revenueCentavos,
+        ticket_medio_centavos: billableAppointments ? Math.round(revenueCentavos / billableAppointments) : 0,
+        total_spent_centavos: Number(lifetimeMetrics.total_spent_centavos || 0),
+        lifetime_appointments: Number(lifetimeMetrics.lifetime_appointments || 0),
+        lifetime_ticket_medio_centavos: Number(lifetimeMetrics.lifetime_appointments || 0)
+          ? Math.round(
+              Number(lifetimeMetrics.total_spent_centavos || 0) / Math.max(Number(lifetimeMetrics.lifetime_appointments || 0), 1)
+            )
+          : 0,
+        last_appointment_at: toISODate(lastAppointment.last_appointment_at),
+        last_visit_at: toISODate(lifetimeMetrics.last_visit_at),
+        last_status: lastAppointment.last_status || null,
+        last_service: history[0]?.servico || derived.last_service || null,
+        avg_return_days: derived.avg_return_days ?? null,
+        days_since_last_visit:
+          lifetimeMetrics.last_visit_at == null ? null : Math.floor(daysSinceLastVisit),
+        preferred_service: derived.preferred_service || null,
+        preferred_professional: derived.preferred_professional || null,
+        relationship_status: relationship.code,
+        relationship_label: relationship.label,
+      },
+      frequent_services: derived.frequent_services || [],
+      notes: notesRows?.[0]?.notas ?? null,
+      tags: (tagsRows || []).map((row) => row.tag).filter(Boolean),
+      history,
+    });
+  } catch (err) {
+    console.error('GET /establishments/:id/clients/:clientId/details', err);
+    return res.status(500).json({ error: 'client_details_failed' });
+  }
+});
+
+router.put('/:id/clients/:clientId/notes', auth, isEstabelecimento, async (req, res) => {
+  try {
+    const estabelecimentoId = Number(req.params.id);
+    const clientId = Number(req.params.clientId);
+    if (!Number.isFinite(estabelecimentoId) || req.user.id !== estabelecimentoId) {
+      return res.status(403).json({ error: 'forbidden' });
+    }
+    if (!Number.isFinite(clientId) || clientId <= 0) {
+      return res.status(400).json({ error: 'invalid_client' });
+    }
+
+    const cliente = await ensureCrmClient(estabelecimentoId, clientId);
+    if (!cliente) {
+      return res.status(404).json({ error: 'client_not_found' });
+    }
+
+    const notes = sanitizePlainText(req.body?.notes, { maxLength: 2000 });
+    await pool.query(
+      `INSERT INTO cliente_notas (estabelecimento_id, cliente_id, notas)
+       VALUES (?, ?, ?)
+       ON DUPLICATE KEY UPDATE notas = VALUES(notas), updated_at = CURRENT_TIMESTAMP`,
+      [estabelecimentoId, clientId, notes]
+    );
+
+    return res.json({ ok: true, notes });
+  } catch (err) {
+    console.error('PUT /establishments/:id/clients/:clientId/notes', err);
+    return res.status(500).json({ error: 'client_notes_failed' });
+  }
+});
+
+router.put('/:id/clients/:clientId/tags', auth, isEstabelecimento, async (req, res) => {
+  let conn = null;
+  try {
+    const estabelecimentoId = Number(req.params.id);
+    const clientId = Number(req.params.clientId);
+    if (!Number.isFinite(estabelecimentoId) || req.user.id !== estabelecimentoId) {
+      return res.status(403).json({ error: 'forbidden' });
+    }
+    if (!Number.isFinite(clientId) || clientId <= 0) {
+      return res.status(400).json({ error: 'invalid_client' });
+    }
+
+    const cliente = await ensureCrmClient(estabelecimentoId, clientId);
+    if (!cliente) {
+      return res.status(404).json({ error: 'client_not_found' });
+    }
+
+    const tags = normalizeCrmTags(req.body?.tags);
+
+    conn = await pool.getConnection();
+    await conn.beginTransaction();
+    await conn.query(
+      'DELETE FROM cliente_tags WHERE estabelecimento_id = ? AND cliente_id = ?',
+      [estabelecimentoId, clientId]
+    );
+
+    if (tags.length) {
+      const valuesSql = tags.map(() => '(?, ?, ?)').join(', ');
+      const params = tags.flatMap((tag) => [estabelecimentoId, clientId, tag]);
+      await conn.query(
+        `INSERT INTO cliente_tags (estabelecimento_id, cliente_id, tag) VALUES ${valuesSql}`,
+        params
+      );
+    }
+
+    await conn.commit();
+    return res.json({ ok: true, tags });
+  } catch (err) {
+    if (conn) {
+      try {
+        await conn.rollback();
+      } catch {}
+    }
+    console.error('PUT /establishments/:id/clients/:clientId/tags', err);
+    return res.status(500).json({ error: 'client_tags_failed' });
+  } finally {
+    if (conn) conn.release();
   }
 });
 

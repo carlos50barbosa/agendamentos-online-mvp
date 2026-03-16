@@ -16,6 +16,7 @@ export function useClientesCrm({ establishmentId, params = {}, enabled = true })
   const [total, setTotal] = useState(0);
   const [hasNext, setHasNext] = useState(false);
   const [aggregations, setAggregations] = useState(EMPTY_AGGREGATIONS);
+  const [meta, setMeta] = useState({ origins: [], day_filters: [] });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [reloadKey, setReloadKey] = useState(0);
@@ -44,6 +45,7 @@ export function useClientesCrm({ establishmentId, params = {}, enabled = true })
         setTotal(Number(resp?.total || 0));
         setHasNext(Boolean(resp?.hasNext));
         setAggregations({ ...EMPTY_AGGREGATIONS, ...(resp?.aggregations || {}) });
+        setMeta(resp?.meta || { origins: [], day_filters: [] });
       })
       .catch((err) => {
         if (!active) return;
@@ -52,6 +54,7 @@ export function useClientesCrm({ establishmentId, params = {}, enabled = true })
         setTotal(0);
         setHasNext(false);
         setAggregations(EMPTY_AGGREGATIONS);
+        setMeta({ origins: [], day_filters: [] });
       })
       .finally(() => {
         if (active) setLoading(false);
@@ -69,6 +72,7 @@ export function useClientesCrm({ establishmentId, params = {}, enabled = true })
     total,
     hasNext,
     aggregations,
+    meta,
     loading,
     error,
     reload,

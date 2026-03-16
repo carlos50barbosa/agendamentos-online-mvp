@@ -131,6 +131,9 @@ CREATE TABLE IF NOT EXISTS agendamentos (
   INDEX idx_ag_estab_inicio (estabelecimento_id, inicio),
   INDEX idx_ag_estab_inicio_status (estabelecimento_id, inicio, status),
   INDEX idx_ag_estab_criado (estabelecimento_id, criado_em),
+  INDEX idx_ag_estab_cliente_inicio (estabelecimento_id, cliente_id, inicio),
+  INDEX idx_ag_estab_prof_inicio (estabelecimento_id, profissional_id, inicio),
+  INDEX idx_ag_estab_origem_inicio (estabelecimento_id, origem, inicio),
   INDEX idx_ag_cliente_inicio (cliente_id, inicio),
   INDEX idx_ag_estab_status_inicio (estabelecimento_id, status, inicio),
   INDEX idx_ag_cliente_status_inicio (cliente_id, status, inicio),
@@ -256,6 +259,7 @@ CREATE TABLE IF NOT EXISTS agendamento_itens (
   criado_em TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   INDEX idx_agendamento_itens_agendamento (agendamento_id),
   INDEX idx_agendamento_itens_servico (servico_id),
+  INDEX idx_agendamento_itens_servico_agendamento (servico_id, agendamento_id),
   UNIQUE KEY uniq_agendamento_item_ordem (agendamento_id, ordem),
   CONSTRAINT fk_ag_itens_agendamento FOREIGN KEY (agendamento_id) REFERENCES agendamentos(id) ON DELETE CASCADE,
   CONSTRAINT fk_ag_itens_servico FOREIGN KEY (servico_id) REFERENCES servicos(id) ON DELETE CASCADE
@@ -322,6 +326,32 @@ CREATE TABLE IF NOT EXISTS cliente_favoritos (
   INDEX idx_favoritos_estab (estabelecimento_id),
   CONSTRAINT fk_favoritos_cliente FOREIGN KEY (cliente_id) REFERENCES usuarios(id) ON DELETE CASCADE,
   CONSTRAINT fk_favoritos_estabelecimento FOREIGN KEY (estabelecimento_id) REFERENCES usuarios(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+CREATE TABLE IF NOT EXISTS cliente_notas (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  estabelecimento_id INT NOT NULL,
+  cliente_id INT NOT NULL,
+  notas TEXT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uniq_cliente_notas (estabelecimento_id, cliente_id),
+  INDEX idx_cliente_notas_estab_cliente (estabelecimento_id, cliente_id),
+  CONSTRAINT fk_cliente_notas_estab FOREIGN KEY (estabelecimento_id) REFERENCES usuarios(id) ON DELETE CASCADE,
+  CONSTRAINT fk_cliente_notas_cliente FOREIGN KEY (cliente_id) REFERENCES usuarios(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+CREATE TABLE IF NOT EXISTS cliente_tags (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  estabelecimento_id INT NOT NULL,
+  cliente_id INT NOT NULL,
+  tag VARCHAR(40) NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uniq_cliente_tag (estabelecimento_id, cliente_id, tag),
+  INDEX idx_cliente_tags_estab_cliente (estabelecimento_id, cliente_id),
+  INDEX idx_cliente_tags_estab_tag (estabelecimento_id, tag),
+  CONSTRAINT fk_cliente_tags_estab FOREIGN KEY (estabelecimento_id) REFERENCES usuarios(id) ON DELETE CASCADE,
+  CONSTRAINT fk_cliente_tags_cliente FOREIGN KEY (cliente_id) REFERENCES usuarios(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 CREATE TABLE IF NOT EXISTS estabelecimento_imagens (

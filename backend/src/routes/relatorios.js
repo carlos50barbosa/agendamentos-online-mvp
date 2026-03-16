@@ -348,6 +348,7 @@ async function handleOverview(req, res) {
     const rates = {
       // Taxa de confirmacao: confirmados / total agendado
       taxa_confirmacao: totals.agendados_total ? totals.confirmados_total / totals.agendados_total : 0,
+      taxa_cancelamento: totals.agendados_total ? totals.cancelados_total / totals.agendados_total : 0,
       // Taxa de comparecimento: concluidos / (concluidos + no_show) quando houver no_show
       taxa_comparecimento: attendanceBase ? totals.concluidos_total / attendanceBase : 0,
     };
@@ -461,6 +462,33 @@ async function handleOverview(req, res) {
     const [leadRows] = await pool.query(leadSql, baseFilters.params);
     const leadTime = normalizeLeadTimeRows(leadRows || []);
 
+    const customerMixSql = `
+      SELECT
+        SUM(CASE WHEN first_seen.first_seen_at BETWEEN ? AND ? THEN 1 ELSE 0 END) AS new_clients,
+        SUM(CASE WHEN first_seen.first_seen_at < ? THEN 1 ELSE 0 END) AS recurring_clients
+      FROM (
+        SELECT DISTINCT a.cliente_id
+        FROM agendamentos a
+        WHERE ${baseFilters.whereClause}
+      ) current_clients
+      LEFT JOIN (
+        SELECT cliente_id, MIN(inicio) AS first_seen_at
+        FROM agendamentos
+        WHERE estabelecimento_id = ?
+        GROUP BY cliente_id
+      ) first_seen ON first_seen.cliente_id = current_clients.cliente_id`;
+    const [[customerMixRow]] = await pool.query(customerMixSql, [
+      startUtc,
+      endUtc,
+      startUtc,
+      estId,
+      ...baseFilters.params,
+    ]);
+    const customerMix = {
+      new_clients: Number(customerMixRow?.new_clients || 0),
+      recurring_clients: Number(customerMixRow?.recurring_clients || 0),
+    };
+
     let origins = [];
     if (allowAdvanced) {
       const originsFilters = buildBaseFilters({
@@ -513,6 +541,7 @@ async function handleOverview(req, res) {
       top_services: topServices,
       top_days_of_week: topDaysOfWeek,
       lead_time: leadTime,
+      customer_mix: customerMix,
       origins,
     });
   } catch (err) {

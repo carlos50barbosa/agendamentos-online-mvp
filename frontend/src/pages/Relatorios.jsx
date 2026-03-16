@@ -353,6 +353,7 @@ export default function Relatorios() {
   const totals = data?.totals;
   const rates = data?.rates;
   const revenue = data?.revenue;
+  const customerMix = data?.customer_mix;
 
   const metrics = useMemo(() => {
     if (!totals || !revenue) return [];
@@ -419,6 +420,11 @@ export default function Relatorios() {
         value: formatPercent(rates.taxa_comparecimento || 0),
       },
       {
+        key: 'taxaCancelamento',
+        label: 'Taxa de cancelamento',
+        value: formatPercent(rates.taxa_cancelamento || 0),
+      },
+      {
         key: 'receitaPerdida',
         label: 'Receita perdida',
         value: centsToCurrency(revenue.perdida || 0),
@@ -428,8 +434,18 @@ export default function Relatorios() {
         label: 'No-show',
         value: Number(totals.no_show_total || 0),
       },
+      {
+        key: 'clientesNovos',
+        label: 'Clientes novos',
+        value: Number(customerMix?.new_clients || 0),
+      },
+      {
+        key: 'clientesRecorrentes',
+        label: 'Clientes recorrentes',
+        value: Number(customerMix?.recurring_clients || 0),
+      },
     ];
-  }, [totals, rates, revenue]);
+  }, [totals, rates, revenue, customerMix]);
 
   const dailyData = data?.series_daily || [];
 

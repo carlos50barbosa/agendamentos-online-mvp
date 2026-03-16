@@ -8,6 +8,7 @@ import { logConversation } from '../bot/logging/conversationLogger.js';
 import { resolveReplyMode } from '../bot/engine/replyPolicy.js';
 import { detectIntent, normalizeIntentText } from '../bot/engine/intents.js';
 import { normalizeInboundMessage, parseWebhookPayload } from '../whatsapp/inbound/normalize.js';
+import { handleInstitutionalInboundAutoReply } from '../whatsapp/inbound/institutionalAutoReply.js';
 import { handleReminderConfirmation } from '../whatsapp/inbound/reminderConfirmation.js';
 import { TEMPLATE_KEYS } from '../bot/templates/templateRegistry.js';
 import { dispatchBotReply } from '../bot/runtime/replyDispatcher.js';
@@ -727,7 +728,21 @@ async function processWebhookPayload(payload) {
     if (!phoneNumberId) continue;
 
     const account = await getWaAccountByPhoneNumberId(phoneNumberId);
-    if (!isConnectedAccount(account)) continue;
+    if (!isConnectedAccount(account)) {
+      const messages = Array.isArray(block.messages) ? block.messages : [];
+      for (const message of messages) {
+        try {
+          await handleInstitutionalInboundAutoReply({
+            phoneNumberId,
+            value: block.value,
+            message,
+          });
+        } catch (err) {
+          console.warn('[wa/webhook][institutional-auto-reply]', err?.message || err);
+        }
+      }
+      continue;
+    }
 
     const statuses = Array.isArray(block.statuses) ? block.statuses : [];
     for (const status of statuses) {

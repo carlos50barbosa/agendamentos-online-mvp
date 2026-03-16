@@ -48,6 +48,33 @@ const STATUS_OPTIONS = [
 
 const TAG_OPTIONS = ['VIP', 'Promoção', 'Atrasos'];
 
+const RELATIONSHIP_OPTIONS = [
+  { value: 'all', label: 'Relacionamento' },
+  { value: 'novo', label: 'Novo' },
+  { value: 'recorrente', label: 'Recorrente' },
+  { value: 'vip', label: 'VIP' },
+  { value: 'sumido', label: 'Sumido' },
+  { value: 'inativo', label: 'Inativo' },
+];
+
+const DORMANT_OPTIONS = [
+  { value: 'all', label: 'Sem retorno' },
+  { value: '15', label: '15+ dias' },
+  { value: '30', label: '30+ dias' },
+  { value: '45', label: '45+ dias' },
+  { value: '60', label: '60+ dias' },
+  { value: '90', label: '90+ dias' },
+];
+
+const QUICK_SEGMENTS = [
+  { value: 'all', label: 'Todos' },
+  { value: 'novo', label: 'Novos' },
+  { value: 'recorrente', label: 'Recorrentes' },
+  { value: 'vip', label: 'VIP' },
+  { value: 'sumido', label: 'Sumidos' },
+  { value: 'inativo', label: 'Inativos' },
+];
+
 const DEFAULT_SORT = { key: 'last', dir: 'desc' };
 
 function formatDateTime(value) {
@@ -122,6 +149,15 @@ const statusBadge = (status) => {
   return { text: status || '-', className: 'badge' };
 };
 
+const relationshipBadge = (status) => {
+  const norm = String(status || '').toLowerCase();
+  if (norm === 'vip') return { text: 'VIP', className: 'crm-pill crm-pill--vip' };
+  if (norm === 'inativo') return { text: 'Inativo', className: 'crm-pill crm-pill--muted' };
+  if (norm === 'sumido') return { text: 'Sumido', className: 'crm-pill crm-pill--warn' };
+  if (norm === 'recorrente') return { text: 'Recorrente', className: 'crm-pill crm-pill--soft' };
+  return { text: 'Novo', className: 'crm-pill' };
+};
+
 const KpiCard = ({ label, value, helper, loading, placeholder }) => (
   <div className="crm-kpi">
     <div className="crm-kpi__label">{label}</div>
@@ -152,9 +188,16 @@ export default function Clientes() {
   const [statusFilters, setStatusFilters] = useState([]);
   const [riskOnly, setRiskOnly] = useState(false);
   const [vipOnly, setVipOnly] = useState(false);
+  const [relationshipFilter, setRelationshipFilter] = useState('all');
+  const [serviceFilter, setServiceFilter] = useState('all');
+  const [professionalFilter, setProfessionalFilter] = useState('all');
+  const [originFilter, setOriginFilter] = useState('all');
+  const [dormantDaysFilter, setDormantDaysFilter] = useState('all');
   const [sort, setSort] = useState(DEFAULT_SORT);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
+  const [serviceOptions, setServiceOptions] = useState([]);
+  const [professionalOptions, setProfessionalOptions] = useState([]);
 
   const listParams = useMemo(() => ({
     page,
@@ -164,15 +207,35 @@ export default function Clientes() {
     status: statusFilters.length ? statusFilters.join(',') : undefined,
     risk: riskOnly ? 1 : undefined,
     vip: vipOnly ? 1 : undefined,
+    relationship: relationshipFilter !== 'all' ? relationshipFilter : undefined,
+    serviceId: serviceFilter !== 'all' ? serviceFilter : undefined,
+    profissionalId: professionalFilter !== 'all' ? professionalFilter : undefined,
+    origem: originFilter !== 'all' ? originFilter : undefined,
+    dormantDays: dormantDaysFilter !== 'all' ? dormantDaysFilter : undefined,
     sort: sort.key,
     dir: sort.dir,
-  }), [page, pageSize, debouncedSearch, period, statusFilters, riskOnly, vipOnly, sort]);
+  }), [
+    page,
+    pageSize,
+    debouncedSearch,
+    period,
+    statusFilters,
+    riskOnly,
+    vipOnly,
+    relationshipFilter,
+    serviceFilter,
+    professionalFilter,
+    originFilter,
+    dormantDaysFilter,
+    sort,
+  ]);
 
   const {
     items,
     total,
     hasNext,
     aggregations,
+    meta,
     loading,
     error,
     reload,
@@ -193,8 +256,47 @@ export default function Clientes() {
   const [detailReloadKey, setDetailReloadKey] = useState(0);
 
   useEffect(() => {
+    if (!isEstab) return undefined;
+    let active = true;
+
+    Api.servicosList()
+      .then((rows) => {
+        if (active) setServiceOptions(Array.isArray(rows) ? rows : []);
+      })
+      .catch(() => {
+        if (active) setServiceOptions([]);
+      });
+
+    Api.profissionaisList()
+      .then((rows) => {
+        if (active) setProfessionalOptions(Array.isArray(rows) ? rows : []);
+      })
+      .catch(() => {
+        if (active) setProfessionalOptions([]);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [isEstab]);
+
+  useEffect(() => {
     setPage(1);
-  }, [debouncedSearch, period, statusFilters.join('|'), riskOnly, vipOnly, sort.key, sort.dir, pageSize]);
+  }, [
+    debouncedSearch,
+    period,
+    statusFilters.join('|'),
+    riskOnly,
+    vipOnly,
+    relationshipFilter,
+    serviceFilter,
+    professionalFilter,
+    originFilter,
+    dormantDaysFilter,
+    sort.key,
+    sort.dir,
+    pageSize,
+  ]);
 
   useEffect(() => {
     if (!drawerOpen || !selectedClient || !user?.id) return undefined;
@@ -253,8 +355,14 @@ export default function Clientes() {
       cancelRate,
       revenue: aggregations?.revenue_centavos,
       ticket: aggregations?.ticket_medio_centavos,
+      vipClients: Number(aggregations?.vip_clients || 0),
+      riskClients: Number(aggregations?.risk_clients || 0),
     };
   }, [aggregations, items]);
+
+  const originOptions = useMemo(() => (
+    Array.isArray(meta?.origins) ? meta.origins : []
+  ), [meta]);
 
   const handleToggleStatus = useCallback((value) => {
     setStatusFilters((prev) => {
@@ -270,6 +378,17 @@ export default function Clientes() {
       }
       return { key, dir: key === 'name' ? 'asc' : 'desc' };
     });
+  }, []);
+
+  const handleQuickSegment = useCallback((value) => {
+    setRelationshipFilter(value);
+    if (value === 'vip') {
+      setVipOnly(true);
+      setRiskOnly(false);
+      return;
+    }
+    setVipOnly(false);
+    setRiskOnly(value === 'sumido' || value === 'inativo');
   }, []);
 
   const handleOpenDetails = useCallback((item) => {
@@ -290,6 +409,11 @@ export default function Clientes() {
     setStatusFilters([]);
     setRiskOnly(false);
     setVipOnly(false);
+    setRelationshipFilter('all');
+    setServiceFilter('all');
+    setProfessionalFilter('all');
+    setOriginFilter('all');
+    setDormantDaysFilter('all');
     setSort(DEFAULT_SORT);
     setPeriod('30d');
     setPageSize(10);
@@ -317,9 +441,27 @@ export default function Clientes() {
     try {
       const resp = await Api.updateEstablishmentClientTags(user.id, selectedClient.id, tagsDraft);
       const nextTags = Array.isArray(resp?.tags) ? resp.tags : tagsDraft;
-      setDetailData((prev) => (prev ? { ...prev, tags: nextTags } : prev));
+      setDetailData((prev) => {
+        if (!prev) return prev;
+        const vipEnabled = nextTags.includes('VIP');
+        return {
+          ...prev,
+          tags: nextTags,
+          metrics: prev.metrics
+            ? {
+                ...prev.metrics,
+                relationship_status: vipEnabled ? 'vip' : prev.metrics.relationship_status,
+                relationship_label: vipEnabled ? 'VIP' : prev.metrics.relationship_label,
+              }
+            : prev.metrics,
+        };
+      });
       const vipEnabled = nextTags.includes('VIP');
-      updateItem(selectedClient.id, { is_vip: vipEnabled ? 1 : 0 });
+      updateItem(selectedClient.id, {
+        is_vip: vipEnabled ? 1 : 0,
+        relationship_status: vipEnabled ? 'vip' : selectedClient?.relationship_status,
+        relationship_label: vipEnabled ? 'VIP' : selectedClient?.relationship_label,
+      });
     } catch (err) {
       setDetailActionError(err?.message || 'Não foi possível salvar as tags.');
     } finally {
@@ -344,7 +486,14 @@ export default function Clientes() {
 
   const drawerPhone = detailData?.cliente?.telefone || selectedClient?.telefone || '';
   const drawerName = detailData?.cliente?.nome || selectedClient?.nome || 'Cliente';
-  const lastVisit = detailData?.metrics?.last_appointment_at || detailData?.history?.[0]?.inicio || null;
+  const lastVisit =
+    detailData?.metrics?.last_visit_at ||
+    detailData?.metrics?.last_appointment_at ||
+    detailData?.history?.[0]?.inicio ||
+    null;
+  const detailRelationship = relationshipBadge(
+    detailData?.metrics?.relationship_status || selectedClient?.relationship_status
+  );
 
   const whatsappTemplates = useMemo(() => {
     const dateLabel = lastVisit ? formatDateOnly(lastVisit) : 'data';
@@ -479,6 +628,67 @@ export default function Clientes() {
             </button>
           </div>
         </div>
+        <div className="crm-controls__row">
+          <div className="crm-filters">
+            {QUICK_SEGMENTS.map((segment) => (
+              <button
+                key={segment.value}
+                type="button"
+                className={`chip ${relationshipFilter === segment.value ? 'chip--active' : ''}`}
+                onClick={() => handleQuickSegment(segment.value)}
+              >
+                {segment.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="crm-filter-grid">
+          <label className="label crm-filter-field">
+            <span>Relacionamento</span>
+            <select className="input" value={relationshipFilter} onChange={(event) => setRelationshipFilter(event.target.value)}>
+              {RELATIONSHIP_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </select>
+          </label>
+          <label className="label crm-filter-field">
+            <span>Servico</span>
+            <select className="input" value={serviceFilter} onChange={(event) => setServiceFilter(event.target.value)}>
+              <option value="all">Todos</option>
+              {serviceOptions.map((service) => (
+                <option key={service.id} value={service.id}>{service.nome}</option>
+              ))}
+            </select>
+          </label>
+          <label className="label crm-filter-field">
+            <span>Profissional</span>
+            <select className="input" value={professionalFilter} onChange={(event) => setProfessionalFilter(event.target.value)}>
+              <option value="all">Todos</option>
+              {professionalOptions.map((professional) => (
+                <option key={professional.id} value={professional.id}>{professional.nome}</option>
+              ))}
+            </select>
+          </label>
+          <label className="label crm-filter-field">
+            <span>Origem</span>
+            <select className="input" value={originFilter} onChange={(event) => setOriginFilter(event.target.value)}>
+              <option value="all">Todas</option>
+              {originOptions.map((origin) => (
+                <option key={origin.origem} value={origin.origem}>
+                  {origin.origem === 'desconhecido' ? 'Desconhecido' : origin.origem}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="label crm-filter-field">
+            <span>Sem retorno</span>
+            <select className="input" value={dormantDaysFilter} onChange={(event) => setDormantDaysFilter(event.target.value)}>
+              {DORMANT_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </select>
+          </label>
+        </div>
       </div>
 
       <div className="card">
@@ -550,6 +760,7 @@ export default function Clientes() {
                 <tbody>
                   {items.map((item) => {
                     const badge = statusBadge(item?.last_status);
+                    const relationship = relationshipBadge(item?.relationship_status);
                     const totalAppointments = Number(item?.total_appointments || 0);
                     const totalCancelled = Number(item?.total_cancelled || 0);
                     const cancelPct = totalAppointments
@@ -571,8 +782,10 @@ export default function Clientes() {
                           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                             <strong>{item?.nome || 'Cliente'}</strong>
                             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                              <span className={relationship.className}>{item?.relationship_label || relationship.text}</span>
                               {item?.is_vip ? <span className="chip">VIP</span> : null}
                               {item?.is_at_risk ? <span className="chip chip--active">Em risco</span> : null}
+                              {item?.birthday?.is_birthday_month ? <span className="crm-pill crm-pill--soft">Aniversario</span> : null}
                             </div>
                           </div>
                         </td>
@@ -594,7 +807,18 @@ export default function Clientes() {
                         <td>{formatDateTime(item?.last_appointment_at)}</td>
                         <td>{totalAppointments}</td>
                         <td>{`${totalCancelled} (${cancelPct}%)`}</td>
-                        <td>{item?.last_service || '-'}</td>
+                        <td>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                            <span>{item?.last_service || '-'}</span>
+                            <span className="muted">
+                              {item?.preferred_professional?.nome
+                                ? `Fav. ${item.preferred_professional.nome}`
+                                : item?.avg_return_days
+                                  ? `Retorno medio ${item.avg_return_days}d`
+                                  : '—'}
+                            </span>
+                          </div>
+                        </td>
                         <td>
                           <span className={badge.className}>{badge.text}</span>
                         </td>
@@ -622,6 +846,7 @@ export default function Clientes() {
             <div className="crm-cards">
               {items.map((item) => {
                 const badge = statusBadge(item?.last_status);
+                const relationship = relationshipBadge(item?.relationship_status);
                 const totalAppointments = Number(item?.total_appointments || 0);
                 const totalCancelled = Number(item?.total_cancelled || 0);
                 const cancelPct = totalAppointments
@@ -631,13 +856,21 @@ export default function Clientes() {
                 return (
                   <div key={`card-${item.id}`} className="crm-card" onClick={() => handleOpenDetails(item)}>
                     <div className="crm-card__header">
-                      <div className="crm-card__name">{item?.nome || 'Cliente'}</div>
+                      <div>
+                        <div className="crm-card__name">{item?.nome || 'Cliente'}</div>
+                        <div className="crm-actions" style={{ marginTop: 6 }}>
+                          <span className={relationship.className}>{item?.relationship_label || relationship.text}</span>
+                          {item?.is_at_risk ? <span className="chip chip--active">Em risco</span> : null}
+                        </div>
+                      </div>
                       <span className={badge.className}>{badge.text}</span>
                     </div>
                     <div className="crm-card__meta">
                       <span>Último: {formatDateTime(item?.last_appointment_at)}</span>
                       <span>Total: {totalAppointments}</span>
                       <span>Cancel.: {`${totalCancelled} (${cancelPct}%)`}</span>
+                      <span>Gasto: {formatCurrency(item?.total_spent_centavos)}</span>
+                      {item?.days_since_last_visit != null ? <span>{item.days_since_last_visit}d sem retorno</span> : null}
                     </div>
                     <div className="crm-card__actions">
                       <button
@@ -718,6 +951,9 @@ export default function Clientes() {
             <div className="crm-drawer__header">
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                 <strong>{drawerName}</strong>
+                <span className={detailRelationship.className}>
+                  {detailData?.metrics?.relationship_label || detailRelationship.text}
+                </span>
                 {detailData?.metrics?.last_status && (
                   <span className={statusBadge(detailData.metrics.last_status).className}>
                     {statusBadge(detailData.metrics.last_status).text}
@@ -728,6 +964,11 @@ export default function Clientes() {
                 <span className="muted">Última visita: {lastVisit ? formatDateOnly(lastVisit) : '-'}</span>
                 {detailData?.metrics?.cancel_rate != null && (
                   <span className="muted">Cancelamento: {detailData.metrics.cancel_rate}%</span>
+                )}
+                {detailData?.cliente?.birthday?.days_until_birthday != null && (
+                  <span className="muted">
+                    Aniversario em {detailData.cliente.birthday.days_until_birthday} dia(s)
+                  </span>
                 )}
               </div>
               <div className="crm-actions" style={{ marginTop: 6 }}>
@@ -755,6 +996,7 @@ export default function Clientes() {
                 <div>{detailData?.cliente?.email || '-'}</div>
                 <div>{formatPhone(detailData?.cliente?.telefone) || '-'}</div>
                 <div>{formatAddress(detailData?.cliente)}</div>
+                <div>Nascimento: {formatDateOnly(detailData?.cliente?.data_nascimento)}</div>
               </div>
               <div className="crm-drawer__section">
                 <strong>{`Métricas (${periodLabel})`}</strong>
@@ -762,6 +1004,20 @@ export default function Clientes() {
                 <div>Cancelamentos: {detailData?.metrics?.total_cancelled ?? 0}</div>
                 <div>Receita: {detailData?.metrics?.revenue_centavos != null ? formatCurrency(detailData.metrics.revenue_centavos) : '—'}</div>
                 <div>Ticket médio: {detailData?.metrics?.ticket_medio_centavos != null ? formatCurrency(detailData.metrics.ticket_medio_centavos) : '—'}</div>
+              </div>
+            </div>
+
+            <div className="crm-drawer__section crm-drawer__section--metrics" style={{ marginTop: 16 }}>
+              <strong>Relacionamento</strong>
+              <div className="crm-drawer__meta">
+                <span className={detailRelationship.className}>
+                  {detailData?.metrics?.relationship_label || detailRelationship.text}
+                </span>
+                <span>Total gasto: {detailData?.metrics?.total_spent_centavos != null ? formatCurrency(detailData.metrics.total_spent_centavos) : '-'}</span>
+                <span>Retorno medio: {detailData?.metrics?.avg_return_days ? `${detailData.metrics.avg_return_days} dias` : '-'}</span>
+                <span>Dias sem retorno: {detailData?.metrics?.days_since_last_visit ?? '-'}</span>
+                <span>Servico preferido: {detailData?.metrics?.preferred_service?.nome || '-'}</span>
+                <span>Profissional favorito: {detailData?.metrics?.preferred_professional?.nome || '-'}</span>
               </div>
             </div>
 

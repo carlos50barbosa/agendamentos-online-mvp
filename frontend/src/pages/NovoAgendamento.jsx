@@ -2,7 +2,7 @@
 
 import React, { Suspense, useEffect, useMemo, useState, useCallback, useRef } from "react";
 
-import { Link, useSearchParams, useLocation, useParams } from "react-router-dom";
+import { Link, useSearchParams, useLocation, useNavigate, useParams } from "react-router-dom";
 
 import { Api, resolveAssetUrl } from "../utils/api";
 
@@ -10,7 +10,7 @@ import { getUser } from "../utils/auth";
 
 import AppointmentDiscoveryHero from "../components/AppointmentDiscoveryHero.jsx";
 
-import { IconMapPin, IconList, IconStar, IconGear } from "../components/Icons.jsx";
+import { IconMapPin, IconList, IconStar, IconGear, IconSearch } from "../components/Icons.jsx";
 
 
 
@@ -1787,68 +1787,90 @@ const AppointmentFlowStepper = ({ currentStep = 1, compact = false, className = 
 
 );
 
-const AppointmentServiceDock = ({
+const AppointmentProgressLine = ({ currentStep = 1, className = '' }) => (
+  <ol
+    className={`appointment-progress-line${className ? ` ${className}` : ''}`}
+    aria-label="Progresso do agendamento"
+  >
+    {APPOINTMENT_FLOW_STEPS.map((label, index) => {
+      const stepNumber = index + 1;
+      const shortLabel = APPOINTMENT_FLOW_STEP_SHORT_LABELS[label] || label;
+      const status =
+        stepNumber < currentStep
+          ? 'done'
+          : stepNumber === currentStep
+            ? 'current'
+            : 'upcoming';
+
+      return (
+        <li key={label} className={`appointment-progress-line__item is-${status}`}>
+          {index > 0 ? <span className="appointment-progress-line__connector" aria-hidden="true" /> : null}
+          <span className="appointment-progress-line__dot" aria-hidden="true" />
+          <span className="appointment-progress-line__label appointment-progress-line__label--full">{label}</span>
+          <span className="appointment-progress-line__label appointment-progress-line__label--short">{shortLabel}</span>
+        </li>
+      );
+    })}
+  </ol>
+);
+
+const AppointmentFlowFooter = ({
   currentStep = 2,
-  selectedCount = 0,
-  duration = 0,
-  priceLabel = '',
+  summary = '',
+  helper = '',
+  onBack = null,
   onContinue = () => {},
+  continueDisabled = false,
+  continueLabel = 'Continuar',
   dockRef = null,
 }) => {
-  const countLabel =
-    selectedCount === 1
-      ? '1 servico selecionado'
-      : selectedCount > 1
-        ? `${selectedCount} servicos selecionados`
-        : 'Nenhum servico selecionado';
-
-  const hasSelection = selectedCount > 0;
-  const metaItems = [];
-
-  if (hasSelection && duration > 0) metaItems.push(`${duration} min`);
-  if (hasSelection && priceLabel) metaItems.push(priceLabel);
+  const hasSummary = Boolean(summary);
 
   return (
     <div
       ref={dockRef}
-      className={`novo-agendamento__service-dock${hasSelection ? ' is-active' : ''}`}
+      className={`novo-agendamento__flow-footer${continueDisabled ? '' : ' is-active'}`}
     >
-      <div className="novo-agendamento__service-dock-inner">
+      <div className="novo-agendamento__flow-footer-inner">
         <div
-          className="novo-agendamento__service-dock-bar"
+          className="novo-agendamento__flow-footer-shell"
           role="region"
-          aria-label="Resumo da selecao de servicos"
+          aria-label="Navegacao do agendamento"
         >
-          <div className="novo-agendamento__service-dock-copy" aria-live="polite">
-            <span className="novo-agendamento__service-dock-kicker">Resumo da selecao</span>
-            <strong className="novo-agendamento__service-dock-title">{countLabel}</strong>
-            {hasSelection ? (
-              <div className="novo-agendamento__service-dock-meta">
-                {metaItems.map((item) => (
-                  <span key={item}>{item}</span>
-                ))}
-              </div>
-            ) : (
-              <p className="novo-agendamento__service-dock-hint">
-                Escolha um ou mais servicos para continuar para horarios.
-              </p>
-            )}
+          <div className="novo-agendamento__flow-footer-head">
+            <div className="novo-agendamento__flow-footer-copy" aria-live="polite">
+              <strong className="novo-agendamento__flow-footer-summary">
+                {hasSummary ? summary : helper}
+              </strong>
+              {hasSummary && helper ? (
+                <span className="novo-agendamento__flow-footer-hint">{helper}</span>
+              ) : null}
+            </div>
+            <div className="novo-agendamento__flow-footer-stepper">
+              <AppointmentProgressLine currentStep={currentStep} />
+            </div>
           </div>
-          <button
-            type="button"
-            className="btn btn--primary novo-agendamento__service-dock-button"
-            disabled={!hasSelection}
-            onClick={onContinue}
-          >
-            Continuar
-          </button>
-        </div>
-        <div className="novo-agendamento__service-dock-stepper">
-          <AppointmentFlowStepper
-            currentStep={currentStep}
-            compact
-            className="appointment-stepper--dock"
-          />
+          <div className="novo-agendamento__flow-footer-actions">
+            {onBack ? (
+              <button
+                type="button"
+                className="btn btn--outline novo-agendamento__flow-footer-back"
+                onClick={onBack}
+              >
+                Voltar
+              </button>
+            ) : (
+              <span className="novo-agendamento__flow-footer-back-spacer" aria-hidden="true" />
+            )}
+            <button
+              type="button"
+              className="btn btn--primary novo-agendamento__flow-footer-continue"
+              disabled={continueDisabled}
+              onClick={onContinue}
+            >
+              {continueLabel}
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -2693,6 +2715,7 @@ export default function NovoAgendamento() {
   const [debouncedEstQuery, setDebouncedEstQuery] = useState("");
 
   const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
 
   const [userLocation, setUserLocation] = useState(null);
 
@@ -2707,13 +2730,13 @@ export default function NovoAgendamento() {
   const estSearchInputRef = useRef(null);
 
   const servicesSectionRef = useRef(null);
-  const serviceDockRef = useRef(null);
+  const flowFooterRef = useRef(null);
 
   const ensureEstParamPendingRef = useRef(false);
   const establishmentsCacheRef = useRef(new Map());
 
   const [distanceMap, setDistanceMap] = useState({});
-  const [serviceDockHeight, setServiceDockHeight] = useState(0);
+  const [flowFooterHeight, setFlowFooterHeight] = useState(0);
 
   const [favoriteIds, setFavoriteIds] = useState(() => {
 
@@ -2911,6 +2934,8 @@ export default function NovoAgendamento() {
 
   const [professionalMenuOpen, setProfessionalMenuOpen] = useState(false);
 
+  const [serviceSearch, setServiceSearch] = useState("");
+
   const professionalMenuRef = useRef(null);
 
   useEffect(() => {
@@ -2982,6 +3007,28 @@ export default function NovoAgendamento() {
   }, [services, normalizedServiceIds]);
 
   const selectedService = selectedServices[0] || null;
+
+  const normalizedServiceSearch = useMemo(() => normalizeText(serviceSearch.trim()), [serviceSearch]);
+
+  const filteredServices = useMemo(() => {
+
+    if (!normalizedServiceSearch) return services;
+
+    const tokens = normalizedServiceSearch.split(/\s+/).filter(Boolean);
+
+    if (!tokens.length) return services;
+
+    return services.filter((service) => {
+
+      const haystack = normalizeText(
+        `${ServiceHelpers.title(service)} ${ServiceHelpers.description(service)}`
+      );
+
+      return tokens.every((token) => haystack.includes(token));
+
+    });
+
+  }, [normalizedServiceSearch, services]);
 
   const serviceSummary = useMemo(() => summarizeServices(selectedServices), [selectedServices]);
 
@@ -6175,6 +6222,22 @@ useEffect(() => {
 
   };
 
+  const handleBackFromServices = useCallback(() => {
+
+    navigate('/novo-agendamento');
+
+  }, [navigate]);
+
+  const handleBackFromSchedule = useCallback(() => {
+
+    setState((p) => ({
+      ...p,
+      serviceSelectionConfirmed: false,
+      selectedSlot: null,
+    }));
+
+  }, []);
+
   const handleWeekChange = (newWeek) => {
 
     let norm = newWeek;
@@ -6949,23 +7012,29 @@ useEffect(() => {
 
     : 3;
 
-  // Ao clicar num dia do Mês, define a semana correspondente e marca o dia
+  const isFlowFooterStep = step === 2 || step === 3;
 
-  const flowStepIndicator = confirmModalOpen || guestModal.open || depositConfirmationOpen ? 4 : step;
+  useEffect(() => {
+
+    setServiceSearch("");
+
+  }, [establishmentId]);
+
+  // Ao clicar num dia do Mês, define a semana correspondente e marca o dia
 
   useEffect(() => {
 
     if (typeof window === 'undefined') return undefined;
 
-    if (step !== 2) {
+    if (!isFlowFooterStep) {
 
-      setServiceDockHeight(0);
+      setFlowFooterHeight(0);
 
       return undefined;
 
     }
 
-    const node = serviceDockRef.current;
+    const node = flowFooterRef.current;
 
     if (!node) return undefined;
 
@@ -6973,7 +7042,7 @@ useEffect(() => {
 
       const nextHeight = Math.ceil(node.getBoundingClientRect().height || 0);
 
-      setServiceDockHeight((current) => (Math.abs(current - nextHeight) > 1 ? nextHeight : current));
+      setFlowFooterHeight((current) => (Math.abs(current - nextHeight) > 1 ? nextHeight : current));
 
     };
 
@@ -6994,21 +7063,21 @@ useEffect(() => {
 
     };
 
-  }, [step, selectedServices.length, serviceDuration, servicePrice]);
+  }, [endTimeLabel, isFlowFooterStep, selectedServices.length, selectedSlot, serviceDuration, servicePrice]);
 
   const appointmentPageStyle = useMemo(() => {
 
     const style = hasPublicPageTheme ? { ...publicPageThemeStyle } : {};
 
-    if (step === 2 && serviceDockHeight > 0) {
+    if (isFlowFooterStep && flowFooterHeight > 0) {
 
-      style["--novo-agendamento-dock-space"] = `${serviceDockHeight}px`;
+      style["--novo-agendamento-dock-space"] = `${flowFooterHeight}px`;
 
     }
 
     return Object.keys(style).length ? style : undefined;
 
-  }, [hasPublicPageTheme, publicPageThemeStyle, serviceDockHeight, step]);
+  }, [flowFooterHeight, hasPublicPageTheme, isFlowFooterStep, publicPageThemeStyle]);
 
   const handlePickDay = useCallback((isoDay) => {
 
@@ -7057,6 +7126,44 @@ useEffect(() => {
       ? 'Selecione os servicos para liberar profissionais e disponibilidade.'
 
       : 'Revise o estabelecimento, escolha o profissional e confirme o melhor horario disponivel.';
+
+  const serviceFooterSummary = useMemo(() => {
+
+    if (!selectedServices.length) return '';
+
+    const parts = [
+      selectedServices.length === 1 ? '1 servico' : `${selectedServices.length} servicos`,
+    ];
+
+    if (serviceDuration > 0) parts.push(`${serviceDuration} min`);
+    if (servicePrice) parts.push(servicePrice);
+
+    return parts.join(' | ');
+
+  }, [selectedServices.length, serviceDuration, servicePrice]);
+
+  const scheduleFooterSummary = useMemo(() => {
+
+    if (!selectedSlot) return '';
+
+    const dateLabel = new Date(selectedSlot.datetime).toLocaleDateString('pt-BR', {
+      day: '2-digit',
+      month: 'short',
+    }).replace('.', '');
+    const timeLabel = DateHelpers.formatTime(selectedSlot.datetime);
+
+    return `${dateLabel} | ${timeLabel}${endTimeLabel ? ` - ${endTimeLabel}` : ''}`;
+
+  }, [endTimeLabel, selectedSlot]);
+
+  const scheduleContinueDisabled =
+    !selectedSlot || !selectedServices.length || modal.isSaving ||
+    (requiresProfessional && !serviceProfessionals.length) ||
+    (requiresProfessional && !state.professionalId) ||
+    (selectedSlotNow && !isAvailableLabel(selectedSlotNow.label)) ||
+    DateHelpers.isPastSlot(selectedSlot.datetime) ||
+    !inBusinessHours(selectedSlot.datetime, workingSchedule, serviceDuration) ||
+    bookingBlocked;
 
   const hasDiscoveryCategoryData = useMemo(
 
@@ -7322,21 +7429,10 @@ useEffect(() => {
 
   const renderServiceStep = () => {
 
-    const summaryNames = serviceSummary.names || [];
-    const selectedServicesLabel =
-      !selectedServices.length
-        ? 'Nenhum servico selecionado'
-        : selectedServices.length === 1
-        ? '1 servico selecionado'
-        : `${selectedServices.length} servicos selecionados`;
 
-    const summaryLabel =
 
-      summaryNames.length <= 3
 
-         ? summaryNames.join(' + ')
 
-        : `${summaryNames[0] || 'Serviço'} + mais ${summaryNames.length - 1}`;
 
     return (
 
@@ -7344,15 +7440,51 @@ useEffect(() => {
 
         <p className="muted" style={{ margin: '0 0 8px' }}>Selecione um ou mais serviços.</p>
 
+        <div className="novo-agendamento__service-search">
+
+          <label className="novo-agendamento__service-search-field">
+
+            <span className="novo-agendamento__service-search-icon" aria-hidden="true">
+
+              <IconSearch />
+
+            </span>
+
+            <input
+
+              type="search"
+
+              className="novo-agendamento__service-search-input"
+
+              placeholder="Buscar serviço..."
+
+              aria-label="Buscar serviço"
+
+              value={serviceSearch}
+
+              onChange={(event) => setServiceSearch(event.target.value)}
+
+              autoComplete="off"
+
+            />
+
+          </label>
+
+        </div>
+
         <div ref={servicesSectionRef} className="novo-agendamento__services">
 
           {services.length === 0 ? (
 
             <div className="empty small">Sem serviços cadastrados.</div>
 
+          ) : filteredServices.length === 0 ? (
+
+            <div className="empty small">Nenhum serviço encontrado.</div>
+
           ) : (
 
-            services.map((s) => (
+            filteredServices.map((s) => (
 
               <ServiceCard
 
@@ -7372,39 +7504,7 @@ useEffect(() => {
 
         </div>
 
-        <div className="novo-agendamento__services-bottom-spacer" aria-hidden="true" />
-
-        <div
-          className={`novo-agendamento__service-cta${selectedServices.length ? ' is-active' : ''}`}
-          aria-live="polite"
-        >
-          <div className="novo-agendamento__service-cta-copy">
-            <span className="novo-agendamento__service-cta-kicker">{selectedServicesLabel}</span>
-            {selectedServices.length > 0 ? (
-              <div className="novo-agendamento__inline-summary">
-                <div className="inline-summary__item inline-summary__item--service">
-                  <span className="inline-summary__value">{summaryLabel}</span>
-                  <div className="inline-summary__meta">
-                    <span>{serviceSummary.duration} min</span>
-                    <span>{ServiceHelpers.formatPrice(serviceSummary.price)}</span>
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <p className="novo-agendamento__service-cta-hint">
-                Selecione um ou mais servicos para liberar a agenda.
-              </p>
-            )}
-          </div>
-          <button
-            type="button"
-            className="btn btn--primary novo-agendamento__service-cta-button"
-            disabled={!selectedServices.length}
-            onClick={handleContinueFromServices}
-          >
-            Continuar
-          </button>
-        </div>
+        <div className="novo-agendamento__flow-bottom-spacer" aria-hidden="true" />
 
       </>
 
@@ -7644,6 +7744,7 @@ useEffect(() => {
 
               </div>
 
+
             </details>
 
           </div>
@@ -7778,12 +7879,6 @@ useEffect(() => {
 
               </div>
 
-              <div className="row" style={{ gap: 6, marginLeft: 'auto' }}>
-
-                <button className="btn btn--outline btn--sm" onClick={() => setState((p) => ({ ...p, selectedSlot: null }))}>Limpar</button>
-
-              </div>
-
             </div>
 
           )}
@@ -7870,45 +7965,7 @@ useEffect(() => {
 
           )}
 
-          <div className="action-bar action-bar--booking">
-
-            <button className="btn" onClick={() => setState((p) => ({ ...p, selectedSlot: null }))} disabled={!selectedSlot}>
-
-              Limpar seleção
-
-            </button>
-
-            <button
-
-              className="btn btn--primary"
-
-              onClick={handleConfirmClick}
-
-              disabled={
-
-                !selectedSlot || !selectedServices.length || modal.isSaving ||
-
-                (requiresProfessional && !serviceProfessionals.length) ||
-
-                (requiresProfessional && !state.professionalId) ||
-
-                (selectedSlotNow && !isAvailableLabel(selectedSlotNow.label)) ||
-
-                DateHelpers.isPastSlot(selectedSlot.datetime) ||
-
-                !inBusinessHours(selectedSlot.datetime, workingSchedule, serviceDuration) ||
-
-                bookingBlocked
-
-              }
-
-            >
-
-              {modal.isSaving ? <span className="spinner" /> : 'Confirmar agendamento'}
-
-            </button>
-
-          </div>
+          <div className="novo-agendamento__flow-bottom-spacer" aria-hidden="true" />
 
         </div>
 
@@ -7923,7 +7980,7 @@ useEffect(() => {
   return (
 
     <div
-      className={`novo-agendamento${hasPublicPageTheme ? ' novo-agendamento--brand' : ''}${step === 2 ? ' novo-agendamento--service-step' : ''}`}
+      className={`novo-agendamento${hasPublicPageTheme ? ' novo-agendamento--brand' : ''}${isFlowFooterStep ? ' novo-agendamento--flow-docked' : ''}${step === 2 ? ' novo-agendamento--service-step' : ''}`}
       style={appointmentPageStyle}
     >
 
@@ -8153,10 +8210,6 @@ useEffect(() => {
 
                 <p className="novo-agendamento__flow-subtitle">{flowSubtitle}</p>
 
-              </div>
-
-              <div className="novo-agendamento__flow-stepper">
-                <AppointmentFlowStepper currentStep={flowStepIndicator} compact />
               </div>
 
             </div>
@@ -8480,15 +8533,20 @@ useEffect(() => {
 
         </div>
 
-        {step === 2 && (
+        {isFlowFooterStep && (
 
-          <AppointmentServiceDock
+          <AppointmentFlowFooter
             currentStep={step}
-            selectedCount={selectedServices.length}
-            duration={serviceDuration}
-            priceLabel={servicePrice}
-            onContinue={handleContinueFromServices}
-            dockRef={serviceDockRef}
+            summary={step === 2 ? serviceFooterSummary : scheduleFooterSummary}
+            helper={
+              step === 2
+                ? 'Escolha os servicos e avance para horarios.'
+                : 'Selecione um horario para revisar antes da confirmacao.'
+            }
+            onBack={step === 2 ? handleBackFromServices : handleBackFromSchedule}
+            onContinue={step === 2 ? handleContinueFromServices : handleConfirmClick}
+            continueDisabled={step === 2 ? !selectedServices.length : scheduleContinueDisabled}
+            dockRef={flowFooterRef}
           />
 
         )}
