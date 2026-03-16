@@ -9,7 +9,10 @@ function toDigits(value) {
 
 function normalizeConfirmText(text) {
   return String(text || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
     .replace(/[!.,;:?]+$/g, '')
+    .replace(/\s+/g, ' ')
     .trim()
     .toLowerCase();
 }
@@ -148,4 +151,4 @@ async function handleReminderConfirmation({ fromPhone, text, buttonPayload, cont
   return { handled: false };
 }
 
-export { handleReminderConfirmation };
+export { handleReminderConfirmation, normalizeConfirmText, shouldTryConfirmation };
