@@ -120,6 +120,13 @@ async function syncPaymentIfApproved(providerPaymentId, paymentData, eventPayloa
   }
 }
 
+function notifyIfAppointmentJustConfirmed(syncResult, source) {
+  if (!syncResult?.ok || !syncResult?.updatedAppointment || !syncResult?.appointmentId) return;
+  notifyAppointmentConfirmed(syncResult.appointmentId).catch((err) => {
+    console.warn(`[payments][${source}] notify failed`, err?.message || err);
+  });
+}
+
 router.get('/:id/status', async (req, res) => {
   try {
     const id = Number(req.params.id);
@@ -154,7 +161,8 @@ router.get('/:id/status', async (req, res) => {
           );
           const mpStatus = normalizePaymentStatus(mpPayment?.status || '');
           if (isApprovedStatus(mpStatus)) {
-            await syncPaymentIfApproved(payment.provider_payment_id, mpPayment);
+            const syncResult = await syncPaymentIfApproved(payment.provider_payment_id, mpPayment);
+            notifyIfAppointmentJustConfirmed(syncResult, 'status');
             payment = await fetchPaymentById(id);
           } else if (isExpiredStatus(mpStatus)) {
             const conn = await pool.getConnection();
@@ -260,11 +268,7 @@ router.post('/webhook', async (req, res) => {
     }
 
     const syncResult = await syncPaymentIfApproved(String(payment.id), payment, event);
-    if (syncResult.ok && syncResult.updatedAppointment) {
-      notifyAppointmentConfirmed(syncResult.appointmentId).catch((err) => {
-        console.warn('[payments:webhook] notify failed', err?.message || err);
-      });
-    }
+    notifyIfAppointmentJustConfirmed(syncResult, 'webhook');
 
     return res.status(200).json({ ok: true, processed: !!syncResult.ok });
   } catch (err) {

@@ -166,6 +166,29 @@ export default function NovoAgendamentoModals(props) {
   const depositPixCode = depositModal?.pix?.copia_e_cola || depositModal?.pix?.qr_code || "";
   const depositQrBase64 = depositModal?.pix?.qr_code_base64 || "";
   const depositTicketUrl = depositModal?.pix?.ticket_url || "";
+  const depositAppointmentInfo = depositModal?.appointmentInfo || null;
+  const depositAppointmentLink =
+    depositModal?.appointmentId && user?.tipo === "cliente"
+      ? `/cliente?agendamento=${depositModal.appointmentId}`
+      : "";
+  const depositProfessionalName = depositAppointmentInfo?.profissionalNome || "";
+  const depositDuration = Number(depositAppointmentInfo?.duracaoMin || 0);
+  const depositPriceLabel = depositAppointmentInfo?.precoLabel || "";
+  const depositAppointmentDateLabel = depositAppointmentInfo?.inicioISO
+    ? DateHelpers.formatDateFull(depositAppointmentInfo.inicioISO)
+    : "";
+  const depositAppointmentTimeLabel = depositAppointmentInfo?.inicioISO
+    ? DateHelpers.formatTime(depositAppointmentInfo.inicioISO)
+    : "";
+  const depositAppointmentEndLabel =
+    depositAppointmentInfo?.inicioISO && depositDuration > 0
+      ? DateHelpers.formatTime(DateHelpers.addMinutes(new Date(depositAppointmentInfo.inicioISO), depositDuration))
+      : "";
+  const depositModalTitle = depositPaid
+    ? "Agendamento confirmado"
+    : depositExpired
+      ? "Pagamento expirado"
+      : "Pagamento do sinal via PIX";
   const depositAmountLabel =
     typeof depositModal?.amountCents === "number"
        ? (depositModal.amountCents / 100).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })
@@ -1800,7 +1823,7 @@ export default function NovoAgendamentoModals(props) {
             )}
             {depositModal?.open && (
               <Modal
-                title="Pagamento do sinal via PIX"
+                title={depositModalTitle}
                 onClose={handleCloseDepositModal}
                 closeButton
                 actions={[
@@ -1814,13 +1837,122 @@ export default function NovoAgendamentoModals(props) {
                     >
                       Abrir no app do banco
                     </a>
+                  ) : depositPaid && depositAppointmentLink ? (
+                    <Link
+                      key="appointment"
+                      className="btn btn--primary"
+                      to={depositAppointmentLink}
+                      onClick={handleCloseDepositModal}
+                    >
+                      Ver agendamento
+                    </Link>
                   ) : null,
                   <button key="close" type="button" className="btn btn--outline" onClick={handleCloseDepositModal}>
-                    Fechar
+                    {depositPaid ? "Concluir" : "Fechar"}
                   </button>,
                 ].filter(Boolean)}
               >
-                <div className="pix-checkout">
+                {depositPaid ? (
+                  <div className="pix-checkout">
+                    <div className="confirmation-icon" aria-hidden="true">
+                      <svg viewBox="0 0 48 48" width="56" height="56" focusable="false">
+                        <circle cx="24" cy="24" r="22" fill="#22c55e" />
+                        <path
+                          d="M16 24l6 6 12-12"
+                          fill="none"
+                          stroke="#ffffff"
+                          strokeWidth="4"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
+                    </div>
+                    <p style={{ marginTop: 0 }}>
+                      O sinal foi confirmado e o agendamento ja esta reservado.
+                    </p>
+                    <div className="confirmation-card">
+                      <dl className="confirmation-details">
+                        <div className="confirmation-details__item">
+                          <dt>Estabelecimento</dt>
+                          <dd>{depositAppointmentInfo?.estabelecimentoNome || selectedEstablishmentName || "-"}</dd>
+                        </div>
+                        <div className="confirmation-details__item">
+                          <dt>Servico</dt>
+                          <dd>{depositAppointmentInfo?.servicoNome || serviceLabel || "-"}</dd>
+                        </div>
+                        {depositProfessionalName ? (
+                          <div className="confirmation-details__item">
+                            <dt>Profissional</dt>
+                            <dd>{depositProfessionalName}</dd>
+                          </div>
+                        ) : null}
+                        {depositAppointmentDateLabel ? (
+                          <div className="confirmation-details__item">
+                            <dt>Data</dt>
+                            <dd>{depositAppointmentDateLabel}</dd>
+                          </div>
+                        ) : null}
+                        {depositAppointmentTimeLabel ? (
+                          <div className="confirmation-details__item">
+                            <dt>Horario</dt>
+                            <dd>
+                              <span className="badge badge--time">
+                                {depositAppointmentTimeLabel}
+                                {depositAppointmentEndLabel ? ` • ${depositAppointmentEndLabel}` : ""}
+                              </span>
+                            </dd>
+                          </div>
+                        ) : null}
+                        {depositDuration > 0 ? (
+                          <div className="confirmation-details__item">
+                            <dt>Duracao</dt>
+                            <dd>{depositDuration} minutos</dd>
+                          </div>
+                        ) : null}
+                        {depositPriceLabel && depositPriceLabel !== "R$ 0,00" ? (
+                          <div className="confirmation-details__item">
+                            <dt>Preco</dt>
+                            <dd>{depositPriceLabel}</dd>
+                          </div>
+                        ) : null}
+                        {depositAmountLabel ? (
+                          <div className="confirmation-details__item">
+                            <dt>Sinal pago</dt>
+                            <dd>{depositAmountLabel}</dd>
+                          </div>
+                        ) : null}
+                      </dl>
+                    </div>
+                    <p className="muted pix-checkout__note">
+                      {depositAppointmentLink
+                        ? "Voce pode acompanhar os detalhes completos na sua area do cliente."
+                        : "Guarde estes dados e acompanhe as informacoes enviadas para o email cadastrado."}
+                    </p>
+                  </div>
+                ) : depositExpired ? (
+                  <div className="pix-checkout">
+                    <div className="confirmation-icon" aria-hidden="true">
+                      <svg viewBox="0 0 48 48" width="56" height="56" focusable="false">
+                        <circle cx="24" cy="24" r="22" fill="#ef4444" />
+                        <path
+                          d="M24 14v12"
+                          fill="none"
+                          stroke="#ffffff"
+                          strokeWidth="4"
+                          strokeLinecap="round"
+                        />
+                        <circle cx="24" cy="33" r="2.5" fill="#ffffff" />
+                      </svg>
+                    </div>
+                    <p style={{ marginTop: 0 }}>
+                      O prazo do PIX terminou e este horario nao esta mais reservado.
+                    </p>
+                    <p className="muted pix-checkout__note">
+                      Escolha um novo horario para concluir o agendamento.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="pix-checkout">
                   <div
                     className={`pix-checkout__status pix-checkout__status--${depositStatusTone}`}
                     role="status"
@@ -1877,7 +2009,8 @@ export default function NovoAgendamentoModals(props) {
                   <p className="muted pix-checkout__note">
                     Sinal não reembolsável por padrão, salvo decisão do estabelecimento.
                   </p>
-                </div>
+                  </div>
+                )}
               </Modal>
             )}
             {modal.isOpen && selectedSlot && serviceLabel && (

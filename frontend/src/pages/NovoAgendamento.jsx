@@ -3985,6 +3985,22 @@ export default function NovoAgendamento() {
       appointmentInfo: appointmentInfo || null,
     });
   }, []);
+  const buildDepositAppointmentInfo = useCallback(() => ({
+    inicioISO: selectedSlot?.datetime || null,
+    servicoNome: serviceLabel || "servico",
+    estabelecimentoNome: selectedEstablishmentName || selectedEstablishment?.name || "seu estabelecimento",
+    profissionalNome: selectedProfessional?.nome || selectedProfessional?.name || "",
+    duracaoMin: serviceDuration || 0,
+    precoLabel: servicePrice || "",
+  }), [
+    selectedEstablishment,
+    selectedEstablishmentName,
+    selectedProfessional,
+    selectedSlot,
+    serviceDuration,
+    serviceLabel,
+    servicePrice,
+  ]);
   const closeDepositModal = useCallback(() => {
     setDepositModal(createDepositModalState());
     setDepositCountdown("");
@@ -5335,11 +5351,7 @@ useEffect(() => {
       success = true;
       setModal((p) => ({ ...p, isOpen: false }));
       if (depositPayload) {
-        openDepositModal(depositPayload, {
-          inicioISO: selectedSlot.datetime,
-          servicoNome: serviceLabel || "servico",
-          estabelecimentoNome: selectedEstablishment?.name || "seu estabelecimento",
-        });
+        openDepositModal(depositPayload, buildDepositAppointmentInfo());
         showToast("info", "Agendamento pendente do pagamento do sinal.");
       } else if (depositRequired) {
         showToast("error", "Não foi possível carregar o PIX do sinal.");
@@ -5477,6 +5489,7 @@ useEffect(() => {
     selectedEstablishment,
     establishmentId,
     scheduleWhatsAppReminders,
+    buildDepositAppointmentInfo,
     openDepositModal,
     loadSlots,
     showToast,
@@ -5686,11 +5699,7 @@ useEffect(() => {
             error: "",
             info: "",
           }));
-          openDepositModal(depositPayload, {
-            inicioISO: selectedSlot.datetime,
-            servicoNome: serviceLabel || "servico",
-            estabelecimentoNome: selectedEstablishment?.name || "seu estabelecimento",
-          });
+          openDepositModal(depositPayload, buildDepositAppointmentInfo());
           showToast("info", "Agendamento pendente do pagamento do sinal.");
           return;
         }
@@ -5825,6 +5834,7 @@ useEffect(() => {
 
       state.professionalId,
       loadSlots,
+      buildDepositAppointmentInfo,
       openDepositModal,
       selectedEstablishment,
       serviceLabel,
@@ -6900,6 +6910,7 @@ useEffect(() => {
   }, [selectedSlot, serviceDuration]);
 
   const confirmModalOpen = modal.isOpen && selectedSlot && selectedServices.length;
+  const depositConfirmationOpen = depositModal.open && depositModal.status === "paid";
 
   const shouldRenderModals =
     infoModalOpen ||
@@ -6940,7 +6951,7 @@ useEffect(() => {
 
   // Ao clicar num dia do Mês, define a semana correspondente e marca o dia
 
-  const flowStepIndicator = confirmModalOpen || guestModal.open ? 4 : step;
+  const flowStepIndicator = confirmModalOpen || guestModal.open || depositConfirmationOpen ? 4 : step;
 
   useEffect(() => {
 
