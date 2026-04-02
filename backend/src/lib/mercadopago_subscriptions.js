@@ -408,8 +408,6 @@ export async function createMercadoPagoCardRecoveryPayment({
     },
     payer: {
       email: payerEmail || estabelecimento?.email || null,
-      type: subscription.gatewayCustomerId ? 'customer' : undefined,
-      id: subscription.gatewayCustomerId || undefined,
       identification:
         identificationType && identificationNumber
           ? { type: identificationType, number: identificationNumber }
@@ -422,6 +420,7 @@ export async function createMercadoPagoCardRecoveryPayment({
   console.info('[mercadopago/subscriptions][recovery-payment] sending', {
     subscription_id: subscription.id || null,
     gateway_subscription_id: subscription.gatewaySubscriptionId || null,
+    ignored_gateway_customer_id: subscription.gatewayCustomerId || null,
     amount_cents: amountCents,
     external_reference: externalReference || null,
     idempotency_key: idempotencyKey || null,
