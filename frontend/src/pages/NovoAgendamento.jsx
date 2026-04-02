@@ -39,8 +39,34 @@ const getEstablishmentsPageSize = () => {
 const QUERY_DEBOUNCE_MS = 180;
 
 const PUBLIC_PAGE_THEME_DEFAULTS = Object.freeze({
-  accent: "#0f766e",
-  accentStrong: "#164e63",
+  accent: "#5b7385",
+  accentStrong: "#243746",
+});
+
+const BOOKING_BRAND = Object.freeze({
+  name: "Agendamentos Online",
+  tagline: "Agenda institucional com aparencia SaaS profissional",
+  heroEyebrow: "Agendamento institucional",
+  heroHeading: "Encontre o atendimento certo com previsibilidade e confianca",
+  heroSubtitle:
+    "Pesquise estabelecimentos, compare informacoes essenciais e reserve servicos em um fluxo claro, organizado e profissional.",
+  contactLabel: "Falar com atendimento",
+  contactMeta: "Suporte comercial",
+  flowEyebrow: "Agendamento profissional",
+  serviceTitle: "Defina os servicos do atendimento",
+  serviceSubtitle:
+    "Selecione os servicos desejados para liberar disponibilidade, profissionais e duracao compativeis.",
+  scheduleTitle: "Escolha data e horario",
+  scheduleSubtitle:
+    "Revise o contexto do atendimento, selecione o profissional e confirme a melhor disponibilidade.",
+  servicesPanelEyebrow: "Catalogo de servicos",
+  servicesPanelTitle: "Monte o atendimento com clareza",
+  servicesPanelDescription:
+    "A disponibilidade sera calculada a partir dos servicos selecionados, mantendo o fluxo objetivo e confiavel.",
+  schedulePanelEyebrow: "Agenda disponivel",
+  schedulePanelTitle: "Organize a reserva em poucos passos",
+  schedulePanelDescription:
+    "Escolha profissional, data e horario com uma visualizacao consistente e pronta para producao.",
 });
 
 const APPOINTMENT_FLOW_STEPS = Object.freeze([
@@ -536,6 +562,7 @@ const createDepositModalState = () => ({
   depositToken: null,
   appointmentInfo: null,
 });
+const PENDING_DEPOSIT_STORAGE_KEY = "ao:public-deposit-pending";
 const formatCountdown = (ms) => {
   if (!Number.isFinite(ms) || ms <= 0) return "00:00";
   const totalSeconds = Math.max(0, Math.floor(ms / 1000));
@@ -1975,6 +2002,14 @@ const SlotButton = ({ slot, isSelected, onClick, density = "compact" }) => {
 
   const tooltipLabel = slot?.label ?? 'disponível';
 
+  const statusLabel = isPast
+    ? "Indisponivel"
+    : isSelected
+      ? "Selecionado"
+      : isAvailableLabel(slot.label)
+        ? "Disponivel"
+        : tooltipLabel;
+
   const className = [
 
     "slot-btn",
@@ -2011,7 +2046,8 @@ const SlotButton = ({ slot, isSelected, onClick, density = "compact" }) => {
 
     >
 
-      {DateHelpers.formatTime(slot.datetime)}
+      <span className="slot-btn__time">{DateHelpers.formatTime(slot.datetime)}</span>
+      <span className="slot-btn__meta">{statusLabel}</span>
 
     </button>
 
@@ -2030,52 +2066,69 @@ const ServiceCard = ({ service, selected, onSelect }) => {
   const imageRaw = service?.imagem_url || service?.image_url || service?.imagem || service?.image || service?.foto_url || '';
 
   const imageUrl = resolveAssetUrl(imageRaw);
+  const title = ServiceHelpers.title(service);
 
   const showPrice = price !== 'R$ 0,00';
 
   const showDuration = duration > 0;
 
   const cardClass = ['mini-card', selected ? 'mini-card--selected' : ''].filter(Boolean).join(' ');
+  const fallbackLabel = title
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part.charAt(0).toUpperCase())
+    .join('') || 'SV';
 
   return (
 
-    <div className={cardClass} onClick={() => onSelect(service)}>
+    <button
+      type="button"
+      className={cardClass}
+      onClick={() => onSelect(service)}
+      aria-pressed={selected}
+    >
 
       <div className="mini-card__content">
 
-        {imageUrl && (
-
-          <div className="mini-card__media">
-
-            <img src={imageUrl} alt={`Imagem do servico ${ServiceHelpers.title(service)}`} />
-
-          </div>
-
-        )}
+        <div className={`mini-card__media${imageUrl ? '' : ' mini-card__media--fallback'}`}>
+          {imageUrl ? (
+            <img src={imageUrl} alt={`Imagem do servico ${title}`} />
+          ) : (
+            <span>{fallbackLabel}</span>
+          )}
+        </div>
 
         <div className="mini-card__main">
 
-          <div className="mini-card__title">{ServiceHelpers.title(service)}</div>
+          <div className="mini-card__header">
+            <div className="mini-card__heading">
+              <span className="mini-card__eyebrow">{selected ? 'Selecionado' : 'Servico'}</span>
+              <div className="mini-card__title">{title}</div>
+            </div>
+            <span className={`mini-card__state${selected ? ' is-selected' : ''}`}>
+              {selected ? 'Incluido' : 'Selecionar'}
+            </span>
+          </div>
 
           {description && <div className="mini-card__description">{description}</div>}
 
+          {(showPrice || showDuration) && (
+            <div className="mini-card__meta-row">
+              {showDuration && <span className="mini-card__duration">{duration} min</span>}
+              {showPrice && <span className="mini-card__price">{price}</span>}
+            </div>
+          )}
+
         </div>
 
-        {(showPrice || showDuration) && (
-
-          <div className="mini-card__side">
-
-            {showPrice && <div className="mini-card__price">{price}</div>}
-
-            {showDuration && <div className="mini-card__duration">{duration} min</div>}
-
-          </div>
-
-        )}
+        <div className="mini-card__side">
+          <span className="mini-card__cta">{selected ? 'Ajustar selecao' : 'Adicionar'}</span>
+        </div>
 
       </div>
 
-    </div>
+    </button>
 
   );
 
@@ -2094,32 +2147,7 @@ const ProfessionalTile = ({ professional, selected, onSelect }) => {
       type="button"
 
       onClick={onSelect}
-
-      style={{
-
-        display: 'flex',
-
-        alignItems: 'center',
-
-        gap: 8,
-
-        width: '100%',
-
-        padding: '6px 8px',
-
-        borderRadius: 8,
-
-        border: 'none',
-
-        background: selected ? 'var(--primary-bg, rgba(11,94,215,0.12))' : 'transparent',
-
-        color: 'var(--text-primary)',
-
-        cursor: 'pointer',
-
-        textAlign: 'left',
-
-      }}
+      className={`professional-tile${selected ? ' is-selected' : ''}`}
 
     >
 
@@ -2130,8 +2158,7 @@ const ProfessionalTile = ({ professional, selected, onSelect }) => {
           src={avatar}
 
           alt={`Foto de ${professional?.nome || ''}`}
-
-          style={{ width: 36, height: 36, borderRadius: '50%', objectFit: 'cover', border: '1px solid var(--border)' }}
+          className="professional-tile__avatar"
 
         />
 
@@ -2139,29 +2166,7 @@ const ProfessionalTile = ({ professional, selected, onSelect }) => {
 
         <div
 
-          style={{
-
-            width: 36,
-
-            height: 36,
-
-            borderRadius: '50%',
-
-            display: 'flex',
-
-            alignItems: 'center',
-
-            justifyContent: 'center',
-
-            background: 'var(--border)',
-
-            color: 'var(--text-primary)',
-
-            fontWeight: 600,
-
-            fontSize: 12,
-
-          }}
+          className="professional-tile__avatar professional-tile__avatar--fallback"
 
         >
 
@@ -2171,11 +2176,8 @@ const ProfessionalTile = ({ professional, selected, onSelect }) => {
 
       )}
 
-      <span style={{ fontSize: 13, fontWeight: selected ? 600 : 500 }}>
-
-        {professional?.nome || 'Profissional'}
-
-      </span>
+      <span className="professional-tile__name">{professional?.nome || 'Profissional'}</span>
+      <span className="professional-tile__state">{selected ? 'Selecionado' : 'Selecionar'}</span>
 
     </button>
 
@@ -2939,6 +2941,61 @@ export default function NovoAgendamento() {
   const professionalMenuRef = useRef(null);
 
   useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const raw = localStorage.getItem(PENDING_DEPOSIT_STORAGE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      if (
+        !parsed ||
+        parsed.open !== true ||
+        parsed.status !== "pending" ||
+        !parsed.paymentId
+      ) {
+        localStorage.removeItem(PENDING_DEPOSIT_STORAGE_KEY);
+        return;
+      }
+      setDepositModal((prev) => (prev.open ? prev : {
+        ...createDepositModalState(),
+        ...parsed,
+      }));
+    } catch {
+      try { localStorage.removeItem(PENDING_DEPOSIT_STORAGE_KEY); } catch {}
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      if (depositModal.open && depositModal.status === "pending" && depositModal.paymentId) {
+        localStorage.setItem(PENDING_DEPOSIT_STORAGE_KEY, JSON.stringify({
+          open: true,
+          status: "pending",
+          paymentId: depositModal.paymentId,
+          appointmentId: depositModal.appointmentId || null,
+          expiresAt: depositModal.expiresAt || null,
+          amountCents: depositModal.amountCents ?? null,
+          pix: depositModal.pix || null,
+          depositToken: depositModal.depositToken || null,
+          appointmentInfo: depositModal.appointmentInfo || null,
+        }));
+        return;
+      }
+      localStorage.removeItem(PENDING_DEPOSIT_STORAGE_KEY);
+    } catch {}
+  }, [
+    depositModal.amountCents,
+    depositModal.appointmentId,
+    depositModal.appointmentInfo,
+    depositModal.depositToken,
+    depositModal.expiresAt,
+    depositModal.open,
+    depositModal.paymentId,
+    depositModal.pix,
+    depositModal.status,
+  ]);
+
+  useEffect(() => {
 
     if (!professionalMenuOpen) return;
 
@@ -3626,17 +3683,17 @@ export default function NovoAgendamento() {
 
       (trialEndsAt && new Date(trialEndsAt).getTime() < Date.now()));
 
-  const planExpired = planStatus === 'expired';
+  const planExpired = ['expired', 'unpaid', 'canceled', 'cancelled'].includes(planStatus);
 
   const subscriptionActive =
+    ['trialing', 'active', 'pending_payment', 'pending_pix', 'past_due'].includes(planStatus) ||
+    ['trialing', 'active', 'pending_payment', 'pending_pix', 'past_due'].includes(subscriptionStatus);
 
-    planStatus === 'active' ||
+  const subscriptionBlocked =
+    ['unpaid', 'expired', 'canceled', 'cancelled'].includes(planStatus) ||
+    ['unpaid', 'expired', 'canceled', 'cancelled'].includes(subscriptionStatus);
 
-    subscriptionStatus === 'active' ||
-
-    subscriptionStatus === 'authorized';
-
-  const bookingBlocked = !subscriptionActive && (planExpired || trialExpired);
+  const bookingBlocked = subscriptionBlocked || (!subscriptionActive && (planExpired || trialExpired));
 
   const bookingBlockedMessage = 'Agendamentos indisponíveis no momento. Entre em contato com o estabelecimento.';
 
@@ -5168,7 +5225,9 @@ useEffect(() => {
     let cancelled = false;
     const pollStatus = async () => {
       try {
-        const data = await Api.getPaymentStatus(depositModal.paymentId);
+        const data = await Api.getPaymentStatus(depositModal.paymentId, {
+          depositToken: depositModal.depositToken || undefined,
+        });
         if (cancelled || !data) return;
         const status = String(data.status || "").toLowerCase();
         if (status === "paid") {
@@ -7115,17 +7174,17 @@ useEffect(() => {
 
     step === 2
 
-      ? 'Defina os servicos do atendimento'
+      ? BOOKING_BRAND.serviceTitle
 
-      : 'Escolha o melhor horario';
+      : BOOKING_BRAND.scheduleTitle;
 
   const flowSubtitle =
 
     step === 2
 
-      ? 'Selecione os servicos para liberar profissionais e disponibilidade.'
+      ? BOOKING_BRAND.serviceSubtitle
 
-      : 'Revise o estabelecimento, escolha o profissional e confirme o melhor horario disponivel.';
+      : BOOKING_BRAND.scheduleSubtitle;
 
   const serviceFooterSummary = useMemo(() => {
 
@@ -7189,25 +7248,25 @@ useEffect(() => {
 
     if (normalizedQuery) {
 
-      return 'Escolha um estabelecimento para seguir para servicos e horarios.';
+      return 'Selecione um estabelecimento para continuar com servicos, agenda e confirmacao.';
 
     }
 
     if (favoritesOnly) {
 
-      return 'Mostrando apenas estabelecimentos marcados como favoritos.';
+      return 'Mostrando sua selecao de estabelecimentos salvos para agilizar novos agendamentos.';
 
     }
 
     if (discoveryCategory !== 'all' && activeDiscoveryCategoryLabel) {
 
-      return `Mostrando resultados preparados para a categoria ${activeDiscoveryCategoryLabel}.`;
+      return `Resultados filtrados para a categoria ${activeDiscoveryCategoryLabel}.`;
 
     }
 
     if (discoverySort === 'rating') {
 
-      return 'Resultados priorizados por confianca e qualidade percebida.';
+      return 'Resultados priorizados por consistencia de avaliacao e confianca percebida.';
 
     }
 
@@ -7221,7 +7280,7 @@ useEffect(() => {
 
     }
 
-    return 'Selecione um estabelecimento para iniciar o agendamento em poucos cliques.';
+    return 'Escolha um estabelecimento para seguir com servicos, disponibilidade e confirmacao.';
 
   })();
 
@@ -7438,7 +7497,12 @@ useEffect(() => {
 
       <>
 
-        <p className="muted" style={{ margin: '0 0 8px' }}>Selecione um ou mais serviços.</p>
+
+        <div className="novo-agendamento__section-intro">
+          <span className="novo-agendamento__section-kicker">{BOOKING_BRAND.servicesPanelEyebrow}</span>
+          <h2 className="novo-agendamento__section-title">{BOOKING_BRAND.servicesPanelTitle}</h2>
+          <p className="novo-agendamento__section-description">{BOOKING_BRAND.servicesPanelDescription}</p>
+        </div>
 
         <div className="novo-agendamento__service-search">
 
@@ -7456,9 +7520,9 @@ useEffect(() => {
 
               className="novo-agendamento__service-search-input"
 
-              placeholder="Buscar serviço..."
+              placeholder="Buscar servico pelo nome"
 
-              aria-label="Buscar serviço"
+              aria-label="Buscar servico"
 
               value={serviceSearch}
 
@@ -7520,6 +7584,12 @@ useEffect(() => {
 
       <>
 
+      <div className="novo-agendamento__section-intro novo-agendamento__section-intro--schedule">
+        <span className="novo-agendamento__section-kicker">{BOOKING_BRAND.schedulePanelEyebrow}</span>
+        <h2 className="novo-agendamento__section-title">{BOOKING_BRAND.schedulePanelTitle}</h2>
+        <p className="novo-agendamento__section-description">{BOOKING_BRAND.schedulePanelDescription}</p>
+      </div>
+
       {requiresProfessional && !serviceProfessionals.length && (
 
         <div className="notice notice--warn" role="alert">
@@ -7538,7 +7608,7 @@ useEffect(() => {
 
             <div className="row" style={{ gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
 
-              <strong className="novo-agendamento__professional-title">Escolha um profissional</strong>
+              <strong className="novo-agendamento__professional-title">Selecione o profissional responsavel</strong>
 
             </div>
 
@@ -7578,7 +7648,7 @@ useEffect(() => {
 
                 <div className="novo-agendamento__select-label">
 
-                  <div>{selectedProfessional ? (selectedProfessional.nome || selectedProfessional.name) : 'Selecione um profissional'}</div>
+                  <div>{selectedProfessional ? (selectedProfessional.nome || selectedProfessional.name) : 'Selecionar profissional'}</div>
 
                 </div>
 
@@ -7622,7 +7692,7 @@ useEffect(() => {
 
               <small className="muted" style={{ fontSize: 11 }}>
 
-                Selecione o profissional desejado para confirmar o agendamento.
+                Escolha quem conduzira o atendimento para liberar a agenda correspondente.
 
               </small>
 
@@ -7642,7 +7712,7 @@ useEffect(() => {
 
             <div className="inline-summary__item inline-summary__item--service">
 
-              <span className="inline-summary__value">{serviceLabel || 'Selecione os servicos'}</span>
+              <span className="inline-summary__value">{serviceLabel || 'Servicos ainda nao definidos'}</span>
 
               {(serviceDuration || servicePrice !== 'R$ 0,00') && (
 
@@ -7662,7 +7732,7 @@ useEffect(() => {
 
           <div className="novo-agendamento__summary-actions-row">
 
-            <button type="button" className="novo-agendamento__change-service" onClick={handleChangeService}>Alterar serviços</button>
+            <button type="button" className="novo-agendamento__change-service" onClick={handleChangeService}>Revisar servicos</button>
 
             <details className="filters">
 
@@ -7753,7 +7823,7 @@ useEffect(() => {
 
         <div className="novo-agendamento__calendar">
 
-          <div className="month card" style={{ padding: 8, marginBottom: 8 }}>
+          <div className="month card novo-agendamento__month-card" style={{ padding: 8, marginBottom: 8 }}>
 
             <div className="row spread" style={{ alignItems: 'center', marginBottom: 6 }}>
 
@@ -7869,7 +7939,7 @@ useEffect(() => {
 
           {selectedSlot && (
 
-            <div className="box box--highlight sticky-bar" aria-live="polite" id="resumo-agendamento">
+            <div className="box box--highlight sticky-bar novo-agendamento__selection-banner" aria-live="polite" id="resumo-agendamento">
 
               <div className="appointment-summary">
 
@@ -7883,15 +7953,15 @@ useEffect(() => {
 
           )}
 
-          <div className="card" style={{ marginTop: 8 }}>
+            <div className="card novo-agendamento__slots-card" style={{ marginTop: 8 }}>
 
-            <h3 style={{ marginTop: 0, marginBottom: 8 }}>
+            <h3 className="novo-agendamento__slots-title" style={{ marginTop: 0, marginBottom: 8 }}>
 
               {selectedDate
 
                  ? new Date(selectedDate + 'T00:00:00').toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' })
 
-                : 'Selecione uma data'}
+                : 'Escolha uma data para visualizar a disponibilidade'}
 
             </h3>
 
@@ -7899,7 +7969,7 @@ useEffect(() => {
 
               serviceProfessionals.length > 0 && !selectedProfessional ? (
 
-                <div className="empty">Selecione um profissional para ver os horários.</div>
+                <div className="empty">Selecione um profissional para liberar os horarios disponiveis.</div>
 
               ) : (
 
@@ -7949,7 +8019,7 @@ useEffect(() => {
 
             ) : (
 
-              <div className="empty">Escolha uma data no calendário acima.</div>
+              <div className="empty">Escolha uma data no calendario para consultar os horarios.</div>
 
             )}
 
@@ -8002,9 +8072,12 @@ useEffect(() => {
 
             <AppointmentDiscoveryHero
 
-              heading="Escolha um estabelecimento"
+              eyebrow={BOOKING_BRAND.heroEyebrow}
+              brandName={BOOKING_BRAND.name}
+              brandTagline={BOOKING_BRAND.tagline}
+              heading={BOOKING_BRAND.heroHeading}
 
-              subtitle="Busque por nome, servico, bairro ou cidade para iniciar seu agendamento"
+              subtitle={BOOKING_BRAND.heroSubtitle}
 
               query={estQuery}
 
@@ -8017,6 +8090,13 @@ useEffect(() => {
               inputRef={estSearchInputRef}
 
               headingId="novo-agendamento-hero-title"
+
+              headerAction={(
+                <Link to="/contato" className="appointment-discovery-hero__contact-btn">
+                  <span>{BOOKING_BRAND.contactLabel}</span>
+                  <small>{BOOKING_BRAND.contactMeta}</small>
+                </Link>
+              )}
 
               stepper={<AppointmentFlowStepper currentStep={step} />}
 
@@ -8068,9 +8148,9 @@ useEffect(() => {
 
                 <div className="novo-agendamento__quick-filters-copy">
 
-                  <span className="novo-agendamento__section-eyebrow">Filtros rapidos</span>
+                  <span className="novo-agendamento__section-eyebrow">Refinamento operacional</span>
 
-                  <p>Refine a lista para encontrar o melhor local e agendar mais rapido.</p>
+                  <p>Priorize proximidade, reputacao e categoria para encontrar a agenda certa com menos ruido visual.</p>
 
                 </div>
 
@@ -8204,7 +8284,7 @@ useEffect(() => {
 
               <div className="novo-agendamento__flow-copy">
 
-                <span className="novo-agendamento__section-eyebrow">Novo agendamento</span>
+                <span className="novo-agendamento__section-eyebrow">{BOOKING_BRAND.flowEyebrow}</span>
 
                 <h1 className="novo-agendamento__flow-title">{flowHeading}</h1>
 
@@ -8342,7 +8422,7 @@ useEffect(() => {
 
                     </svg>
 
-                    Fotos
+                    Galeria
 
                   </button>
 
@@ -8350,7 +8430,7 @@ useEffect(() => {
 
                     <IconList aria-hidden style={{ width: 14, height: 14, color: 'var(--booking-accent-strong, var(--primary-600))' }} />
 
-                    Inf.
+                    Detalhes
 
                   </button>
 
@@ -8540,12 +8620,13 @@ useEffect(() => {
             summary={step === 2 ? serviceFooterSummary : scheduleFooterSummary}
             helper={
               step === 2
-                ? 'Escolha os servicos e avance para horarios.'
-                : 'Selecione um horario para revisar antes da confirmacao.'
+                ? 'Selecione o escopo do atendimento antes de consultar a agenda.'
+                : 'Escolha um horario para revisar a reserva com seguranca.'
             }
             onBack={step === 2 ? handleBackFromServices : handleBackFromSchedule}
             onContinue={step === 2 ? handleContinueFromServices : handleConfirmClick}
             continueDisabled={step === 2 ? !selectedServices.length : scheduleContinueDisabled}
+            continueLabel={step === 2 ? 'Ver disponibilidade' : 'Revisar reserva'}
             dockRef={flowFooterRef}
           />
 

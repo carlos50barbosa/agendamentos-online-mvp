@@ -18,6 +18,10 @@ import { shouldPauseEngine } from '../bot/runtime/handoffPolicy.js';
 import { checkRateLimit } from '../bot/runtime/rateLimiter.js';
 import { mapEngineResultToMetrics } from '../bot/metrics/metricsMapper.js';
 import { incrementDailyMetrics } from '../bot/storage/metricsStore.js';
+import { config } from '../lib/config.js';
+import { buildRateLimitClientKey, observeAbuseFlood } from '../lib/request_rate_limit.js';
+import { verifyWhatsAppWebhookSignature } from '../lib/wa_webhook_signature.js';
+import { logSecurityEvent } from '../lib/route_access.js';
 
 const router = Router();
 const OFFICIAL_WEBHOOK_PATH = '/api/webhooks/whatsapp';
@@ -779,6 +783,32 @@ router.get('/', (req, res) => {
 });
 
 router.post('/', async (req, res) => {
+  const verification = verifyWhatsAppWebhookSignature(req);
+  if (!verification.ok) {
+    logSecurityEvent('wa:webhook-invalid-signature', req, {
+      reason: verification.reason || 'invalid_signature',
+      has_signature: Boolean(req.headers['x-hub-signature-256']),
+      has_raw_body: Buffer.isBuffer(req.rawBody) && req.rawBody.length > 0,
+    }, { level: 'warn' });
+    await observeAbuseFlood({
+      routeKey: 'wa:webhook-invalid-signature',
+      req,
+      bucketKey: `wa-webhook-invalid:${buildRateLimitClientKey(req)}`,
+      windowMs: config.security?.telemetry?.webhookInvalidSignature?.windowMs,
+      threshold: config.security?.telemetry?.webhookInvalidSignature?.threshold,
+      details: { reason: verification.reason || 'invalid_signature' },
+      level: 'error',
+    });
+    return res.sendStatus(403);
+  }
+  if (verification.skipped) {
+    const nodeEnv = String(process.env.NODE_ENV || '').trim().toLowerCase();
+    logSecurityEvent('wa:webhook-signature-skipped', req, {
+      reason: verification.skipped,
+      production_unsafe: nodeEnv === 'production',
+    }, { level: nodeEnv === 'production' ? 'error' : 'warn' });
+  }
+
   const payload = req.body || {};
   processWebhookPayload(payload).catch((err) => {
     console.error('[wa/webhook][official]', err?.message || err);

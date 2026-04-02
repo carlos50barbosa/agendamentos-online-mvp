@@ -156,7 +156,7 @@ const APP_ROUTES = [
 
 
 
-const BILLING_ALERT_STATES = new Set(['due_soon', 'overdue', 'blocked']);
+const BILLING_ALERT_STATES = new Set(['due_soon', 'overdue', 'pending', 'blocked']);
 
 const DASHBOARD_BY_ROLE = {
 
@@ -332,6 +332,16 @@ function BillingStatusBanner({ status, user, planInfo }) {
       ? `Bloqueio em ${remaining} ${remaining === 1 ? 'dia' : 'dias'}${graceDeadline ? ` (até ${graceDeadline})` : ''}.`
       : 'Atualize para evitar o bloqueio.';
     body = `${overdueLabel} ${remainingText}`.trim();
+
+  } else if (state === 'pending') {
+
+    tone = 'warning';
+
+    title = 'Pagamento pendente';
+
+    body = 'Existe uma cobranca pendente na assinatura. Atualize cartao ou gere um PIX para regularizar.';
+
+    ctaLabel = 'Abrir assinatura';
 
   } else {
 
@@ -1123,6 +1133,18 @@ const topbarAlert = useMemo(() => {
         variant: 'warning',
 
         message: `Pagamento em atraso${dueLabel ? ` (venc. ${dueLabel})` : ''}.${suffix}`,
+
+      };
+
+    }
+
+    if (billingState === 'pending') {
+
+      return {
+
+        variant: 'warning',
+
+        message: 'Existe uma cobranca pendente na assinatura. Atualize o cartao ou gere um PIX para regularizar.',
 
       };
 

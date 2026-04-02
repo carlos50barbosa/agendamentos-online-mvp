@@ -1277,7 +1277,11 @@ export default function NovoAgendamentoModals(props) {
 
                 {guestModal.step === "success" ? (
 
-                  <>
+                  <div className="booking-modal booking-modal--success">
+
+                    <div className="booking-modal__intro">
+
+                      <span className="booking-modal__eyebrow">Reserva concluida</span>
 
                     <div className="confirmation-icon" aria-hidden="true">
 
@@ -1307,11 +1311,13 @@ export default function NovoAgendamentoModals(props) {
 
                     <h3>Agendamento realizado</h3>
 
-                    <p style={{ marginTop: 6 }}>
+                    <p>
                       Enviamos um email com os detalhes do agendamento.
                       {' '}Se não aparecer em alguns minutos, confira o spam ou reencontre o link mais tarde.
                     </p>
-                    <div className="row" style={{ justifyContent: 'flex-end', gap: 8, marginTop: 12 }}>
+                    </div>
+
+                    <div className="booking-modal__actions">
 
                       <button type="button" className="btn btn--primary" onClick={handleCloseGuestModal}>
 
@@ -1321,23 +1327,29 @@ export default function NovoAgendamentoModals(props) {
 
                     </div>
 
-                  </>
+                  </div>
 
                 ) : guestModal.step === "otp" ? (
 
-                  <>
+                  <div className="booking-modal booking-modal--otp">
+
+                    <div className="booking-modal__intro">
+
+                      <span className="booking-modal__eyebrow">Validacao de contato</span>
 
                     <h3>Confirme seu email</h3>
 
-                    <p className="muted" style={{ marginTop: 4 }}>
+                    <p>
 
                       Enviamos um código para {guestModal.email || 'seu email'}. Digite para concluir o agendamento.
 
                     </p>
 
-                    <div style={{ display: 'grid', gap: 8, marginTop: 10 }}>
+                    </div>
 
-                      <label htmlFor="guest-otp-code" className="muted" style={{ fontWeight: 700 }}>
+                    <div className="booking-modal__form-grid">
+
+                      <label htmlFor="guest-otp-code" className="booking-modal__label">
 
                         Código
 
@@ -1385,7 +1397,7 @@ export default function NovoAgendamentoModals(props) {
 
                     )}
 
-                    <div className="row" style={{ justifyContent: 'flex-end', gap: 8, marginTop: 12 }}>
+                    <div className="booking-modal__actions">
 
                       <button type="button" className="btn btn--outline" onClick={handleGuestResendOtp} disabled={guestModal.loading}>
 
@@ -1401,13 +1413,19 @@ export default function NovoAgendamentoModals(props) {
 
                     </div>
 
-                  </>
+                  </div>
 
                 ) : (
 
-                  <>
+                  <div className="booking-modal booking-modal--guest">
+
+                    <div className="booking-modal__intro">
+
+                      <span className="booking-modal__eyebrow">Conclusao da reserva</span>
 
                     <h3>Finalizar agendamento</h3>
+
+                    </div>
 
                     <div className="confirmation-card">
 
@@ -1459,11 +1477,11 @@ export default function NovoAgendamentoModals(props) {
 
                     </div>
 
-                    <div style={{ display: 'grid', gap: 10, marginTop: 12 }}>
+                    <div className="booking-modal__form-grid">
 
-                      <label style={{ display: 'grid', gap: 4 }}>
+                      <label className="booking-modal__field">
 
-                        <span className="muted" style={{ fontWeight: 700 }}>Nome completo</span>
+                        <span className="booking-modal__label">Nome completo</span>
 
                         <input
 
@@ -1483,9 +1501,9 @@ export default function NovoAgendamentoModals(props) {
 
                       </label>
 
-                      <label style={{ display: 'grid', gap: 4 }}>
+                      <label className="booking-modal__field">
 
-                        <span className="muted" style={{ fontWeight: 700 }}>Email</span>
+                        <span className="booking-modal__label">Email</span>
 
                         <input
 
@@ -1507,9 +1525,9 @@ export default function NovoAgendamentoModals(props) {
 
                       </label>
 
-                      <label style={{ display: 'grid', gap: 4 }}>
+                      <label className="booking-modal__field">
 
-                        <span className="muted" style={{ fontWeight: 700 }}>Telefone (WhatsApp)</span>
+                        <span className="booking-modal__label">Telefone (WhatsApp)</span>
 
                         <input
 
@@ -1533,13 +1551,13 @@ export default function NovoAgendamentoModals(props) {
 
                     </div>
 
-                    <div className="row" style={{ marginTop: 6 }}>
+                    <div>
 
                       <button
 
                         type="button"
 
-                        className="btn btn--ghost btn--sm"
+                        className="btn btn--outline btn--sm booking-modal__toggle"
 
                         onClick={() => setShowGuestOptional((prev) => !prev)}
 
@@ -1555,11 +1573,11 @@ export default function NovoAgendamentoModals(props) {
 
                     {showGuestOptional && (
 
-                      <div style={{ display: 'grid', gap: 10, marginTop: 8 }}>
+                      <div className="booking-modal__form-grid booking-modal__form-grid--optional">
 
-                        <label style={{ display: 'grid', gap: 4 }}>
+                        <label className="booking-modal__field">
 
-                          <span className="muted" style={{ fontWeight: 700 }}>Data de nascimento (opcional)</span>
+                          <span className="booking-modal__label">Data de nascimento (opcional)</span>
 
                           <input
 
@@ -1577,9 +1595,9 @@ export default function NovoAgendamentoModals(props) {
 
                         </label>
 
-                        <label style={{ display: 'grid', gap: 4 }}>
+                        <label className="booking-modal__field">
 
-                          <span className="muted" style={{ fontWeight: 700 }}>CEP (opcional)</span>
+                          <span className="booking-modal__label">CEP (opcional)</span>
 
                           <input
 
@@ -1601,9 +1619,9 @@ export default function NovoAgendamentoModals(props) {
 
                         </label>
 
-                        <label style={{ display: 'grid', gap: 4 }}>
+                        <label className="booking-modal__field">
 
-                          <span className="muted" style={{ fontWeight: 700 }}>Endereço (opcional)</span>
+                          <span className="booking-modal__label">Endereco (opcional)</span>
 
                           <input
 
@@ -1621,9 +1639,9 @@ export default function NovoAgendamentoModals(props) {
 
                         </label>
 
-                        <label style={{ display: 'grid', gap: 4 }}>
+                        <label className="booking-modal__field">
 
-                          <span className="muted" style={{ fontWeight: 700 }}>Número (opcional)</span>
+                          <span className="booking-modal__label">Numero (opcional)</span>
 
                           <input
 
@@ -1641,9 +1659,9 @@ export default function NovoAgendamentoModals(props) {
 
                         </label>
 
-                        <label style={{ display: 'grid', gap: 4 }}>
+                        <label className="booking-modal__field">
 
-                          <span className="muted" style={{ fontWeight: 700 }}>Complemento (opcional)</span>
+                          <span className="booking-modal__label">Complemento (opcional)</span>
 
                           <input
 
@@ -1661,9 +1679,9 @@ export default function NovoAgendamentoModals(props) {
 
                         </label>
 
-                        <label style={{ display: 'grid', gap: 4 }}>
+                        <label className="booking-modal__field">
 
-                          <span className="muted" style={{ fontWeight: 700 }}>Bairro (opcional)</span>
+                          <span className="booking-modal__label">Bairro (opcional)</span>
 
                           <input
 
@@ -1681,9 +1699,9 @@ export default function NovoAgendamentoModals(props) {
 
                         </label>
 
-                        <label style={{ display: 'grid', gap: 4 }}>
+                        <label className="booking-modal__field">
 
-                          <span className="muted" style={{ fontWeight: 700 }}>Cidade (opcional)</span>
+                          <span className="booking-modal__label">Cidade (opcional)</span>
 
                           <input
 
@@ -1701,9 +1719,9 @@ export default function NovoAgendamentoModals(props) {
 
                         </label>
 
-                        <label style={{ display: 'grid', gap: 4 }}>
+                        <label className="booking-modal__field">
 
-                          <span className="muted" style={{ fontWeight: 700 }}>Estado (opcional)</span>
+                          <span className="booking-modal__label">Estado (opcional)</span>
 
                           <input
 
@@ -1747,7 +1765,7 @@ export default function NovoAgendamentoModals(props) {
 
                     )}
 
-                    <div className="row" style={{ justifyContent: 'flex-end', gap: 8, marginTop: 12 }}>
+                    <div className="booking-modal__actions">
 
                       <button type="button" className="btn btn--outline" onClick={handleCloseGuestModal} disabled={guestModal.loading}>
 
@@ -1763,7 +1781,7 @@ export default function NovoAgendamentoModals(props) {
 
                     </div>
 
-                  </>
+                  </div>
 
                 )}
 
@@ -2016,7 +2034,14 @@ export default function NovoAgendamentoModals(props) {
             {modal.isOpen && selectedSlot && serviceLabel && (
               <Modal onClose={() => setModal((m) => ({ ...m, isOpen: false }))} closeButton>
 
-                <h3>Confirmar agendamento?</h3>
+                <div className="booking-modal booking-modal--confirm">
+
+                <div className="booking-modal__intro">
+                  <span className="booking-modal__eyebrow">Revisao final</span>
+                  <h3>Confirmar agendamento?</h3>
+                </div>
+
+                <div className="confirmation-card">
 
                 <div className="confirmation-details">
 
@@ -2052,7 +2077,9 @@ export default function NovoAgendamentoModals(props) {
 
                 </div>
 
-                <div className="row" style={{ justifyContent: 'flex-end', gap: 6, marginTop: 8 }}>
+                </div>
+
+                <div className="booking-modal__actions">
 
                   <button className="btn btn--outline" onClick={() => setModal((m) => ({ ...m, isOpen: false }))} disabled={modal.isSaving}>Cancelar</button>
 
@@ -2061,6 +2088,8 @@ export default function NovoAgendamentoModals(props) {
                     {modal.isSaving ? <span className="spinner" /> : 'Confirmar Agendamento'}
 
                   </button>
+
+                </div>
 
                 </div>
 

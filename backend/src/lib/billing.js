@@ -22,6 +22,7 @@ import {
 } from './subscriptions.js'
 import { pool } from './db.js'
 import { findWhatsAppPack } from './addon_packs.js'
+import { syncUserPlanContextFromSubscription } from './subscription_state.js'
 
 const BILLING_CURRENCY = (config.billing?.currency || 'BRL').toUpperCase()
 const BILLING_DEBUG = (() => {
@@ -200,39 +201,6 @@ function pickValidUrl(...candidates) {
   return null
 }
 
-// Mapeia status do Preapproval do Mercado Pago para os valores aceitos pela coluna
-// subscriptions.status (ENUM: 'initiated','pending','authorized','active','paused','past_due','canceled','expired')
-function mapMpToSubscriptionStatus(status) {
-  const key = String(status || '').toLowerCase()
-  switch (key) {
-    case 'authorized':
-      return 'authorized'
-    case 'active':
-      return 'active'
-    case 'paused':
-    case 'halted':
-      return 'paused'
-    case 'stopped':
-    case 'cancelled':
-    case 'canceled':
-    case 'cancelled_by_collector':
-    case 'cancelled_by_merchant':
-      return 'canceled'
-    case 'expired':
-    case 'finished':
-      return 'expired'
-    case 'pending':
-    case 'inprocess':
-    case 'in_process':
-      return 'pending'
-    case 'charged_back':
-    case 'rejected':
-      return 'past_due'
-    default:
-      return 'pending'
-  }
-}
-
 // Cria um Checkout Pro (preferência) exclusivamente para PIX como fallback do primeiro ciclo
 export async function createMercadoPagoPixCheckout({
   estabelecimento,
@@ -293,21 +261,23 @@ export async function createMercadoPagoPixCheckout({
     plan: normalizedPlan,
     amountCents: priceCents,
     currency: BILLING_CURRENCY,
-    status: 'pending',
+    paymentMethod: 'pix',
+    status: 'pending_pix',
     gatewaySubscriptionId: null,
+    gatewayPaymentId: String(payment.id),
     gatewayPreferenceId: String(payment.id),
     externalReference,
     billingCycle: normalizedCycle,
   })
   await appendSubscriptionEvent(subscription.id, {
-    eventType: 'payment.create',
+    eventType: 'pix_generated',
     gatewayEventId: String(payment.id),
     payload: { payment },
   })
 
   const initPoint = transactionData.ticket_url || null
 
-  return { initPoint, subscription, planStatus: 'pending', pix: pixPayload, payment }
+  return { initPoint, subscription, planStatus: 'pending_pix', pix: pixPayload, payment }
 }
 
 // Checkout PIX para compra avulsa (topup) de mensagens WhatsApp
@@ -389,8 +359,10 @@ export async function createMercadoPagoPixTopupCheckout({
     plan: planForRow,
     amountCents: pkg.priceCents,
     currency: BILLING_CURRENCY,
-    status: 'pending',
+    paymentMethod: 'pix',
+    status: 'pending_pix',
     gatewaySubscriptionId: null,
+    gatewayPaymentId: String(payment.id),
     gatewayPreferenceId: String(payment.id),
     externalReference,
     billingCycle: 'mensal',
@@ -578,8 +550,10 @@ export async function syncMercadoPagoPayment(paymentId, eventPayload = null) {
       plan: PLAN_TIERS.includes(planToken) ? planToken : 'starter',
       amountCents: Math.round(Number(payment.transaction_amount || 0) * 100),
       currency: (payment.currency_id || BILLING_CURRENCY).toUpperCase(),
-      status: 'pending',
+      paymentMethod: 'pix',
+      status: 'pending_pix',
       gatewaySubscriptionId: null,
+      gatewayPaymentId: String(payment.id),
       gatewayPreferenceId: null,
       externalReference: externalRef || null,
       billingCycle: cycleToken || 'mensal',
@@ -595,8 +569,23 @@ export async function syncMercadoPagoPayment(paymentId, eventPayload = null) {
 
   if (status !== 'approved') {
     if (subscription?.id) {
+      const nextStatus = ['pending', 'in_process', 'authorized'].includes(status)
+        ? 'pending_pix'
+        : ['cancelled', 'canceled', 'expired'].includes(status)
+          ? 'expired'
+          : 'unpaid'
+      await updateSubscription(subscription.id, {
+        paymentMethod: 'pix',
+        gatewayPaymentId: String(payment.id),
+        status: nextStatus,
+        lastEventId: String(payment.id),
+      })
       await appendSubscriptionEvent(subscription.id, {
-        eventType: `payment.${status}`,
+        eventType: nextStatus === 'expired'
+          ? 'pix_expired'
+          : nextStatus === 'pending_pix'
+            ? 'pix_generated'
+            : 'payment_failed',
         gatewayEventId: String(payment.id),
         payload: { event: eventPayload, payment },
       })
@@ -635,12 +624,15 @@ export async function syncMercadoPagoPayment(paymentId, eventPayload = null) {
     if (subscription?.id) {
       await updateSubscription(subscription.id, {
         status: 'active',
+        paymentMethod: 'pix',
+        gatewayPaymentId: String(payment.id),
         amountCents: Math.round(Number(payment.transaction_amount || subscription.amountCents / 100) * 100),
         currency: (payment.currency_id || BILLING_CURRENCY).toUpperCase(),
+        lastPaymentAt: payment.date_approved || new Date(),
         lastEventId: String(payment.id),
       })
       await appendSubscriptionEvent(subscription.id, {
-        eventType: 'topup.approved',
+        eventType: 'payment_approved',
         gatewayEventId: String(payment.id),
         payload: { event: eventPayload, payment, messages: topupMessages, pack_code: packCode, pack_id: packId },
       })
@@ -673,15 +665,26 @@ export async function syncMercadoPagoPayment(paymentId, eventPayload = null) {
   if (subscription?.id) {
     await updateSubscription(subscription.id, {
       status: 'active',
+      paymentMethod: 'pix',
+      gatewayPaymentId: String(payment.id),
       amountCents: Math.round(Number(payment.transaction_amount || subscription.amountCents / 100) * 100),
       currency: (payment.currency_id || BILLING_CURRENCY).toUpperCase(),
+      currentPeriodStart: new Date(),
       currentPeriodEnd: activeUntil,
+      nextBillingAt: activeUntil,
+      graceUntil: null,
+      lastPaymentAt: payment.date_approved || new Date(),
       lastEventId: String(payment.id),
       billingCycle: effectiveCycle,
     })
     await appendSubscriptionEvent(subscription.id, {
-      eventType: 'payment.approved',
+      eventType: 'pix_paid',
       gatewayEventId: String(payment.id),
+      payload: { event: eventPayload, payment },
+    })
+    await appendSubscriptionEvent(subscription.id, {
+      eventType: 'subscription_renewed',
+      gatewayEventId: `renewal:${payment.id}`,
       payload: { event: eventPayload, payment },
     })
   }
@@ -689,8 +692,14 @@ export async function syncMercadoPagoPayment(paymentId, eventPayload = null) {
   // Atualiza o usuário
   if (subscription?.estabelecimentoId || estabId) {
     const estabelecimentoId = subscription?.estabelecimentoId || estabId
-    const sql = `UPDATE usuarios SET plan=?, plan_status='active', plan_cycle=?, plan_trial_ends_at=NULL, plan_active_until=?, plan_subscription_id=NULL WHERE id=? AND tipo='estabelecimento' LIMIT 1`
-    await pool.query(sql, [effectivePlan, effectiveCycle, activeUntil, estabelecimentoId])
+    await syncUserPlanContextFromSubscription(estabelecimentoId, {
+      plan: effectivePlan,
+      status: 'active',
+      billingCycle: effectiveCycle,
+      trialEndsAt: null,
+      activeUntil,
+      subscriptionId: subscription?.id || null,
+    })
     try { await getWhatsAppWalletSnapshot(estabelecimentoId) } catch {}
   }
 

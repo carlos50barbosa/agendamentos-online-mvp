@@ -2,11 +2,10 @@ import { Router } from 'express';
 import { pool } from '../lib/db.js';
 import { auth, isEstabelecimento } from '../middleware/auth.js';
 import {
-  getPlanContext,
   resolvePlanConfig,
-  isDelinquentStatus,
 } from '../lib/plans.js';
 import { saveServiceImageFromDataUrl, removeServiceImageFile } from '../lib/service_images.js';
+import { ensureSubscriptionOperationalAccess } from '../middleware/billing.js';
 
 const router = Router();
 
@@ -149,7 +148,9 @@ router.get('/', auth, isEstabelecimento, async (req, res) => {
 /**
  * POST /servicos
  */
-router.post('/', auth, isEstabelecimento, async (req, res) => {
+router.post('/', auth, isEstabelecimento, ensureSubscriptionOperationalAccess({
+  message: 'Regularize a assinatura para cadastrar novos servicos.',
+}), async (req, res) => {
   let conn;
   try {
     const estId = req.user.id;
@@ -166,16 +167,8 @@ router.post('/', auth, isEstabelecimento, async (req, res) => {
       });
     }
 
-    const planContext = await getPlanContext(estId);
+    const planContext = req.subscriptionContext?.planContext || null;
     const planConfig = planContext?.config || resolvePlanConfig('starter');
-    const planStatus = planContext?.status || 'trialing';
-
-    if (isDelinquentStatus(planStatus)) {
-      return res.status(402).json({
-        error: 'plan_delinquent',
-        message: 'Sua assinatura esta em atraso. Regularize o pagamento para cadastrar novos servicos.',
-      });
-    }
 
     let professionalIdsToLink = [];
     try {
@@ -254,7 +247,9 @@ router.post('/', auth, isEstabelecimento, async (req, res) => {
 /**
  * PUT /servicos/:id
  */
-router.put('/:id', auth, isEstabelecimento, async (req, res) => {
+router.put('/:id', auth, isEstabelecimento, ensureSubscriptionOperationalAccess({
+  message: 'Regularize a assinatura para editar servicos.',
+}), async (req, res) => {
   let conn;
   try {
     const estId = req.user.id;
@@ -377,7 +372,9 @@ router.put('/:id', auth, isEstabelecimento, async (req, res) => {
 /**
  * DELETE /servicos/:id
  */
-router.delete('/:id', auth, isEstabelecimento, async (req, res) => {
+router.delete('/:id', auth, isEstabelecimento, ensureSubscriptionOperationalAccess({
+  message: 'Regularize a assinatura para excluir servicos.',
+}), async (req, res) => {
   try {
     const estId = req.user.id;
     const serviceId = Number(req.params.id);

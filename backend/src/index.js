@@ -27,6 +27,8 @@ import otpPublicRouter from './routes/otp_public.js';
 import profissionaisRouter from './routes/profissionais.js';
 import estabelecimentoSettingsRouter from './routes/estabelecimento_settings.js';
 import { pool } from './lib/db.js';
+import { config, getOperationalHardeningWarnings } from './lib/config.js';
+import { getRateLimitMaintenanceInfo, initializeRateLimitStore, startRateLimitStoreMaintenance } from './lib/request_rate_limit.js';
 import { startMaintenance, startPublicPendingCleanup, startAppointmentPaymentCleanup } from './lib/maintenance.js';
 import { mountWebhooks } from './routes/webhooks.js';
 import { startBillingMonitor } from './lib/billing_monitor.js';
@@ -39,6 +41,12 @@ const UPLOADS_DIR = path.join(__dirname, '..', 'uploads');
 mkdir(UPLOADS_DIR, { recursive: true }).catch(() => {});
 
 const app = express();
+const whatsappWebhookPaths = [
+  '/wa/webhook',
+  '/api/wa/webhook',
+  '/webhooks/whatsapp',
+  '/api/webhooks/whatsapp',
+];
 const MP_NOTIFICATION_URL = String(process.env.MP_NOTIFICATION_URL || '').trim();
 const BILLING_ROUTES_ENABLED = (() => {
   const env = String(process.env.NODE_ENV || '').toLowerCase();
@@ -63,9 +71,15 @@ app.use(cors({
     'http://127.0.0.1:5173',
   ],
   credentials: true,
-  allowedHeaders: ['Content-Type', 'Authorization', 'Idempotency-Key', 'X-Admin-Token', 'X-Admin-Allow-Write', 'X-OTP-Token'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Idempotency-Key', 'X-Admin-Token', 'X-Admin-Allow-Write', 'X-OTP-Token', 'X-Deposit-Token', 'X-Notify-Token', 'X-Billing-Health-Token'],
 }));
 app.options('*', cors());
+app.use(whatsappWebhookPaths, express.json({
+  limit: '5mb',
+  verify: (req, _res, buf) => {
+    req.rawBody = Buffer.from(buf);
+  },
+}));
 app.use(express.json({ limit: '5mb' }));
 app.use((req, res, next) => {
   const json = res.json.bind(res);
@@ -177,6 +191,35 @@ app.use((err, req, res, _next) => {
 
 const HOST = process.env.HOST || '127.0.0.1';
 const PORT = Number(process.env.PORT || 3002);
+
+for (const warning of getOperationalHardeningWarnings(process.env, config)) {
+  const logger = warning.severity === 'error' ? console.error : console.warn;
+  logger(warning.message, { code: warning.code, severity: warning.severity });
+}
+
+const rateLimitStoreInfo = await initializeRateLimitStore({ cfg: config, dbPool: pool, logger: console });
+console.log('[security][rate-limit] store_ready', rateLimitStoreInfo);
+const rateLimitMaintenanceInfo = startRateLimitStoreMaintenance({ cfg: config, dbPool: pool, logger: console });
+console.log('[security][rate-limit] maintenance_ready', rateLimitMaintenanceInfo);
+if (rateLimitStoreInfo.fallbackReason === 'rate_limit_mysql_table_missing') {
+  console.warn(
+    '[security][rate-limit] mysql store fallback ativo; aplique a migracao backend/sql/2026-03-26-add-rate-limit-counters.sql para habilitar contadores compartilhados.'
+  );
+}
+if (rateLimitStoreInfo.fallbackReason === 'rate_limit_redis_client_missing') {
+  console.warn(
+    '[security][rate-limit] redis configurado sem client compativel no bootstrap; mantendo fallback seguro no store configurado.'
+  );
+}
+if (
+  rateLimitStoreInfo.driver === 'mysql' &&
+  !getRateLimitMaintenanceInfo().enabled &&
+  String(rateLimitStoreInfo.pruneStrategy || '') !== 'write_fallback'
+) {
+  console.warn(
+    '[security][rate-limit] store mysql ativo sem prune agendado; revise RATE_LIMIT_MYSQL_PRUNE_STRATEGY para evitar acumulacao de contadores expirados.'
+  );
+}
 
 app.listen(PORT, HOST, () => {
   console.log(`✅ Backend ouvindo em http://${HOST}:${PORT}`);

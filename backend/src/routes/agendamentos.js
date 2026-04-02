@@ -19,6 +19,7 @@ import bcrypt from 'bcryptjs';
 import { checkMonthlyAppointmentLimit, notifyAppointmentLimitReached } from '../lib/appointment_limits.js';
 import { estabNotificationsDisabled } from '../lib/estab_notifications.js';
 import { clientWhatsappDisabled, whatsappImmediateDisabled, whatsappConfirmationDisabled } from '../lib/client_notifications.js';
+import { ensureSubscriptionOperationalAccess } from '../middleware/billing.js';
 
 const router = Router();
 
@@ -600,7 +601,10 @@ router.post('/:id/deposit/pix', authRequired, isCliente, async (req, res) => {
 /* =================== Criacao =================== */
 
 // Criar agendamento (cliente)
-router.post('/', authRequired, isCliente, async (req, res) => {
+router.post('/', authRequired, isCliente, ensureSubscriptionOperationalAccess({
+  getEstabelecimentoId: (req) => req.body?.estabelecimento_id || req.body?.establishment_id || null,
+  message: 'Este estabelecimento esta com a assinatura indisponivel para novos agendamentos no momento.',
+}), async (req, res) => {
   let conn;
   let txStarted = false;
   try {
@@ -634,10 +638,6 @@ router.post('/', authRequired, isCliente, async (req, res) => {
     if (!planContext) {
       return res.status(404).json({ error: 'estabelecimento_inexistente' });
     }
-    if (isDelinquentStatus(planContext.status)) {
-      return res.status(403).json({ error: 'plan_delinquent', message: 'Este estabelecimento esta com o plano em atraso. Agendamentos temporariamente suspensos.' });
-    }
-
     const { items: serviceItems, missing } = await fetchServicesForAppointment(pool, estabelecimento_id, serviceIds);
     if (missing.length) {
       return res.status(400).json({ error: 'servico_invalido', message: 'Servico invalido ou inativo para este estabelecimento.' });
@@ -1164,7 +1164,9 @@ router.post('/', authRequired, isCliente, async (req, res) => {
 
 
 // Criar agendamento (estabelecimento)
-router.post('/estabelecimento', authRequired, isEstabelecimento, async (req, res) => {
+router.post('/estabelecimento', authRequired, isEstabelecimento, ensureSubscriptionOperationalAccess({
+  message: 'Regularize a assinatura para criar agendamentos.',
+}), async (req, res) => {
   let conn;
   let txStarted = false;
   try {
@@ -1240,10 +1242,6 @@ router.post('/estabelecimento', authRequired, isEstabelecimento, async (req, res
     if (!planContext) {
       return res.status(404).json({ error: 'estabelecimento_inexistente' });
     }
-    if (isDelinquentStatus(planContext.status)) {
-      return res.status(403).json({ error: 'plan_delinquent', message: 'Este estabelecimento esta com o plano em atraso. Agendamentos temporariamente suspensos.' });
-    }
-
     const { items: serviceItems, missing } = await fetchServicesForAppointment(pool, estabelecimento_id, serviceIds);
     if (missing.length) return res.status(400).json({ error: 'servico_invalido' });
     if (serviceItems.some((item) => !Number.isFinite(item.duracao_min) || item.duracao_min <= 0)) {
@@ -1644,7 +1642,9 @@ router.post('/estabelecimento', authRequired, isEstabelecimento, async (req, res
 /* =================== Reagendamento (estabelecimento) =================== */
 
 // Reagendar (estabelecimento)
-router.put('/:id/reschedule-estab', authRequired, isEstabelecimento, async (req, res) => {
+router.put('/:id/reschedule-estab', authRequired, isEstabelecimento, ensureSubscriptionOperationalAccess({
+  message: 'Regularize a assinatura para reagendar atendimentos.',
+}), async (req, res) => {
   let conn;
   let txStarted = false;
   try {
@@ -1662,14 +1662,6 @@ router.put('/:id/reschedule-estab', authRequired, isEstabelecimento, async (req,
     }
     if (inicioDate.getTime() <= Date.now()) {
       return res.status(400).json({ error: 'past_datetime', message: 'Não é possível reagendar no passado.' });
-    }
-
-    const planContext = await getPlanContext(estId);
-    if (planContext && isDelinquentStatus(planContext.status)) {
-      return res.status(403).json({
-        error: 'plan_delinquent',
-        message: 'Sua assinatura esta em atraso. Reagendamentos temporariamente suspensos.',
-      });
     }
 
     conn = await pool.getConnection();

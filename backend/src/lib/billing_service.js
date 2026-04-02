@@ -42,7 +42,7 @@ export class BillingService {
        FROM subscriptions s
        JOIN billing_plans bp ON bp.code = s.plan
        WHERE s.estabelecimento_id = ?
-         AND s.status IN ('active','trialing')
+         AND s.status IN ('active','trialing','past_due','pending_payment','pending_pix')
        ORDER BY s.current_period_end DESC, s.id DESC
        LIMIT 1`,
       [estabelecimentoId]

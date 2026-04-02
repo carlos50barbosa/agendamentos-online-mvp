@@ -29,7 +29,7 @@ CREATE TABLE IF NOT EXISTS usuarios (
   senha_hash   VARCHAR(200)          NOT NULL,
   tipo         ENUM('cliente','estabelecimento') NOT NULL,
   plan         ENUM('starter','pro','premium') NOT NULL DEFAULT 'starter',
-  plan_status  ENUM('trialing','active','delinquent') NOT NULL DEFAULT 'trialing',
+  plan_status  ENUM('trialing','active','pending_payment','pending_pix','past_due','unpaid','expired','canceled') NOT NULL DEFAULT 'trialing',
   plan_cycle   ENUM('mensal','anual') NOT NULL DEFAULT 'mensal',
   plan_trial_ends_at DATETIME       NULL,
   plan_active_until DATETIME       NULL,
@@ -378,6 +378,52 @@ CREATE TABLE IF NOT EXISTS billing_payment_reminders (
   KEY idx_reminder_due (due_date),
   CONSTRAINT fk_billing_reminder_estab FOREIGN KEY (estabelecimento_id)
     REFERENCES usuarios(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+CREATE TABLE IF NOT EXISTS subscriptions (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  estabelecimento_id INT NOT NULL,
+  plan ENUM('starter','pro','premium') NOT NULL,
+  gateway VARCHAR(40) NOT NULL DEFAULT 'mercadopago',
+  payment_method ENUM('credit_card','pix') NOT NULL DEFAULT 'pix',
+  gateway_customer_id VARCHAR(80) NULL,
+  gateway_subscription_id VARCHAR(80) NULL,
+  gateway_payment_id VARCHAR(80) NULL,
+  gateway_preference_id VARCHAR(80) NULL,
+  external_reference VARCHAR(120) NULL,
+  status ENUM('trialing','active','pending_payment','pending_pix','past_due','unpaid','expired','canceled') NOT NULL DEFAULT 'pending_pix',
+  amount_cents INT NOT NULL,
+  currency CHAR(3) NOT NULL DEFAULT 'BRL',
+  billing_cycle ENUM('mensal','anual') NOT NULL DEFAULT 'mensal',
+  trial_ends_at DATETIME NULL,
+  current_period_start DATETIME NULL,
+  current_period_end DATETIME NULL,
+  next_billing_at DATETIME NULL,
+  grace_until DATETIME NULL,
+  last_payment_at DATETIME NULL,
+  cancel_at DATETIME NULL,
+  canceled_at DATETIME NULL,
+  last_event_id VARCHAR(80) NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_subscriptions_gateway (gateway_subscription_id),
+  INDEX idx_subscriptions_estab (estabelecimento_id),
+  INDEX idx_subscriptions_estab_status (estabelecimento_id, status),
+  INDEX idx_subscriptions_gateway_payment (gateway_payment_id),
+  INDEX idx_subscriptions_next_billing (next_billing_at),
+  CONSTRAINT fk_subscriptions_estab FOREIGN KEY (estabelecimento_id) REFERENCES usuarios(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+CREATE TABLE IF NOT EXISTS subscription_events (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  subscription_id INT NOT NULL,
+  event_type VARCHAR(80) NOT NULL,
+  gateway_event_id VARCHAR(120) NULL,
+  payload LONGTEXT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_subscription_events_sub (subscription_id),
+  INDEX idx_subscription_events_event (event_type, gateway_event_id),
+  CONSTRAINT fk_subscription_events_sub FOREIGN KEY (subscription_id) REFERENCES subscriptions(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 CREATE TABLE IF NOT EXISTS auditoria (

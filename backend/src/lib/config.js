@@ -26,6 +26,16 @@ function requireAny(...names) {
   return value
 }
 
+function getAnyFromEnv(envObject, ...names) {
+  for (const n of names) {
+    const value = envObject?.[n]
+    if (value !== undefined && value !== null && String(value).trim() !== '') {
+      return String(value).trim()
+    }
+  }
+  return undefined
+}
+
 function parseBool(value, fallback = false) {
   if (value === undefined || value === null) return fallback
   const normalized = String(value).trim().toLowerCase()
@@ -33,6 +43,23 @@ function parseBool(value, fallback = false) {
   if (['1', 'true', 'yes', 'on'].includes(normalized)) return true
   if (['0', 'false', 'no', 'off'].includes(normalized)) return false
   return fallback
+}
+
+function parsePositiveInt(value, fallback) {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) && parsed > 0 ? Math.round(parsed) : fallback
+}
+
+function parseLowerString(value, fallback) {
+  const normalized = String(value ?? '').trim().toLowerCase()
+  return normalized || fallback
+}
+
+function parseNullableIsoDate(value) {
+  const normalized = String(value ?? '').trim()
+  if (!normalized) return null
+  const parsed = new Date(normalized)
+  return Number.isFinite(parsed.getTime()) ? parsed.toISOString() : null
 }
 
 export const config = {
@@ -46,6 +73,46 @@ export const config = {
   app: {
     port: Number(getAny('PORT') || 3002),
     jwtSecret: requireAny('JWT_SECRET'),
+  },
+  security: {
+    rateLimit: {
+      store: {
+        driver: parseLowerString(getAny('RATE_LIMIT_STORE', 'RATE_LIMIT_DRIVER'), 'memory'),
+        fallbackDriver: parseLowerString(getAny('RATE_LIMIT_FALLBACK_STORE'), 'memory'),
+        mysqlTable: getAny('RATE_LIMIT_MYSQL_TABLE') || 'rate_limit_counters',
+        mysqlPruneStrategy: parseLowerString(getAny('RATE_LIMIT_MYSQL_PRUNE_STRATEGY'), 'interval'),
+        mysqlPruneIntervalMs: parsePositiveInt(getAny('RATE_LIMIT_MYSQL_PRUNE_INTERVAL_MS') || 300000, 300000),
+        mysqlPruneBatchSize: parsePositiveInt(getAny('RATE_LIMIT_MYSQL_PRUNE_BATCH_SIZE') || 500, 500),
+        mysqlPruneMaxBatchesPerRun: parsePositiveInt(getAny('RATE_LIMIT_MYSQL_PRUNE_MAX_BATCHES_PER_RUN') || 5, 5),
+        redisUrl: getAny('RATE_LIMIT_REDIS_URL') || null,
+        redisKeyPrefix: getAny('RATE_LIMIT_REDIS_KEY_PREFIX') || 'rate-limit:',
+      },
+      notify: {
+        windowMs: parsePositiveInt(getAny('NOTIFY_RATE_LIMIT_WINDOW_MS') || 60000, 60000),
+        max: parsePositiveInt(getAny('NOTIFY_RATE_LIMIT_MAX') || 20, 20),
+      },
+      paymentStatusPublic: {
+        windowMs: parsePositiveInt(getAny('PAYMENT_STATUS_RATE_LIMIT_WINDOW_MS') || 60000, 60000),
+        max: parsePositiveInt(getAny('PAYMENT_STATUS_RATE_LIMIT_MAX') || 60, 60),
+      },
+    },
+    telemetry: {
+      webhookInvalidSignature: {
+        windowMs: parsePositiveInt(getAny('WEBHOOK_INVALID_SIGNATURE_ALERT_WINDOW_MS') || 60000, 60000),
+        threshold: parsePositiveInt(getAny('WEBHOOK_INVALID_SIGNATURE_ALERT_THRESHOLD') || 20, 20),
+      },
+      legacyWebhookHits: {
+        windowMs: parsePositiveInt(getAny('LEGACY_WEBHOOK_HIT_ALERT_WINDOW_MS') || 60000, 60000),
+        threshold: parsePositiveInt(getAny('LEGACY_WEBHOOK_HIT_ALERT_THRESHOLD') || 120, 120),
+      },
+    },
+    payments: {
+      legacyQueryToken: {
+        enabled: parseBool(getAny('PAYMENTS_LEGACY_QUERY_TOKEN_ENABLED'), true),
+        sunsetAt: parseNullableIsoDate(getAny('PAYMENTS_LEGACY_QUERY_TOKEN_SUNSET_AT')),
+        deprecationUrl: getAny('PAYMENTS_LEGACY_QUERY_TOKEN_DEPRECATION_URL') || null,
+      },
+    },
   },
   billing: {
     provider: getAny('BILLING_PROVIDER', 'PAYMENT_PROVIDER') || 'mercadopago',
@@ -72,12 +139,98 @@ export const config = {
     },
     reminders: {
       warnDays: Number(getAny('BILLING_WARN_DAYS', 'BILLING_REMINDER_WARN_DAYS') || 3) || 3,
-      graceDays: Number(getAny('BILLING_GRACE_DAYS', 'BILLING_REMINDER_GRACE_DAYS') || 3) || 3,
+      graceDays: Number(getAny('SUBSCRIPTION_GRACE_DAYS', 'BILLING_GRACE_DAYS', 'BILLING_REMINDER_GRACE_DAYS') || 3) || 3,
       intervalMs: Number(getAny('BILLING_MONITOR_INTERVAL_MS', 'BILLING_REMINDER_INTERVAL_MS') || 30 * 60 * 1000) || 30 * 60 * 1000,
       disabled: parseBool(getAny('BILLING_REMINDERS_DISABLED', 'BILLING_MONITOR_DISABLED'), false),
       paymentUrl: getAny('BILLING_PAYMENT_URL', 'BILLING_REMINDER_PAYMENT_URL') || null,
     },
   },
+}
+
+export function getOperationalHardeningWarnings(env = process.env, cfg = config) {
+  const nodeEnv = String(env.NODE_ENV || '').trim().toLowerCase()
+  const severity = nodeEnv === 'production' ? 'error' : 'warn'
+  const warnings = []
+  const waAppSecret = getAnyFromEnv(env, 'WA_APP_SECRET', 'WHATSAPP_APP_SECRET', 'META_APP_SECRET') || ''
+  const waAllowUnsigned = parseBool(getAnyFromEnv(env, 'WA_WEBHOOK_ALLOW_UNSIGNED', 'WHATSAPP_WEBHOOK_ALLOW_UNSIGNED'), false)
+
+  if (!waAppSecret) {
+    warnings.push({
+      code: 'wa_app_secret_missing',
+      severity,
+      message: '[security][wa/webhook] WA_APP_SECRET ausente; POSTs do webhook oficial aceitam payloads sem assinatura valida.',
+    })
+  }
+  if (waAllowUnsigned) {
+    warnings.push({
+      code: 'wa_allow_unsigned_enabled',
+      severity,
+      message: '[security][wa/webhook] WA_WEBHOOK_ALLOW_UNSIGNED=true; assinatura do webhook oficial esta em modo permissivo.',
+    })
+  }
+  if (cfg.billing?.mercadopago?.allowUnsigned) {
+    warnings.push({
+      code: 'mercadopago_allow_unsigned_enabled',
+      severity,
+      message: '[security][mercadopago] MERCADOPAGO_ALLOW_UNSIGNED/BILLING_ALLOW_UNSIGNED habilitado; webhooks sem assinatura serao aceitos.',
+    })
+  }
+  if (
+    cfg.security?.rateLimit?.store?.driver === 'memory' &&
+    nodeEnv === 'production'
+  ) {
+    warnings.push({
+      code: 'rate_limit_memory_store',
+      severity: 'warn',
+      message: '[security][rate-limit] RATE_LIMIT_STORE=memory; multiplas instancias nao compartilharao contadores de abuso.',
+    })
+  }
+  if (
+    cfg.security?.rateLimit?.store?.driver === 'mysql' &&
+    String(cfg.security?.rateLimit?.store?.mysqlPruneStrategy || '').toLowerCase() === 'write_fallback'
+  ) {
+    warnings.push({
+      code: 'rate_limit_mysql_write_prune_enabled',
+      severity: 'warn',
+      message: '[security][rate-limit] RATE_LIMIT_MYSQL_PRUNE_STRATEGY=write_fallback adiciona deletes no write path; prefira prune em intervalo para reduzir custo operacional.',
+    })
+  }
+  if (
+    cfg.security?.rateLimit?.store?.driver === 'mysql' &&
+    String(cfg.security?.rateLimit?.store?.mysqlPruneStrategy || '').toLowerCase() === 'off'
+  ) {
+    warnings.push({
+      code: 'rate_limit_mysql_prune_disabled',
+      severity: 'warn',
+      message: '[security][rate-limit] RATE_LIMIT_MYSQL_PRUNE_STRATEGY=off desliga a limpeza da store MySQL; contadores expirados vao se acumular.',
+    })
+  }
+  if (cfg.security?.rateLimit?.store?.driver === 'redis' && !cfg.security?.rateLimit?.store?.redisUrl) {
+    warnings.push({
+      code: 'rate_limit_redis_url_missing',
+      severity: 'warn',
+      message: '[security][rate-limit] RATE_LIMIT_STORE=redis sem RATE_LIMIT_REDIS_URL; o bootstrap precisa injetar um client Redis compativel ou o store fara fallback.',
+    })
+  }
+  const legacyQueryTokenSunsetAt = cfg.security?.payments?.legacyQueryToken?.sunsetAt
+  if (cfg.security?.payments?.legacyQueryToken?.enabled === false) {
+    warnings.push({
+      code: 'payments_legacy_query_token_disabled',
+      severity: 'warn',
+      message: '[security][payments] PAYMENTS_LEGACY_QUERY_TOKEN_ENABLED=false; chamadas publicas com ?token= vao ser negadas e devem migrar para X-Deposit-Token.',
+    })
+  }
+  if (legacyQueryTokenSunsetAt) {
+    const sunsetAtMs = new Date(legacyQueryTokenSunsetAt).getTime()
+    if (Number.isFinite(sunsetAtMs) && sunsetAtMs <= Date.now()) {
+      warnings.push({
+        code: 'payments_legacy_query_token_sunset_elapsed',
+        severity: 'warn',
+        message: '[security][payments] PAYMENTS_LEGACY_QUERY_TOKEN_SUNSET_AT ja passou; monitore o uso legado antes de remover o fallback ?token=.',
+      })
+    }
+  }
+  return warnings
 }
 
 export const env = { getAny, requireAny }

@@ -30,8 +30,30 @@ const BILLING_CYCLE_LABELS = {
   anual: 'Anual',
 };
 
+const PAYMENT_METHOD_LABELS = {
+  credit_card: 'Cartão',
+  pix: 'PIX',
+};
+
+const FINANCIAL_EVENT_LABELS = {
+  subscription_created: 'Assinatura criada',
+  payment_approved: 'Pagamento aprovado',
+  payment_failed: 'Pagamento falhou',
+  payment_pending: 'Pagamento pendente',
+  pix_generated: 'PIX gerado',
+  pix_paid: 'PIX pago',
+  pix_expired: 'PIX expirado',
+  subscription_renewed: 'Assinatura renovada',
+  subscription_canceled: 'Assinatura cancelada',
+  subscription_blocked: 'Assinatura bloqueada',
+  payment_method_changed: 'Forma de pagamento alterada',
+  subscription_updated: 'Assinatura atualizada',
+  subscription_state_corrected: 'Estado sincronizado',
+};
+
 const PIX_POLL_INTERVAL_MS = 2000;
 const PIX_POLL_MAX_ATTEMPTS = 60;
+let mercadoPagoSdkPromise = null;
 
 function getErrorMessage(error, fallback) {
   return error?.data?.message || error?.message || fallback;
@@ -83,11 +105,11 @@ function getStatusLabel(value) {
   const map = {
     trialing: 'Teste gratuito',
     active: 'Ativo',
-    authorized: 'Ativo',
     pending: 'Pagamento pendente',
-    paused: 'Pausado',
-    past_due: 'Em atraso',
-    delinquent: 'Em atraso',
+    pending_payment: 'Aguardando cartão',
+    pending_pix: 'PIX pendente',
+    past_due: 'Cartão recusado',
+    unpaid: 'Inadimplente',
     canceled: 'Cancelado',
     cancelled: 'Cancelado',
     expired: 'Expirado',
@@ -100,11 +122,16 @@ function getStatusLabel(value) {
 
 function getStatusTone(value) {
   const key = normalizeStatusKey(value);
-  if (['active', 'authorized'].includes(key)) return 'success';
+  if (['active'].includes(key)) return 'success';
   if (['trialing', 'due_soon'].includes(key)) return 'info';
-  if (['pending', 'paused', 'past_due', 'overdue'].includes(key)) return 'warning';
-  if (['delinquent', 'blocked', 'expired', 'canceled', 'cancelled'].includes(key)) return 'danger';
+  if (['pending_payment', 'pending_pix', 'past_due', 'overdue', 'pending'].includes(key)) return 'warning';
+  if (['unpaid', 'blocked', 'expired', 'canceled', 'cancelled'].includes(key)) return 'danger';
   return 'neutral';
+}
+
+function getPaymentMethodLabel(value) {
+  const key = String(value || '').toLowerCase();
+  return PAYMENT_METHOD_LABELS[key] || (key ? key : 'Não definido');
 }
 
 function getLimitLabel(limit) {
@@ -171,6 +198,31 @@ function clearIntentStorage() {
   } catch {}
 }
 
+async function loadMercadoPagoSdk() {
+  if (typeof window === 'undefined') throw new Error('browser_unavailable');
+  if (window.MercadoPago) return window.MercadoPago;
+  if (mercadoPagoSdkPromise) return mercadoPagoSdkPromise;
+
+  mercadoPagoSdkPromise = new Promise((resolve, reject) => {
+    const existing = document.querySelector('script[data-mercadopago-sdk="true"]');
+    if (existing) {
+      existing.addEventListener('load', () => resolve(window.MercadoPago), { once: true });
+      existing.addEventListener('error', () => reject(new Error('sdk_load_failed')), { once: true });
+      return;
+    }
+
+    const script = document.createElement('script');
+    script.src = 'https://sdk.mercadopago.com/js/v2';
+    script.async = true;
+    script.dataset.mercadopagoSdk = 'true';
+    script.onload = () => resolve(window.MercadoPago);
+    script.onerror = () => reject(new Error('sdk_load_failed'));
+    document.head.appendChild(script);
+  });
+
+  return mercadoPagoSdkPromise;
+}
+
 function UsageCard({ label, value, hint, tone = 'ok' }) {
   return (
     <div className={`subscription-page__usage-card subscription-page__usage-card--${tone}`}>
@@ -202,6 +254,28 @@ function HistoryRow({ item }) {
   );
 }
 
+function FinancialEventRow({ item }) {
+  const eventLabel = FINANCIAL_EVENT_LABELS[item?.event_type] || String(item?.event_type || 'Evento');
+  const statusLabel = getStatusLabel(item?.status);
+  const statusTone = getStatusTone(item?.status);
+  const planLabel = PLAN_META[normalizePlanKey(item?.plan)]?.label || String(item?.plan || 'Plano');
+  const paymentMethodLabel = getPaymentMethodLabel(item?.payment_method);
+  return (
+    <li className="subscription-page__history-item">
+      <div>
+        <strong>{eventLabel}</strong>
+        <span className="muted">{planLabel} • {paymentMethodLabel}</span>
+      </div>
+      <div>
+        <span className={`subscription-page__status-chip subscription-page__status-chip--${statusTone}`}>
+          {statusLabel}
+        </span>
+        <span className="muted">{formatDateTime(item?.created_at)}</span>
+      </div>
+    </li>
+  );
+}
+
 export default function Assinatura() {
   const user = useMemo(() => getUser(), []);
   const navigate = useNavigate();
@@ -219,11 +293,14 @@ export default function Assinatura() {
   const [trialLoading, setTrialLoading] = useState(false);
   const [checkoutLoading, setCheckoutLoading] = useState(false);
   const [renewalLoading, setRenewalLoading] = useState(false);
+  const [cardState, setCardState] = useState({ ready: false, loading: false, submitting: false, error: '' });
   const [pixModal, setPixModal] = useState({ open: false, data: null });
   const [pixConfirmed, setPixConfirmed] = useState(false);
   const [pixNotice, setPixNotice] = useState('');
   const [pixCopyNotice, setPixCopyNotice] = useState('');
 
+  const cardFormRef = useRef(null);
+  const cardSubmittingRef = useRef(false);
   const pixIntervalRef = useRef(null);
   const pixAttemptsRef = useRef(0);
   const pixBusyRef = useRef(false);
@@ -294,6 +371,10 @@ export default function Assinatura() {
     void refreshData();
     return () => {
       clearPixPolling();
+      try {
+        cardFormRef.current?.unmount?.();
+      } catch {}
+      cardFormRef.current = null;
     };
   }, [clearPixPolling, refreshData]);
 
@@ -317,6 +398,13 @@ export default function Assinatura() {
     billingStatus?.subscription?.currentPeriodEnd ||
     planContext?.active_until ||
     null;
+  const currentPaymentMethod =
+    subscriptionData?.subscription?.payment_method ||
+    billingStatus?.subscription?.paymentMethod ||
+    'pix';
+  const accessMode = String(billingStatus?.access?.mode || '').toLowerCase() || 'full';
+  const coreFeaturesAllowed = billingStatus?.access?.core_features_allowed !== false;
+  const cardGatewayPublicKey = billingStatus?.payment_methods?.public_key || null;
   const trialInfo = billingStatus?.trial || {};
   const trialEndsAt = trialInfo?.endsAt || planContext?.trial?.ends_at || null;
   const trialDaysLeft =
@@ -332,6 +420,16 @@ export default function Assinatura() {
   const currentPlanPriceCents = currentCycle === 'anual' ? planMeta.annualPriceCents : planMeta.priceCents;
   const checkoutCycle = selectedCycle || currentCycle || 'mensal';
   const selectedPlanPriceCents = checkoutCycle === 'anual' ? planMeta.annualPriceCents : planMeta.priceCents;
+  const paymentMethodLabel = getPaymentMethodLabel(currentPaymentMethod);
+  const cardAction = useMemo(() => {
+    if (currentPaymentMethod === 'credit_card' && ['past_due', 'pending_payment'].includes(planStatusKey)) {
+      return { mode: 'update', label: 'Regularizar com outro cartao' };
+    }
+    if (currentPaymentMethod === 'credit_card') {
+      return { mode: 'update', label: 'Trocar cartao' };
+    }
+    return { mode: 'subscribe', label: 'Assinar com cartao' };
+  }, [currentPaymentMethod, planStatusKey]);
 
   const appointmentUsage = useMemo(() => {
     const data = planContext?.usage?.appointments || {};
@@ -382,6 +480,11 @@ export default function Assinatura() {
     const list = Array.isArray(subscriptionData?.history) ? subscriptionData.history : [];
     return list.slice(0, 6);
   }, [subscriptionData?.history]);
+
+  const financialEvents = useMemo(() => {
+    const list = Array.isArray(subscriptionData?.events) ? subscriptionData.events : [];
+    return list.slice(0, 10);
+  }, [subscriptionData?.events]);
 
   const nextDueLabel = renewalRequired
     ? formatDateLong(billingStatus?.due_at || activeUntil)
@@ -497,6 +600,132 @@ export default function Assinatura() {
       setRenewalLoading(false);
     }
   }, [establishmentId, openPixModal, refreshData, renewalLoading]);
+
+  const handleSubmitCard = useCallback(async (cardFormData) => {
+    if (!establishmentId || cardSubmittingRef.current) return false;
+    cardSubmittingRef.current = true;
+    setCardState((current) => ({ ...current, submitting: true, error: '' }));
+    setNotice({ type: '', message: '' });
+
+    try {
+      const payload = {
+        plan: planKey,
+        billing_cycle: checkoutCycle,
+        card_token: cardFormData?.token,
+        payer_email: cardFormData?.cardholderEmail || user?.email || '',
+        payment_method_id: cardFormData?.paymentMethodId || null,
+        issuer_id: cardFormData?.issuerId || null,
+        identification_type: cardFormData?.identificationType || null,
+        identification_number: cardFormData?.identificationNumber || null,
+      };
+
+      if (!payload.card_token) {
+        throw new Error('Nao foi possivel tokenizar o cartao.');
+      }
+
+      if (cardAction.mode === 'update') {
+        await Api.billingCardUpdate(payload);
+      } else {
+        await Api.billingCardSubscribe(payload);
+      }
+
+      await refreshData({ silent: true });
+      setNotice({
+        type: 'success',
+        message: cardAction.mode === 'update'
+          ? 'Cartao atualizado. Vamos sincronizar a cobranca recorrente automaticamente.'
+          : 'Assinatura enviada no cartao. A renovacao automatica passa a ser o fluxo principal.',
+      });
+      return true;
+    } catch (requestError) {
+      const message = getErrorMessage(requestError, 'Falha ao processar o cartao agora.');
+      setCardState((current) => ({ ...current, error: message }));
+      setNotice({ type: 'error', message });
+      return false;
+    } finally {
+      cardSubmittingRef.current = false;
+      setCardState((current) => ({ ...current, submitting: false }));
+    }
+  }, [cardAction.mode, checkoutCycle, establishmentId, planKey, refreshData, user?.email]);
+
+  useEffect(() => {
+    if (!isEstablishment || !cardGatewayPublicKey) {
+      setCardState((current) => ({ ...current, ready: false, error: '' }));
+      return undefined;
+    }
+    let cancelled = false;
+
+    const mountCardForm = async () => {
+      setCardState((current) => ({ ...current, loading: true, error: '' }));
+      try {
+        const MercadoPagoCtor = await loadMercadoPagoSdk();
+        if (cancelled) return;
+
+        try {
+          cardFormRef.current?.unmount?.();
+        } catch {}
+
+        const mp = new MercadoPagoCtor(cardGatewayPublicKey, { locale: 'pt-BR' });
+        const amount = (selectedPlanPriceCents / 100).toFixed(2);
+        const cardForm = mp.cardForm({
+          amount,
+          iframe: true,
+          form: {
+            id: 'subscription-card-form',
+            cardNumber: { id: 'subscription-card-number', placeholder: 'Numero do cartao' },
+            expirationDate: { id: 'subscription-card-expiration', placeholder: 'MM/AA' },
+            securityCode: { id: 'subscription-card-security-code', placeholder: 'CVV' },
+            cardholderName: { id: 'subscription-cardholder-name', placeholder: 'Titular do cartao' },
+            issuer: { id: 'subscription-card-issuer', placeholder: 'Banco emissor' },
+            installments: { id: 'subscription-card-installments', placeholder: 'Parcelas' },
+            identificationType: { id: 'subscription-card-id-type', placeholder: 'Documento' },
+            identificationNumber: { id: 'subscription-card-id-number', placeholder: 'Numero do documento' },
+            cardholderEmail: { id: 'subscription-card-email', placeholder: 'E-mail' },
+          },
+          callbacks: {
+            onFormMounted: (error) => {
+              if (cancelled) return;
+              if (error) {
+                setCardState((current) => ({
+                  ...current,
+                  ready: false,
+                  loading: false,
+                  error: 'Nao foi possivel montar o formulario do cartao.',
+                }));
+                return;
+              }
+              setCardState((current) => ({ ...current, ready: true, loading: false, error: '' }));
+            },
+            onSubmit: async (event) => {
+              event.preventDefault();
+              const data = cardForm.getCardFormData();
+              await handleSubmitCard(data);
+            },
+          },
+        });
+
+        cardFormRef.current = cardForm;
+      } catch (sdkError) {
+        if (cancelled) return;
+        setCardState((current) => ({
+          ...current,
+          ready: false,
+          loading: false,
+          error: 'Nao foi possivel carregar o SDK de cartao do gateway.',
+        }));
+      }
+    };
+
+    void mountCardForm();
+
+    return () => {
+      cancelled = true;
+      try {
+        cardFormRef.current?.unmount?.();
+      } catch {}
+      cardFormRef.current = null;
+    };
+  }, [cardGatewayPublicKey, handleSubmitCard, isEstablishment, selectedPlanPriceCents]);
 
   const refreshRenewalPixStatus = useCallback(async ({ silent = true } = {}) => {
     if (!isRenewalPix || !pixPaymentId || pixBusyRef.current) return null;
@@ -684,6 +913,13 @@ export default function Assinatura() {
       {!loading && notice.message ? (
         <div className={notice.type ? `notice notice--${notice.type}` : 'notice'}>{notice.message}</div>
       ) : null}
+      {!loading && accessMode !== 'full' ? (
+        <div className={`notice notice--${coreFeaturesAllowed ? 'warn' : 'error'}`}>
+          {coreFeaturesAllowed
+            ? 'Existe uma cobranca pendente. Regularize cartao ou PIX para evitar bloqueio.'
+            : 'As funcionalidades principais estao bloqueadas ate a regularizacao. Login, assinatura, PIX e historico financeiro continuam liberados.'}
+        </div>
+      ) : null}
 
       <div className="subscription-page__summary-grid">
         <div className="settings-module-card subscription-page__summary-card">
@@ -698,11 +934,13 @@ export default function Assinatura() {
           <span className="subscription-page__eyebrow">Proximo marco</span>
           <h3>{nextDueLabel}</h3>
           <p className="muted">
-            {renewalRequired
-              ? 'Regularize a renovacao para manter o acesso sem interrupcoes.'
-              : activeUntil
-                ? 'Ciclo atual registrado no backend de cobranca.'
-                : 'Sem vencimento confirmado no momento.'}
+            {planStatusKey === 'past_due'
+              ? 'Cartao falhou. Regularize dentro da tolerancia para evitar bloqueio.'
+              : renewalRequired
+                ? 'Existe renovacao manual ou cobranca pendente para resolver.'
+                : activeUntil
+                  ? 'Ciclo atual registrado no backend de cobranca.'
+                  : 'Sem vencimento confirmado no momento.'}
           </p>
         </div>
 
@@ -725,9 +963,13 @@ export default function Assinatura() {
         </div>
 
         <div className="settings-module-card subscription-page__summary-card">
-          <span className="subscription-page__eyebrow">Referencia para novo PIX</span>
-          <h3>{formatCurrencyFromCents(selectedPlanPriceCents)}</h3>
-          <p className="muted">Ciclo selecionado: {BILLING_CYCLE_LABELS[checkoutCycle] || 'Mensal'}.</p>
+          <span className="subscription-page__eyebrow">Forma principal</span>
+          <h3>{paymentMethodLabel}</h3>
+          <p className="muted">
+            {currentPaymentMethod === 'credit_card'
+              ? 'Renovacao automatica habilitada no cartao.'
+              : `PIX manual ativo. Referencia atual: ${formatCurrencyFromCents(selectedPlanPriceCents)}.`}
+          </p>
         </div>
       </div>
 
@@ -791,13 +1033,13 @@ export default function Assinatura() {
         <aside className="settings-module-card subscription-page__aside-card">
           <div className="subscription-page__section-head subscription-page__section-head--compact">
             <div>
-              <h3>Acoes</h3>
-              <p className="muted">Renovacao, trial e checkout via PIX.</p>
+              <h3>PIX manual</h3>
+              <p className="muted">Use PIX para primeira assinatura, renovacao, reativacao ou contingencia.</p>
             </div>
           </div>
 
           <label className="label subscription-page__cycle-field">
-            <span>Ciclo para novo PIX</span>
+            <span>Ciclo para PIX</span>
             <select className="input" value={checkoutCycle} onChange={(event) => setSelectedCycle(event.target.value)}>
               <option value="mensal">Mensal</option>
               <option value="anual">Anual</option>
@@ -811,64 +1053,132 @@ export default function Assinatura() {
               </button>
             ) : null}
 
-            {openRenewalPayment ? (
-              <button type="button" className="btn btn--primary" onClick={handleOpenPendingRenewal}>
-                Ver PIX pendente
-              </button>
-            ) : null}
-
-            {!openRenewalPayment && renewalRequired ? (
-              <button type="button" className="btn btn--primary" onClick={() => void handleGenerateRenewalPix()} disabled={renewalLoading}>
-                {renewalLoading ? <span className="spinner" /> : 'Gerar PIX de renovacao'}
-              </button>
-            ) : null}
-
-            <button
-              type="button"
-              className="btn btn--outline"
-              onClick={() => void handleStartCheckout(planKey, checkoutCycle)}
-              disabled={checkoutLoading}
-            >
-              {checkoutLoading ? <span className="spinner" /> : `Gerar PIX do ${planMeta.label}`}
-            </button>
-
             <Link className="btn btn--ghost" to="/planos#planos">
               Ver comparativo completo
             </Link>
           </div>
 
           <div className="subscription-page__callout">
-            <strong>Situacao atual</strong>
+            <strong>Regra do PIX</strong>
             <p className="muted">
-              {renewalRequired
-                ? 'Existe necessidade de renovacao. O pagamento por PIX libera a assinatura automaticamente apos a confirmacao.'
-                : planStatusKey === 'trialing'
-                  ? 'Sua conta esta em periodo de teste. Voce pode contratar antes do fim ou aguardar ate a data limite.'
-                  : 'A assinatura atual esta registrada e os limites abaixo refletem o plano aplicado hoje.'}
+              PIX nao renova sozinho. Se a cobranca vencer sem pagamento, a assinatura nao continua automaticamente e o acesso principal pode ser bloqueado.
             </p>
           </div>
         </aside>
       </div>
 
+      <section className="settings-module-card subscription-page__payments-card">
+        <div className="subscription-page__section-head">
+          <div>
+            <h3>Forma de pagamento</h3>
+            <p className="muted">Cartao de credito e o metodo principal com renovacao automatica. PIX continua como alternativa manual.</p>
+          </div>
+          <div className={`subscription-page__status-chip subscription-page__status-chip--${currentPaymentMethod === 'credit_card' ? 'success' : 'warning'}`}>
+            {paymentMethodLabel}
+          </div>
+        </div>
+
+        <div className="subscription-page__payment-grid">
+          <div className="subscription-page__payment-panel subscription-page__payment-panel--recommended">
+            <span className="subscription-page__payment-tag">Recomendado</span>
+            <h4>Cartao de credito</h4>
+            <p className="muted">Renovacao automatica, sem interrupcoes enquanto as cobrancas forem aprovadas.</p>
+            <form id="subscription-card-form" className="subscription-page__card-form">
+              <div id="subscription-card-number" className="input subscription-page__card-frame" />
+              <div className="subscription-page__card-inline">
+                <div id="subscription-card-expiration" className="input subscription-page__card-frame" />
+                <div id="subscription-card-security-code" className="input subscription-page__card-frame" />
+              </div>
+              <input id="subscription-cardholder-name" className="input" placeholder="Titular do cartao" />
+              <div className="subscription-page__card-inline">
+                <select id="subscription-card-issuer" className="input" defaultValue="" />
+                <select id="subscription-card-installments" className="input" defaultValue="" />
+              </div>
+              <div className="subscription-page__card-inline">
+                <select id="subscription-card-id-type" className="input" defaultValue="" />
+                <input id="subscription-card-id-number" className="input" placeholder="Numero do documento" />
+              </div>
+              <input id="subscription-card-email" className="input" type="email" placeholder="E-mail" defaultValue={user?.email || ''} />
+              <button
+                id="subscription-card-submit"
+                type="submit"
+                className="btn btn--primary"
+                disabled={cardState.loading || cardState.submitting || !cardGatewayPublicKey}
+              >
+                {cardState.submitting
+                  ? <span className="spinner" />
+                  : cardAction.label}
+              </button>
+            </form>
+            {cardState.loading ? <span className="muted">Carregando formulario seguro do gateway...</span> : null}
+            {cardState.error ? <span className="muted" style={{ color: '#b91c1c' }}>{cardState.error}</span> : null}
+          </div>
+
+          <div className="subscription-page__payment-panel">
+            <span className="subscription-page__payment-tag subscription-page__payment-tag--manual">Manual</span>
+            <h4>PIX</h4>
+            <p className="muted">Gere um PIX para contratar, renovar, reativar ou cobrir falha do cartao. Se nao pagar, a renovacao nao acontece sozinha.</p>
+            <div className="subscription-page__payment-actions">
+              {openRenewalPayment ? (
+                <button type="button" className="btn btn--outline" onClick={handleOpenPendingRenewal}>
+                  Ver PIX pendente
+                </button>
+              ) : null}
+              {!openRenewalPayment && renewalRequired ? (
+                <button type="button" className="btn btn--outline" onClick={() => void handleGenerateRenewalPix()} disabled={renewalLoading}>
+                  {renewalLoading ? <span className="spinner" /> : 'Gerar PIX de renovacao'}
+                </button>
+              ) : null}
+              <button
+                type="button"
+                className="btn btn--outline"
+                onClick={() => void handleStartCheckout(planKey, checkoutCycle)}
+                disabled={checkoutLoading}
+              >
+                {checkoutLoading ? <span className="spinner" /> : `Gerar PIX do ${planMeta.label}`}
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <section className="settings-module-card subscription-page__history-card">
         <div className="subscription-page__section-head">
           <div>
-            <h3>Historico recente da assinatura</h3>
-            <p className="muted">Ultimos eventos de assinatura retornados pela API atual.</p>
+            <h3>Historico financeiro</h3>
+            <p className="muted">Eventos recentes de assinatura, cobranca, PIX e regularizacao.</p>
           </div>
           <div className={`subscription-page__status-chip subscription-page__status-chip--${getStatusTone(billingStatus?.state)}`}>
             {getStatusLabel(billingStatus?.state)}
           </div>
         </div>
-        {history.length ? (
+        {financialEvents.length ? (
           <ul className="subscription-page__history-list">
-            {history.map((item) => (
-              <HistoryRow key={item?.id || `${item?.plan}-${item?.created_at || item?.updated_at || 'row'}`} item={item} />
+            {financialEvents.map((item) => (
+              <FinancialEventRow key={item?.id || `${item?.event_type}-${item?.created_at || 'row'}`} item={item} />
             ))}
           </ul>
         ) : (
-          <div className="subscription-page__empty">Nenhum evento recente de assinatura para exibir.</div>
+          <div className="subscription-page__empty">Nenhum evento financeiro recente para exibir.</div>
         )}
+        {history.length ? (
+          <>
+            <div className="subscription-page__section-head subscription-page__section-head--compact">
+              <div>
+                <h3>Historico de assinaturas</h3>
+                <p className="muted">Ultimos ciclos e mudancas registrados localmente.</p>
+              </div>
+            </div>
+            <ul className="subscription-page__history-list">
+              {history.map((item) => (
+                <HistoryRow key={item?.id || `${item?.plan}-${item?.created_at || item?.updated_at || 'row'}`} item={item} />
+              ))}
+            </ul>
+          </>
+        ) : null}
+        {!history.length && !financialEvents.length ? (
+          <div className="subscription-page__empty">Nenhuma movimentacao recente para exibir.</div>
+        ) : null}
       </section>
 
       {pixModal.open ? (

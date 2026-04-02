@@ -2,11 +2,9 @@ import { Router } from 'express';
 import { pool } from '../lib/db.js';
 import { auth, isEstabelecimento } from '../middleware/auth.js';
 import {
-  getPlanContext,
-  isDelinquentStatus,
 } from '../lib/plans.js';
 import { saveAvatarFromDataUrl, removeAvatarFile } from '../lib/avatar.js';
-import { ensureWithinProfessionalLimit } from '../middleware/billing.js';
+import { ensureSubscriptionOperationalAccess, ensureWithinProfessionalLimit } from '../middleware/billing.js';
 
 const router = Router();
 
@@ -62,6 +60,9 @@ router.post(
   '/',
   auth,
   isEstabelecimento,
+  ensureSubscriptionOperationalAccess({
+    message: 'Regularize a assinatura para cadastrar profissionais.',
+  }),
   ensureWithinProfessionalLimit({
     isActivating: (req) => toBoolean(req.body?.ativo ?? true) === true,
   }),
@@ -75,16 +76,6 @@ router.post(
 
     if (!nome) {
       return res.status(400).json({ error: 'nome_obrigatorio', message: 'Informe o nome do profissional.' });
-    }
-
-    const planContext = await getPlanContext(estId);
-    const planStatus = planContext?.status || 'trialing';
-
-    if (isDelinquentStatus(planStatus)) {
-      return res.status(402).json({
-        error: 'plan_delinquent',
-        message: 'Sua assinatura esta em atraso. Regularize o pagamento para cadastrar profissionais.',
-      });
     }
 
     let avatarUrl = null;
@@ -144,6 +135,9 @@ router.put(
   auth,
   isEstabelecimento,
   loadProfessional,
+  ensureSubscriptionOperationalAccess({
+    message: 'Regularize a assinatura para editar profissionais.',
+  }),
   ensureWithinProfessionalLimit({
     isActivating: (req) => {
       const currentActive = toBoolean(req.professional?.ativo);
@@ -202,7 +196,9 @@ router.put(
   }
 );
 
-router.delete('/:id', auth, isEstabelecimento, async (req, res) => {
+router.delete('/:id', auth, isEstabelecimento, ensureSubscriptionOperationalAccess({
+  message: 'Regularize a assinatura para excluir profissionais.',
+}), async (req, res) => {
   try {
     const estId = req.user.id;
     const { id } = req.params;

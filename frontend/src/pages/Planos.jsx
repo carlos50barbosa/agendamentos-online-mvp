@@ -26,9 +26,9 @@ function Stat({ value, label }) {
 }
 
 const HERO_STATS = [
-  { value: '2 a 10', label: 'profissionais por plano' },
-  { value: '50 a 300', label: 'agendamentos com WhatsApp/mês' },
-  { value: 'até 5', label: 'mensagens por agendamento' },
+  { value: '2 / 5 / 10', label: 'profissionais por plano' },
+  { value: '250 a 1.500', label: 'mensagens de WhatsApp por mês' },
+  { value: '5 / 15 / livre', label: 'galeria pública por plano' },
 ];
 
 const BILLING_CYCLES = {
@@ -36,13 +36,13 @@ const BILLING_CYCLES = {
   anual: { label: 'Anual', periodLabel: '/ano' },
 };
 
-const WHATSAPP_LIMIT_FOOTNOTE = '* Ao atingir o limite de WhatsApp, continua por e-mail e painel.';
+const WHATSAPP_LIMIT_FOOTNOTE = '* Ao atingir o limite de WhatsApp, o envio continua por e-mail e painel.';
 const WHATSAPP_TOOLTIP = {
   title: 'Como funciona?',
   items: [
     'As mensagens do WhatsApp são usadas para confirmações, lembretes e avisos do agendamento.',
-    'Cada agendamento pode enviar até 5 mensagens (ex.: confirmação + lembrete + aviso).',
-    'O plano inclui um limite mensal de mensagens. Ao atingir o limite, você continua por e-mail e painel, ou pode adicionar pacotes extras.',
+    'Cada agendamento pode enviar até 5 mensagens.',
+    'Ao atingir o limite mensal do plano, você pode seguir por e-mail e painel ou comprar pacotes extras.',
   ],
 };
 
@@ -52,19 +52,22 @@ const PRICING_PLANS = [
     key: 'starter',
     title: 'Starter',
     subtitle: 'Para começar com o essencial',
-    badge: 'Agendamentos ilimitados',
+    badge: 'Serviços e agendamentos ilimitados',
     prices: { mensal: '14,90', anual: '149,00' },
     annualEquivalent: '12,40',
     features: [
+      { key: 'starter-services', label: 'Serviços e agendamentos ilimitados no sistema' },
       { key: 'starter-pros', label: 'Até 2 profissionais' },
+      { key: 'starter-gallery', label: 'Galeria pública com até 5 imagens' },
       {
         key: 'starter-whatsapp',
         label: 'WhatsApp incluso: 250 mensagens/mês (confirmações, lembretes e avisos)*',
         tooltip: WHATSAPP_TOOLTIP,
       },
       { key: 'starter-extras', label: 'Pacotes extras de WhatsApp via PIX (opcional)' },
-      { key: 'starter-msgs', label: 'Até 5 mensagens por agendamento (confirmações, lembretes e avisos)' },
+      { key: 'starter-msgs', label: 'Até 5 mensagens por agendamento' },
       { key: 'starter-reports', label: 'Relatórios básicos' },
+      { key: 'starter-deposit', label: 'Sinal via PIX com Mercado Pago indisponível neste plano' },
     ],
     footnote: WHATSAPP_LIMIT_FOOTNOTE,
     annualNote: 'Economize o equivalente a 2 meses no plano anual.',
@@ -76,20 +79,22 @@ const PRICING_PLANS = [
     key: 'pro',
     title: 'Pro',
     subtitle: 'O melhor custo-benefício',
-    badge: 'Agendamentos ilimitados',
+    badge: 'Serviços e agendamentos ilimitados',
     prices: { mensal: '29,90', anual: '299,00' },
     annualEquivalent: '24,90',
     features: [
+      { key: 'pro-services', label: 'Serviços e agendamentos ilimitados no sistema' },
       { key: 'pro-pros', label: 'Até 5 profissionais' },
+      { key: 'pro-gallery', label: 'Galeria pública com até 15 imagens' },
       {
         key: 'pro-whatsapp',
         label: 'WhatsApp incluso: 500 mensagens/mês (confirmações, lembretes e avisos)*',
         tooltip: WHATSAPP_TOOLTIP,
       },
       { key: 'pro-extras', label: 'Pacotes extras de WhatsApp via PIX (opcional)' },
-      { key: 'pro-msgs', label: 'Até 5 mensagens por agendamento (confirmações, lembretes e avisos)' },
-      { key: 'pro-reports', label: 'Relatórios avançados e indicadores em tempo real' },
-      { key: 'pro-support', label: 'Suporte prioritário via WhatsApp Business' },
+      { key: 'pro-msgs', label: 'Até 5 mensagens por agendamento' },
+      { key: 'pro-reports', label: 'Relatórios avançados com filtros e intervalo personalizado' },
+      { key: 'pro-deposit', label: 'Sinal via PIX com conexão Mercado Pago' },
     ],
     footnote: WHATSAPP_LIMIT_FOOTNOTE,
     annualNote: 'Economize o equivalente a 2 meses no plano anual.',
@@ -101,20 +106,23 @@ const PRICING_PLANS = [
   {
     key: 'premium',
     title: 'Premium',
-    subtitle: 'Para alto volume e franquias',
-    badge: 'Agendamentos ilimitados',
+    subtitle: 'Para alto volume e operações maiores',
+    badge: 'Serviços e agendamentos ilimitados',
     prices: { mensal: '99,90', anual: '999,00' },
     annualEquivalent: '83,25',
     features: [
+      { key: 'premium-services', label: 'Serviços e agendamentos ilimitados no sistema' },
       { key: 'premium-pros', label: 'Até 10 profissionais' },
+      { key: 'premium-gallery', label: 'Galeria pública sem limite de imagens' },
       {
         key: 'premium-whatsapp',
         label: 'WhatsApp incluso: 1.500 mensagens/mês (confirmações, lembretes e avisos)*',
         tooltip: WHATSAPP_TOOLTIP,
       },
       { key: 'premium-extras', label: 'Pacotes extras de WhatsApp via PIX (opcional)' },
-      { key: 'premium-msgs', label: 'Até 5 mensagens por agendamento (confirmações, lembretes e avisos)' },
-      { key: 'premium-support', label: 'Suporte prioritário e onboarding do time' },
+      { key: 'premium-msgs', label: 'Até 5 mensagens por agendamento' },
+      { key: 'premium-reports', label: 'Relatórios avançados com filtros e intervalo personalizado' },
+      { key: 'premium-deposit', label: 'Sinal via PIX com conexão Mercado Pago' },
     ],
     footnote: WHATSAPP_LIMIT_FOOTNOTE,
     annualNote: 'Economize o equivalente a 2 meses no plano anual.',
@@ -225,7 +233,7 @@ export default function Planos() {
   const renewalRequired = Boolean(renewalInfo.renewalRequired);
   const hasOpenRenewalPayment = Boolean(renewalInfo.hasOpenPayment && renewalInfo.openPayment);
   const subscriptionStatus = String(billingStatus?.subscription?.status || '').toLowerCase();
-  const hasActivePlan = ['active', 'authorized'].includes(subscriptionStatus);
+  const hasActivePlan = ['trialing', 'active', 'pending_payment', 'pending_pix', 'past_due', 'unpaid', 'expired'].includes(subscriptionStatus);
   const currentPlanKey = billingStatus?.subscription?.plan || '';
   const hasPlanContext = Boolean(currentPlanKey);
   const currentPlan = PRICING_PLANS.find((item) => item.key === currentPlanKey) || null;
@@ -248,17 +256,17 @@ export default function Planos() {
         <div className="hero__content">
           <span className="tag tag--accent">Planos para estabelecimentos</span>
           <h1>Planos simples, limites claros</h1>
-          <p>Todos os planos têm agendamentos ilimitados no sistema. Compare limites de profissionais, pacote de WhatsApp e itens adicionais de cada plano.</p>
+          <p>Cartão de crédito é o formato principal da assinatura com renovação automática. O PIX segue como alternativa manual para contratar, renovar, reativar e cobrir contingências.</p>
           <div className="hero__badge-row">
-            <span className="hero__badge">Mensal ou anual</span>
-            <span className="hero__badge hero__badge--outline">Starter e Pro com 7 dias grátis</span>
-            <span className="hero__badge hero__badge--outline">WhatsApp incluído por mês</span>
+            <span className="hero__badge">Cartão com renovação automática</span>
+            <span className="hero__badge hero__badge--outline">PIX manual como alternativa</span>
+            <span className="hero__badge hero__badge--outline">Mensal ou anual</span>
           </div>
           <div className="hero__actions">
             <button className="btn btn--primary btn--lg" onClick={goTrial('pro')}>Testar Pro por 7 dias</button>
             <button className="btn btn--outline btn--lg" onClick={scrollToPlans}>Ver detalhes dos planos</button>
           </div>
-          <div className="planos-highlight">Teste grátis por 7 dias sem cartão.</div>
+          <div className="planos-highlight">Cartão evita interrupções. Se optar por PIX, a renovação continua manual.</div>
           {user?.tipo !== 'estabelecimento' && (
             <div className="alert-inline" role="status">*Para estabelecimentos e profissionais.</div>
           )}
@@ -270,7 +278,7 @@ export default function Planos() {
           <div className="hero__pulse" />
           <div className="hero__card hero__card--primary">
             <strong>WhatsApp mensal</strong>
-            <span>50/100/300 agendamentos por mês</span>
+            <span>250 / 500 / 1.500 mensagens por mês</span>
           </div>
           <div className="hero__card hero__card--secondary">
             <strong>Profissionais</strong>
@@ -283,9 +291,9 @@ export default function Planos() {
         <div className="section-shell">
           <span className="eyebrow">Resumo do que está em todos os planos</span>
           <div className="logos">
-            <span>Agendamentos ilimitados no sistema</span>
-            <span>Até 5 mensagens por agendamento</span>
-            <span>WhatsApp incluído por mês</span>
+            <span>Serviços e agendamentos ilimitados no sistema</span>
+            <span>Cartão com cobrança recorrente</span>
+            <span>PIX para renovação manual e contingência</span>
           </div>
         </div>
       </section>
@@ -297,7 +305,7 @@ export default function Planos() {
         <div className="section-shell">
           <header className="section-header">
             <h2>Planos e preços</h2>
-            <p>Veja o que cada plano inclui e compare os limites.</p>
+            <p>Compare limites, recursos e a regra de cobrança: cartão recomendado com renovação automática e PIX manual quando você preferir pagar avulso.</p>
           </header>
           {hasPlanContext && (
             <div
@@ -317,7 +325,7 @@ export default function Planos() {
                   Renovar agora
                 </button>
               ) : (
-                <span className="muted">Assinatura ativa.</span>
+                <span className="muted">Acompanhe cobrança, cartão e PIX na área de assinatura.</span>
               )}
               {hasOpenRenewalPayment && renewalInfo.openPayment?.expiresAt && (
                 <span className="muted" style={{ fontSize: 12 }}>
@@ -338,7 +346,7 @@ export default function Planos() {
           </div>
           )}
           <div className="small muted" style={{ marginTop: -8, marginBottom: 12 }}>
-            Política de cobrança: upgrades liberam recursos imediatamente e o novo valor é cobrado no próximo ciclo. Downgrades valem no ciclo seguinte, desde que os limites do plano sejam atendidos.
+            Política de cobrança: cartão renova automaticamente enquanto as cobranças forem aprovadas. PIX não renova sozinho; se a renovação não for paga, o acesso principal é bloqueado até a regularização.
           </div>
           <div
             className="segmented billing-toggle"
@@ -453,9 +461,9 @@ export default function Planos() {
           <div className="pricing-extras">
             <h3>Pacotes extras de WhatsApp (opcional)</h3>
             <ul>
-              <li>Passou do limite Adicione mensagens via PIX.</li>
-              <li>Saldo extra é usado quando o limite do plano termina.</li>
-              <li>Confirmação rápida via PIX.</li>
+              <li>Quando o limite do plano termina, você pode adicionar mensagens via PIX.</li>
+              <li>O saldo extra passa a ser usado depois que a franquia mensal acabar.</li>
+              <li>A compra e a confirmação acontecem no próprio fluxo de cobrança.</li>
             </ul>
           </div>
         </div>
@@ -470,7 +478,7 @@ export default function Planos() {
       <footer className="planos-footer">
         <div className="section-shell planos-footer__inner">
           <div className="planos-footer__meta">
-            <p>© 2025 Agendamentos Online</p>
+            <p>© 2026 Agendamentos Online</p>
             <p>Todos os direitos reservados.</p>
             <a href="mailto:servicos.negocios.digital@gmail.com">servicos.negocios.digital@gmail.com</a>
             <p className="planos-footer__meta-links">

@@ -3,8 +3,8 @@ import { Router } from 'express';
 import { pool } from '../lib/db.js';
 import { EST_TZ_OFFSET_MIN, makeUtcFromLocalYMDHM, weekDayIndexInTZ } from '../lib/datetime_tz.js';
 import { buildWorkingRules, resolveExpedienteForDay } from '../lib/expediente.js';
-import { getPlanContext, isDelinquentStatus } from '../lib/plans.js';
 import { auth, isEstabelecimento } from '../middleware/auth.js';
+import { ensureSubscriptionOperationalAccess } from '../middleware/billing.js';
 
 const router = Router();
 
@@ -327,17 +327,11 @@ router.get('/', async (req, res) => {
  * body: { slotDatetime }
  * — Bloqueia ou libera um intervalo de 30 min do estabelecimento logado
  */
-router.post('/toggle', auth, isEstabelecimento, async (req, res) => {
+router.post('/toggle', auth, isEstabelecimento, ensureSubscriptionOperationalAccess({
+  message: 'Regularize a assinatura para ajustar a agenda.',
+}), async (req, res) => {
   const { slotDatetime } = req.body;
   if (!slotDatetime) return res.status(400).json({ error: 'missing_slot' });
-
-  const planContext = await getPlanContext(req.user.id);
-  if (planContext && isDelinquentStatus(planContext.status)) {
-    return res.status(403).json({
-      error: 'plan_delinquent',
-      message: 'Sua assinatura esta em atraso. Ajustes de agenda estao temporariamente bloqueados.'
-    });
-  }
 
   try {
     const s = new Date(slotDatetime);

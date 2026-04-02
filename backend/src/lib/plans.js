@@ -2,7 +2,7 @@
 import { pool } from './db.js';
 
 export const PLAN_TIERS = ['starter', 'pro', 'premium'];
-export const PLAN_STATUS = ['trialing', 'active', 'delinquent', 'pending', 'canceled', 'expired'];
+export const PLAN_STATUS = ['trialing', 'active', 'pending_payment', 'pending_pix', 'past_due', 'unpaid', 'expired', 'canceled'];
 
 const LIMIT_UNLIMITED = null;
 
@@ -96,7 +96,10 @@ export function isUpgrade(currentPlan, nextPlan) {
 }
 
 export function isDelinquentStatus(status) {
-  return (status || '').toLowerCase() === 'delinquent';
+  const normalized = String(status || '').toLowerCase().trim();
+  if (!normalized) return false;
+  if (['delinquent', 'blocked'].includes(normalized)) return true;
+  return ['unpaid', 'expired', 'canceled', 'cancelled'].includes(normalized);
 }
 
 export function computeTrialInfo(trialEndsAt) {
@@ -140,7 +143,17 @@ export async function getPlanContext(estabelecimentoId) {
   if (!rows.length) return null;
   const row = rows[0];
   const plan = row.plan || 'starter';
-  const status = row.plan_status || 'trialing';
+  const rawStatus = String(row.plan_status || 'trialing').toLowerCase().trim();
+  const status =
+    rawStatus === 'delinquent'
+      ? 'unpaid'
+      : rawStatus === 'pending'
+        ? 'pending_pix'
+        : rawStatus === 'authorized'
+          ? 'active'
+          : rawStatus === 'paused'
+            ? 'past_due'
+            : rawStatus || 'trialing';
   const cycle = normalizeBillingCycle(row.plan_cycle);
   const config = resolvePlanConfig(plan);
   const trialEndsAt = row.plan_trial_ends_at ? new Date(row.plan_trial_ends_at) : null;

@@ -6,6 +6,11 @@ import { verifyMercadoPagoWebhookSignature } from '../lib/mp_signature.js';
 import { fetchMercadoPagoPayment } from '../lib/billing.js';
 import { notifyAppointmentConfirmed } from '../lib/appointment_confirmation.js';
 import { resolveMpAccessToken } from '../services/mpAccounts.js';
+import { tryAuthenticateRequest } from '../middleware/auth.js';
+import { verifyPublicDepositToken } from '../lib/public_deposit_token.js';
+import { canAccessPaymentStatus, serializePaymentStatusResponse } from '../lib/payment_status_access.js';
+import { buildRateLimitClientKey, consumeRateLimit, observeAbuseFlood, setRateLimitHeaders } from '../lib/request_rate_limit.js';
+import { logBlockedRouteAccess, logSecurityEvent } from '../lib/route_access.js';
 
 const router = Router();
 
@@ -33,7 +38,10 @@ async function fetchPaymentById(id, { forUpdate = false, connection = null } = {
   const db = connection || pool;
   const lock = forUpdate ? ' FOR UPDATE' : '';
   const [rows] = await db.query(
-    `SELECT * FROM appointment_payments WHERE id=? LIMIT 1${lock}`,
+    `SELECT ap.*, a.cliente_id
+       FROM appointment_payments ap
+       LEFT JOIN agendamentos a ON a.id = ap.agendamento_id
+      WHERE ap.id=? LIMIT 1${lock}`,
     [id]
   );
   return rows?.[0] || null;
@@ -43,7 +51,10 @@ async function fetchPaymentByProvider(providerPaymentId, { forUpdate = false, co
   const db = connection || pool;
   const lock = forUpdate ? ' FOR UPDATE' : '';
   const [rows] = await db.query(
-    `SELECT * FROM appointment_payments WHERE provider_payment_id=? LIMIT 1${lock}`,
+    `SELECT ap.*, a.cliente_id
+       FROM appointment_payments ap
+       LEFT JOIN agendamentos a ON a.id = ap.agendamento_id
+      WHERE ap.provider_payment_id=? LIMIT 1${lock}`,
     [String(providerPaymentId)]
   );
   return rows?.[0] || null;
@@ -127,6 +138,118 @@ function notifyIfAppointmentJustConfirmed(syncResult, source) {
   });
 }
 
+function resolveDepositStatusToken(req) {
+  const headerToken = String(req.headers['x-deposit-token'] || '').trim();
+  if (headerToken) {
+    return { token: headerToken, source: 'header' };
+  }
+
+  const legacyQueryTokenEnabled = config.security?.payments?.legacyQueryToken?.enabled !== false;
+  const queryToken = String(req.query?.token || '').trim();
+  if (queryToken) {
+    return {
+      token: legacyQueryTokenEnabled ? queryToken : '',
+      source: legacyQueryTokenEnabled ? 'query_legacy' : 'query_legacy_disabled',
+    };
+  }
+
+  return { token: '', source: 'missing' };
+}
+
+function buildLegacyQueryTokenTelemetry(req, { paymentId, tokenSource }) {
+  if (tokenSource !== 'query_legacy' && tokenSource !== 'query_legacy_disabled') return null;
+  const legacyConfig = config.security?.payments?.legacyQueryToken || {};
+  const sunsetAtMs = legacyConfig.sunsetAt ? new Date(legacyConfig.sunsetAt).getTime() : NaN;
+  let deprecationStage = legacyConfig.enabled === false ? 'disabled' : 'enabled';
+  let sunsetRemainingDays = null;
+  if (legacyConfig.enabled !== false && Number.isFinite(sunsetAtMs)) {
+    const remainingMs = sunsetAtMs - Date.now();
+    sunsetRemainingDays = Math.ceil(remainingMs / (24 * 60 * 60 * 1000));
+    if (remainingMs <= 0) deprecationStage = 'sunset_elapsed';
+    else deprecationStage = remainingMs <= 30 * 24 * 60 * 60 * 1000 ? 'sunset_imminent' : 'sunset_scheduled';
+  } else if (legacyConfig.enabled === false) {
+    if (Number.isFinite(sunsetAtMs)) {
+      const remainingMs = sunsetAtMs - Date.now();
+      sunsetRemainingDays = Math.ceil(remainingMs / (24 * 60 * 60 * 1000));
+    }
+    deprecationStage = 'disabled';
+  }
+  return {
+    paymentId,
+    tokenSource,
+    legacyConfig,
+    deprecationStage,
+    sunsetRemainingDays,
+    routeVariant: String(req.originalUrl || req.baseUrl || req.url || '').startsWith('/api/')
+      ? 'api'
+      : 'direct',
+  };
+}
+
+function markLegacyQueryTokenUsage(req, res, telemetry) {
+  if (!telemetry || telemetry.tokenSource !== 'query_legacy') return telemetry;
+  const { legacyConfig } = telemetry;
+  const routeVariant = String(req.originalUrl || req.baseUrl || req.url || '').startsWith('/api/')
+    ? 'api'
+    : 'direct';
+  res.set('Deprecation', 'true');
+  res.set('Warning', '299 - "Query token fallback is deprecated; use X-Deposit-Token"');
+  res.set('X-Legacy-Token-Fallback', 'query-param');
+  res.set('X-Deprecated-Replacement', 'X-Deposit-Token');
+  res.set('X-Legacy-Token-Phase', telemetry.deprecationStage);
+  if (legacyConfig.sunsetAt) {
+    res.set('Sunset', new Date(legacyConfig.sunsetAt).toUTCString());
+  }
+  if (legacyConfig.deprecationUrl) {
+    res.append('Link', `<${legacyConfig.deprecationUrl}>; rel="deprecation"; type="text/html"`);
+  }
+  telemetry.routeVariant = routeVariant;
+  return telemetry;
+}
+
+function logLegacyQueryTokenUsage(req, telemetry, details = {}) {
+  if (!telemetry) return;
+  const eventKey =
+    telemetry.tokenSource === 'query_legacy_disabled'
+      ? 'payments:legacy-query-token-disabled'
+      : 'payments:legacy-query-token';
+  logSecurityEvent(eventKey, req, {
+    payment_id: telemetry.paymentId,
+    token_source: telemetry.tokenSource,
+    replacement: 'x-deposit-token',
+    legacy_query_token_enabled: telemetry.legacyConfig?.enabled !== false,
+    deprecation_stage: telemetry.deprecationStage,
+    route_variant: telemetry.routeVariant,
+    client_key: buildRateLimitClientKey(req),
+    sunset_at: telemetry.legacyConfig?.sunsetAt || null,
+    sunset_remaining_days: telemetry.sunsetRemainingDays,
+    deprecation_url: telemetry.legacyConfig?.deprecationUrl || null,
+    ...details,
+  }, { level: telemetry.tokenSource === 'query_legacy_disabled' ? 'warn' : 'info' });
+}
+
+async function enforcePublicPaymentStatusRateLimit(req, res, { paymentId, authResult, tokenSource }) {
+  if (authResult?.user) return false;
+
+  const result = await consumeRateLimit({
+    bucketKey: `payments-public:${buildRateLimitClientKey(req)}:${paymentId}`,
+    windowMs: config.security?.rateLimit?.paymentStatusPublic?.windowMs,
+    max: config.security?.rateLimit?.paymentStatusPublic?.max,
+  });
+  setRateLimitHeaders(res, result);
+  if (!result.limited) return false;
+
+  logSecurityEvent('payments:status-rate-limit', req, {
+    payment_id: paymentId,
+    token_source: tokenSource,
+    limit: result.limit,
+    retry_after_sec: result.retryAfterSec,
+    store_driver: result.storeDriver || null,
+  }, { level: 'warn' });
+  res.status(429).json({ error: 'rate_limited' });
+  return true;
+}
+
 router.get('/:id/status', async (req, res) => {
   try {
     const id = Number(req.params.id);
@@ -134,8 +257,80 @@ router.get('/:id/status', async (req, res) => {
       return res.status(400).json({ error: 'invalid_payment_id' });
     }
 
+    const authResult = await tryAuthenticateRequest(req);
+    const { token: depositToken, source: depositTokenSource } = resolveDepositStatusToken(req);
+    const legacyQueryTokenTelemetry = markLegacyQueryTokenUsage(
+      req,
+      res,
+      buildLegacyQueryTokenTelemetry(req, { paymentId: id, tokenSource: depositTokenSource })
+    );
+    if (await enforcePublicPaymentStatusRateLimit(req, res, {
+      paymentId: id,
+      authResult,
+      tokenSource: depositTokenSource,
+    })) {
+      logLegacyQueryTokenUsage(req, legacyQueryTokenTelemetry, {
+        access_outcome: 'rate_limited',
+        auth_user_present: Boolean(authResult.user),
+        auth_user_tipo: authResult.user?.tipo || null,
+      });
+      return;
+    }
+    const depositVerification = verifyPublicDepositToken(depositToken);
+    const hasLookupAccess = Boolean(authResult.user) || depositVerification.ok;
+
+    if (!hasLookupAccess) {
+      logLegacyQueryTokenUsage(req, legacyQueryTokenTelemetry, {
+        access_outcome: 'blocked_lookup',
+        auth_user_present: Boolean(authResult.user),
+        auth_user_tipo: authResult.user?.tipo || null,
+        token_valid: depositVerification.ok,
+      });
+      logBlockedRouteAccess('payments:status', req, {
+        payment_id: id,
+        reason: authResult.error?.code || depositVerification.reason || 'missing_access',
+        token_access: depositVerification.ok ? 'valid' : (depositVerification.reason || 'missing'),
+        user_id: authResult.user?.id || null,
+        user_tipo: authResult.user?.tipo || null,
+      });
+      if (authResult.error) {
+        return res.status(authResult.error.code === 'token_expired' ? 401 : 403).json({
+          error: authResult.error.code,
+        });
+      }
+      return res.status(404).json({ error: 'payment_not_found' });
+    }
+
     let payment = await fetchPaymentById(id);
     if (!payment) {
+      return res.status(404).json({ error: 'payment_not_found' });
+    }
+
+    const access = canAccessPaymentStatus({
+      payment,
+      user: authResult.user,
+      depositPayload: depositVerification.ok ? depositVerification.payload : null,
+    });
+
+    if (!access.ok) {
+      logLegacyQueryTokenUsage(req, legacyQueryTokenTelemetry, {
+        access_outcome: 'blocked_scope',
+        auth_user_present: Boolean(authResult.user),
+        auth_user_tipo: authResult.user?.tipo || null,
+        token_valid: depositVerification.ok,
+      });
+      logBlockedRouteAccess('payments:status', req, {
+        payment_id: id,
+        reason: authResult.error?.code || access.reason || depositVerification.reason || 'forbidden',
+        token_access: depositVerification.ok ? 'valid' : (depositVerification.reason || 'missing'),
+        user_id: authResult.user?.id || null,
+        user_tipo: authResult.user?.tipo || null,
+      });
+      if (authResult.error && !depositVerification.ok) {
+        return res.status(authResult.error.code === 'token_expired' ? 401 : 403).json({
+          error: authResult.error.code,
+        });
+      }
       return res.status(404).json({ error: 'payment_not_found' });
     }
 
@@ -193,18 +388,19 @@ router.get('/:id/status', async (req, res) => {
       }
     }
 
-    const normalized = normalizePaymentStatus(payment.status);
-    return res.json({
-      ok: true,
-      id: payment.id,
-      status: normalized,
-      paid: normalized === 'paid',
-      expired: isExpiredStatus(normalized),
-      expires_at: payment.expires_at ? new Date(payment.expires_at).toISOString() : null,
-      paid_at: payment.paid_at ? new Date(payment.paid_at).toISOString() : null,
-      amount_centavos: payment.amount_centavos,
-      agendamento_id: payment.agendamento_id,
+    logLegacyQueryTokenUsage(req, legacyQueryTokenTelemetry, {
+      access_outcome: 'allowed',
+      access_mode: access.mode || null,
+      auth_user_present: Boolean(authResult.user),
+      auth_user_tipo: authResult.user?.tipo || null,
+      token_valid: depositVerification.ok,
+      required_for_access: access.mode === 'public_deposit_token',
     });
+    return res.json(
+      serializePaymentStatusResponse(payment, {
+        includePrivate: access.mode !== 'public_deposit_token',
+      })
+    );
   } catch (err) {
     console.error('GET /payments/:id/status', err);
     return res.status(500).json({ error: 'payment_status_failed' });
@@ -225,7 +421,19 @@ router.post('/webhook', async (req, res) => {
   const verification = verifyMercadoPagoWebhookSignature(req);
   const allowUnsigned = Boolean(config.billing?.mercadopago?.allowUnsigned);
   if (!verification.ok && !allowUnsigned) {
-    console.warn('[payments:webhook] invalid_signature', { reason: verification.reason, topic });
+    logSecurityEvent('payments:webhook-invalid-signature', req, {
+      reason: verification.reason,
+      topic,
+    }, { level: 'warn' });
+    await observeAbuseFlood({
+      routeKey: 'payments:webhook-invalid-signature',
+      req,
+      bucketKey: `payments-webhook-invalid:${buildRateLimitClientKey(req)}`,
+      windowMs: config.security?.telemetry?.webhookInvalidSignature?.windowMs,
+      threshold: config.security?.telemetry?.webhookInvalidSignature?.threshold,
+      details: { reason: verification.reason, topic },
+      level: 'error',
+    });
     return res.status(200).json({ ok: true, ignored: true, reason: verification.reason });
   }
 

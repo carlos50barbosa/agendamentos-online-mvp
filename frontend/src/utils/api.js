@@ -350,6 +350,8 @@ export const Api = {
 
   // Billing (assinaturas Mercado Pago)
 
+  billingConfig: () => req('/billing/config'),
+
   billingSubscription: () => req('/billing/subscription'),
 
   billingPixPending: (params = {}) => req(`/billing/pix/pending${toQuery(params)}`),
@@ -374,6 +376,10 @@ export const Api = {
 
   billingStatus: () => req('/billing/status'),
 
+  billingCardSubscribe: (payload) => req('/billing/card/subscribe', { method: 'POST', body: JSON.stringify(payload || {}) }),
+
+  billingCardUpdate: (payload) => req('/billing/card/update', { method: 'POST', body: JSON.stringify(payload || {}) }),
+
   billingWhatsAppPacks: () => req('/billing/whatsapp/packs'),
 
   billingWhatsAppWallet: () => req('/billing/whatsapp/wallet'),
@@ -382,7 +388,12 @@ export const Api = {
 
   billingWhatsAppPixStatus: (paymentId) =>
     req(`/billing/whatsapp/pix/status${toQuery({ payment_id: paymentId })}`),
-  getPaymentStatus: (paymentId) => req(`/payments/${paymentId}/status`),
+  getPaymentStatus: (paymentId, opts = {}) =>
+    req(`/payments/${paymentId}/status`, {
+      headers: opts?.depositToken
+        ? { 'X-Deposit-Token': String(opts.depositToken) }
+        : undefined,
+    }),
 
 
   // Serviços (rotas existentes)

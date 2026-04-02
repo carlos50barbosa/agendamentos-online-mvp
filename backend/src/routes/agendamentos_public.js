@@ -10,9 +10,9 @@ import { sendAppointmentWhatsApp } from '../lib/whatsapp_outbox.js';
 import { buildConfirmacaoAgendamentoV2Components, isConfirmacaoAgendamentoV2 } from '../lib/whatsapp_templates.js';
 import { createMercadoPagoPixPayment } from '../lib/billing.js';
 import { resolveMpAccessToken } from '../services/mpAccounts.js';
+import { ensureSubscriptionOperationalAccess } from '../middleware/billing.js';
 import { estabNotificationsDisabled } from '../lib/estab_notifications.js';
 import { clientWhatsappDisabled, whatsappImmediateDisabled, whatsappConfirmationDisabled } from '../lib/client_notifications.js';
-import jwt from 'jsonwebtoken';
 import { checkMonthlyAppointmentLimit, notifyAppointmentLimitReached } from '../lib/appointment_limits.js';
 import {
   extractPixPayloadFromRaw,
@@ -20,6 +20,7 @@ import {
   isExpiredAt,
   markDepositPaymentExpired,
 } from '../lib/deposit_payments.js';
+import { buildPublicDepositToken, verifyPublicDepositToken } from '../lib/public_deposit_token.js';
 
 const router = Router();
 const TZ = 'America/Sao_Paulo';
@@ -32,7 +33,6 @@ const APPOINTMENT_BUFFER_MIN = (() => {
 })();
 const DEFAULT_DEPOSIT_HOLD_MINUTES = 15;
 const DEPOSIT_ALLOWED_PLANS = new Set(['pro', 'premium']);
-const PUBLIC_DEPOSIT_TOKEN_DAYS = Number(process.env.PUBLIC_DEPOSIT_TOKEN_DAYS || 30);
 
 const safeJson = (payload) => {
   try {
@@ -69,38 +69,6 @@ function attachDepositPixToResponse(target, paymentRow, payload) {
     expires_at: expiresIso,
     pix: payload.pix,
   };
-}
-
-function buildPublicDepositToken({ agendamentoId, clienteId, estabelecimentoId }) {
-  const secret = process.env.JWT_SECRET;
-  if (!secret) return null;
-  const payload = {
-    scope: 'public_deposit',
-    agendamento_id: Number(agendamentoId),
-    cliente_id: Number(clienteId),
-    estabelecimento_id: Number(estabelecimentoId),
-  };
-  try {
-    return jwt.sign(payload, secret, { expiresIn: `${PUBLIC_DEPOSIT_TOKEN_DAYS}d` });
-  } catch {
-    return null;
-  }
-}
-
-function verifyPublicDepositToken(rawToken) {
-  const token = String(rawToken || '').trim();
-  if (!token) return { ok: false, reason: 'missing_token' };
-  const secret = process.env.JWT_SECRET;
-  if (!secret) return { ok: false, reason: 'missing_secret' };
-  try {
-    const payload = jwt.verify(token, secret);
-    if (payload?.scope !== 'public_deposit') {
-      return { ok: false, reason: 'invalid_scope' };
-    }
-    return { ok: true, payload };
-  } catch (err) {
-    return { ok: false, reason: err?.name || 'invalid_token', error: err };
-  }
 }
 
 function resolveApiBaseUrl() {
@@ -502,7 +470,10 @@ async function notifyPublicConfirmedAppointment(appointmentId) {
 }
 
 // POST /public/agendamentos — cria agendamento sem login (guest)
-router.post('/', async (req, res) => {
+router.post('/', ensureSubscriptionOperationalAccess({
+  getEstabelecimentoId: (req) => req.body?.estabelecimento_id || req.body?.establishment_id || null,
+  message: 'Este estabelecimento esta com a assinatura indisponivel para novos agendamentos no momento.',
+}), async (req, res) => {
   let conn;
   let txStarted = false;
   try {
@@ -563,10 +534,6 @@ router.post('/', async (req, res) => {
     if (!planContext) {
       return res.status(404).json({ error: 'estabelecimento_inexistente' });
     }
-    if (isDelinquentStatus(planContext.status)) {
-      return res.status(403).json({ error: 'plan_delinquent', message: 'Este estabelecimento esta com o plano em atraso. Agendamentos temporariamente suspensos.' });
-    }
-
     const inicioDate = new Date(inicio);
     if (Number.isNaN(inicioDate.getTime())) return res.status(400).json({ error: 'invalid_date' });
     if (inicioDate.getTime() <= Date.now()) return res.status(400).json({ error: 'past_datetime' });
@@ -1041,6 +1008,7 @@ router.post('/', async (req, res) => {
           agendamentoId: appointmentId,
           clienteId: userId,
           estabelecimentoId: estabelecimento_id,
+          paymentId: depositPaymentId,
         });
         return res.status(201).json({
           id: appointmentId,

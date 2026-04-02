@@ -4,8 +4,10 @@ import { IconSearch } from './Icons.jsx';
 
 export default function AppointmentDiscoveryHero({
   headingId = 'novo-agendamento-hero-title',
-  eyebrow = 'Novo agendamento',
-  heading = 'Escolha um estabelecimento',
+  eyebrow = 'Agendamento profissional',
+  brandName = 'Agendamentos Online',
+  brandTagline = 'Plataforma institucional para reservas de servicos',
+  heading = 'Encontre o atendimento ideal com mais clareza',
   subtitle = '',
   query = '',
   onChange = () => {},
@@ -14,6 +16,7 @@ export default function AppointmentDiscoveryHero({
   inputRef = null,
   meta = null,
   stepper = null,
+  headerAction = null,
   children = null,
 }) {
   return (
@@ -25,6 +28,12 @@ export default function AppointmentDiscoveryHero({
               <LogoAO size={64} className="appointment-discovery-hero__logo" />
             </div>
             <div className="appointment-discovery-hero__copy">
+              <div className="appointment-discovery-hero__brand-line">
+                <span className="appointment-discovery-hero__brand-name">{brandName}</span>
+                {brandTagline ? (
+                  <span className="appointment-discovery-hero__brand-tagline">{brandTagline}</span>
+                ) : null}
+              </div>
               <span className="appointment-discovery-hero__eyebrow">{eyebrow}</span>
               <h1 id={headingId} className="appointment-discovery-hero__title">
                 {heading}
@@ -34,9 +43,18 @@ export default function AppointmentDiscoveryHero({
               ) : null}
             </div>
           </div>
-          {stepper ? (
-            <div className="appointment-discovery-hero__stepper">
-              {stepper}
+          {(headerAction || stepper) ? (
+            <div className="appointment-discovery-hero__header-aside">
+              {headerAction ? (
+                <div className="appointment-discovery-hero__header-action">
+                  {headerAction}
+                </div>
+              ) : null}
+              {stepper ? (
+                <div className="appointment-discovery-hero__stepper">
+                  {stepper}
+                </div>
+              ) : null}
             </div>
           ) : null}
         </div>

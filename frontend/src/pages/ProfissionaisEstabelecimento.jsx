@@ -421,8 +421,11 @@ export default function ProfissionaisEstabelecimento() {
     } catch (error) {
       if (error?.status === 403 && error?.data?.error === 'plan_limit') {
         showToast('error', error?.data?.message || 'Limite do plano atingido.');
-      } else if (error?.status === 402 && error?.data?.error === 'plan_delinquent') {
-        showToast('error', 'Plano em atraso. Regularize para continuar.');
+      } else if (
+        error?.status === 402 &&
+        ['plan_delinquent', 'subscription_access_blocked'].includes(error?.data?.error)
+      ) {
+        showToast('error', error?.data?.message || 'Assinatura indisponivel. Regularize para continuar.');
       } else if (error?.data?.error === 'avatar_invalido') {
         showToast('error', 'Envie uma imagem PNG, JPG ou WEBP.');
       } else if (error?.data?.error === 'avatar_grande') {

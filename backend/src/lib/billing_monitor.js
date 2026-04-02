@@ -4,6 +4,7 @@ import { config } from './config.js'
 import { notifyEmail, sendWhatsAppSmart } from './notifications.js'
 import { getPlanLabel } from './plans.js'
 import { estabNotificationsDisabled } from './estab_notifications.js'
+import { normalizeSubscriptionStatus } from './subscription_normalization.js'
 
 const DAY_MS = 86400000
 const TIMEZONE = config.timezone || process.env.TZ || 'America/Sao_Paulo'
@@ -92,7 +93,7 @@ function pluralDays(value) {
 }
 
 export function resolveBillingState({ planStatus, planActiveUntil, planTrialEndsAt }, { warnDays = WARN_DAYS, graceDays = GRACE_DAYS } = {}) {
-  const normalizedStatus = String(planStatus || '').toLowerCase() || 'trialing'
+  const normalizedStatus = normalizeSubscriptionStatus(planStatus || 'trialing')
   const dueAt = toDate(planActiveUntil)
   const trialEndsAt = toDate(planTrialEndsAt)
   const now = new Date()
@@ -113,7 +114,7 @@ export function resolveBillingState({ planStatus, planActiveUntil, planTrialEnds
 
   if (!dueAt) {
     return {
-      state: normalizedStatus === 'delinquent' ? 'blocked' : 'ok',
+      state: ['unpaid', 'expired', 'canceled'].includes(normalizedStatus) ? 'blocked' : ['pending_payment', 'pending_pix'].includes(normalizedStatus) ? 'pending' : 'ok',
       planStatus: normalizedStatus,
       dueAt: null,
       trialEndsAt,
@@ -128,7 +129,11 @@ export function resolveBillingState({ planStatus, planActiveUntil, planTrialEnds
   const msDiff = dueAt.getTime() - now.getTime()
   if (msDiff >= 0) {
     const daysToDue = Math.ceil(msDiff / DAY_MS)
-    const state = daysToDue <= warnDays ? 'due_soon' : 'ok'
+    const state = ['pending_payment', 'pending_pix', 'past_due'].includes(normalizedStatus)
+      ? 'due_soon'
+      : daysToDue <= warnDays
+        ? 'due_soon'
+        : 'ok'
     return {
       state,
       planStatus: normalizedStatus,
@@ -143,7 +148,7 @@ export function resolveBillingState({ planStatus, planActiveUntil, planTrialEnds
   }
 
   const daysOverdue = Math.floor(Math.abs(msDiff) / DAY_MS)
-  if (daysOverdue < graceDays && normalizedStatus !== 'delinquent') {
+  if (daysOverdue < graceDays && !['unpaid', 'expired', 'canceled'].includes(normalizedStatus)) {
     return {
       state: 'overdue',
       planStatus: normalizedStatus,
@@ -159,7 +164,7 @@ export function resolveBillingState({ planStatus, planActiveUntil, planTrialEnds
 
   return {
     state: 'blocked',
-    planStatus: 'delinquent',
+    planStatus: normalizedStatus === 'pending_pix' ? 'expired' : 'unpaid',
     dueAt,
     trialEndsAt,
     warnDays,
@@ -368,10 +373,12 @@ async function sendWhatsappReminder(row, dueAt, kind, state) {
 }
 
 async function applyDelinquentStatus(row) {
-  if (String(row.plan_status || '').toLowerCase() === 'delinquent') return false
+  const current = normalizeSubscriptionStatus(row.plan_status || 'trialing')
+  const nextStatus = current === 'pending_pix' ? 'expired' : 'unpaid'
+  if (current === nextStatus) return false
   await pool.query(
-    "UPDATE usuarios SET plan_status='delinquent' WHERE id=? AND tipo='estabelecimento' LIMIT 1",
-    [row.id]
+    'UPDATE usuarios SET plan_status=? WHERE id=? AND tipo=\'estabelecimento\' LIMIT 1',
+    [nextStatus, row.id]
   )
   return true
 }
@@ -438,7 +445,10 @@ export async function runBillingReminderTick() {
               notify_email_estab, notify_whatsapp_estab
        FROM usuarios
        WHERE tipo='estabelecimento'
-         AND (plan_active_until IS NOT NULL OR plan_status='delinquent')`
+         AND (
+           plan_active_until IS NOT NULL
+           OR plan_status IN ('past_due','pending_payment','pending_pix','unpaid','expired','canceled')
+         )`
     )
 
     let warned = 0

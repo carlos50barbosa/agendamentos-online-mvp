@@ -1,11 +1,84 @@
 // backend/src/routes/notify.js
 import { Router } from 'express';
+import { config } from '../lib/config.js';
 import { sendTemplate, sendWhatsAppSmart } from '../lib/notifications.js';
+import { buildRateLimitClientKey, createRateLimitMiddleware } from '../lib/request_rate_limit.js';
+import { tryAuthenticateRequest } from '../middleware/auth.js';
+import { logBlockedRouteAccess, resolveRouteTokenAccess } from '../lib/route_access.js';
 
 const router = Router();
+const notifyRateLimit = createRateLimitMiddleware({
+  routeKey: 'notify',
+  max: () => config.security?.rateLimit?.notify?.max,
+  windowMs: () => config.security?.rateLimit?.notify?.windowMs,
+  keyResolver: (req) => `notify:${buildRateLimitClientKey(req)}`,
+});
+
+router.use(notifyRateLimit);
+
+export function resolveNotifyTokenAccess(req, env = process.env) {
+  return resolveRouteTokenAccess(req, {
+    env,
+    envNames: ['NOTIFY_ROUTE_TOKEN', 'ADMIN_TOKEN'],
+    headerNames: ['x-notify-token', 'x-admin-token'],
+    allowAuthorizationBearer: false,
+  });
+}
+
+export function decideNotifyAccess({ tokenAccess, authResult }) {
+  if (tokenAccess?.ok) {
+    return {
+      ok: true,
+      source: tokenAccess.source,
+      user: null,
+    };
+  }
+
+  if (authResult?.user?.tipo === 'estabelecimento') {
+    return {
+      ok: true,
+      source: 'jwt_estabelecimento',
+      user: authResult.user,
+    };
+  }
+
+  if (authResult?.error) {
+    return {
+      ok: false,
+      status: authResult.error.code === 'token_expired' ? 401 : 403,
+      error: authResult.error.code,
+    };
+  }
+
+  return {
+    ok: false,
+    status: 403,
+    error: 'forbidden',
+  };
+}
+
+export async function requireNotifyAccess(req, res, next) {
+  const tokenAccess = resolveNotifyTokenAccess(req);
+  const authResult = tokenAccess.ok ? { user: null, error: null } : await tryAuthenticateRequest(req);
+  const decision = decideNotifyAccess({ tokenAccess, authResult });
+
+  if (decision.ok) {
+    if (decision.user) req.user = decision.user;
+    req.routeAccess = { source: decision.source };
+    return next();
+  }
+
+  logBlockedRouteAccess('notify', req, {
+    reason: decision.error || tokenAccess.reason || 'forbidden',
+    has_auth_header: Boolean(req.headers.authorization),
+    token_configured: tokenAccess.configured,
+  });
+
+  return res.status(decision.status).json({ ok: false, error: decision.error });
+}
 
 // Texto livre
-router.post('/whatsapp/text', async (req, res) => {
+router.post('/whatsapp/text', requireNotifyAccess, async (req, res) => {
   try {
     const { to, message, text, templateNameFallback } = req.body || {};
     const fallbackName =
@@ -35,7 +108,7 @@ router.post('/whatsapp/text', async (req, res) => {
 });
 
 // Template hello_world
-router.post('/whatsapp/template', async (req, res) => {
+router.post('/whatsapp/template', requireNotifyAccess, async (req, res) => {
   try {
     const { to, name, lang } = req.body || {};
     const data = await sendTemplate({ to, name, lang });

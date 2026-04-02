@@ -21,30 +21,30 @@ function BenefitCard({ title, description, items }) {
 
 const PLAN_GUIDE = [
   {
-    title: 'Profissionais por plano',
-    description: 'Escolha o limite de equipe que faz sentido para o seu atendimento.',
+    title: 'Equipe e galeria',
+    description: 'Cada plano muda o tamanho da equipe e o limite da galeria pública.',
     items: [
-      'Starter: até 2 profissionais',
-      'Pro: até 5 profissionais',
-      'Premium: até 10 profissionais',
+      'Starter: até 2 profissionais e até 5 imagens na galeria',
+      'Pro: até 5 profissionais e até 15 imagens na galeria',
+      'Premium: até 10 profissionais e galeria sem limite de imagens',
     ],
   },
   {
     title: 'WhatsApp incluído por mês',
     description: 'Pacotes mensais de mensagens do WhatsApp.',
     items: [
-      'Starter: 250 mensagens/mês (confirmações, lembretes e avisos)',
-      'Pro: 500 mensagens/mês (confirmações, lembretes e avisos)',
-      'Premium: 1.500 mensagens/mês (confirmações, lembretes e avisos)',
+      'Starter: 250 mensagens/mês para confirmações, lembretes e avisos',
+      'Pro: 500 mensagens/mês para confirmações, lembretes e avisos',
+      'Premium: 1.500 mensagens/mês para confirmações, lembretes e avisos',
     ],
   },
   {
-    title: 'Relatórios e suporte',
-    description: 'Itens adicionais que mudam conforme o plano.',
+    title: 'Relatórios e pagamentos',
+    description: 'Os recursos operacionais mudam conforme o plano contratado.',
     items: [
-      'Starter: relatórios básicos',
-      'Pro: relatórios avançados, indicadores em tempo real e suporte prioritário via WhatsApp Business',
-      'Premium: suporte prioritário e onboarding do time',
+      'Starter: relatórios básicos e sem sinal via PIX com Mercado Pago',
+      'Pro: relatórios avançados e sinal via PIX com Mercado Pago',
+      'Premium: relatórios avançados e sinal via PIX com Mercado Pago',
     ],
   },
 ];
@@ -56,7 +56,7 @@ export default function PlanosUpperExtras({ onContactPremium = () => {} }) {
         <div className="section-shell">
           <header className="section-header">
             <h2>Entenda o que muda em cada plano</h2>
-            <p>Em todos: agendamentos ilimitados e até 5 mensagens por agendamento (confirmações, lembretes e avisos).</p>
+            <p>Em todos: serviços e agendamentos ilimitados no sistema, com até 5 mensagens por agendamento.</p>
           </header>
           <div className="benefits-grid">
             {PLAN_GUIDE.map((benefit) => (
