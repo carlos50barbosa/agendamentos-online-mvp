@@ -39,6 +39,8 @@ const FINANCIAL_EVENT_LABELS = {
   subscription_created: 'Assinatura criada',
   payment_approved: 'Pagamento aprovado',
   payment_failed: 'Pagamento falhou',
+  payment_recovery_attempt: 'Tentativa de regularizacao',
+  payment_recovered: 'Pagamento recuperado',
   payment_pending: 'Pagamento pendente',
   pix_generated: 'PIX gerado',
   pix_paid: 'PIX pago',
@@ -54,6 +56,15 @@ const FINANCIAL_EVENT_LABELS = {
 const PIX_POLL_INTERVAL_MS = 2000;
 const PIX_POLL_MAX_ATTEMPTS = 60;
 let mercadoPagoSdkPromise = null;
+
+function generateIdempotencyKey() {
+  try {
+    if (typeof window !== 'undefined' && window.crypto?.randomUUID) {
+      return window.crypto.randomUUID();
+    }
+  } catch {}
+  return `subscription-recovery-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
 
 function getErrorMessage(error, fallback) {
   return error?.data?.message || error?.message || fallback;
@@ -294,6 +305,7 @@ export default function Assinatura() {
   const [checkoutLoading, setCheckoutLoading] = useState(false);
   const [renewalLoading, setRenewalLoading] = useState(false);
   const [cardState, setCardState] = useState({ ready: false, loading: false, submitting: false, error: '' });
+  const [cardRecoveryReady, setCardRecoveryReady] = useState(false);
   const [pixModal, setPixModal] = useState({ open: false, data: null });
   const [pixConfirmed, setPixConfirmed] = useState(false);
   const [pixNotice, setPixNotice] = useState('');
@@ -301,6 +313,8 @@ export default function Assinatura() {
 
   const cardFormRef = useRef(null);
   const cardSubmittingRef = useRef(false);
+  const cardSubmitIntentRef = useRef('save');
+  const cardRecoveryIdempotencyKeyRef = useRef('');
   const pixIntervalRef = useRef(null);
   const pixAttemptsRef = useRef(0);
   const pixBusyRef = useRef(false);
@@ -421,15 +435,22 @@ export default function Assinatura() {
   const checkoutCycle = selectedCycle || currentCycle || 'mensal';
   const selectedPlanPriceCents = checkoutCycle === 'anual' ? planMeta.annualPriceCents : planMeta.priceCents;
   const paymentMethodLabel = getPaymentMethodLabel(currentPaymentMethod);
+  const hasDelinquentStatus = ['past_due', 'unpaid', 'expired'].includes(planStatusKey);
   const cardAction = useMemo(() => {
-    if (currentPaymentMethod === 'credit_card' && ['past_due', 'pending_payment'].includes(planStatusKey)) {
-      return { mode: 'update', label: 'Regularizar com outro cartao' };
+    if (currentPaymentMethod === 'credit_card' && (hasDelinquentStatus || planStatusKey === 'pending_payment')) {
+      return {
+        mode: 'update',
+        label: hasDelinquentStatus ? 'Salvar cartao para regularizar' : 'Atualizar cartao',
+      };
     }
     if (currentPaymentMethod === 'credit_card') {
       return { mode: 'update', label: 'Trocar cartao' };
     }
-    return { mode: 'subscribe', label: 'Assinar com cartao' };
-  }, [currentPaymentMethod, planStatusKey]);
+    return {
+      mode: 'subscribe',
+      label: hasDelinquentStatus ? 'Salvar cartao para reativar' : 'Assinar com cartao',
+    };
+  }, [currentPaymentMethod, hasDelinquentStatus, planStatusKey]);
 
   const appointmentUsage = useMemo(() => {
     const data = planContext?.usage?.appointments || {};
@@ -500,6 +521,13 @@ export default function Assinatura() {
   );
   const isRenewalPix = pixModal.data?.kind === 'renewal';
   const isCheckoutPix = pixModal.data?.kind === 'checkout';
+
+  useEffect(() => {
+    if (!hasDelinquentStatus) {
+      setCardRecoveryReady(false);
+      cardRecoveryIdempotencyKeyRef.current = '';
+    }
+  }, [hasDelinquentStatus]);
 
   const openPixModal = useCallback((data) => {
     clearPixPolling();
@@ -603,6 +631,8 @@ export default function Assinatura() {
 
   const handleSubmitCard = useCallback(async (cardFormData) => {
     if (!establishmentId || cardSubmittingRef.current) return false;
+    const submitIntent = cardSubmitIntentRef.current === 'recover' ? 'recover' : 'save';
+    cardSubmitIntentRef.current = 'save';
     cardSubmittingRef.current = true;
     setCardState((current) => ({ ...current, submitting: true, error: '' }));
     setNotice({ type: '', message: '' });
@@ -623,23 +653,57 @@ export default function Assinatura() {
         throw new Error('Nao foi possivel tokenizar o cartao.');
       }
 
+      if (submitIntent === 'recover') {
+        const idempotencyKey = cardRecoveryIdempotencyKeyRef.current || generateIdempotencyKey();
+        cardRecoveryIdempotencyKeyRef.current = idempotencyKey;
+        const response = await Api.billingCardRecover(payload, { idempotencyKey });
+        await refreshData({ silent: true });
+        cardRecoveryIdempotencyKeyRef.current = '';
+        if (response?.paid) {
+          setCardRecoveryReady(false);
+          setNotice({
+            type: 'success',
+            message: 'Pagamento aprovado. A assinatura foi reativada e a renovacao automatica segue no cartao.',
+          });
+          return true;
+        }
+        setCardRecoveryReady(true);
+        const message = response?.message || 'A cobranca pendente nao foi aprovada. Gere um PIX ou tente outro cartao.';
+        setCardState((current) => ({ ...current, error: message }));
+        setNotice({ type: 'error', message });
+        return false;
+      }
+
+      let response;
       if (cardAction.mode === 'update') {
-        await Api.billingCardUpdate(payload);
+        response = await Api.billingCardUpdate(payload);
       } else {
-        await Api.billingCardSubscribe(payload);
+        response = await Api.billingCardSubscribe(payload);
       }
 
       await refreshData({ silent: true });
-      setNotice({
-        type: 'success',
-        message: cardAction.mode === 'update'
-          ? 'Cartao atualizado. Vamos sincronizar a cobranca recorrente automaticamente.'
-          : 'Assinatura enviada no cartao. A renovacao automatica passa a ser o fluxo principal.',
-      });
+      if (response?.recovery_required) {
+        setCardRecoveryReady(true);
+        setNotice({
+          type: 'warning',
+          message: 'Cartao cadastrado com sucesso. Falta quitar a pendencia para reativar o plano.',
+        });
+      } else {
+        setCardRecoveryReady(false);
+        setNotice({
+          type: 'success',
+          message: cardAction.mode === 'update'
+            ? 'Cartao atualizado. Vamos sincronizar a cobranca recorrente automaticamente.'
+            : 'Assinatura enviada no cartao. A renovacao automatica passa a ser o fluxo principal.',
+        });
+      }
       return true;
     } catch (requestError) {
       const message = getErrorMessage(requestError, 'Falha ao processar o cartao agora.');
       setCardState((current) => ({ ...current, error: message }));
+      if (submitIntent === 'recover') {
+        setCardRecoveryReady(true);
+      }
       setNotice({ type: 'error', message });
       return false;
     } finally {
@@ -647,6 +711,17 @@ export default function Assinatura() {
       setCardState((current) => ({ ...current, submitting: false }));
     }
   }, [cardAction.mode, checkoutCycle, establishmentId, planKey, refreshData, user?.email]);
+
+  const handleRecoverNowWithCard = useCallback(() => {
+    const form = document.getElementById('subscription-card-form');
+    if (!form) return;
+    cardSubmitIntentRef.current = 'recover';
+    if (typeof form.requestSubmit === 'function') {
+      form.requestSubmit();
+      return;
+    }
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  }, []);
 
   useEffect(() => {
     if (!isEstablishment || !cardGatewayPublicKey) {
@@ -1103,6 +1178,7 @@ export default function Assinatura() {
                 id="subscription-card-submit"
                 type="submit"
                 className="btn btn--primary"
+                onClick={() => { cardSubmitIntentRef.current = 'save'; }}
                 disabled={cardState.loading || cardState.submitting || !cardGatewayPublicKey}
               >
                 {cardState.submitting
@@ -1112,6 +1188,38 @@ export default function Assinatura() {
             </form>
             {cardState.loading ? <span className="muted">Carregando formulario seguro do gateway...</span> : null}
             {cardState.error ? <span className="muted" style={{ color: '#b91c1c' }}>{cardState.error}</span> : null}
+            {cardRecoveryReady && hasDelinquentStatus ? (
+              <div className="subscription-page__callout">
+                <strong>Cartao cadastrado com sucesso. Falta quitar a pendencia para reativar o plano.</strong>
+                <p className="muted">
+                  O cadastro do cartao nao libera o acesso sozinho. Quite a cobranca pendente agora ou gere um PIX manual.
+                </p>
+                <div className="subscription-page__payment-actions">
+                  <button
+                    type="button"
+                    className="btn btn--primary"
+                    onClick={handleRecoverNowWithCard}
+                    disabled={cardState.loading || cardState.submitting || !cardGatewayPublicKey}
+                  >
+                    {cardState.submitting ? <span className="spinner" /> : 'Pagar agora com cartao'}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn--outline"
+                    onClick={() => {
+                      if (openRenewalPayment) {
+                        handleOpenPendingRenewal();
+                        return;
+                      }
+                      void handleGenerateRenewalPix();
+                    }}
+                    disabled={renewalLoading}
+                  >
+                    {renewalLoading ? <span className="spinner" /> : 'Gerar PIX'}
+                  </button>
+                </div>
+              </div>
+            ) : null}
           </div>
 
           <div className="subscription-page__payment-panel">

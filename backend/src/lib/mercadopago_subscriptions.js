@@ -138,7 +138,30 @@ function mapAuthorizedPaymentResponse(data) {
   }
 }
 
-async function mercadoPagoRequest(path, { method = 'GET', body } = {}) {
+function mapCardChargeResponse(data) {
+  if (!data) return null
+  const statusRaw = String(data.status || '').toLowerCase()
+  let status = 'pending_payment'
+  if (statusRaw === 'approved') status = 'active'
+  else if (['pending', 'in_process', 'authorized'].includes(statusRaw)) status = 'pending_payment'
+  else if (['rejected', 'cancelled', 'canceled', 'failed', 'refunded', 'charged_back'].includes(statusRaw)) status = 'past_due'
+
+  return {
+    id: data.id || null,
+    status,
+    rawStatus: data.status || null,
+    paymentMethod: normalizePaymentMethod(data.payment_method_id || 'credit_card') || 'credit_card',
+    amountCents: data.transaction_amount != null
+      ? Math.round(Number(data.transaction_amount || 0) * 100)
+      : null,
+    currency: data.currency_id || BILLING_CURRENCY,
+    paidAt: data.date_approved || data.last_modified || null,
+    externalReference: data.external_reference || null,
+    raw: data,
+  }
+}
+
+async function mercadoPagoRequest(path, { method = 'GET', body, headers = {} } = {}) {
   if (MOCK_MP) {
     const normalizedPath = String(path || '')
     if (method === 'POST' && normalizedPath === '/preapproval') {
@@ -180,6 +203,19 @@ async function mercadoPagoRequest(path, { method = 'GET', body } = {}) {
     if (authorizedMatch && method === 'GET') {
       return mockAuthorizedPayments.get(authorizedMatch[1]) || null
     }
+
+    if (method === 'POST' && normalizedPath === '/v1/payments') {
+      return {
+        id: `mock-card-payment-${mockAuthorizedPayments.size + 1}`,
+        status: String(body?.token || '').toLowerCase().includes('fail') ? 'rejected' : 'approved',
+        transaction_amount: body?.transaction_amount || null,
+        currency_id: BILLING_CURRENCY,
+        payment_method_id: body?.payment_method_id || 'visa',
+        external_reference: body?.external_reference || null,
+        date_approved: new Date().toISOString(),
+        last_modified: new Date().toISOString(),
+      }
+    }
   }
 
   const accessToken = ensureAccessToken()
@@ -188,6 +224,7 @@ async function mercadoPagoRequest(path, { method = 'GET', body } = {}) {
     headers: {
       Authorization: `Bearer ${accessToken}`,
       'Content-Type': 'application/json',
+      ...headers,
     },
     body: body == null ? undefined : JSON.stringify(body),
   })
@@ -298,13 +335,14 @@ export async function updateMercadoPagoCardSubscription(gatewaySubscriptionId, {
   amountCents = null,
   billingCycle = null,
   status = null,
+  startDate = null,
 } = {}) {
   if (!gatewaySubscriptionId) throw new Error('gateway_subscription_id_required')
   const payload = {}
   if (cardToken) payload.card_token_id = cardToken
   if (payerEmail) payload.payer_email = payerEmail
   if (status) payload.status = status
-  if (amountCents != null || billingCycle) {
+  if (amountCents != null || billingCycle || startDate) {
     const normalizedCycle = normalizeBillingCycle(billingCycle || 'mensal')
     const cycleConfig = getBillingCycleConfig(normalizedCycle)
     payload.auto_recurring = {
@@ -314,6 +352,11 @@ export async function updateMercadoPagoCardSubscription(gatewaySubscriptionId, {
     if (amountCents != null) {
       payload.auto_recurring.transaction_amount = amountToGatewayValue(amountCents)
       payload.auto_recurring.currency_id = BILLING_CURRENCY
+    }
+    if (startDate) {
+      const normalizedStartDate = normalizeGatewayIsoDate(startDate) || new Date(startDate).toISOString()
+      validateFutureSubscriptionStartDate(normalizedStartDate, { nowMs: Date.now() })
+      payload.auto_recurring.start_date = normalizedStartDate
     }
   }
 
@@ -330,6 +373,84 @@ export async function updateMercadoPagoCardSubscription(gatewaySubscriptionId, {
 
 export async function cancelMercadoPagoCardSubscription(gatewaySubscriptionId) {
   return updateMercadoPagoCardSubscription(gatewaySubscriptionId, { status: 'cancelled' })
+}
+
+export async function createMercadoPagoCardRecoveryPayment({
+  subscription,
+  estabelecimento,
+  amountCents,
+  description,
+  cardToken,
+  payerEmail,
+  paymentMethodId = null,
+  issuerId = null,
+  identificationType = null,
+  identificationNumber = null,
+  externalReference,
+  idempotencyKey,
+} = {}) {
+  if (!subscription?.gatewaySubscriptionId) throw new Error('gateway_subscription_id_required')
+  if (!cardToken) throw new Error('card_token_required')
+
+  const body = {
+    transaction_amount: amountToGatewayValue(amountCents),
+    token: cardToken,
+    description: description || 'Regularizacao de assinatura Agendamentos Online',
+    installments: 1,
+    capture: true,
+    binary_mode: true,
+    external_reference: externalReference || null,
+    metadata: {
+      kind: 'subscription_recovery',
+      subscription_id: String(subscription.id || ''),
+      gateway_subscription_id: String(subscription.gatewaySubscriptionId || ''),
+      estabelecimento_id: String(estabelecimento?.id || subscription.estabelecimentoId || ''),
+    },
+    payer: {
+      email: payerEmail || estabelecimento?.email || null,
+      type: subscription.gatewayCustomerId ? 'customer' : undefined,
+      id: subscription.gatewayCustomerId || undefined,
+      identification:
+        identificationType && identificationNumber
+          ? { type: identificationType, number: identificationNumber }
+          : undefined,
+    },
+  }
+  if (paymentMethodId) body.payment_method_id = paymentMethodId
+  if (issuerId) body.issuer_id = issuerId
+
+  console.info('[mercadopago/subscriptions][recovery-payment] sending', {
+    subscription_id: subscription.id || null,
+    gateway_subscription_id: subscription.gatewaySubscriptionId || null,
+    amount_cents: amountCents,
+    external_reference: externalReference || null,
+    idempotency_key: idempotencyKey || null,
+  })
+
+  try {
+    const response = await mercadoPagoRequest('/v1/payments', {
+      method: 'POST',
+      body,
+      headers: idempotencyKey ? { 'X-Idempotency-Key': String(idempotencyKey) } : {},
+    })
+    return {
+      request: body,
+      payment: mapCardChargeResponse(response),
+      raw: response,
+    }
+  } catch (error) {
+    console.error('[mercadopago/subscriptions][recovery-payment] failed', {
+      subscription_id: subscription.id || null,
+      gateway_subscription_id: subscription.gatewaySubscriptionId || null,
+      amount_cents: amountCents,
+      external_reference: externalReference || null,
+      idempotency_key: idempotencyKey || null,
+      status: error?.status || null,
+      response: error?.responseData || null,
+      message: error?.message || String(error),
+    })
+    throw error
+  }
 }
 
 export async function getMercadoPagoAuthorizedPayment(authorizedPaymentId) {

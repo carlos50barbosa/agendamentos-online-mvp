@@ -380,6 +380,13 @@ export const Api = {
 
   billingCardUpdate: (payload) => req('/billing/card/update', { method: 'POST', body: JSON.stringify(payload || {}) }),
 
+  billingCardRecover: (payload, opts = {}) =>
+    req('/billing/card/recover', {
+      method: 'POST',
+      body: JSON.stringify(payload || {}),
+      idempotencyKey: opts?.idempotencyKey,
+    }),
+
   billingWhatsAppPacks: () => req('/billing/whatsapp/packs'),
 
   billingWhatsAppWallet: () => req('/billing/whatsapp/wallet'),

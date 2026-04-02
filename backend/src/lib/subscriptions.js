@@ -228,6 +228,46 @@ export async function appendSubscriptionEvent(subscriptionId, { eventType, gatew
   return { duplicated: false, id: result.insertId }
 }
 
+export async function getSubscriptionEventByGatewayEventId(subscriptionId, gatewayEventId, { eventTypes = [] } = {}) {
+  if (!subscriptionId || !gatewayEventId) return null
+
+  const filters = [
+    'subscription_id=?',
+    'gateway_event_id=?',
+  ]
+  const values = [
+    subscriptionId,
+    String(gatewayEventId),
+  ]
+
+  const normalizedTypes = Array.isArray(eventTypes)
+    ? eventTypes.map((item) => String(item || '').trim()).filter(Boolean)
+    : []
+  if (normalizedTypes.length) {
+    filters.push(`event_type IN (${normalizedTypes.map(() => '?').join(', ')})`)
+    values.push(...normalizedTypes)
+  }
+
+  const [rows] = await pool.query(
+    `SELECT id, subscription_id, event_type, gateway_event_id, payload, created_at
+       FROM subscription_events
+      WHERE ${filters.join(' AND ')}
+      ORDER BY id DESC
+      LIMIT 1`,
+    values
+  )
+  const row = rows?.[0]
+  if (!row) return null
+  return {
+    id: row.id,
+    subscription_id: row.subscription_id,
+    event_type: row.event_type,
+    gateway_event_id: row.gateway_event_id || null,
+    payload: row.payload ? safeJsonParse(row.payload) : null,
+    created_at: row.created_at ? new Date(row.created_at).toISOString() : null,
+  }
+}
+
 export async function listSubscriptionEventsForEstabelecimento(estabelecimentoId, { limit = 30 } = {}) {
   const safeLimit = Math.max(1, Math.min(Number(limit || 30) || 30, 100))
   const [rows] = await pool.query(

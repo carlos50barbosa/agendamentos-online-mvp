@@ -1,6 +1,6 @@
 ﻿// backend/src/routes/billing.js
 import { Router } from 'express'
-import { createHmac, timingSafeEqual } from 'node:crypto'
+import { createHmac, timingSafeEqual, randomUUID } from 'node:crypto'
 import { auth, isEstabelecimento } from '../middleware/auth.js'
 import {
   createMercadoPagoPixCheckout,
@@ -11,6 +11,7 @@ import {
 import {
   cancelMercadoPagoCardSubscription,
   createMercadoPagoCardSubscription,
+  createMercadoPagoCardRecoveryPayment,
   getMercadoPagoAuthorizedPayment,
   getMercadoPagoCardSubscription,
   getMercadoPagoPublicKey,
@@ -36,7 +37,9 @@ import {
 } from '../lib/plans.js'
 import { checkMonthlyAppointmentLimit } from '../lib/appointment_limits.js'
 import {
+  getSubscriptionById,
   getSubscriptionByGatewayId,
+  getSubscriptionEventByGatewayEventId,
   listSubscriptionsForEstabelecimento,
   listSubscriptionEventsForEstabelecimento,
   serializeSubscription,
@@ -59,6 +62,7 @@ const DAY_MS = 86400000
 const MP_COLLECTOR_ID = Number(process.env.MERCADOPAGO_COLLECTOR_ID || 281768531)
 const WEBHOOK_MISMATCH_WINDOW_MS = 60000
 const webhookMismatchLogByIp = new Map()
+const CARD_RECOVERY_STATUSES = new Set(['past_due', 'unpaid', 'expired'])
 
 function requireBillingWebhookHealthAccess(req, res, next) {
   const access = resolveRouteTokenAccess(req, {
@@ -144,6 +148,51 @@ async function summarizeReminders(estabelecimentoId) {
 function normalizePlanKey(plan) {
   const p = String(plan || '').toLowerCase().trim()
   return PLAN_TIERS.includes(p) ? p : ''
+}
+
+function requiresCardRecovery(status) {
+  return CARD_RECOVERY_STATUSES.has(normalizeSubscriptionStatus(status))
+}
+
+function buildCardRecoveryExternalReference(subscriptionId, idempotencyKey) {
+  return [
+    'subscription_recovery',
+    'sub',
+    String(subscriptionId || ''),
+    'attempt',
+    String(idempotencyKey || randomUUID()),
+  ].join(':')
+}
+
+function resolveCardPersistenceAfterSave({
+  gatewaySubscription,
+  previousContext,
+} = {}) {
+  const previousStatus = previousContext?.computedState?.resolvedStatus || previousContext?.subscription?.status || null
+  const previousSubscription = previousContext?.subscription || null
+  const recoveryRequired = requiresCardRecovery(previousStatus)
+
+  if (recoveryRequired) {
+    return {
+      recoveryRequired: true,
+      status: previousStatus,
+      currentPeriodStart: previousSubscription?.currentPeriodStart || null,
+      currentPeriodEnd: previousSubscription?.currentPeriodEnd || previousContext?.computedState?.currentPeriodEnd || null,
+      nextBillingAt: gatewaySubscription?.nextBillingAt || previousSubscription?.nextBillingAt || null,
+      graceUntil: previousSubscription?.graceUntil || previousContext?.computedState?.graceUntil || null,
+      lastPaymentAt: previousSubscription?.lastPaymentAt || null,
+    }
+  }
+
+  return {
+    recoveryRequired: false,
+    status: gatewaySubscription?.status || 'pending_payment',
+    currentPeriodStart: gatewaySubscription?.status === 'active' ? gatewaySubscription?.currentPeriodStart || new Date() : null,
+    currentPeriodEnd: gatewaySubscription?.status === 'active' ? gatewaySubscription?.currentPeriodEnd || null : null,
+    nextBillingAt: gatewaySubscription?.nextBillingAt || null,
+    graceUntil: null,
+    lastPaymentAt: gatewaySubscription?.status === 'active' ? new Date() : null,
+  }
 }
 
 async function findPendingPixSubscription(estabelecimentoId, { plan, billingCycle } = {}) {
@@ -290,6 +339,10 @@ async function createOrReplaceCardSubscription({
   })
   const gatewaySubscription = gatewayResult.subscription
   const amountCents = gatewaySubscription?.amountCents ?? getPlanPriceCents(plan, billingCycle)
+  const persistenceState = resolveCardPersistenceAfterSave({
+    gatewaySubscription,
+    previousContext,
+  })
 
   const subscription = await createSubscription({
     estabelecimentoId,
@@ -299,14 +352,15 @@ async function createOrReplaceCardSubscription({
     gatewayCustomerId: gatewaySubscription?.gatewayCustomerId || null,
     gatewaySubscriptionId: gatewaySubscription?.gatewaySubscriptionId || null,
     externalReference: gatewaySubscription?.externalReference || null,
-    status: gatewaySubscription?.status || 'pending_payment',
+    status: persistenceState.status,
     amountCents,
     currency: gatewaySubscription?.currency || (config.billing?.currency || 'BRL'),
     billingCycle,
-    currentPeriodStart: gatewaySubscription?.status === 'active' ? gatewaySubscription?.currentPeriodStart || new Date() : null,
-    currentPeriodEnd: gatewaySubscription?.status === 'active' ? gatewaySubscription?.currentPeriodEnd || null : null,
-    nextBillingAt: gatewaySubscription?.nextBillingAt || null,
-    graceUntil: null,
+    currentPeriodStart: persistenceState.currentPeriodStart,
+    currentPeriodEnd: persistenceState.currentPeriodEnd,
+    nextBillingAt: persistenceState.nextBillingAt,
+    graceUntil: persistenceState.graceUntil,
+    lastPaymentAt: persistenceState.lastPaymentAt,
   })
   await appendSubscriptionEvent(subscription.id, {
     eventType: 'subscription_created',
@@ -343,6 +397,7 @@ async function createOrReplaceCardSubscription({
     computedState: effectiveContext.computedState,
     effectiveSubscription: effectiveContext.subscription,
     gatewayResult,
+    recoveryRequired: persistenceState.recoveryRequired,
   }
 }
 
@@ -372,11 +427,15 @@ async function syncCardSubscriptionFromGateway(gatewaySubscriptionId, {
   const graceUntil = gatewaySubscription?.status === 'past_due'
     ? new Date(Date.now() + graceDays * DAY_MS)
     : null
+  const preservedStatus =
+    requiresCardRecovery(localSubscription.status) && gatewaySubscription?.status === 'pending_payment'
+      ? normalizeSubscriptionStatus(localSubscription.status, { paymentMethod: localSubscription.paymentMethod })
+      : gatewaySubscription?.status || localSubscription.status
 
   const updated = await updateSubscription(localSubscription.id, {
     paymentMethod: 'credit_card',
     gatewayCustomerId: gatewaySubscription?.gatewayCustomerId || localSubscription.gatewayCustomerId || null,
-    status: gatewaySubscription?.status || localSubscription.status,
+    status: preservedStatus,
     amountCents: gatewaySubscription?.amountCents || localSubscription.amountCents,
     currency: gatewaySubscription?.currency || localSubscription.currency,
     billingCycle: gatewaySubscription?.billingCycle || localSubscription.billingCycle,
@@ -385,7 +444,7 @@ async function syncCardSubscriptionFromGateway(gatewaySubscriptionId, {
       gatewaySubscription?.status === 'active'
         ? (gatewaySubscription?.nextBillingAt || localSubscription.currentPeriodEnd || null)
         : localSubscription.currentPeriodEnd || null,
-    graceUntil,
+    graceUntil: preservedStatus === gatewaySubscription?.status ? graceUntil : localSubscription.graceUntil || null,
   })
   const normalizedEventType =
     eventType ||
@@ -490,6 +549,23 @@ async function syncAuthorizedPaymentFromGateway(authorizedPaymentId, {
     authorizedPayment: paymentResult.raw,
     gatewaySubscription: preapprovalResult.raw,
   }
+}
+
+function pickRecoverableCardSubscription(context) {
+  if (!context) return null
+  if (
+    context.subscription?.gatewaySubscriptionId &&
+    String(context.subscription.paymentMethod || '').toLowerCase() === 'credit_card' &&
+    requiresCardRecovery(context.computedState?.resolvedStatus || context.subscription.status)
+  ) {
+    return context.subscription
+  }
+
+  return (context.subscriptions || []).find((item) =>
+    item?.gatewaySubscriptionId &&
+    String(item.paymentMethod || '').toLowerCase() === 'credit_card' &&
+    requiresCardRecovery(item.status)
+  ) || null
 }
 
 function parseMercadoPagoSignatureHeader(xSignature) {
@@ -1218,6 +1294,7 @@ router.post('/card/subscribe', auth, isEstabelecimento, async (req, res) => {
     return res.json({
       ok: true,
       automatic_renewal: true,
+      recovery_required: !!result.recoveryRequired,
       plan_status: result.computedState.resolvedStatus,
       access_state: result.computedState.accessState,
       subscription: serializeSubscription(result.subscription),
@@ -1243,7 +1320,8 @@ router.post('/card/update', auth, isEstabelecimento, async (req, res) => {
       return res.status(400).json({ error: 'card_token_required', message: 'Token do cartao nao informado.' })
     }
 
-    const { planContext, subscriptions, subscription: effective } = await loadEffectiveSubscriptionContext(req.user.id)
+    const previousContext = await loadEffectiveSubscriptionContext(req.user.id)
+    const { planContext, subscriptions, subscription: effective, computedState } = previousContext
     const billingCycle = normalizeBillingCycle(
       req.body?.billing_cycle ||
       effective?.billingCycle ||
@@ -1260,13 +1338,15 @@ router.post('/card/update', auth, isEstabelecimento, async (req, res) => {
     ).toLowerCase()
 
     const targetCardSubscription = (() => {
+      const recoverable = pickRecoverableCardSubscription(previousContext)
+      if (recoverable?.gatewaySubscriptionId) return recoverable
       if (effective?.gatewaySubscriptionId && String(effective.paymentMethod || '').toLowerCase() === 'credit_card') {
         return effective
       }
       return subscriptions.find((item) =>
         item?.gatewaySubscriptionId &&
         String(item.paymentMethod || '').toLowerCase() === 'credit_card' &&
-        !['canceled', 'expired'].includes(String(item.status || '').toLowerCase())
+        !['canceled'].includes(String(item.status || '').toLowerCase())
       ) || null
     })()
 
@@ -1282,6 +1362,7 @@ router.post('/card/update', auth, isEstabelecimento, async (req, res) => {
       return res.json({
         ok: true,
         created: true,
+        recovery_required: !!created.recoveryRequired,
         plan_status: created.computedState.resolvedStatus,
         access_state: created.computedState.accessState,
         subscription: serializeSubscription(created.subscription),
@@ -1296,17 +1377,27 @@ router.post('/card/update', auth, isEstabelecimento, async (req, res) => {
       billingCycle,
       status: 'authorized',
     })
+    const persistenceState = resolveCardPersistenceAfterSave({
+      gatewaySubscription: gatewayResult?.subscription || null,
+      previousContext: {
+        planContext,
+        subscription: targetCardSubscription,
+        computedState,
+      },
+    })
 
     const updated = await updateSubscription(targetCardSubscription.id, {
       paymentMethod: 'credit_card',
       gatewayCustomerId: gatewayResult?.subscription?.gatewayCustomerId || targetCardSubscription.gatewayCustomerId || null,
-      status: gatewayResult?.subscription?.status || 'pending_payment',
+      status: persistenceState.status,
       amountCents: gatewayResult?.subscription?.amountCents || amountCents,
       currency: gatewayResult?.subscription?.currency || targetCardSubscription.currency || (config.billing?.currency || 'BRL'),
       billingCycle,
-      nextBillingAt: gatewayResult?.subscription?.nextBillingAt || targetCardSubscription.nextBillingAt || null,
-      currentPeriodEnd: targetCardSubscription.currentPeriodEnd || gatewayResult?.subscription?.currentPeriodEnd || null,
-      graceUntil: targetCardSubscription.graceUntil || null,
+      nextBillingAt: persistenceState.nextBillingAt || targetCardSubscription.nextBillingAt || null,
+      currentPeriodStart: persistenceState.currentPeriodStart || targetCardSubscription.currentPeriodStart || null,
+      currentPeriodEnd: persistenceState.currentPeriodEnd || targetCardSubscription.currentPeriodEnd || gatewayResult?.subscription?.currentPeriodEnd || null,
+      graceUntil: persistenceState.graceUntil || targetCardSubscription.graceUntil || null,
+      lastPaymentAt: persistenceState.lastPaymentAt || targetCardSubscription.lastPaymentAt || null,
     })
     await appendSubscriptionEvent(updated.id, {
       eventType: 'payment_method_changed',
@@ -1322,6 +1413,7 @@ router.post('/card/update', auth, isEstabelecimento, async (req, res) => {
     return res.json({
       ok: true,
       created: false,
+      recovery_required: !!persistenceState.recoveryRequired,
       plan_status: effectiveContext.computedState.resolvedStatus,
       access_state: effectiveContext.computedState.accessState,
       subscription: serializeSubscription(updated),
@@ -1331,6 +1423,198 @@ router.post('/card/update', auth, isEstabelecimento, async (req, res) => {
     return res.status(400).json({
       error: 'card_update_failed',
       message: error?.message || 'Falha ao atualizar o cartao.',
+    })
+  }
+})
+
+router.post('/card/recover', auth, isEstabelecimento, async (req, res) => {
+  try {
+    const token = String(req.body?.card_token || req.body?.cardToken || '').trim()
+    if (!token) {
+      return res.status(400).json({ error: 'card_token_required', message: 'Token do cartao nao informado.' })
+    }
+
+    const idempotencyKey = String(req.headers['idempotency-key'] || '').trim() || randomUUID()
+    const context = await loadEffectiveSubscriptionContext(req.user.id)
+    const targetSubscription = pickRecoverableCardSubscription(context)
+    const currentStatus = context?.computedState?.resolvedStatus || targetSubscription?.status || 'unpaid'
+
+    if (!targetSubscription?.gatewaySubscriptionId || !requiresCardRecovery(currentStatus)) {
+      return res.status(409).json({
+        error: 'card_recovery_not_required',
+        message: 'Nao existe uma pendencia elegivel para regularizacao imediata no cartao.',
+      })
+    }
+
+    const plan = String(
+      targetSubscription.plan ||
+      context?.planContext?.plan ||
+      req.user.plan ||
+      'starter'
+    ).toLowerCase()
+    const billingCycle = normalizeBillingCycle(
+      targetSubscription.billingCycle ||
+      context?.planContext?.cycle ||
+      req.user.plan_cycle ||
+      'mensal'
+    )
+    const amountCents = Number(targetSubscription.amountCents || 0) || getPlanPriceCents(plan, billingCycle)
+    const externalReference = buildCardRecoveryExternalReference(targetSubscription.id, idempotencyKey)
+
+    const previousOutcome = await getSubscriptionEventByGatewayEventId(targetSubscription.id, externalReference, {
+      eventTypes: ['payment_recovered', 'payment_failed'],
+    })
+    if (previousOutcome) {
+      const refreshedContext = await loadEffectiveSubscriptionContext(req.user.id)
+      const refreshedSubscription =
+        (refreshedContext.subscription?.id === targetSubscription.id && refreshedContext.subscription) ||
+        await getSubscriptionById(targetSubscription.id)
+      const paid = previousOutcome.event_type === 'payment_recovered'
+      return res.json({
+        ok: true,
+        paid,
+        idempotent: true,
+        recovery_status: paid ? 'approved' : 'rejected',
+        message: paid
+          ? 'A cobranca pendente ja foi quitada neste cartao.'
+          : 'A ultima tentativa no cartao nao foi aprovada. Voce pode tentar novamente ou gerar um PIX.',
+        plan_status: refreshedContext.computedState.resolvedStatus,
+        access_state: refreshedContext.computedState.accessState,
+        subscription: serializeSubscription(refreshedSubscription),
+        payment: previousOutcome.payload?.payment || null,
+      })
+    }
+
+    await appendSubscriptionEvent(targetSubscription.id, {
+      eventType: 'payment_recovery_attempt',
+      gatewayEventId: externalReference,
+      payload: {
+        amount_cents: amountCents,
+        idempotency_key: idempotencyKey,
+        external_reference: externalReference,
+        previous_status: currentStatus,
+        payment_method: 'credit_card',
+      },
+    })
+
+    const paymentResult = await createMercadoPagoCardRecoveryPayment({
+      subscription: targetSubscription,
+      estabelecimento: { id: req.user.id, email: req.user.email },
+      amountCents,
+      description: `Regularizacao de assinatura Agendamentos Online - ${plan} (${billingCycle})`,
+      cardToken: token,
+      payerEmail: req.body?.payer_email || req.body?.payerEmail || req.user.email,
+      paymentMethodId: req.body?.payment_method_id || req.body?.paymentMethodId || null,
+      issuerId: req.body?.issuer_id || req.body?.issuerId || null,
+      identificationType: req.body?.identification_type || req.body?.identificationType || null,
+      identificationNumber: req.body?.identification_number || req.body?.identificationNumber || null,
+      externalReference,
+      idempotencyKey,
+    })
+    const payment = paymentResult?.payment
+    if (!payment) {
+      throw new Error('card_recovery_payment_invalid')
+    }
+
+    if (payment.status === 'active') {
+      const paidAt = payment.paidAt ? new Date(payment.paidAt) : new Date()
+      const expectedPeriodEnd = addBillingCycleDate(paidAt, billingCycle)
+      let alignedGatewaySubscription = null
+      try {
+        const aligned = await updateMercadoPagoCardSubscription(targetSubscription.gatewaySubscriptionId, {
+          amountCents,
+          billingCycle,
+          status: 'authorized',
+          startDate: expectedPeriodEnd,
+        })
+        alignedGatewaySubscription = aligned?.subscription || null
+      } catch (alignmentError) {
+        console.warn('[billing/card/recover][align_subscription]', {
+          subscription_id: targetSubscription.id,
+          gateway_subscription_id: targetSubscription.gatewaySubscriptionId,
+          message: alignmentError?.message || String(alignmentError),
+        })
+      }
+
+      const updated = await updateSubscription(targetSubscription.id, {
+        paymentMethod: 'credit_card',
+        gatewayCustomerId: alignedGatewaySubscription?.gatewayCustomerId || targetSubscription.gatewayCustomerId || null,
+        gatewayPaymentId: payment.id || null,
+        status: 'active',
+        amountCents: payment.amountCents || amountCents,
+        currency: payment.currency || targetSubscription.currency || (config.billing?.currency || 'BRL'),
+        billingCycle,
+        currentPeriodStart: paidAt,
+        currentPeriodEnd: alignedGatewaySubscription?.currentPeriodEnd || expectedPeriodEnd || null,
+        nextBillingAt: alignedGatewaySubscription?.nextBillingAt || expectedPeriodEnd || null,
+        graceUntil: null,
+        lastPaymentAt: paidAt,
+      })
+
+      await appendSubscriptionEvent(updated.id, {
+        eventType: 'payment_recovered',
+        gatewayEventId: externalReference,
+        payload: {
+          payment: paymentResult.raw,
+          previous_status: currentStatus,
+          next_status: 'active',
+        },
+      })
+      await appendSubscriptionEvent(updated.id, {
+        eventType: 'subscription_renewed',
+        gatewayEventId: `recovery:${payment.id || externalReference}`,
+        payload: {
+          payment: paymentResult.raw,
+          recovery: true,
+        },
+      })
+
+      const effectiveContext = await loadEffectiveSubscriptionContext(req.user.id)
+      return res.json({
+        ok: true,
+        paid: true,
+        recovery_status: 'approved',
+        plan_status: effectiveContext.computedState.resolvedStatus,
+        access_state: effectiveContext.computedState.accessState,
+        subscription: serializeSubscription(updated),
+        payment: paymentResult.raw,
+      })
+    }
+
+    const updated = await updateSubscription(targetSubscription.id, {
+      paymentMethod: 'credit_card',
+      gatewayPaymentId: payment.id || targetSubscription.gatewayPaymentId || null,
+      status: currentStatus,
+      graceUntil: targetSubscription.graceUntil || context?.computedState?.graceUntil || null,
+      lastPaymentAt: targetSubscription.lastPaymentAt || null,
+    })
+    await appendSubscriptionEvent(updated.id, {
+      eventType: 'payment_failed',
+      gatewayEventId: externalReference,
+      payload: {
+        payment: paymentResult.raw,
+        previous_status: currentStatus,
+        next_status: currentStatus,
+        recovery: true,
+      },
+    })
+
+    const effectiveContext = await loadEffectiveSubscriptionContext(req.user.id)
+    return res.json({
+      ok: true,
+      paid: false,
+      recovery_status: payment.rawStatus || 'rejected',
+      message: 'O cartao foi validado, mas a cobranca pendente nao foi aprovada. Tente novamente ou gere um PIX.',
+      plan_status: effectiveContext.computedState.resolvedStatus,
+      access_state: effectiveContext.computedState.accessState,
+      subscription: serializeSubscription(updated),
+      payment: paymentResult.raw,
+    })
+  } catch (error) {
+    console.error('POST /billing/card/recover', error)
+    return res.status(400).json({
+      error: 'card_recovery_failed',
+      message: error?.message || 'Falha ao cobrar a pendencia no cartao.',
     })
   }
 })
