@@ -30,7 +30,7 @@ function getStatusLabel(value) {
   const labels = {
     active: 'Ativo',
     pending_pix: 'PIX pendente',
-    pending_payment: 'Aguardando cartao',
+    pending_payment: 'Aguardando primeira cobranca',
     past_due: 'Pagamento falhou',
     unpaid: 'Inadimplente',
     expired: 'Expirado',
@@ -185,7 +185,7 @@ export default function LoyaltyAssinaturaCliente() {
         identification_type: cardFormData.identificationType || null,
         identification_number: cardFormData.identificationNumber || null,
       })
-      setNotice({ type: 'success', message: 'Plano ativado no cartao com cobranca imediata do primeiro ciclo.' })
+      setNotice({ type: 'success', message: 'Cartao validado. A primeira cobranca sera confirmada pelo gateway em instantes.' })
       await loadData()
       return true
     } catch (error) {
@@ -404,7 +404,7 @@ export default function LoyaltyAssinaturaCliente() {
                 </div>
               ) : (
                 <div className="loyalty-checkout-block">
-                  <p>Cartao com renovacao automatica mensal.</p>
+                  <p>Cartao com primeira cobranca em instantes e renovacao automatica mensal.</p>
                   <form id="client-loyalty-card-form" className="loyalty-card-form">
                     <div className="loyalty-card-form__grid">
                       <div id="client-loyalty-card-number" className="input loyalty-card-form__field" />
