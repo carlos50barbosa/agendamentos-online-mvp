@@ -234,6 +234,50 @@ async function lockSubscriptionRow(subscriptionId, { db = pool } = {}) {
   return rows?.[0] || null
 }
 
+async function retireReplaceableClientLoyaltySubscription(subscription, {
+  reason = 'replaced_by_new_checkout',
+  db = pool,
+} = {}) {
+  if (!subscription?.id) return null
+
+  let gatewayCanceled = false
+  if (subscription.paymentMethod === 'credit_card' && subscription.gatewaySubscriptionId) {
+    try {
+      const mpAccess = await resolveLoyaltyMpContext(subscription.estabelecimentoId)
+      await cancelMercadoPagoCardSubscription(subscription.gatewaySubscriptionId, {
+        accessToken: mpAccess.accessToken,
+      })
+      gatewayCanceled = true
+    } catch (error) {
+      console.warn('[client-loyalty][replace] gateway_cancel_failed', error?.message || error)
+    }
+  }
+
+  const canceledAt = new Date()
+  const updated = await updateClientLoyaltySubscription(subscription.id, {
+    status: gatewayCanceled ? 'canceled' : 'expired',
+    autoRenew: false,
+    canceledAt,
+    cancelAt: canceledAt,
+    nextBillingAt: null,
+    graceUntil: null,
+  }, { db })
+
+  await appendClientLoyaltySubscriptionEvent(subscription.id, {
+    eventType: 'subscription_replaced',
+    gatewayEventId: `replace:${subscription.id}:${canceledAt.toISOString()}`,
+    payload: {
+      reason,
+      previous_status: subscription.status || null,
+      payment_method: subscription.paymentMethod || null,
+      gateway_subscription_id: subscription.gatewaySubscriptionId || null,
+      gateway_canceled: gatewayCanceled,
+    },
+  }, { db })
+
+  return updated
+}
+
 async function activateSubscriptionCycleTx(subscriptionId, {
   paymentDate = new Date(),
   gatewayPaymentId = null,
@@ -353,12 +397,18 @@ export async function startClientLoyaltyCardSubscription({
   const current = await getPreferredClientLoyaltySubscription(clienteId, estabelecimentoId, { db })
   if (current) {
     const state = computeClientLoyaltySubscriptionState(current)
-    if (state.benefitsActive || ['pending_payment', 'pending_pix'].includes(state.resolvedStatus)) {
+    if (state.benefitsActive || state.resolvedStatus === 'pending_pix') {
       throw createError(
         'Ja existe uma assinatura em andamento para este estabelecimento.',
         409,
         'client_loyalty_subscription_conflict'
       )
+    }
+    if (['pending_payment', 'past_due', 'unpaid', 'expired', 'canceled'].includes(state.resolvedStatus)) {
+      await retireReplaceableClientLoyaltySubscription(current, {
+        reason: 'replaced_by_new_card_checkout',
+        db,
+      })
     }
   }
 
