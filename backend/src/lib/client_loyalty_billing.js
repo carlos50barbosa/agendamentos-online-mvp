@@ -4,6 +4,7 @@ import { createMercadoPagoPixPayment, fetchMercadoPagoPayment } from './billing.
 import {
   cancelMercadoPagoCardSubscription,
   createMercadoPagoCardPreapproval,
+  createMercadoPagoCardRecoveryPayment,
   getMercadoPagoAuthorizedPayment,
   getMercadoPagoCardSubscription,
 } from './mercadopago_subscriptions.js'
@@ -83,6 +84,20 @@ function buildCardExternalReference({ estabelecimentoId, clienteId, loyaltyPlanI
     String(clienteId || ''),
     'plan',
     String(loyaltyPlanId || ''),
+    'uuid',
+    randomUUID(),
+  ].join(':')
+}
+
+function buildCardInitialPaymentReference({ subscriptionId, gatewaySubscriptionId }) {
+  return [
+    'loyalty',
+    'card',
+    'initial',
+    'sub',
+    String(subscriptionId || ''),
+    'preapproval',
+    String(gatewaySubscriptionId || ''),
     'uuid',
     randomUUID(),
   ].join(':')
@@ -319,6 +334,10 @@ export async function startClientLoyaltyCardSubscription({
   loyaltyPlanId,
   cardToken,
   payerEmail = null,
+  paymentMethodId = null,
+  issuerId = null,
+  identificationType = null,
+  identificationNumber = null,
   db = pool,
 } = {}) {
   if (!cardToken) {
@@ -344,6 +363,8 @@ export async function startClientLoyaltyCardSubscription({
   }
 
   const mpAccess = await resolveLoyaltyMpContext(estabelecimentoId)
+  const firstCycleReferenceDate = new Date()
+  const recurringStartDate = addMonths(firstCycleReferenceDate, 1)
   const gatewayResult = await createMercadoPagoCardPreapproval({
     amountCents: Number(plan.preco_centavos || 0),
     billingCycle: 'mensal',
@@ -352,6 +373,7 @@ export async function startClientLoyaltyCardSubscription({
     reason: `${plan.nome} - ${estabelecimento.nome}`,
     backUrl: buildClientBackUrl(estabelecimentoId),
     externalReference: buildCardExternalReference({ estabelecimentoId, clienteId, loyaltyPlanId }),
+    startDate: recurringStartDate,
     accessToken: mpAccess.accessToken,
   })
 
@@ -359,16 +381,16 @@ export async function startClientLoyaltyCardSubscription({
     clienteId,
     estabelecimentoId,
     loyaltyPlanId,
-    status: gatewayResult?.subscription?.status || 'pending_payment',
+    status: 'pending_payment',
     paymentMethod: 'credit_card',
     gateway: 'mercadopago',
     gatewayCustomerId: gatewayResult?.subscription?.gatewayCustomerId || null,
     gatewaySubscriptionId: gatewayResult?.subscription?.gatewaySubscriptionId || null,
     gatewayPaymentId: null,
     externalReference: gatewayResult?.subscription?.externalReference || gatewayResult?.request?.external_reference || null,
-    currentPeriodStart: gatewayResult?.subscription?.currentPeriodStart || null,
-    currentPeriodEnd: gatewayResult?.subscription?.currentPeriodEnd || null,
-    nextBillingAt: gatewayResult?.subscription?.nextBillingAt || null,
+    currentPeriodStart: null,
+    currentPeriodEnd: null,
+    nextBillingAt: gatewayResult?.subscription?.nextBillingAt || recurringStartDate || null,
     autoRenew: true,
   }, { db })
 
@@ -378,7 +400,137 @@ export async function startClientLoyaltyCardSubscription({
     payload: gatewayResult.raw,
   }, { db })
 
-  return { subscription, plan, estabelecimento, gatewayResult }
+  const initialPaymentReference = buildCardInitialPaymentReference({
+    subscriptionId: subscription.id,
+    gatewaySubscriptionId: gatewayResult?.subscription?.gatewaySubscriptionId || null,
+  })
+
+  try {
+    const paymentResult = await createMercadoPagoCardRecoveryPayment({
+      subscription,
+      estabelecimento: { id: estabelecimento.id, email: estabelecimento.email || null },
+      amountCents: Number(plan.preco_centavos || 0),
+      description: `${plan.nome} - ${estabelecimento.nome}`,
+      cardToken,
+      payerEmail: payerEmail || cliente.email || null,
+      paymentMethodId,
+      issuerId,
+      identificationType,
+      identificationNumber,
+      externalReference: initialPaymentReference,
+      idempotencyKey: initialPaymentReference,
+      accessToken: mpAccess.accessToken,
+    })
+    const payment = paymentResult?.payment
+    if (!payment) {
+      throw createError(
+        'O gateway nao retornou o resultado da cobranca inicial do cartao.',
+        502,
+        'client_loyalty_initial_payment_invalid'
+      )
+    }
+
+    if (payment.status !== 'active') {
+      try {
+        await cancelMercadoPagoCardSubscription(subscription.gatewaySubscriptionId, {
+          accessToken: mpAccess.accessToken,
+        })
+      } catch (cancelError) {
+        console.warn('[client-loyalty][card] initial_payment_cancel_failed', cancelError?.message || cancelError)
+      }
+
+      await updateClientLoyaltySubscription(subscription.id, {
+        status: 'past_due',
+        autoRenew: false,
+        gatewayPaymentId: payment.id || null,
+        nextBillingAt: null,
+      }, { db })
+      await appendClientLoyaltySubscriptionEvent(subscription.id, {
+        eventType: 'card_initial_payment_failed',
+        gatewayEventId: payment.id || initialPaymentReference,
+        payload: {
+          payment: paymentResult.raw,
+          subscription: gatewayResult.raw,
+        },
+      }, { db })
+
+      throw createError(
+        'A cobranca inicial do plano nao foi aprovada no cartao.',
+        402,
+        'client_loyalty_initial_payment_not_approved',
+        {
+          status: payment.status || null,
+          raw_status: payment.rawStatus || null,
+        }
+      )
+    }
+
+    const activatedSubscription = await activateSubscriptionCycleTx(subscription.id, {
+      paymentDate: payment.paidAt || new Date(),
+      gatewayPaymentId: payment.id || null,
+      gatewaySubscriptionId: gatewayResult?.subscription?.gatewaySubscriptionId || null,
+      gatewayCustomerId: gatewayResult?.subscription?.gatewayCustomerId || null,
+      externalReference: subscription.externalReference || null,
+      paymentMethod: 'credit_card',
+      rawPayload: {
+        payment: paymentResult.raw,
+        subscription: gatewayResult.raw,
+      },
+      gatewayEventId: payment.id || initialPaymentReference,
+    }, { db })
+
+    await appendClientLoyaltySubscriptionEvent(subscription.id, {
+      eventType: 'card_initial_payment_approved',
+      gatewayEventId: payment.id || initialPaymentReference,
+      payload: {
+        payment: paymentResult.raw,
+        subscription: gatewayResult.raw,
+      },
+    }, { db })
+
+    return {
+      subscription: activatedSubscription,
+      plan,
+      estabelecimento,
+      gatewayResult,
+      initialPayment: paymentResult,
+    }
+  } catch (error) {
+    if (error?.code?.startsWith('client_loyalty_initial_payment_')) {
+      throw error
+    }
+
+    try {
+      await cancelMercadoPagoCardSubscription(subscription.gatewaySubscriptionId, {
+        accessToken: mpAccess.accessToken,
+      })
+    } catch (cancelError) {
+      console.warn('[client-loyalty][card] setup_cancel_failed', cancelError?.message || cancelError)
+    }
+
+    await updateClientLoyaltySubscription(subscription.id, {
+      status: 'past_due',
+      autoRenew: false,
+      nextBillingAt: null,
+    }, { db })
+    await appendClientLoyaltySubscriptionEvent(subscription.id, {
+      eventType: 'card_initial_payment_error',
+      gatewayEventId: initialPaymentReference,
+      payload: {
+        message: error?.message || String(error),
+        subscription: gatewayResult.raw,
+      },
+    }, { db })
+
+    throw createError(
+      'Nao foi possivel cobrar o primeiro ciclo no cartao.',
+      502,
+      'client_loyalty_initial_payment_error',
+      {
+        cause: error?.message || String(error),
+      }
+    )
+  }
 }
 
 export async function createClientLoyaltyPixCheckout({
@@ -606,18 +758,27 @@ export async function syncClientLoyaltyCardSubscriptionFromGateway(gatewaySubscr
   const conn = await pool.getConnection()
   try {
     await conn.beginTransaction()
+    const current = await getClientLoyaltySubscriptionById(localSubscription.id, { db: conn })
+    const currentState = computeClientLoyaltySubscriptionState(current)
+    const preserveCurrentCycle =
+      Boolean(currentState.benefitsActive) &&
+      String(gatewaySubscription?.status || '').toLowerCase() === 'pending_payment'
+    const nextStatus = preserveCurrentCycle
+      ? current?.status || localSubscription.status
+      : gatewaySubscription?.status || localSubscription.status
     const updated = await updateClientLoyaltySubscription(localSubscription.id, {
       paymentMethod: 'credit_card',
       gatewayCustomerId: gatewaySubscription?.gatewayCustomerId || localSubscription.gatewayCustomerId || null,
       gatewaySubscriptionId: gatewaySubscription?.gatewaySubscriptionId || localSubscription.gatewaySubscriptionId || null,
       externalReference: gatewaySubscription?.externalReference || localSubscription.externalReference || null,
       nextBillingAt: gatewaySubscription?.nextBillingAt || localSubscription.nextBillingAt || null,
-      status: gatewaySubscription?.status || localSubscription.status,
+      status: nextStatus,
     }, { db: conn })
 
     await appendClientLoyaltySubscriptionEvent(localSubscription.id, {
-      eventType:
-        gatewaySubscription?.status === 'canceled'
+      eventType: preserveCurrentCycle
+        ? 'subscription_updated'
+        : gatewaySubscription?.status === 'canceled'
           ? 'subscription_canceled'
           : gatewaySubscription?.status === 'past_due'
             ? 'payment_failed'

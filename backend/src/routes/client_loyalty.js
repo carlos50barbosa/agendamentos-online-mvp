@@ -148,6 +148,10 @@ router.post('/subscribe', auth, isCliente, async (req, res) => {
         loyaltyPlanId,
         cardToken: req.body?.card_token,
         payerEmail: req.body?.payer_email || req.user.email || '',
+        paymentMethodId: req.body?.payment_method_id || null,
+        issuerId: req.body?.issuer_id || null,
+        identificationType: req.body?.identification_type || null,
+        identificationNumber: req.body?.identification_number || null,
       })
       return res.status(201).json({
         ok: true,
@@ -223,6 +227,10 @@ router.post('/pay/card', auth, isCliente, async (req, res) => {
       loyaltyPlanId,
       cardToken: String(req.body?.card_token || '').trim(),
       payerEmail: req.body?.payer_email || req.user.email || '',
+      paymentMethodId: req.body?.payment_method_id || null,
+      issuerId: req.body?.issuer_id || null,
+      identificationType: req.body?.identification_type || null,
+      identificationNumber: req.body?.identification_number || null,
     })
     return res.status(201).json({
       ok: true,

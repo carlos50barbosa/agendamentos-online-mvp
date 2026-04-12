@@ -180,8 +180,12 @@ export default function LoyaltyAssinaturaCliente() {
         loyalty_plan_id: Number(selectedPlanId),
         card_token: cardFormData.token,
         payer_email: cardFormData.cardholderEmail || user?.email || '',
+        payment_method_id: cardFormData.paymentMethodId || null,
+        issuer_id: cardFormData.issuerId || null,
+        identification_type: cardFormData.identificationType || null,
+        identification_number: cardFormData.identificationNumber || null,
       })
-      setNotice({ type: 'success', message: 'Assinatura enviada no cartao. A ativacao chega assim que o gateway confirmar o pagamento.' })
+      setNotice({ type: 'success', message: 'Plano ativado no cartao com cobranca imediata do primeiro ciclo.' })
       await loadData()
       return true
     } catch (error) {
