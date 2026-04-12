@@ -483,9 +483,9 @@ export default function Login() {
 
         err?.message === 'tipo_incorreto'
           ? (tipo === 'CLIENTE'
-              ? 'Este acesso e para clientes. Use a opcao de estabelecimento.'
-              : 'Este acesso e para estabelecimentos. Use a opcao de cliente.')
-          : (err?.data?.message || err?.message || 'Nao foi possivel entrar. Verifique seus dados.');
+              ? 'Este acesso é para clientes. Use a opção de estabelecimento.'
+              : 'Este acesso é para estabelecimentos. Use a opção de cliente.')
+          : (err?.data?.message || err?.message || 'Não foi possível entrar. Verifique seus dados.');
 
       setErrorMsg(msg);
 
@@ -610,7 +610,7 @@ export default function Login() {
                   <div className={styles.estabHeroTitle}>Agenda, equipe e atendimento no mesmo lugar.</div>
                   <div className={styles.estabHeroList}>
                     <span className={styles.estabHeroItem}>Agenda centralizada</span>
-                    <span className={styles.estabHeroItem}>Servicos e equipe</span>
+                    <span className={styles.estabHeroItem}>Serviços e equipe</span>
                     <span className={styles.estabHeroItem}>Clientes recorrentes</span>
                   </div>
                 </section>

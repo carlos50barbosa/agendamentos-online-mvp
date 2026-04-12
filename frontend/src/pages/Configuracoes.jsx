@@ -1466,7 +1466,7 @@ function _l() {
           const s =
             ((a = t == null ? void 0 : t.data) == null ? void 0 : a.message) ||
             (t == null ? void 0 : t.message) ||
-            "Nao foi possivel iniciar a conexao.";
+            "Não foi possível iniciar a conexão.";
           Te((i) => ({ ...i, connectLoading: !1, error: s }));
         }
       }
@@ -1488,7 +1488,7 @@ function _l() {
           const s =
             ((a = t == null ? void 0 : t.data) == null ? void 0 : a.message) ||
             (t == null ? void 0 : t.message) ||
-            "Nao foi possivel desconectar.";
+            "Não foi possível desconectar.";
           Re((i) => ({ ...i, disconnectLoading: !1, error: s }));
         }
       }
@@ -1509,7 +1509,7 @@ function _l() {
           const s =
             ((a = t == null ? void 0 : t.data) == null ? void 0 : a.message) ||
             (t == null ? void 0 : t.message) ||
-            "Nao foi possivel desconectar.";
+            "Não foi possível desconectar.";
           Te((i) => ({ ...i, disconnectLoading: !1, error: s }));
         }
       }
@@ -1559,7 +1559,7 @@ function _l() {
               connected: { notice: "WhatsApp conectado com sucesso." },
               disconnected: { notice: "WhatsApp desconectado." },
               error: {
-                error: "Nao foi possivel concluir a conexao do WhatsApp.",
+                error: "Não foi possível concluir a conexão do WhatsApp.",
               },
               phone_in_use: {
                 error: "Esse numero ja esta conectado a outro estabelecimento.",
@@ -1579,7 +1579,7 @@ function _l() {
               connected: { notice: "Mercado Pago conectado com sucesso." },
               disconnected: { notice: "Mercado Pago desconectado." },
               error: {
-                error: "Nao foi possivel concluir a conexao do Mercado Pago.",
+                error: "Não foi possível concluir a conexão do Mercado Pago.",
               },
             }[f];
             (d != null && d.notice
@@ -1816,7 +1816,7 @@ function _l() {
           _t(
             ((b = _ == null ? void 0 : _.data) == null ? void 0 : b.message) ||
               (_ == null ? void 0 : _.message) ||
-              "Falha ao gerar cobranca PIX.",
+              "Falha ao gerar cobrança PIX.",
           );
         } finally {
           (dn(!1), Ts(), (Ga.current = !1));
@@ -1941,7 +1941,7 @@ function _l() {
           kt(
             ((N = b == null ? void 0 : b.data) == null ? void 0 : N.message) ||
               (b == null ? void 0 : b.message) ||
-              "Falha ao gerar cobranca PIX do pacote.",
+              "Falha ao gerar cobrança PIX do pacote.",
           );
         } finally {
           _n(null);
@@ -2603,7 +2603,7 @@ function _l() {
             va({
               type: "success",
               message:
-                "Perfil atualizado. Confirme o novo email com o codigo enviado.",
+                "Perfil atualizado. Confirme o novo e-mail com o código enviado.",
             }))
           : (gt(null),
             cs(),
@@ -2645,7 +2645,7 @@ function _l() {
           (Is(!0), ja(""));
           const i = await I.confirmEmailChange({ code: t });
           if (!(i != null && i.user))
-            throw new Error("Não foi possível confirmar o novo email.");
+            throw new Error("Não foi possível confirmar o novo e-mail.");
           const c = i.user;
           (Kt(c),
             da((l) => {
@@ -2667,14 +2667,14 @@ function _l() {
             cs(),
             va({
               type: "success",
-              message: "Novo email confirmado com sucesso.",
+              message: "Novo e-mail confirmado com sucesso.",
             }),
             $e(!1));
         } catch (i) {
           const c =
             ((s = i == null ? void 0 : i.data) == null ? void 0 : s.message) ||
             (i == null ? void 0 : i.message) ||
-            "Não foi possível confirmar o novo email.";
+            "Não foi possível confirmar o novo e-mail.";
           ja(c);
         } finally {
           Is(!1);
@@ -3189,7 +3189,7 @@ function _l() {
                                 fe("notifyEmailEstab", u.target.checked),
                             }),
                             e.jsx("span", {
-                              children: "Receber notificações por email",
+                              children: "Receber notificações por e-mail",
                             }),
                           ],
                         }),
@@ -3490,7 +3490,7 @@ function _l() {
                         className: "muted",
                         style: { margin: "4px 0 0" },
                         children:
-                          "A integracao oficial com WhatsApp Business esta em fase final de liberacao para o seu estabelecimento.",
+                          "A integração oficial com WhatsApp Business está em fase final de liberação para o seu estabelecimento.",
                       }),
                     ],
                   }),
@@ -3552,7 +3552,7 @@ function _l() {
                         className: "btn btn--primary",
                         onClick: Pn,
                         disabled: !0,
-                        children: "Disponivel em breve",
+                        children: "Disponível em breve",
                       }),
                       !1 &&
                         e.jsx("button", {
@@ -6015,7 +6015,7 @@ function _l() {
             id: "subscription-hub",
             title: "Plano e assinatura",
             description:
-              "Plano atual, limites, historico da assinatura e cobranca via PIX em pagina propria.",
+              "Plano atual, limites, histórico da assinatura e cobrança via PIX em página própria.",
             to: "/assinatura",
             cta: "Abrir modulo",
           },
@@ -6023,7 +6023,7 @@ function _l() {
             id: "whatsapp-business-hub",
             title: "WhatsApp Business",
             description:
-              "Conexao oficial, franquia mensal, creditos extras e historico de recargas.",
+              "Conexão oficial, franquia mensal, créditos extras e histórico de recargas.",
             to: "/whatsappbusiness",
             cta: "Abrir modulo",
           },

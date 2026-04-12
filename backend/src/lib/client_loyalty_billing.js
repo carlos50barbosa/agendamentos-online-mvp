@@ -1,0 +1,822 @@
+import { randomUUID } from 'node:crypto'
+import { pool } from './db.js'
+import { createMercadoPagoPixPayment, fetchMercadoPagoPayment } from './billing.js'
+import {
+  cancelMercadoPagoCardSubscription,
+  createMercadoPagoCardPreapproval,
+  getMercadoPagoAuthorizedPayment,
+  getMercadoPagoCardSubscription,
+} from './mercadopago_subscriptions.js'
+import { getLoyaltyPlanById } from './loyalty_plans.js'
+import {
+  appendClientLoyaltySubscriptionEvent,
+  computeClientLoyaltySubscriptionState,
+  createClientLoyaltySubscription,
+  getClientLoyaltySubscriptionByExternalReference,
+  getClientLoyaltySubscriptionByGatewayId,
+  getClientLoyaltySubscriptionByGatewayPaymentId,
+  getClientLoyaltySubscriptionById,
+  getPreferredClientLoyaltySubscription,
+  listClientLoyaltySubscriptionEvents,
+  serializeClientLoyaltySubscription,
+  updateClientLoyaltySubscription,
+} from './client_loyalty_subscriptions.js'
+import {
+  ensureCreditsForCurrentCycle,
+  formatCycleRef,
+  listSubscriptionCredits,
+} from './client_loyalty_credits.js'
+import { getMpAccountByMpUserId, resolveMpAccessToken } from '../services/mpAccounts.js'
+
+const FRONTEND_BASE = String(process.env.FRONTEND_BASE_URL || process.env.APP_URL || 'http://localhost:3001').replace(/\/$/, '')
+const CLIENT_LOYALTY_GRACE_DAYS = Number(process.env.CLIENT_LOYALTY_GRACE_DAYS || 3) || 3
+const DAY_MS = 86400000
+
+function createError(message, status = 400, code = 'bad_request', details = null) {
+  const error = new Error(message)
+  error.status = status
+  error.code = code
+  if (details) error.details = details
+  return error
+}
+
+function toDate(value) {
+  if (!value) return null
+  const parsed = value instanceof Date ? value : new Date(value)
+  return Number.isFinite(parsed.getTime()) ? parsed : null
+}
+
+function addMonths(dateValue, months = 1) {
+  const date = toDate(dateValue)
+  if (!date) return null
+  const result = new Date(date)
+  const day = result.getDate()
+  result.setDate(1)
+  result.setMonth(result.getMonth() + months)
+  const lastDay = new Date(result.getFullYear(), result.getMonth() + 1, 0).getDate()
+  result.setDate(Math.min(day, lastDay))
+  return result
+}
+
+function resolveApiBaseUrl() {
+  const isDevFront = /^(https?:\/\/)?(localhost|127\.0\.0\.1):3001$/i.test(FRONTEND_BASE)
+  const defaultApi = isDevFront ? 'http://localhost:3002' : `${FRONTEND_BASE}/api`
+  return String(process.env.API_BASE_URL || process.env.BACKEND_BASE_URL || defaultApi).replace(/\/$/, '')
+}
+
+function resolveBillingWebhookUrl(apiBase = resolveApiBaseUrl()) {
+  const base = String(apiBase || '').replace(/\/$/, '')
+  return base.endsWith('/api') ? `${base}/billing/webhook` : `${base}/api/billing/webhook`
+}
+
+function buildClientBackUrl(estabelecimentoId) {
+  return `${FRONTEND_BASE}/cliente/fidelidade?estabelecimento=${encodeURIComponent(String(estabelecimentoId || ''))}`
+}
+
+function buildCardExternalReference({ estabelecimentoId, clienteId, loyaltyPlanId }) {
+  return [
+    'loyalty',
+    'card',
+    'est',
+    String(estabelecimentoId || ''),
+    'cliente',
+    String(clienteId || ''),
+    'plan',
+    String(loyaltyPlanId || ''),
+    'uuid',
+    randomUUID(),
+  ].join(':')
+}
+
+function buildPixExternalReference({ subscriptionId, estabelecimentoId, clienteId, loyaltyPlanId, cycleRef }) {
+  return [
+    'loyalty',
+    'pix',
+    'sub',
+    String(subscriptionId || ''),
+    'est',
+    String(estabelecimentoId || ''),
+    'cliente',
+    String(clienteId || ''),
+    'plan',
+    String(loyaltyPlanId || ''),
+    'cycle',
+    String(cycleRef || ''),
+    'uuid',
+    randomUUID(),
+  ].join(':')
+}
+
+function normalizeGatewayPaymentStatus(value) {
+  return String(value || '').trim().toLowerCase()
+}
+
+function isApprovedGatewayPaymentStatus(status) {
+  return status === 'approved' || status === 'paid'
+}
+
+function isFailedGatewayPaymentStatus(status) {
+  return ['expired', 'canceled', 'cancelled', 'rejected', 'failed', 'refunded', 'charged_back'].includes(status)
+}
+
+function resolveCycleStart(subscription, paymentDate) {
+  const paidAt = toDate(paymentDate) || new Date()
+  const currentEnd = toDate(subscription?.currentPeriodEnd)
+  if (!currentEnd) return paidAt
+  if (currentEnd.getTime() <= paidAt.getTime()) return paidAt
+  if ((currentEnd.getTime() - paidAt.getTime()) <= 7 * DAY_MS) {
+    return currentEnd
+  }
+  return paidAt
+}
+
+async function fetchEstablishmentSummary(estabelecimentoId, { db = pool } = {}) {
+  const [rows] = await db.query(
+    `SELECT id, nome, email, slug, avatar_url
+       FROM usuarios
+      WHERE id=?
+        AND tipo='estabelecimento'
+      LIMIT 1`,
+    [estabelecimentoId]
+  )
+  return rows?.[0] || null
+}
+
+async function fetchClientSummary(clienteId, { db = pool } = {}) {
+  const [rows] = await db.query(
+    `SELECT id, nome, email, telefone
+       FROM usuarios
+      WHERE id=?
+      LIMIT 1`,
+    [clienteId]
+  )
+  return rows?.[0] || null
+}
+
+async function countPlanSubscribers(loyaltyPlanId, { db = pool } = {}) {
+  const [rows] = await db.query(
+    `SELECT COUNT(*) AS total
+       FROM client_loyalty_subscriptions
+      WHERE loyalty_plan_id=?
+        AND status IN ('active','pending_payment','pending_pix','past_due','unpaid')`,
+    [loyaltyPlanId]
+  )
+  return Number(rows?.[0]?.total || 0)
+}
+
+async function assertPlanReadyForSubscription(plan, { db = pool } = {}) {
+  if (!plan) {
+    throw createError('Plano de fidelidade nao encontrado.', 404, 'loyalty_plan_not_found')
+  }
+  if (String(plan.status || '').toLowerCase() !== 'active') {
+    throw createError('Este plano nao esta disponivel para novas assinaturas.', 409, 'loyalty_plan_unavailable')
+  }
+  if (plan.max_assinantes != null) {
+    const activeSubscribers = await countPlanSubscribers(plan.id, { db })
+    if (activeSubscribers >= Number(plan.max_assinantes || 0)) {
+      throw createError('Este plano atingiu o limite de assinantes.', 409, 'loyalty_plan_full')
+    }
+  }
+}
+
+async function resolveLoyaltyCheckoutContext(clienteId, estabelecimentoId, loyaltyPlanId, { db = pool } = {}) {
+  const plan = await getLoyaltyPlanById(loyaltyPlanId, { db })
+  if (!plan || Number(plan.estabelecimento_id) !== Number(estabelecimentoId)) {
+    throw createError('Plano de fidelidade nao encontrado para este estabelecimento.', 404, 'loyalty_plan_not_found')
+  }
+  await assertPlanReadyForSubscription(plan, { db })
+
+  const [estabelecimento, cliente] = await Promise.all([
+    fetchEstablishmentSummary(estabelecimentoId, { db }),
+    fetchClientSummary(clienteId, { db }),
+  ])
+  if (!estabelecimento) {
+    throw createError('Estabelecimento nao encontrado.', 404, 'estabelecimento_not_found')
+  }
+  if (!cliente) {
+    throw createError('Cliente nao encontrado.', 404, 'cliente_not_found')
+  }
+  return { plan, estabelecimento, cliente }
+}
+
+async function resolveLoyaltyMpContext(estabelecimentoId) {
+  const mpAccess = await resolveMpAccessToken(estabelecimentoId, { allowFallback: false })
+  if (!mpAccess?.accessToken) {
+    throw createError(
+      'O estabelecimento ainda nao conectou o Mercado Pago para vender este plano.',
+      409,
+      'mp_not_connected'
+    )
+  }
+  return mpAccess
+}
+
+async function lockSubscriptionRow(subscriptionId, { db = pool } = {}) {
+  const [rows] = await db.query(
+    'SELECT id, status, payment_method, gateway_payment_id, gateway_subscription_id, current_period_start, current_period_end FROM client_loyalty_subscriptions WHERE id=? LIMIT 1 FOR UPDATE',
+    [subscriptionId]
+  )
+  return rows?.[0] || null
+}
+
+async function activateSubscriptionCycleTx(subscriptionId, {
+  paymentDate = new Date(),
+  gatewayPaymentId = null,
+  gatewaySubscriptionId = null,
+  gatewayCustomerId = null,
+  externalReference = null,
+  paymentMethod = null,
+  rawPayload = null,
+  gatewayEventId = null,
+}, { db = pool } = {}) {
+  await lockSubscriptionRow(subscriptionId, { db })
+  const current = await getClientLoyaltySubscriptionById(subscriptionId, { db })
+  if (!current) {
+    throw createError('Assinatura de fidelidade nao encontrada.', 404, 'client_loyalty_subscription_not_found')
+  }
+
+  const cycleStart = resolveCycleStart(current, paymentDate)
+  const cycleEnd = addMonths(cycleStart, 1)
+  const nextBillingAt = cycleEnd
+  const updated = await updateClientLoyaltySubscription(subscriptionId, {
+    status: 'active',
+    paymentMethod: paymentMethod || current.paymentMethod,
+    gatewayPaymentId: gatewayPaymentId || current.gatewayPaymentId || null,
+    gatewaySubscriptionId: gatewaySubscriptionId || current.gatewaySubscriptionId || null,
+    gatewayCustomerId: gatewayCustomerId || current.gatewayCustomerId || null,
+    externalReference: externalReference || current.externalReference || null,
+    currentPeriodStart: cycleStart,
+    currentPeriodEnd: cycleEnd,
+    nextBillingAt,
+    lastPaymentAt: paymentDate,
+    graceUntil: null,
+  }, { db })
+
+  const credits = await ensureCreditsForCurrentCycle(updated, { db })
+  await appendClientLoyaltySubscriptionEvent(subscriptionId, {
+    eventType: 'payment_approved',
+    gatewayEventId: gatewayEventId || gatewayPaymentId || gatewaySubscriptionId || null,
+    payload: rawPayload,
+  }, { db })
+  await appendClientLoyaltySubscriptionEvent(subscriptionId, {
+    eventType: 'cycle_credits_generated',
+    gatewayEventId: `credits:${formatCycleRef(cycleStart) || randomUUID()}`,
+    payload: {
+      cycle_start: cycleStart ? cycleStart.toISOString() : null,
+      cycle_end: cycleEnd ? cycleEnd.toISOString() : null,
+      credits,
+    },
+  }, { db })
+
+  return updated
+}
+
+async function markSubscriptionPastDueTx(subscriptionId, {
+  paymentStatus,
+  gatewayPaymentId = null,
+  gatewaySubscriptionId = null,
+  gatewayCustomerId = null,
+  externalReference = null,
+  rawPayload = null,
+  gatewayEventId = null,
+}, { db = pool } = {}) {
+  await lockSubscriptionRow(subscriptionId, { db })
+  const current = await getClientLoyaltySubscriptionById(subscriptionId, { db })
+  if (!current) {
+    throw createError('Assinatura de fidelidade nao encontrada.', 404, 'client_loyalty_subscription_not_found')
+  }
+
+  const state = computeClientLoyaltySubscriptionState(current)
+  const nextStatus = state.withinCurrentPeriod ? 'past_due' : 'expired'
+  const graceUntil = nextStatus === 'past_due'
+    ? new Date(Date.now() + CLIENT_LOYALTY_GRACE_DAYS * DAY_MS)
+    : null
+
+  const updated = await updateClientLoyaltySubscription(subscriptionId, {
+    status: nextStatus,
+    gatewayPaymentId: gatewayPaymentId || current.gatewayPaymentId || null,
+    gatewaySubscriptionId: gatewaySubscriptionId || current.gatewaySubscriptionId || null,
+    gatewayCustomerId: gatewayCustomerId || current.gatewayCustomerId || null,
+    externalReference: externalReference || current.externalReference || null,
+    graceUntil,
+  }, { db })
+
+  await appendClientLoyaltySubscriptionEvent(subscriptionId, {
+    eventType: nextStatus === 'past_due' ? 'payment_failed' : 'payment_expired',
+    gatewayEventId: gatewayEventId || gatewayPaymentId || gatewaySubscriptionId || null,
+    payload: {
+      payment_status: paymentStatus || null,
+      raw: rawPayload,
+    },
+  }, { db })
+
+  return updated
+}
+
+export async function startClientLoyaltyCardSubscription({
+  clienteId,
+  estabelecimentoId,
+  loyaltyPlanId,
+  cardToken,
+  payerEmail = null,
+  db = pool,
+} = {}) {
+  if (!cardToken) {
+    throw createError('Token do cartao nao informado.', 400, 'card_token_required')
+  }
+
+  const { plan, estabelecimento, cliente } = await resolveLoyaltyCheckoutContext(
+    clienteId,
+    estabelecimentoId,
+    loyaltyPlanId,
+    { db }
+  )
+  const current = await getPreferredClientLoyaltySubscription(clienteId, estabelecimentoId, { db })
+  if (current) {
+    const state = computeClientLoyaltySubscriptionState(current)
+    if (state.benefitsActive || ['pending_payment', 'pending_pix'].includes(state.resolvedStatus)) {
+      throw createError(
+        'Ja existe uma assinatura em andamento para este estabelecimento.',
+        409,
+        'client_loyalty_subscription_conflict'
+      )
+    }
+  }
+
+  const mpAccess = await resolveLoyaltyMpContext(estabelecimentoId)
+  const gatewayResult = await createMercadoPagoCardPreapproval({
+    amountCents: Number(plan.preco_centavos || 0),
+    billingCycle: 'mensal',
+    cardToken,
+    payer: { email: payerEmail || cliente.email || null },
+    reason: `${plan.nome} - ${estabelecimento.nome}`,
+    backUrl: buildClientBackUrl(estabelecimentoId),
+    externalReference: buildCardExternalReference({ estabelecimentoId, clienteId, loyaltyPlanId }),
+    accessToken: mpAccess.accessToken,
+  })
+
+  const subscription = await createClientLoyaltySubscription({
+    clienteId,
+    estabelecimentoId,
+    loyaltyPlanId,
+    status: gatewayResult?.subscription?.status || 'pending_payment',
+    paymentMethod: 'credit_card',
+    gateway: 'mercadopago',
+    gatewayCustomerId: gatewayResult?.subscription?.gatewayCustomerId || null,
+    gatewaySubscriptionId: gatewayResult?.subscription?.gatewaySubscriptionId || null,
+    gatewayPaymentId: null,
+    externalReference: gatewayResult?.subscription?.externalReference || gatewayResult?.request?.external_reference || null,
+    currentPeriodStart: gatewayResult?.subscription?.currentPeriodStart || null,
+    currentPeriodEnd: gatewayResult?.subscription?.currentPeriodEnd || null,
+    nextBillingAt: gatewayResult?.subscription?.nextBillingAt || null,
+    autoRenew: true,
+  }, { db })
+
+  await appendClientLoyaltySubscriptionEvent(subscription.id, {
+    eventType: 'card_subscription_created',
+    gatewayEventId: gatewayResult?.subscription?.gatewaySubscriptionId || null,
+    payload: gatewayResult.raw,
+  }, { db })
+
+  return { subscription, plan, estabelecimento, gatewayResult }
+}
+
+export async function createClientLoyaltyPixCheckout({
+  clienteId,
+  estabelecimentoId,
+  loyaltyPlanId,
+  db = pool,
+} = {}) {
+  const { plan, estabelecimento, cliente } = await resolveLoyaltyCheckoutContext(
+    clienteId,
+    estabelecimentoId,
+    loyaltyPlanId,
+    { db }
+  )
+  const current = await getPreferredClientLoyaltySubscription(clienteId, estabelecimentoId, { db })
+  if (current) {
+    const state = computeClientLoyaltySubscriptionState(current)
+    if (state.benefitsActive) {
+      throw createError(
+        'Este plano ja esta ativo no ciclo atual.',
+        409,
+        'client_loyalty_subscription_active'
+      )
+    }
+  }
+
+  const subscription = await createClientLoyaltySubscription({
+    clienteId,
+    estabelecimentoId,
+    loyaltyPlanId,
+    status: 'pending_pix',
+    paymentMethod: 'pix',
+    gateway: 'mercadopago',
+    autoRenew: false,
+  }, { db })
+
+  const cycleRef = formatCycleRef(new Date())
+  const externalReference = buildPixExternalReference({
+    subscriptionId: subscription.id,
+    estabelecimentoId,
+    clienteId,
+    loyaltyPlanId,
+    cycleRef,
+  })
+
+  const mpAccess = await resolveLoyaltyMpContext(estabelecimentoId)
+  const paymentResult = await createMercadoPagoPixPayment({
+    amountCents: Number(plan.preco_centavos || 0),
+    description: `${plan.nome} - ${estabelecimento.nome}`,
+    externalReference,
+    metadata: {
+      kind: 'loyalty_subscription_pix',
+      loyalty_subscription_id: String(subscription.id),
+      loyalty_plan_id: String(loyaltyPlanId),
+      cliente_id: String(clienteId),
+      estabelecimento_id: String(estabelecimentoId),
+      cycle_ref: cycleRef,
+    },
+    notificationUrl: resolveBillingWebhookUrl(),
+    payerEmail: cliente.email || null,
+    accessToken: mpAccess.accessToken,
+  })
+
+  const updated = await updateClientLoyaltySubscription(subscription.id, {
+    status: 'pending_pix',
+    gatewayPaymentId: paymentResult?.payment?.id ? String(paymentResult.payment.id) : null,
+    externalReference,
+    paymentMethod: 'pix',
+    autoRenew: false,
+  }, { db })
+
+  await appendClientLoyaltySubscriptionEvent(updated.id, {
+    eventType: 'pix_generated',
+    gatewayEventId: paymentResult?.payment?.id ? String(paymentResult.payment.id) : null,
+    payload: paymentResult.payment,
+  }, { db })
+
+  return {
+    subscription: updated,
+    plan,
+    estabelecimento,
+    pix: paymentResult.pix,
+    payment: paymentResult.payment,
+  }
+}
+
+async function resolveGatewayContextFromUserId(bodyUserId) {
+  if (bodyUserId == null) return null
+  const account = await getMpAccountByMpUserId(bodyUserId)
+  if (!account?.estabelecimento_id) return null
+  const mpAccess = await resolveMpAccessToken(account.estabelecimento_id, { allowFallback: false })
+  if (!mpAccess?.accessToken) return null
+  return {
+    estabelecimentoId: Number(account.estabelecimento_id),
+    accessToken: mpAccess.accessToken,
+    account,
+  }
+}
+
+export async function syncClientLoyaltyPixPaymentFromGateway(paymentId, {
+  bodyUserId = null,
+  gatewayEventId = null,
+} = {}) {
+  const existing = await getClientLoyaltySubscriptionByGatewayPaymentId(paymentId)
+  let estabelecimentoId = existing?.estabelecimentoId || null
+  let accessToken = null
+
+  if (estabelecimentoId) {
+    const mpAccess = await resolveMpAccessToken(estabelecimentoId, { allowFallback: false })
+    accessToken = mpAccess?.accessToken || null
+  }
+  if (!accessToken) {
+    const gatewayContext = await resolveGatewayContextFromUserId(bodyUserId)
+    estabelecimentoId = gatewayContext?.estabelecimentoId || estabelecimentoId || null
+    accessToken = gatewayContext?.accessToken || null
+  }
+  if (!accessToken) {
+    return { ok: false, reason: 'mp_token_missing' }
+  }
+
+  const payment = await fetchMercadoPagoPayment(paymentId, { accessToken })
+  const paymentStatus = normalizeGatewayPaymentStatus(payment?.status)
+  const metadataType = String(payment?.metadata?.kind || payment?.metadata?.type || '').toLowerCase()
+  if (metadataType !== 'loyalty_subscription_pix') {
+    return { ok: false, reason: 'not_loyalty_payment' }
+  }
+
+  const subscriptionId = Number(payment?.metadata?.loyalty_subscription_id || 0) || null
+  const localSubscription =
+    (subscriptionId ? await getClientLoyaltySubscriptionById(subscriptionId) : null) ||
+    existing ||
+    await getClientLoyaltySubscriptionByExternalReference(payment?.external_reference || '')
+  if (!localSubscription) {
+    return { ok: false, reason: 'subscription_not_found' }
+  }
+
+  const conn = await pool.getConnection()
+  try {
+    await conn.beginTransaction()
+    const locked = await lockSubscriptionRow(localSubscription.id, { db: conn })
+    if (!locked) {
+      await conn.rollback()
+      return { ok: false, reason: 'subscription_not_found' }
+    }
+
+    if (isApprovedGatewayPaymentStatus(paymentStatus)) {
+      if (String(locked.gateway_payment_id || '') === String(payment?.id || '')) {
+        const current = await getClientLoyaltySubscriptionById(localSubscription.id, { db: conn })
+        if (String(current?.status || '').toLowerCase() === 'active') {
+          await conn.commit()
+          return { ok: true, handled: true, already_processed: true, subscription: current }
+        }
+      }
+      const activated = await activateSubscriptionCycleTx(localSubscription.id, {
+        paymentDate: payment?.date_approved || payment?.date_last_updated || new Date(),
+        gatewayPaymentId: payment?.id ? String(payment.id) : null,
+        externalReference: payment?.external_reference || localSubscription.externalReference || null,
+        paymentMethod: 'pix',
+        rawPayload: payment,
+        gatewayEventId: gatewayEventId || payment?.id || null,
+      }, { db: conn })
+      await conn.commit()
+      return { ok: true, handled: true, status: 'active', subscription: activated }
+    }
+
+    if (isFailedGatewayPaymentStatus(paymentStatus)) {
+      const updated = await markSubscriptionPastDueTx(localSubscription.id, {
+        paymentStatus,
+        gatewayPaymentId: payment?.id ? String(payment.id) : null,
+        externalReference: payment?.external_reference || localSubscription.externalReference || null,
+        rawPayload: payment,
+        gatewayEventId: gatewayEventId || payment?.id || null,
+      }, { db: conn })
+      await conn.commit()
+      return { ok: true, handled: true, status: updated.status, subscription: updated }
+    }
+
+    await updateClientLoyaltySubscription(localSubscription.id, {
+      status: 'pending_pix',
+      gatewayPaymentId: payment?.id ? String(payment.id) : null,
+      externalReference: payment?.external_reference || localSubscription.externalReference || null,
+    }, { db: conn })
+    await appendClientLoyaltySubscriptionEvent(localSubscription.id, {
+      eventType: 'pix_pending',
+      gatewayEventId: gatewayEventId || payment?.id || null,
+      payload: payment,
+    }, { db: conn })
+    await conn.commit()
+    return { ok: true, handled: false, status: 'pending_pix' }
+  } catch (error) {
+    try { await conn.rollback() } catch {}
+    throw error
+  } finally {
+    conn.release()
+  }
+}
+
+export async function syncClientLoyaltyCardSubscriptionFromGateway(gatewaySubscriptionId, {
+  bodyUserId = null,
+  gatewayEventId = null,
+} = {}) {
+  const localSubscription = await getClientLoyaltySubscriptionByGatewayId(gatewaySubscriptionId)
+  if (!localSubscription) {
+    return { ok: false, reason: 'subscription_not_found' }
+  }
+
+  let accessToken = null
+  if (localSubscription.estabelecimentoId) {
+    const mpAccess = await resolveMpAccessToken(localSubscription.estabelecimentoId, { allowFallback: false })
+    accessToken = mpAccess?.accessToken || null
+  }
+  if (!accessToken) {
+    const gatewayContext = await resolveGatewayContextFromUserId(bodyUserId)
+    accessToken = gatewayContext?.accessToken || null
+  }
+  if (!accessToken) {
+    return { ok: false, reason: 'mp_token_missing' }
+  }
+
+  const gatewayResult = await getMercadoPagoCardSubscription(gatewaySubscriptionId, {
+    fallbackCycle: 'mensal',
+    accessToken,
+  })
+  const gatewaySubscription = gatewayResult.subscription
+  const conn = await pool.getConnection()
+  try {
+    await conn.beginTransaction()
+    const updated = await updateClientLoyaltySubscription(localSubscription.id, {
+      paymentMethod: 'credit_card',
+      gatewayCustomerId: gatewaySubscription?.gatewayCustomerId || localSubscription.gatewayCustomerId || null,
+      gatewaySubscriptionId: gatewaySubscription?.gatewaySubscriptionId || localSubscription.gatewaySubscriptionId || null,
+      externalReference: gatewaySubscription?.externalReference || localSubscription.externalReference || null,
+      nextBillingAt: gatewaySubscription?.nextBillingAt || localSubscription.nextBillingAt || null,
+      status: gatewaySubscription?.status || localSubscription.status,
+    }, { db: conn })
+
+    await appendClientLoyaltySubscriptionEvent(localSubscription.id, {
+      eventType:
+        gatewaySubscription?.status === 'canceled'
+          ? 'subscription_canceled'
+          : gatewaySubscription?.status === 'past_due'
+            ? 'payment_failed'
+            : gatewaySubscription?.status === 'active'
+              ? 'subscription_updated'
+              : 'subscription_pending',
+      gatewayEventId: gatewayEventId || gatewaySubscriptionId,
+      payload: gatewayResult.raw,
+    }, { db: conn })
+
+    if (gatewaySubscription?.status === 'active' && !updated.currentPeriodStart && gatewaySubscription?.currentPeriodStart) {
+      await activateSubscriptionCycleTx(localSubscription.id, {
+        paymentDate: gatewaySubscription.currentPeriodStart,
+        gatewaySubscriptionId: gatewaySubscription.gatewaySubscriptionId || gatewaySubscriptionId,
+        gatewayCustomerId: gatewaySubscription.gatewayCustomerId || null,
+        externalReference: gatewaySubscription.externalReference || localSubscription.externalReference || null,
+        paymentMethod: 'credit_card',
+        rawPayload: gatewayResult.raw,
+        gatewayEventId: gatewayEventId || gatewaySubscriptionId,
+      }, { db: conn })
+    }
+
+    await conn.commit()
+    return { ok: true, handled: true, subscription: updated }
+  } catch (error) {
+    try { await conn.rollback() } catch {}
+    throw error
+  } finally {
+    conn.release()
+  }
+}
+
+export async function syncClientLoyaltyAuthorizedPaymentFromGateway(authorizedPaymentId, {
+  bodyUserId = null,
+  gatewayEventId = null,
+} = {}) {
+  let accessToken = null
+  const existingByPayment = await getClientLoyaltySubscriptionByGatewayPaymentId(authorizedPaymentId)
+  if (existingByPayment?.estabelecimentoId) {
+    const mpAccess = await resolveMpAccessToken(existingByPayment.estabelecimentoId, { allowFallback: false })
+    accessToken = mpAccess?.accessToken || null
+  }
+  if (!accessToken) {
+    const gatewayContext = await resolveGatewayContextFromUserId(bodyUserId)
+    accessToken = gatewayContext?.accessToken || null
+  }
+  if (!accessToken) {
+    return { ok: false, reason: 'mp_token_missing' }
+  }
+
+  const paymentResult = await getMercadoPagoAuthorizedPayment(authorizedPaymentId, { accessToken })
+  const authorizedPayment = paymentResult.authorizedPayment
+  if (!authorizedPayment?.preapprovalId) {
+    return { ok: false, reason: 'preapproval_not_found' }
+  }
+
+  const localSubscription = await getClientLoyaltySubscriptionByGatewayId(authorizedPayment.preapprovalId)
+  if (!localSubscription) {
+    return { ok: false, reason: 'subscription_not_found' }
+  }
+
+  const gatewayResult = await getMercadoPagoCardSubscription(authorizedPayment.preapprovalId, {
+    fallbackCycle: 'mensal',
+    accessToken,
+  })
+  const conn = await pool.getConnection()
+  try {
+    await conn.beginTransaction()
+    if (authorizedPayment.status === 'active') {
+      const activated = await activateSubscriptionCycleTx(localSubscription.id, {
+        paymentDate: authorizedPayment.paidAt || new Date(),
+        gatewayPaymentId: authorizedPayment.id || null,
+        gatewaySubscriptionId: authorizedPayment.preapprovalId || null,
+        gatewayCustomerId: gatewayResult?.subscription?.gatewayCustomerId || null,
+        externalReference: gatewayResult?.subscription?.externalReference || localSubscription.externalReference || null,
+        paymentMethod: 'credit_card',
+        rawPayload: {
+          payment: paymentResult.raw,
+          subscription: gatewayResult.raw,
+        },
+        gatewayEventId: gatewayEventId || authorizedPayment.id || authorizedPaymentId,
+      }, { db: conn })
+      await appendClientLoyaltySubscriptionEvent(localSubscription.id, {
+        eventType: 'subscription_renewed',
+        gatewayEventId: `renewal:${authorizedPayment.id || authorizedPaymentId}`,
+        payload: {
+          payment: paymentResult.raw,
+          subscription: gatewayResult.raw,
+        },
+      }, { db: conn })
+      await conn.commit()
+      return { ok: true, handled: true, status: 'active', subscription: activated }
+    }
+
+    const updated = await markSubscriptionPastDueTx(localSubscription.id, {
+      paymentStatus: authorizedPayment.status || null,
+      gatewayPaymentId: authorizedPayment.id || null,
+      gatewaySubscriptionId: authorizedPayment.preapprovalId || null,
+      gatewayCustomerId: gatewayResult?.subscription?.gatewayCustomerId || null,
+      externalReference: gatewayResult?.subscription?.externalReference || localSubscription.externalReference || null,
+      rawPayload: {
+        payment: paymentResult.raw,
+        subscription: gatewayResult.raw,
+      },
+      gatewayEventId: gatewayEventId || authorizedPayment.id || authorizedPaymentId,
+    }, { db: conn })
+    await conn.commit()
+    return { ok: true, handled: true, status: updated.status, subscription: updated }
+  } catch (error) {
+    try { await conn.rollback() } catch {}
+    throw error
+  } finally {
+    conn.release()
+  }
+}
+
+export async function cancelClientLoyaltySubscriptionForClient({
+  clienteId,
+  subscriptionId = null,
+  estabelecimentoId = null,
+  db = pool,
+} = {}) {
+  const subscription = subscriptionId
+    ? await getClientLoyaltySubscriptionById(subscriptionId, { db })
+    : await getPreferredClientLoyaltySubscription(clienteId, estabelecimentoId, { db })
+  if (!subscription || Number(subscription.clienteId) !== Number(clienteId)) {
+    throw createError('Assinatura de fidelidade nao encontrada.', 404, 'client_loyalty_subscription_not_found')
+  }
+
+  const state = computeClientLoyaltySubscriptionState(subscription)
+  if (!subscription.canceledAt && subscription.paymentMethod === 'credit_card' && subscription.gatewaySubscriptionId) {
+    try {
+      const mpAccess = await resolveLoyaltyMpContext(subscription.estabelecimentoId)
+      await cancelMercadoPagoCardSubscription(subscription.gatewaySubscriptionId, {
+        accessToken: mpAccess.accessToken,
+      })
+    } catch (error) {
+      console.warn('[client-loyalty][cancel] gateway_cancel_failed', error?.message || error)
+    }
+  }
+
+  const canceledAt = new Date()
+  const nextStatus = state.withinCurrentPeriod ? 'canceled' : 'expired'
+  const updated = await updateClientLoyaltySubscription(subscription.id, {
+    status: nextStatus,
+    autoRenew: false,
+    canceledAt,
+    cancelAt: subscription.currentPeriodEnd || canceledAt,
+    nextBillingAt: null,
+  }, { db })
+
+  await appendClientLoyaltySubscriptionEvent(subscription.id, {
+    eventType: 'subscription_canceled',
+    gatewayEventId: `cancel:${subscription.id}:${canceledAt.toISOString()}`,
+    payload: {
+      canceled_at: canceledAt.toISOString(),
+      keep_until: subscription.currentPeriodEnd ? subscription.currentPeriodEnd.toISOString() : null,
+    },
+  }, { db })
+
+  return updated
+}
+
+export async function loadClientLoyaltySubscriptionDetails(subscriptionInput, {
+  db = pool,
+  includeEvents = true,
+  eventLimit = 30,
+} = {}) {
+  const subscription = typeof subscriptionInput === 'number'
+    ? await getClientLoyaltySubscriptionById(subscriptionInput, { db })
+    : subscriptionInput
+  if (!subscription) return null
+
+  const [plan, estabelecimento] = await Promise.all([
+    getLoyaltyPlanById(subscription.loyaltyPlanId, { db }),
+    fetchEstablishmentSummary(subscription.estabelecimentoId, { db }),
+  ])
+  const credits = subscription.currentPeriodStart
+    ? await listSubscriptionCredits(subscription.id, {
+        db,
+        cycleRef: formatCycleRef(subscription.currentPeriodStart),
+      })
+    : []
+  const events = includeEvents
+    ? await listClientLoyaltySubscriptionEvents(subscription.id, { db, limit: eventLimit })
+    : []
+
+  return {
+    subscription: serializeClientLoyaltySubscription(subscription),
+    plan,
+    estabelecimento: estabelecimento
+      ? {
+          id: Number(estabelecimento.id),
+          nome: estabelecimento.nome || '',
+          slug: estabelecimento.slug || '',
+          avatar_url: estabelecimento.avatar_url || null,
+        }
+      : null,
+    credits,
+    events,
+  }
+}

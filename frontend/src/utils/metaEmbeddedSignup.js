@@ -66,7 +66,7 @@ export async function loadMetaSdk({ appId, apiVersion, sdkLocale = 'en_US' }) {
         existing.addEventListener('error', () => {
           reject(createLaunchError(
             'wa_embedded_signup_sdk_load_failed',
-            'Nao foi possivel carregar o SDK da Meta.'
+            'Não foi possível carregar o SDK da Meta.'
           ));
         }, { once: true });
         return;
@@ -81,7 +81,7 @@ export async function loadMetaSdk({ appId, apiVersion, sdkLocale = 'en_US' }) {
       script.onerror = () => {
         reject(createLaunchError(
           'wa_embedded_signup_sdk_load_failed',
-          'Nao foi possivel carregar o SDK da Meta.'
+          'Não foi possível carregar o SDK da Meta.'
         ));
       };
       document.body.appendChild(script);
@@ -215,7 +215,7 @@ export async function launchWhatsAppEmbeddedSignup(config) {
           rejectLaunch(createLaunchError(
             cancelled ? 'wa_embedded_signup_cancelled' : 'wa_embedded_signup_no_code',
             cancelled
-              ? 'Conexao cancelada antes da conclusao.'
+              ? 'Conexão cancelada antes da conclusão.'
               : 'A Meta nao retornou o codigo de autorizacao do WhatsApp.',
             {
               sessionInfo: latestSession,
@@ -258,7 +258,7 @@ export async function launchWhatsAppEmbeddedSignup(config) {
     } catch (error) {
       rejectLaunch(createLaunchError(
         error?.code || 'wa_embedded_signup_launch_failed',
-        error?.message || 'Nao foi possivel abrir o Embedded Signup da Meta.',
+        error?.message || 'Não foi possível abrir o Embedded Signup da Meta.',
         { cause: error }
       ));
     }

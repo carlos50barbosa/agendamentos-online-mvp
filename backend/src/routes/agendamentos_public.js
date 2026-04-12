@@ -21,6 +21,8 @@ import {
   markDepositPaymentExpired,
 } from '../lib/deposit_payments.js';
 import { buildPublicDepositToken, verifyPublicDepositToken } from '../lib/public_deposit_token.js';
+import { applyClientLoyaltyBenefitsTx, previewClientLoyaltyBenefits } from '../lib/client_loyalty_credits.js'
+import { cancelPendingPaymentAppointmentTx, cancelPublicPendingAppointmentTx } from '../lib/appointment_loyalty.js'
 
 const router = Router();
 const TZ = 'America/Sao_Paulo';
@@ -37,6 +39,16 @@ const DEPOSIT_ALLOWED_PLANS = new Set(['pro', 'premium']);
 const safeJson = (payload) => {
   try {
     return JSON.stringify(payload);
+  } catch {
+    return null;
+  }
+};
+
+const safeJsonParse = (payload) => {
+  if (!payload) return null;
+  if (typeof payload === 'object') return payload;
+  try {
+    return JSON.parse(payload);
   } catch {
     return null;
   }
@@ -163,6 +175,38 @@ const summarizeServices = (items) => {
     duracaoTotal,
     precoTotal,
   };
+};
+
+const buildLoyaltyPricingMap = (loyaltyApplication) => {
+  const map = new Map();
+  const items = Array.isArray(loyaltyApplication?.items) ? loyaltyApplication.items : [];
+  items.forEach((item) => {
+    const serviceId = Number(item?.servico_id || 0);
+    if (!serviceId) return;
+    map.set(serviceId, item);
+  });
+  return map;
+};
+
+const serializeAppointmentServiceItems = (items, loyaltyApplication = null) => {
+  const pricing = buildLoyaltyPricingMap(loyaltyApplication);
+  return (Array.isArray(items) ? items : []).map((item, idx) => {
+    const benefit = pricing.get(Number(item.id));
+    const precoSnapshot = Math.max(
+      0,
+      Math.round(Number(benefit?.cobrado_centavos ?? item.preco_centavos ?? item.preco_snapshot ?? 0) || 0)
+    );
+    return {
+      id: item.id,
+      nome: item.nome,
+      duracao_min: item.duracao_min,
+      preco_centavos_snapshot: precoSnapshot,
+      preco_snapshot: precoSnapshot,
+      ordem: idx + 1,
+      loyalty_benefit_type: benefit?.benefit_type || 'full',
+      loyalty_discount_percent: benefit?.discount_percent ?? null,
+    };
+  });
 };
 
 const normalizeOrigem = (value) => {
@@ -343,7 +387,7 @@ async function notifyPublicConfirmedAppointment(appointmentId) {
       serviceItems = fallback.items || [];
     }
     const summary = summarizeServices(serviceItems);
-    const serviceLabel = summary.serviceLabel || serviceItems[0]?.nome || 'servico';
+    const serviceLabel = summary.serviceLabel || serviceItems[0]?.nome || 'serviço';
     const [[est]] = await pool.query(
       'SELECT email, telefone, nome, notify_email_estab, notify_whatsapp_estab FROM usuarios WHERE id=?',
       [ag.estabelecimento_id]
@@ -472,7 +516,7 @@ async function notifyPublicConfirmedAppointment(appointmentId) {
 // POST /public/agendamentos — cria agendamento sem login (guest)
 router.post('/', ensureSubscriptionOperationalAccess({
   getEstabelecimentoId: (req) => req.body?.estabelecimento_id || req.body?.establishment_id || null,
-  message: 'Este estabelecimento esta com a assinatura indisponivel para novos agendamentos no momento.',
+  message: 'Este estabelecimento está com a assinatura indisponível para novos agendamentos no momento.',
 }), async (req, res) => {
   let conn;
   let txStarted = false;
@@ -500,14 +544,14 @@ router.post('/', ensureSubscriptionOperationalAccess({
     const professionalCandidate = profissionalIdRaw != null ? profissionalIdRaw : profissionalId;
     const profissional_id = professionalCandidate == null ? null : Number(professionalCandidate);
     if (profissional_id !== null && !Number.isFinite(profissional_id)) {
-      return res.status(400).json({ error: 'profissional_invalido', message: 'Profissional invalido.' });
+      return res.status(400).json({ error: 'profissional_invalido', message: 'Profissional inválido.' });
     }
 
     const serviceIds = extractServiceIds(req.body || {});
     if (!estabelecimento_id || !serviceIds.length || !inicio || !nome || !email || !telefone) {
       return res.status(400).json({
         error: 'invalid_payload',
-        message: 'Campos obrigatorios: estabelecimento_id, servico_ids, inicio, nome, email, telefone.'
+        message: 'Campos obrigatórios: estabelecimento_id, servico_ids, inicio, nome, e-mail, telefone.'
       });
     }
 
@@ -521,10 +565,10 @@ router.post('/', ensureSubscriptionOperationalAccess({
     const dataNascimentoRaw = data_nascimento ?? dataNascimento;
     const dataNascimentoValue = normalizeBirthdate(dataNascimentoRaw);
     if (dataNascimentoRaw && String(dataNascimentoRaw).trim() && !dataNascimentoValue) {
-      return res.status(400).json({ error: 'data_nascimento_invalida', message: 'Informe uma data de nascimento valida.' });
+      return res.status(400).json({ error: 'data_nascimento_invalida', message: 'Informe uma data de nascimento válida.' });
     }
     if (cepDigits && cepDigits.length !== 8) {
-      return res.status(400).json({ error: 'cep_invalido', message: 'Informe um CEP valido com 8 digitos.' });
+      return res.status(400).json({ error: 'cep_invalido', message: 'Informe um CEP válido com 8 dígitos.' });
     }
     if (estadoTrim && !/^[A-Z]{2}$/.test(estadoTrim)) {
       return res.status(400).json({ error: 'estado_invalido', message: 'Informe a UF com 2 letras.' });
@@ -540,14 +584,14 @@ router.post('/', ensureSubscriptionOperationalAccess({
 
     const { items: serviceItems, missing } = await fetchServicesForAppointment(pool, estabelecimento_id, serviceIds);
     if (missing.length) {
-      return res.status(400).json({ error: 'servico_invalido', message: 'Servico invalido ou inativo para este estabelecimento.' });
+      return res.status(400).json({ error: 'servico_invalido', message: 'Serviço inválido ou inativo para este estabelecimento.' });
     }
     if (serviceItems.some((item) => !Number.isFinite(item.duracao_min) || item.duracao_min <= 0)) {
       return res.status(400).json({ error: 'duracao_invalida' });
     }
     const summary = summarizeServices(serviceItems);
     const primaryServiceId = summary.serviceIds[0] || serviceIds[0];
-    const serviceLabel = summary.serviceLabel || serviceItems[0]?.nome || 'servico';
+    const serviceLabel = summary.serviceLabel || serviceItems[0]?.nome || 'serviço';
     const totalCentavos = serviceItems.reduce(
       (sum, item) => sum + Math.max(0, Math.round(Number(item?.preco_centavos || 0))),
       0
@@ -558,7 +602,7 @@ router.post('/', ensureSubscriptionOperationalAccess({
     const requiresProfessional = servicesRequiringProfessional.length > 0;
 
     if (requiresProfessional && profissional_id == null) {
-      return res.status(400).json({ error: 'profissional_obrigatorio', message: 'Escolha um profissional para estes servicos.' });
+      return res.status(400).json({ error: 'profissional_obrigatorio', message: 'Escolha um profissional para estes serviços.' });
     }
 
     if (profissional_id != null) {
@@ -567,7 +611,7 @@ router.post('/', ensureSubscriptionOperationalAccess({
         [profissional_id, estabelecimento_id]
       );
       if (!profRow) {
-        return res.status(400).json({ error: 'profissional_invalido', message: 'Profissional nao encontrado para este estabelecimento.' });
+        return res.status(400).json({ error: 'profissional_invalido', message: 'Profissional não encontrado para este estabelecimento.' });
       }
       if (!profRow.ativo) {
         return res.status(400).json({ error: 'profissional_inativo', message: 'Profissional inativo.' });
@@ -575,7 +619,7 @@ router.post('/', ensureSubscriptionOperationalAccess({
       if (requiresProfessional) {
         const valid = servicesRequiringProfessional.every((id) => professionalMap.get(id)?.has(profissional_id));
         if (!valid) {
-          return res.status(400).json({ error: 'profissional_servico', message: 'Profissional nao esta associado a todos os servicos selecionados.' });
+          return res.status(400).json({ error: 'profissional_servico', message: 'Profissional não está associado a todos os serviços selecionados.' });
         }
       }
     }
@@ -621,7 +665,7 @@ router.post('/', ensureSubscriptionOperationalAccess({
       })();
       return res.status(403).json({
         error: 'plan_limit_agendamentos',
-        message: formatPlanLimitExceeded(planConfig, 'appointments') || 'Limite de agendamentos atingido para este mes.',
+        message: formatPlanLimitExceeded(planConfig, 'appointments') || 'Limite de agendamentos atingido para este mês.',
         details: { limit: limitCheck.limit, total: limitCheck.total, month: limitCheck.range?.label || null },
       });
     }
@@ -690,7 +734,7 @@ router.post('/', ensureSubscriptionOperationalAccess({
       }
       mpAccessToken = mpAccess.accessToken;
     }
-    const depositRequired = Boolean(depositEnabled && Number.isFinite(depositCentavos) && depositCentavos > 0);
+    let depositRequired = Boolean(depositEnabled && Number.isFinite(depositCentavos) && depositCentavos > 0);
     if (!depositRequired) {
       depositCentavos = null;
       depositExpiresAt = null;
@@ -734,7 +778,7 @@ router.post('/', ensureSubscriptionOperationalAccess({
     if (userByEmail && userByPhone && userByEmail.id !== userByPhone.id) {
       return res.status(409).json({
         error: 'cliente_conflito',
-        message: 'Já existe cliente com este email ou telefone. Revise os dados antes de continuar.',
+        message: 'Já existe cliente com este e-mail ou telefone. Revise os dados antes de continuar.',
       });
     }
     const existingUser = userByEmail || userByPhone;
@@ -746,7 +790,7 @@ router.post('/', ensureSubscriptionOperationalAccess({
       if (emailMismatch || phoneMismatch) {
         return res.status(409).json({
           error: 'cliente_conflito',
-          message: 'Já existe cliente com este email ou telefone. Revise os dados antes de continuar.',
+          message: 'Já existe cliente com este e-mail ou telefone. Revise os dados antes de continuar.',
         });
       }
       userId = existingUser.id;
@@ -817,6 +861,31 @@ router.post('/', ensureSubscriptionOperationalAccess({
       } catch {}
     }
 
+    const loyaltyPreview = await previewClientLoyaltyBenefits({
+      clienteId: userId,
+      estabelecimentoId: estabelecimento_id,
+      serviceItems,
+      appointmentAt: inicioDate,
+    });
+    const totalCentavosPreview = Math.max(
+      0,
+      Math.round(Number(loyaltyPreview?.total_cobrado_centavos ?? totalCentavos ?? 0) || 0)
+    );
+    if (depositEnabled) {
+      depositCentavos = Math.ceil(totalCentavosPreview * (depositPercent || 0) / 100);
+    }
+    depositRequired = Boolean(
+      depositEnabled &&
+      Number.isFinite(totalCentavosPreview) &&
+      totalCentavosPreview > 0 &&
+      Number.isFinite(depositCentavos) &&
+      depositCentavos > 0
+    );
+    if (!depositRequired) {
+      depositCentavos = null;
+      depositExpiresAt = null;
+    }
+
     conn = await pool.getConnection();
     await conn.beginTransaction();
     txStarted = true;
@@ -845,6 +914,14 @@ router.post('/', ensureSubscriptionOperationalAccess({
     }
 
     const origem = 'public';
+    const loyaltyApplication = await applyClientLoyaltyBenefitsTx({
+      db: conn,
+      clienteId: userId,
+      estabelecimentoId: estabelecimento_id,
+      serviceItems,
+      appointmentAt: inicioDate,
+    });
+    const loyaltySnapshotJson = loyaltyApplication?.snapshot ? safeJson(loyaltyApplication.snapshot) : null;
 
     let appointmentId = null;
     let depositPaymentId = null;
@@ -852,8 +929,9 @@ router.post('/', ensureSubscriptionOperationalAccess({
       const [ins] = await conn.query(
         `INSERT INTO agendamentos
           (cliente_id, estabelecimento_id, servico_id, profissional_id, inicio, fim, status, origem, total_centavos,
-           deposit_required, deposit_percent, deposit_centavos, deposit_expires_at)
-         VALUES (?,?,?,?,?,?, 'pendente_pagamento', ?, ?, 1, ?, ?, ?)`,
+           deposit_required, deposit_percent, deposit_centavos, deposit_expires_at,
+           loyalty_subscription_id, loyalty_credit_applied, loyalty_discount_percent, loyalty_benefit_snapshot_json)
+         VALUES (?,?,?,?,?,?, 'pendente_pagamento', ?, ?, 1, ?, ?, ?, ?, ?, ?, ?)`,
         [
           userId,
           estabelecimento_id,
@@ -862,10 +940,14 @@ router.post('/', ensureSubscriptionOperationalAccess({
           inicioDate,
           fimDate,
           origem,
-          totalCentavos,
+          totalCentavosPreview,
           depositPercent,
           depositCentavos,
           depositExpiresAt,
+          loyaltyApplication?.subscription?.id || null,
+          loyaltyApplication?.loyalty_credit_applied ? 1 : 0,
+          loyaltyApplication?.loyalty_discount_percent ?? null,
+          loyaltySnapshotJson,
         ]
       );
       appointmentId = ins.insertId;
@@ -888,19 +970,36 @@ router.post('/', ensureSubscriptionOperationalAccess({
       const [ins] = await conn.query(
         `INSERT INTO agendamentos
           (cliente_id, estabelecimento_id, servico_id, profissional_id, inicio, fim, status, origem, public_confirm_token_hash,
-           public_confirm_expires_at, public_confirmed_at, total_centavos)
-         VALUES (?,?,?,?,?,?, 'confirmado', ?, NULL, NULL, NOW(), ?)`,
-        [userId, estabelecimento_id, primaryServiceId, profissional_id || null, inicioDate, fimDate, origem, totalCentavos]
+           public_confirm_expires_at, public_confirmed_at, total_centavos,
+           loyalty_subscription_id, loyalty_credit_applied, loyalty_discount_percent, loyalty_benefit_snapshot_json)
+         VALUES (?,?,?,?,?,?, 'confirmado', ?, NULL, NULL, NOW(), ?, ?, ?, ?, ?)`,
+        [
+          userId,
+          estabelecimento_id,
+          primaryServiceId,
+          profissional_id || null,
+          inicioDate,
+          fimDate,
+          origem,
+          totalCentavosPreview,
+          loyaltyApplication?.subscription?.id || null,
+          loyaltyApplication?.loyalty_credit_applied ? 1 : 0,
+          loyaltyApplication?.loyalty_discount_percent ?? null,
+          loyaltySnapshotJson,
+        ]
       );
       appointmentId = ins.insertId;
     }
+    const loyaltyPricing = buildLoyaltyPricingMap(loyaltyApplication);
     const itemValues = serviceItems.map((item, idx) => {
-      const precoSnapshot = Math.max(0, Math.round(item.preco_centavos || 0));
+      const benefit = loyaltyPricing.get(Number(item.id));
+      const precoSnapshot = Math.max(0, Math.round((benefit?.cobrado_centavos ?? item.preco_centavos ?? 0)));
       if (precoSnapshot <= 0) {
         console.warn('[agendamentos_public][preco_snapshot_zero]', {
           estabelecimento_id,
           servico_id: item.id,
           preco_centavos: item.preco_centavos,
+          loyalty_benefit_type: benefit?.benefit_type || null,
         });
       }
       return [
@@ -925,7 +1024,15 @@ router.post('/', ensureSubscriptionOperationalAccess({
     );
     const totalCentavosFinal = Number(totalRow?.total_centavos || 0);
     console.info('[public/agendamento][total]', { appointmentId, totalCentavosFinal });
-    if (!Number.isFinite(totalCentavosFinal) || totalCentavosFinal <= 0) {
+    if (
+      !Number.isFinite(totalCentavosFinal) ||
+      totalCentavosFinal < 0 ||
+      (
+        totalCentavosFinal === 0 &&
+        !loyaltyApplication?.loyalty_credit_applied &&
+        loyaltyApplication?.loyalty_discount_percent == null
+      )
+    ) {
       if (txStarted && conn) {
         await conn.rollback();
       }
@@ -1028,6 +1135,10 @@ router.post('/', ensureSubscriptionOperationalAccess({
           pix_ticket_url: pix?.ticket_url || null,
           amount_centavos: depositCentavosFinal,
           pix,
+          loyalty_subscription_id: loyaltyApplication?.subscription?.id || null,
+          loyalty_credit_applied: Boolean(loyaltyApplication?.loyalty_credit_applied),
+          loyalty_discount_percent: loyaltyApplication?.loyalty_discount_percent ?? null,
+          loyalty_benefit_snapshot: loyaltyApplication?.snapshot || null,
         });
       } catch (err) {
         console.error('[public/agendamentos][deposit] erro ao criar PIX:', err?.message || err);
@@ -1036,13 +1147,10 @@ router.post('/', ensureSubscriptionOperationalAccess({
           'UPDATE appointment_payments SET status=?, raw_payload=? WHERE id=?',
           ['failed', payload, depositPaymentId]
         );
-        await pool.query(
-          "UPDATE agendamentos SET status='cancelado', deposit_expires_at=NOW() WHERE id=? AND status='pendente_pagamento'",
-          [appointmentId]
-        );
+        await cancelPendingPaymentAppointmentTx(appointmentId, { db: pool });
         return res.status(502).json({
           error: 'payment_create_failed',
-          message: 'Nao foi possivel gerar o PIX do sinal. Tente novamente.',
+          message: 'Não foi possível gerar o PIX do sinal. Tente novamente.',
         });
       }
     }
@@ -1061,15 +1169,19 @@ router.post('/', ensureSubscriptionOperationalAccess({
       servico_id: primaryServiceId,
       servico_ids: summary.serviceIds,
       servico_nome: summary.serviceLabel || serviceLabel,
-      servicos: serviceItems,
+      servicos: serializeAppointmentServiceItems(serviceItems, loyaltyApplication),
       duracao_total: summary.duracaoTotal,
-      preco_total: summary.precoTotal,
+      preco_total: totalCentavosFinal,
       total_centavos: totalCentavosFinal,
       profissional_id: profissional_id || null,
       inicio: inicioDate,
       fim: fimDate,
       status: 'confirmado',
       confirm_expires_at: null,
+      loyalty_subscription_id: loyaltyApplication?.subscription?.id || null,
+      loyalty_credit_applied: Boolean(loyaltyApplication?.loyalty_credit_applied),
+      loyalty_discount_percent: loyaltyApplication?.loyalty_discount_percent ?? null,
+      loyalty_benefit_snapshot: loyaltyApplication?.snapshot || null,
     });
   } catch (e) {
     try { if (txStarted && conn) await conn.rollback(); } catch {}
@@ -1085,8 +1197,8 @@ router.get('/confirm', async (req, res) => {
     const token = String(req.query?.token || '').trim();
     if (!token) {
       return res.status(400).send(renderConfirmPage({
-        title: 'Token invalido',
-        message: 'Link de confirmacao invalido ou ausente.',
+        title: 'Token inválido',
+        message: 'Link de confirmação inválido ou ausente.',
       }));
     }
     const tokenHash = hashToken(token);
@@ -1096,30 +1208,27 @@ router.get('/confirm', async (req, res) => {
     );
     if (!ag) {
       return res.status(404).send(renderConfirmPage({
-        title: 'Agendamento nao encontrado',
-        message: 'Este link nao e valido ou ja expirou.',
+        title: 'Agendamento não encontrado',
+        message: 'Este link não é válido ou já expirou.',
       }));
     }
     if (ag.status === 'confirmado') {
       return res.status(200).send(renderConfirmPage({
         title: 'Agendamento confirmado',
-        message: 'Seu agendamento ja estava confirmado.',
+        message: 'Seu agendamento já estava confirmado.',
       }));
     }
     if (ag.status === 'cancelado') {
       return res.status(410).send(renderConfirmPage({
-        title: 'Confirmacao expirada',
-        message: 'Este agendamento foi cancelado por falta de confirmacao.',
+        title: 'Confirmação expirada',
+        message: 'Este agendamento foi cancelado por falta de confirmação.',
       }));
     }
     if (ag.public_confirm_expires_at && new Date(ag.public_confirm_expires_at).getTime() < Date.now()) {
-      await pool.query(
-        "UPDATE agendamentos SET status='cancelado' WHERE id=? AND status='pendente'",
-        [ag.id]
-      );
+      await cancelPublicPendingAppointmentTx(ag.id, { db: pool });
       return res.status(410).send(renderConfirmPage({
-        title: 'Confirmacao expirada',
-        message: 'Este agendamento foi cancelado por falta de confirmacao.',
+        title: 'Confirmação expirada',
+        message: 'Este agendamento foi cancelado por falta de confirmação.',
       }));
     }
 
@@ -1132,13 +1241,13 @@ router.get('/confirm', async (req, res) => {
     }
     return res.status(200).send(renderConfirmPage({
       title: 'Agendamento confirmado',
-      message: 'Confirmacao registrada com sucesso.',
+      message: 'Confirmação registrada com sucesso.',
     }));
   } catch (e) {
     console.error('[public/agendamentos][confirm]', e?.message || e);
     return res.status(500).send(renderConfirmPage({
-      title: 'Erro na confirmacao',
-      message: 'Nao foi possivel confirmar agora. Tente novamente.',
+      title: 'Erro na confirmação',
+      message: 'Não foi possível confirmar agora. Tente novamente.',
     }));
   }
 });
@@ -1266,10 +1375,7 @@ router.post('/:id/deposit/pix', async (req, res) => {
     const expiredByAgendamento =
       ag.deposit_expires_at && new Date(ag.deposit_expires_at).getTime() <= Date.now();
     if (expiredByAgendamento) {
-      await conn.query(
-        "UPDATE agendamentos SET status='cancelado', deposit_expires_at=NOW() WHERE id=? AND status='pendente_pagamento'",
-        [id]
-      );
+      await cancelPendingPaymentAppointmentTx(id, { db: conn });
       await conn.query(
         "UPDATE appointment_payments SET status='expired' WHERE agendamento_id=? AND status='pending'",
         [id]
@@ -1330,10 +1436,7 @@ router.post('/:id/deposit/pix', async (req, res) => {
         pix_ticket_url: payload.pix?.ticket_url || null,
       });
     }
-    await conn.query(
-      "UPDATE agendamentos SET status='cancelado', deposit_expires_at=NOW() WHERE id=? AND status='pendente_pagamento'",
-      [id]
-    );
+    await cancelPendingPaymentAppointmentTx(id, { db: conn });
     await conn.query(
       "UPDATE appointment_payments SET status='expired' WHERE agendamento_id=? AND status='pending'",
       [id]

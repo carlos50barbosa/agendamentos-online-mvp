@@ -6,7 +6,7 @@ import { Calendar as BigCalendar, momentLocalizer, Views } from 'react-big-calen
 import { Api, resolveAssetUrl } from '../utils/api'
 import { getUser, USER_EVENT } from '../utils/auth'
 import Modal from '../components/Modal.jsx'
-import { useLocation, useSearchParams } from 'react-router-dom'
+import { NavLink, useLocation, useSearchParams } from 'react-router-dom'
 
 
 moment.locale('pt-br')
@@ -2022,7 +2022,7 @@ function ProfessionalAgendaView({
           : []
         const service = serviceNames.length
            ? serviceNames.join(' + ')
-          : (item?.servico_nome || item?.service_name || 'Servico')
+          : (item?.servico_nome || item?.service_name || 'Serviço')
         const client = item?.cliente_nome || item?.client_name || ''
 
         const clientPhone =
@@ -2652,7 +2652,7 @@ function ProfessionalAgendaView({
 
     const whenLabel = [dateLabel, timeLabel].filter(Boolean).join(' ')
 
-    const serviceLabel = nextAppointment.service || nextAppointment.title || 'Servico'
+    const serviceLabel = nextAppointment.service || nextAppointment.title || 'Serviço'
 
     const clientLabel = nextAppointment.client ? ` - ${nextAppointment.client}` : ''
 
@@ -2698,7 +2698,7 @@ function ProfessionalAgendaView({
       { key: 'total', label: 'Total', value: counts.total, tone: 'neutral' },
       { key: 'pending', label: 'Pendentes', value: counts.pending, tone: 'warning' },
       { key: 'confirmed', label: 'Confirmados', value: counts.confirmed, tone: 'success' },
-      { key: 'done', label: 'Concluidos', value: counts.done, tone: 'info' },
+      { key: 'done', label: 'Concluídos', value: counts.done, tone: 'info' },
       { key: 'canceled', label: 'Cancelados', value: counts.canceled, tone: 'danger' },
     ]
 
@@ -3204,9 +3204,9 @@ function ProfessionalAgendaView({
 
     const theme = event?._theme || getAgendaTheme(event?.status)
 
-    const serviceLabel = event?.service || event?.title || 'Servico'
+    const serviceLabel = event?.service || event?.title || 'Serviço'
 
-    const clientLabel = event?.client || 'Cliente nao informado'
+    const clientLabel = event?.client || 'Cliente não informado'
 
     const timeLabel = formatHourRange(event?.start, event?.end)
 
@@ -3332,7 +3332,7 @@ function ProfessionalAgendaView({
 
   const selectedEventTitle = selectedEvent
 
-     ? `${selectedEvent.service || selectedEvent.title || 'Servico'}${selectedEvent.client ? ` - ${selectedEvent.client}` : ''}`
+     ? `${selectedEvent.service || selectedEvent.title || 'Serviço'}${selectedEvent.client ? ` - ${selectedEvent.client}` : ''}`
 
     : ''
 
@@ -3688,7 +3688,7 @@ function ProfessionalAgendaView({
 
     if (!nome || !email || !telefone) {
 
-      setSelfBookingError('Informe nome, email e telefone.')
+      setSelfBookingError('Informe nome, e-mail e telefone.')
 
       return
 
@@ -3696,7 +3696,7 @@ function ProfessionalAgendaView({
 
     if (!isValidEmail(email)) {
 
-      setSelfBookingError('Informe um email válido.')
+      setSelfBookingError('Informe um e-mail válido.')
 
       return
 
@@ -3824,7 +3824,7 @@ function ProfessionalAgendaView({
 
         selectedService?.title ||
 
-        'Servico'
+        'Serviço'
 
       const profName = profId
         ? (serviceProfessionals.find((prof) => String(prof.id) === String(profId))?.nome ||
@@ -3918,13 +3918,22 @@ function ProfessionalAgendaView({
 
               <h3 className="pro-agenda__title">Agenda da semana</h3>
 
-              <p className="pro-agenda__subtitle">Visualize horarios, confirmacoes e status dos atendimentos</p>
+              <p className="pro-agenda__subtitle">Visualize horários, confirmações e status dos atendimentos</p>
 
             </div>
 
           </div>
 
           <div className="pro-agenda__toolbar-actions">
+
+            <NavLink
+              to="/fidelidade"
+              className="pro-agenda__btn pro-agenda__link-btn pro-agenda__link-btn--loyalty"
+              aria-label="Gerenciar planos de fidelidade"
+              title="Criar e editar planos de fidelidade"
+            >
+              Gerenciar fidelidade
+            </NavLink>
 
             <div className="pro-agenda__date-pill">{weekLabel}</div>
 
@@ -3958,7 +3967,7 @@ function ProfessionalAgendaView({
 
                 type="button"
 
-                aria-label="Proxima semana"
+                aria-label="Próxima semana"
 
                 onClick={handleNextWeek}
 
@@ -3998,13 +4007,13 @@ function ProfessionalAgendaView({
 
           <div className={`pro-agenda__spotlight${!nextAppointment ? ' is-empty' : ''}`}>
 
-            <span className="pro-agenda__spotlight-label">Proximo atendimento</span>
+            <span className="pro-agenda__spotlight-label">Próximo atendimento</span>
 
             <b title={nextAppointmentInfo.title}>{nextAppointmentInfo.label}</b>
 
             {nextAppointment ? (
 
-              <span className="pro-agenda__spotlight-note">Acompanhe confirmacoes, horarios e status em tempo real.</span>
+              <span className="pro-agenda__spotlight-note">Acompanhe confirmações, horários e status em tempo real.</span>
 
             ) : (
 
@@ -4392,7 +4401,7 @@ function ProfessionalAgendaView({
 
                         className="btn btn--sm"
 
-                        aria-label="Proximo mes"
+                        aria-label="Próximo mês"
 
                         onClick={() =>
 
@@ -4582,7 +4591,7 @@ function ProfessionalAgendaView({
 
                   ) : (
 
-                    <div className="empty">Escolha uma data no calendario acima.</div>
+                    <div className="empty">Escolha uma data no calendário acima.</div>
 
                   )}
 

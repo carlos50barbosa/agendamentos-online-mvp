@@ -1312,7 +1312,7 @@ export default function NovoAgendamentoModals(props) {
                     <h3>Agendamento realizado</h3>
 
                     <p>
-                      Enviamos um email com os detalhes do agendamento.
+                      Enviamos um e-mail com os detalhes do agendamento.
                       {' '}Se não aparecer em alguns minutos, confira o spam ou reencontre o link mais tarde.
                     </p>
                     </div>
@@ -1337,11 +1337,11 @@ export default function NovoAgendamentoModals(props) {
 
                       <span className="booking-modal__eyebrow">Validacao de contato</span>
 
-                    <h3>Confirme seu email</h3>
+                    <h3>Confirme seu e-mail</h3>
 
                     <p>
 
-                      Enviamos um código para {guestModal.email || 'seu email'}. Digite para concluir o agendamento.
+                      Enviamos um código para {guestModal.email || 'seu e-mail'}. Digite para concluir o agendamento.
 
                     </p>
 
@@ -1431,7 +1431,7 @@ export default function NovoAgendamentoModals(props) {
 
                       <p className="muted" style={{ marginTop: 0, fontStyle: 'italic', fontSize: 12 }}>
 
-                        Agendaremos e criaremos sua conta com estes dados. Vamos mandar a confirmação por email.
+                        Agendaremos e criaremos sua conta com estes dados. Vamos mandar a confirmação por e-mail.
 
                       </p>
 
@@ -1895,7 +1895,7 @@ export default function NovoAgendamentoModals(props) {
                           <dd>{depositAppointmentInfo?.estabelecimentoNome || selectedEstablishmentName || "-"}</dd>
                         </div>
                         <div className="confirmation-details__item">
-                          <dt>Servico</dt>
+                          <dt>Serviço</dt>
                           <dd>{depositAppointmentInfo?.servicoNome || serviceLabel || "-"}</dd>
                         </div>
                         {depositProfessionalName ? (
@@ -1912,7 +1912,7 @@ export default function NovoAgendamentoModals(props) {
                         ) : null}
                         {depositAppointmentTimeLabel ? (
                           <div className="confirmation-details__item">
-                            <dt>Horario</dt>
+                            <dt>Horário</dt>
                             <dd>
                               <span className="badge badge--time">
                                 {depositAppointmentTimeLabel}
@@ -1923,13 +1923,13 @@ export default function NovoAgendamentoModals(props) {
                         ) : null}
                         {depositDuration > 0 ? (
                           <div className="confirmation-details__item">
-                            <dt>Duracao</dt>
+                            <dt>Duração</dt>
                             <dd>{depositDuration} minutos</dd>
                           </div>
                         ) : null}
                         {depositPriceLabel && depositPriceLabel !== "R$ 0,00" ? (
                           <div className="confirmation-details__item">
-                            <dt>Preco</dt>
+                            <dt>Preço</dt>
                             <dd>{depositPriceLabel}</dd>
                           </div>
                         ) : null}
@@ -1943,8 +1943,8 @@ export default function NovoAgendamentoModals(props) {
                     </div>
                     <p className="muted pix-checkout__note">
                       {depositAppointmentLink
-                        ? "Voce pode acompanhar os detalhes completos na sua area do cliente."
-                        : "Guarde estes dados e acompanhe as informacoes enviadas para o email cadastrado."}
+                        ? "Você pode acompanhar os detalhes completos na sua área do cliente."
+                        : "Guarde estes dados e acompanhe as informações enviadas para o e-mail cadastrado."}
                     </p>
                   </div>
                 ) : depositExpired ? (
@@ -1963,10 +1963,10 @@ export default function NovoAgendamentoModals(props) {
                       </svg>
                     </div>
                     <p style={{ marginTop: 0 }}>
-                      O prazo do PIX terminou e este horario nao esta mais reservado.
+                      O prazo do PIX terminou e este horário não está mais reservado.
                     </p>
                     <p className="muted pix-checkout__note">
-                      Escolha um novo horario para concluir o agendamento.
+                      Escolha um novo horário para concluir o agendamento.
                     </p>
                   </div>
                 ) : (

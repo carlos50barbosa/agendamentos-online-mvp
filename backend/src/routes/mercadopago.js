@@ -31,6 +31,18 @@ if (value) return value;
 const MP_CLIENT_ID = pickEnv(['MP_CLIENT_ID', 'MERCADOPAGO_CLIENT_ID']);
 const MP_CLIENT_SECRET = pickEnv(['MP_CLIENT_SECRET', 'MERCADOPAGO_CLIENT_SECRET']);
 const MP_REDIRECT_URI = pickEnv(['MP_REDIRECT_URI', 'MERCADOPAGO_REDIRECT_URI']);
+function buildMpRedirectUriExample() {
+const explicitApiBase = normalizeEnvValue(process.env.API_BASE_URL || process.env.BACKEND_BASE_URL);
+if (explicitApiBase) {
+return `${explicitApiBase.replace(/\/$/, '')}/mercadopago/callback`;
+}
+const frontBase = normalizeEnvValue(process.env.FRONTEND_BASE_URL || process.env.APP_URL);
+if (!frontBase) return '';
+if (/localhost:3001$/i.test(frontBase.replace(/\/$/, ''))) {
+return 'http://localhost:3002/mercadopago/callback';
+}
+return `${frontBase.replace(/\/$/, '')}/api/mercadopago/callback`;
+}
 function getMissingMpOAuthEnv() {
 const missing = [];
 for (const group of MP_OAUTH_ENV_GROUPS) {
@@ -88,9 +100,23 @@ const wantsJson = String(req.query?.json || '').trim() === '1' || String(req.hea
 try {
 const missing = getMissingMpOAuthEnv();
 if (missing.length) {
+const exampleRedirectUri = buildMpRedirectUriExample();
+const message = [
+  'Configuracao incompleta do OAuth do Mercado Pago no backend.',
+  missing.length ? `Preencha: ${missing.join(', ')}.` : '',
+  missing.includes('MP_REDIRECT_URI') && exampleRedirectUri
+    ? `Sugestao para MP_REDIRECT_URI: ${exampleRedirectUri}.`
+    : '',
+].filter(Boolean).join(' ');
 console.warn('[mp/connect] config missing', { missing });
 return res.status(400).json({
-ok: false, error: 'mp_config_missing', missing, hint: 'check backend/.env and dotenv loading', });
+ok: false,
+error: 'mp_config_missing',
+missing,
+message,
+hint: 'check backend/.env and dotenv loading',
+example_redirect_uri: exampleRedirectUri || null,
+});
 }
     const planContext = await getPlanContext(req.user.id);
     if (!planContext) {
@@ -104,7 +130,7 @@ ok: false, error: 'mp_config_missing', missing, hint: 'check backend/.env and do
       return res.status(403).json({
         ok: false,
         error: 'plan_not_allowed',
-        message: 'Disponivel apenas para planos Pro ou Premium.',
+        message: 'Disponível apenas para planos Pro ou Premium.',
       });
     }
     const state = buildState(req.user.id);

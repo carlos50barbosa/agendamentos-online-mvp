@@ -328,7 +328,7 @@ export default function ServicosEstabelecimento() {
 
     } catch {
 
-      showToast('error', 'Nao foi possivel ler a imagem.');
+      showToast('error', 'Não foi possível ler a imagem.');
 
       if (setError) setError('');
 
@@ -544,7 +544,7 @@ export default function ServicosEstabelecimento() {
 
 
 
-  // Confirmacao de exclusao
+  // Confirmação de exclusão
 
   function askDelete(svc) {
 
@@ -968,7 +968,7 @@ export default function ServicosEstabelecimento() {
 
               Exibindo <b>{filtered.length}</b>{" "}
 
-              {filtered.length === 1 ? "servico" : "serviços"}.
+              {filtered.length === 1 ? "serviço" : "serviços"}.
 
             </div>
 
@@ -990,7 +990,7 @@ export default function ServicosEstabelecimento() {
 
                         <div className="mini-card__media">
 
-                          <img src={imageUrl} alt={`Imagem do servico ${s.nome}`} />
+                          <img src={imageUrl} alt={`Imagem do serviço ${s.nome}`} />
 
                         </div>
 
@@ -1164,7 +1164,7 @@ export default function ServicosEstabelecimento() {
 
               </div>
 
-              <small className="muted" style={{ fontSize: 11 }}>Formatos aceitos: PNG, JPG ou WEBP (ate 2MB).</small>
+              <small className="muted" style={{ fontSize: 11 }}>Formatos aceitos: PNG, JPG ou WEBP (at? 2 MB).</small>
 
               {newImageError && <div className="service-form__error">{newImageError}</div>}
 
@@ -1469,7 +1469,7 @@ export default function ServicosEstabelecimento() {
 
               onChange={(e)=> setEditForm(f => ({ ...f, duracao_min: parseInt(e.target.value,10) }))}
 
-              title="Duracao (min)"
+              title="Duração (min)"
 
             >
 
@@ -1488,7 +1488,7 @@ export default function ServicosEstabelecimento() {
 
               inputMode="numeric"
 
-              placeholder="Preco"
+              placeholder="Preço"
 
               value={editPrecoStr}
 
@@ -1570,7 +1570,7 @@ export default function ServicosEstabelecimento() {
 
               </div>
 
-              <small className="muted" style={{ fontSize: 11 }}>Formatos aceitos: PNG, JPG ou WEBP (ate 2MB).</small>
+              <small className="muted" style={{ fontSize: 11 }}>Formatos aceitos: PNG, JPG ou WEBP (at? 2 MB).</small>
 
               {editImageError && <div className="service-form__error">{editImageError}</div>}
 

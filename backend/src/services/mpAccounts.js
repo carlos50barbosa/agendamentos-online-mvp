@@ -33,6 +33,17 @@ const [[row]] = await pool.query(
 return row || null;
 }
 
+export async function getMpAccountByMpUserId(mpUserId) {
+const id = normalizeId(mpUserId);
+if (!id) return null;
+const [[row]] = await pool.query(
+    `SELECT estabelecimento_id, mp_user_id, access_token_enc, refresh_token_enc, token_last4,
+            expires_at, status, created_at, updated_at
+       FROM mercadopago_accounts
+      WHERE mp_user_id=? LIMIT 1`, [id] );
+return row || null;
+}
+
 export async function upsertMpAccount({
 estabelecimentoId, mpUserId, accessTokenEnc, refreshTokenEnc, tokenLast4, expiresAt, status = 'connected', }) {
 const id = normalizeId(estabelecimentoId);

@@ -651,6 +651,45 @@ export const Api = {
 
   },
 
+  // Loyalty / Fidelidade
+
+  loyaltyPlansList: (params = {}) => req(`/loyalty/plans${toQuery(params)}`),
+
+  loyaltyPlanGet: (id) => req(`/loyalty/plans/${id}`),
+
+  loyaltyPlanCreate: (payload) => req('/loyalty/plans', { method: 'POST', body: JSON.stringify(payload || {}) }),
+
+  loyaltyPlanUpdate: (id, payload) => req(`/loyalty/plans/${id}`, { method: 'PUT', body: JSON.stringify(payload || {}) }),
+
+  loyaltyPlanUpdateStatus: (id, status) =>
+    req(`/loyalty/plans/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status }) }),
+
+  loyaltyPlanDelete: (id) => req(`/loyalty/plans/${id}`, { method: 'DELETE' }),
+
+  loyaltySubscribers: (params = {}) => req(`/loyalty/subscribers${toQuery(params)}`),
+
+  publicLoyaltyPlans: (idOrSlug) => req(`/public/estabelecimentos/${idOrSlug}/loyalty-plans`),
+
+  clientLoyaltyConfig: () => req('/cliente/loyalty/config'),
+
+  clientLoyaltySubscription: (params = {}) => req(`/cliente/loyalty/subscription${toQuery(params)}`),
+
+  clientLoyaltyContext: (params = {}) => req(`/cliente/loyalty/context${toQuery(params)}`),
+
+  clientLoyaltySubscribe: (payload) =>
+    req('/cliente/loyalty/subscribe', { method: 'POST', body: JSON.stringify(payload || {}) }),
+
+  clientLoyaltyPayPix: (payload) =>
+    req('/cliente/loyalty/pay/pix', { method: 'POST', body: JSON.stringify(payload || {}) }),
+
+  clientLoyaltyPayCard: (payload) =>
+    req('/cliente/loyalty/pay/card', { method: 'POST', body: JSON.stringify(payload || {}) }),
+
+  clientLoyaltyCancel: (payload) =>
+    req('/cliente/loyalty/cancel', { method: 'POST', body: JSON.stringify(payload || {}) }),
+
+  clientLoyaltyHistory: (params = {}) => req(`/cliente/loyalty/history${toQuery(params)}`),
+
   requestOtp: (channel, value) => req('/public/otp/request', { method: 'POST', body: JSON.stringify({ channel, value }) }),
 
   verifyOtp: (request_id, code) => req('/public/otp/verify', { method: 'POST', body: JSON.stringify({ request_id, code }) }),

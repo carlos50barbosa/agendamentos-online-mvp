@@ -14,7 +14,7 @@ const INSTITUTIONAL_AUTO_REPLY_TEXT = [
 ].join('\n');
 
 const CONFIRMATION_REPLY_TEXT = 'Confirmado! Vamos te aguardar no hor\u00e1rio combinado.';
-const CONFIRMATION_NOT_FOUND_TEXT = 'Nao encontrei um agendamento pendente de confirmacao para esta conversa.';
+const CONFIRMATION_NOT_FOUND_TEXT = 'Não encontrei um agendamento pendente de confirmação para esta conversa.';
 
 const RECENT_MESSAGE_TTL_MS = 30 * 60 * 1000;
 const recentInstitutionalMessageIds = new Map();

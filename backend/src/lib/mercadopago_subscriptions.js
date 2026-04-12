@@ -21,8 +21,8 @@ const mockAuthorizedPayments = new Map()
 const SUBSCRIPTION_START_DATE_OFFSET_MS = 10 * 60 * 1000
 const SUBSCRIPTION_START_DATE_MIN_LEAD_MS = 60 * 1000
 
-function ensureAccessToken() {
-  const accessToken = config.billing?.mercadopago?.accessToken
+function ensureAccessToken(accessTokenOverride = null) {
+  const accessToken = accessTokenOverride || config.billing?.mercadopago?.accessToken
   if (!accessToken && !MOCK_MP) {
     throw new Error('mercadopago_access_token_missing')
   }
@@ -161,7 +161,7 @@ function mapCardChargeResponse(data) {
   }
 }
 
-async function mercadoPagoRequest(path, { method = 'GET', body, headers = {} } = {}) {
+async function mercadoPagoRequest(path, { method = 'GET', body, headers = {}, accessToken = null } = {}) {
   if (MOCK_MP) {
     const normalizedPath = String(path || '')
     if (method === 'POST' && normalizedPath === '/preapproval') {
@@ -218,11 +218,11 @@ async function mercadoPagoRequest(path, { method = 'GET', body, headers = {} } =
     }
   }
 
-  const accessToken = ensureAccessToken()
+  const resolvedAccessToken = ensureAccessToken(accessToken)
   const response = await fetch(`${API_BASE}${path}`, {
     method,
     headers: {
-      Authorization: `Bearer ${accessToken}`,
+      Authorization: `Bearer ${resolvedAccessToken}`,
       'Content-Type': 'application/json',
       ...headers,
     },
@@ -253,6 +253,58 @@ export function getMercadoPagoPublicKey() {
   return config.billing?.mercadopago?.publicKey || null
 }
 
+export async function createMercadoPagoCardPreapproval({
+  amountCents,
+  billingCycle,
+  cardToken,
+  payer = {},
+  reason = null,
+  backUrl = null,
+  externalReference = null,
+  startDate = null,
+  accessToken = null,
+} = {}) {
+  const normalizedCycle = normalizeBillingCycle(billingCycle || 'mensal')
+  if (!cardToken) throw new Error('card_token_required')
+  if (!Number.isFinite(Number(amountCents)) || Number(amountCents) <= 0) {
+    throw new Error('amount_cents_required')
+  }
+
+  const cycleConfig = getBillingCycleConfig(normalizedCycle)
+  const resolvedStartDate = startDate || buildFutureSubscriptionStartDate(Date.now())
+  const payload = {
+    reason: reason || `Assinatura recorrente (${cycleConfig.label})`,
+    payer_email: payer.email || null,
+    card_token_id: cardToken,
+    back_url: backUrl || buildBackUrl(),
+    external_reference: externalReference || randomUUID(),
+    status: 'authorized',
+    auto_recurring: {
+      frequency: Number(cycleConfig.frequency || 1),
+      frequency_type: cycleConfig.frequencyType || 'months',
+      transaction_amount: amountToGatewayValue(amountCents),
+      currency_id: BILLING_CURRENCY,
+      start_date: resolvedStartDate,
+    },
+  }
+
+  validateFutureSubscriptionStartDate(payload.auto_recurring.start_date, { nowMs: Date.now() })
+  const response = await mercadoPagoRequest('/preapproval', {
+    method: 'POST',
+    body: payload,
+    accessToken,
+  })
+  return {
+    request: payload,
+    subscription: mapPreapprovalResponse(response, {
+      fallbackPlan: 'custom',
+      fallbackCycle: normalizedCycle,
+      fallbackStartDate: resolvedStartDate,
+    }),
+    raw: response,
+  }
+}
+
 export async function createMercadoPagoCardSubscription({
   estabelecimento,
   plan,
@@ -266,46 +318,26 @@ export async function createMercadoPagoCardSubscription({
   const normalizedPlan = String(plan || '').toLowerCase()
   if (!PLAN_TIERS.includes(normalizedPlan)) throw new Error('plano_invalido')
   const normalizedCycle = normalizeBillingCycle(billingCycle)
-  if (!cardToken) throw new Error('card_token_required')
-
-  const cycleConfig = getBillingCycleConfig(normalizedCycle)
   const amountCents = getPlanPriceCents(normalizedPlan, normalizedCycle)
   const startDate = buildFutureSubscriptionStartDate(Date.now())
-  const payload = {
-    reason: reason || `Assinatura Agendamentos Online - ${getPlanLabel(normalizedPlan)} (${cycleConfig.label})`,
-    payer_email: payer.email || estabelecimento.email,
-    card_token_id: cardToken,
-    back_url: backUrl || buildBackUrl(),
-    external_reference: buildExternalReference(estabelecimento.id, normalizedPlan, normalizedCycle),
-    status: 'authorized',
-    auto_recurring: {
-      frequency: Number(cycleConfig.frequency || 1),
-      frequency_type: cycleConfig.frequencyType || 'months',
-      transaction_amount: amountToGatewayValue(amountCents),
-      currency_id: BILLING_CURRENCY,
-      start_date: startDate,
-    },
-  }
-
-  validateFutureSubscriptionStartDate(payload.auto_recurring.start_date, { nowMs: Date.now() })
   console.info('[mercadopago/subscriptions][preapproval] sending', {
     estabelecimento_id: estabelecimento.id,
     plan: normalizedPlan,
     billing_cycle: normalizedCycle,
-    start_date: payload.auto_recurring.start_date,
+    start_date: startDate,
   })
 
   try {
-    const response = await mercadoPagoRequest('/preapproval', { method: 'POST', body: payload })
-    return {
-      request: payload,
-      subscription: mapPreapprovalResponse(response, {
-        fallbackPlan: normalizedPlan,
-        fallbackCycle: normalizedCycle,
-        fallbackStartDate: startDate,
-      }),
-      raw: response,
-    }
+    return await createMercadoPagoCardPreapproval({
+      amountCents,
+      billingCycle: normalizedCycle,
+      cardToken,
+      payer: { ...payer, email: payer.email || estabelecimento.email },
+      reason: reason || `Assinatura Agendamentos Online - ${getPlanLabel(normalizedPlan)} (${getBillingCycleConfig(normalizedCycle).label})`,
+      backUrl,
+      externalReference: buildExternalReference(estabelecimento.id, normalizedPlan, normalizedCycle),
+      startDate,
+    })
   } catch (error) {
     console.error('[mercadopago/subscriptions][preapproval] failed', {
       estabelecimento_id: estabelecimento.id,
@@ -320,9 +352,9 @@ export async function createMercadoPagoCardSubscription({
   }
 }
 
-export async function getMercadoPagoCardSubscription(gatewaySubscriptionId, { fallbackPlan = 'starter', fallbackCycle = 'mensal' } = {}) {
+export async function getMercadoPagoCardSubscription(gatewaySubscriptionId, { fallbackPlan = 'starter', fallbackCycle = 'mensal', accessToken = null } = {}) {
   if (!gatewaySubscriptionId) throw new Error('gateway_subscription_id_required')
-  const response = await mercadoPagoRequest(`/preapproval/${encodeURIComponent(String(gatewaySubscriptionId))}`)
+  const response = await mercadoPagoRequest(`/preapproval/${encodeURIComponent(String(gatewaySubscriptionId))}`, { accessToken })
   return {
     subscription: mapPreapprovalResponse(response, { fallbackPlan, fallbackCycle }),
     raw: response,
@@ -336,6 +368,7 @@ export async function updateMercadoPagoCardSubscription(gatewaySubscriptionId, {
   billingCycle = null,
   status = null,
   startDate = null,
+  accessToken = null,
 } = {}) {
   if (!gatewaySubscriptionId) throw new Error('gateway_subscription_id_required')
   const payload = {}
@@ -363,6 +396,7 @@ export async function updateMercadoPagoCardSubscription(gatewaySubscriptionId, {
   const response = await mercadoPagoRequest(`/preapproval/${encodeURIComponent(String(gatewaySubscriptionId))}`, {
     method: 'PUT',
     body: payload,
+    accessToken,
   })
   return {
     request: payload,
@@ -371,8 +405,8 @@ export async function updateMercadoPagoCardSubscription(gatewaySubscriptionId, {
   }
 }
 
-export async function cancelMercadoPagoCardSubscription(gatewaySubscriptionId) {
-  return updateMercadoPagoCardSubscription(gatewaySubscriptionId, { status: 'cancelled' })
+export async function cancelMercadoPagoCardSubscription(gatewaySubscriptionId, { accessToken = null } = {}) {
+  return updateMercadoPagoCardSubscription(gatewaySubscriptionId, { status: 'cancelled', accessToken })
 }
 
 export async function createMercadoPagoCardRecoveryPayment({
@@ -388,6 +422,7 @@ export async function createMercadoPagoCardRecoveryPayment({
   identificationNumber = null,
   externalReference,
   idempotencyKey,
+  accessToken = null,
 } = {}) {
   if (!subscription?.gatewaySubscriptionId) throw new Error('gateway_subscription_id_required')
   if (!cardToken) throw new Error('card_token_required')
@@ -431,6 +466,7 @@ export async function createMercadoPagoCardRecoveryPayment({
       method: 'POST',
       body,
       headers: idempotencyKey ? { 'X-Idempotency-Key': String(idempotencyKey) } : {},
+      accessToken,
     })
     return {
       request: body,
@@ -452,9 +488,9 @@ export async function createMercadoPagoCardRecoveryPayment({
   }
 }
 
-export async function getMercadoPagoAuthorizedPayment(authorizedPaymentId) {
+export async function getMercadoPagoAuthorizedPayment(authorizedPaymentId, { accessToken = null } = {}) {
   if (!authorizedPaymentId) throw new Error('authorized_payment_id_required')
-  const response = await mercadoPagoRequest(`/authorized_payments/${encodeURIComponent(String(authorizedPaymentId))}`)
+  const response = await mercadoPagoRequest(`/authorized_payments/${encodeURIComponent(String(authorizedPaymentId))}`, { accessToken })
   return {
     authorizedPayment: mapAuthorizedPaymentResponse(response),
     raw: response,

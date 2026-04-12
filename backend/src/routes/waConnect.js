@@ -113,7 +113,7 @@ router.post('/manual/validate', auth, isEstabelecimento, async (req, res) => {
       res,
       err,
       'wa_manual_validate_failed',
-      'Nao foi possivel validar os dados do WhatsApp na Meta.'
+      'Não foi possível validar os dados do WhatsApp na Meta.'
     );
   }
 });
@@ -134,7 +134,7 @@ router.post('/manual/connect', auth, isEstabelecimento, async (req, res) => {
       res,
       err,
       'wa_manual_connect_failed',
-      'Nao foi possivel salvar a conexao manual do WhatsApp.'
+      'Não foi possível salvar a conexão manual do WhatsApp.'
     );
   }
 });
@@ -195,7 +195,7 @@ router.get('/connect/start', auth, isEstabelecimento, async (req, res) => {
     ok: true,
     deprecated: true,
     url: buildPanelUrl(),
-    message: 'O fluxo Embedded Signup foi aposentado. Use a conexao manual assistida no painel.',
+    message: 'O fluxo Embedded Signup foi aposentado. Use a conexão manual assistida no painel.',
   });
 });
 
@@ -220,7 +220,7 @@ router.get('/embedded-signup/config', auth, isEstabelecimento, (_req, res) => {
     ok: false,
     deprecated: true,
     error: 'wa_embedded_signup_deprecated',
-    message: 'O Embedded Signup nao faz mais parte da experiencia principal. Use a conexao manual assistida.',
+    message: 'O Embedded Signup não faz mais parte da experiência principal. Use a conexão manual assistida.',
   });
 });
 
@@ -232,7 +232,7 @@ router.post('/embedded-signup/exchange', auth, isEstabelecimento, (_req, res) =>
     ok: false,
     deprecated: true,
     error: 'wa_embedded_signup_deprecated',
-    message: 'O Embedded Signup nao faz mais parte da experiencia principal. Use a conexao manual assistida.',
+    message: 'O Embedded Signup não faz mais parte da experiência principal. Use a conexão manual assistida.',
   });
 });
 

@@ -63,7 +63,7 @@ return res.status(404).json({ error: 'estabelecimento_inexistente' });
     const allowed = DEPOSIT_ALLOWED_PLANS.has(String(planContext.plan || '').toLowerCase());
 if (!allowed) {
 return res.status(403).json({
-error: 'plan_not_allowed', message: 'Disponivel apenas para planos Pro ou Premium.', });
+error: 'plan_not_allowed', message: 'Disponível apenas para planos Pro ou Premium.', });
 }
 
     const enabled = normalizeBool(req.body?.enabled);

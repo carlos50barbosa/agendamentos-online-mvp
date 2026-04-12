@@ -16,6 +16,20 @@
 
 Observação: mantenha `ACCESS_TOKEN`, `PUBLIC_KEY` e `WEBHOOK_SECRET` da MESMA aplicação e do MESMO ambiente para evitar assinaturas inválidas.
 
+## OAuth para conectar a conta do estabelecimento
+
+Para o modulo de sinal/PIX com conta do estabelecimento, o backend tambem precisa destas variaveis:
+
+- `MP_CLIENT_ID`
+- `MP_CLIENT_SECRET`
+- `MP_REDIRECT_URI`
+
+Exemplo comum em producao:
+
+- `MP_REDIRECT_URI=https://seu-dominio.com/api/mercadopago/callback`
+
+Essa mesma URL precisa estar cadastrada no app do Mercado Pago.
+
 ## Webhook
 
 - Endpoint: `POST /billing/webhook` (alias: `POST /api/billing/webhook`)

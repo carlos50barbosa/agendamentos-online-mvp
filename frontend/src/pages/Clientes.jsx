@@ -652,7 +652,7 @@ export default function Clientes() {
             </select>
           </label>
           <label className="label crm-filter-field">
-            <span>Servico</span>
+            <span>Serviço</span>
             <select className="input" value={serviceFilter} onChange={(event) => setServiceFilter(event.target.value)}>
               <option value="all">Todos</option>
               {serviceOptions.map((service) => (
@@ -785,7 +785,7 @@ export default function Clientes() {
                               <span className={relationship.className}>{item?.relationship_label || relationship.text}</span>
                               {item?.is_vip ? <span className="chip">VIP</span> : null}
                               {item?.is_at_risk ? <span className="chip chip--active">Em risco</span> : null}
-                              {item?.birthday?.is_birthday_month ? <span className="crm-pill crm-pill--soft">Aniversario</span> : null}
+                              {item?.birthday?.is_birthday_month ? <span className="crm-pill crm-pill--soft">Aniversário</span> : null}
                             </div>
                           </div>
                         </td>
@@ -814,7 +814,7 @@ export default function Clientes() {
                               {item?.preferred_professional?.nome
                                 ? `Fav. ${item.preferred_professional.nome}`
                                 : item?.avg_return_days
-                                  ? `Retorno medio ${item.avg_return_days}d`
+                                  ? `Retorno médio ${item.avg_return_days}d`
                                   : '—'}
                             </span>
                           </div>
@@ -967,7 +967,7 @@ export default function Clientes() {
                 )}
                 {detailData?.cliente?.birthday?.days_until_birthday != null && (
                   <span className="muted">
-                    Aniversario em {detailData.cliente.birthday.days_until_birthday} dia(s)
+                    Aniversário em {detailData.cliente.birthday.days_until_birthday} dia(s)
                   </span>
                 )}
               </div>
@@ -1014,9 +1014,9 @@ export default function Clientes() {
                   {detailData?.metrics?.relationship_label || detailRelationship.text}
                 </span>
                 <span>Total gasto: {detailData?.metrics?.total_spent_centavos != null ? formatCurrency(detailData.metrics.total_spent_centavos) : '-'}</span>
-                <span>Retorno medio: {detailData?.metrics?.avg_return_days ? `${detailData.metrics.avg_return_days} dias` : '-'}</span>
+                <span>Retorno médio: {detailData?.metrics?.avg_return_days ? `${detailData.metrics.avg_return_days} dias` : '-'}</span>
                 <span>Dias sem retorno: {detailData?.metrics?.days_since_last_visit ?? '-'}</span>
-                <span>Servico preferido: {detailData?.metrics?.preferred_service?.nome || '-'}</span>
+                <span>Serviço preferido: {detailData?.metrics?.preferred_service?.nome || '-'}</span>
                 <span>Profissional favorito: {detailData?.metrics?.preferred_professional?.nome || '-'}</span>
               </div>
             </div>

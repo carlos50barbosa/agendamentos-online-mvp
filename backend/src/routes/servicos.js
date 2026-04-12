@@ -149,7 +149,7 @@ router.get('/', auth, isEstabelecimento, async (req, res) => {
  * POST /servicos
  */
 router.post('/', auth, isEstabelecimento, ensureSubscriptionOperationalAccess({
-  message: 'Regularize a assinatura para cadastrar novos servicos.',
+  message: 'Regularize a assinatura para cadastrar novos serviços.',
 }), async (req, res) => {
   let conn;
   try {
@@ -204,7 +204,7 @@ router.post('/', auth, isEstabelecimento, ensureSubscriptionOperationalAccess({
             return res.status(400).json({ error: 'imagem_invalida', message: 'Envie uma imagem PNG, JPG ou WEBP.' });
           }
           console.error('[servicos][create] imagem', err);
-          return res.status(500).json({ error: 'imagem_falhou', message: 'Nao foi possivel salvar a imagem.' });
+          return res.status(500).json({ error: 'imagem_falhou', message: 'Não foi possível salvar a imagem.' });
         }
       }
     }
@@ -248,14 +248,14 @@ router.post('/', auth, isEstabelecimento, ensureSubscriptionOperationalAccess({
  * PUT /servicos/:id
  */
 router.put('/:id', auth, isEstabelecimento, ensureSubscriptionOperationalAccess({
-  message: 'Regularize a assinatura para editar servicos.',
+  message: 'Regularize a assinatura para editar serviços.',
 }), async (req, res) => {
   let conn;
   try {
     const estId = req.user.id;
     const serviceId = Number(req.params.id);
     if (!Number.isFinite(serviceId)) {
-      return res.status(400).json({ error: 'invalid_id', message: 'Servico invalido.' });
+      return res.status(400).json({ error: 'invalid_id', message: 'Serviço inválido.' });
     }
 
     const [[current]] = await pool.query(
@@ -328,7 +328,7 @@ router.put('/:id', auth, isEstabelecimento, ensureSubscriptionOperationalAccess(
           return res.status(400).json({ error: 'imagem_invalida', message: 'Envie uma imagem PNG, JPG ou WEBP.' });
         }
         console.error('[servicos][update] imagem', err);
-        return res.status(500).json({ error: 'imagem_falhou', message: 'Nao foi possivel salvar a imagem.' });
+        return res.status(500).json({ error: 'imagem_falhou', message: 'Não foi possível salvar a imagem.' });
       }
     }
 
@@ -373,7 +373,7 @@ router.put('/:id', auth, isEstabelecimento, ensureSubscriptionOperationalAccess(
  * DELETE /servicos/:id
  */
 router.delete('/:id', auth, isEstabelecimento, ensureSubscriptionOperationalAccess({
-  message: 'Regularize a assinatura para excluir servicos.',
+  message: 'Regularize a assinatura para excluir serviços.',
 }), async (req, res) => {
   try {
     const estId = req.user.id;

@@ -20,6 +20,8 @@ import { checkMonthlyAppointmentLimit, notifyAppointmentLimitReached } from '../
 import { estabNotificationsDisabled } from '../lib/estab_notifications.js';
 import { clientWhatsappDisabled, whatsappImmediateDisabled, whatsappConfirmationDisabled } from '../lib/client_notifications.js';
 import { ensureSubscriptionOperationalAccess } from '../middleware/billing.js';
+import { applyClientLoyaltyBenefitsTx, previewClientLoyaltyBenefits } from '../lib/client_loyalty_credits.js'
+import { cancelPendingPaymentAppointmentTx, restoreAppointmentLoyaltyBenefitsTx } from '../lib/appointment_loyalty.js'
 
 const router = Router();
 
@@ -90,6 +92,16 @@ const DEPOSIT_ALLOWED_PLANS = new Set(['pro', 'premium']);
 const safeJson = (payload) => {
   try {
     return JSON.stringify(payload);
+  } catch {
+    return null;
+  }
+};
+
+const safeJsonParse = (payload) => {
+  if (!payload) return null;
+  if (typeof payload === 'object') return payload;
+  try {
+    return JSON.parse(payload);
   } catch {
     return null;
   }
@@ -224,6 +236,38 @@ const summarizeServices = (items) => {
   };
 };
 
+const buildLoyaltyPricingMap = (loyaltyApplication) => {
+  const map = new Map();
+  const items = Array.isArray(loyaltyApplication?.items) ? loyaltyApplication.items : [];
+  items.forEach((item) => {
+    const serviceId = Number(item?.servico_id || 0);
+    if (!serviceId) return;
+    map.set(serviceId, item);
+  });
+  return map;
+};
+
+const serializeAppointmentServiceItems = (items, loyaltyApplication = null) => {
+  const pricing = buildLoyaltyPricingMap(loyaltyApplication);
+  return (Array.isArray(items) ? items : []).map((item, idx) => {
+    const benefit = pricing.get(Number(item.id));
+    const precoCentavosSnapshot = Math.max(
+      0,
+      Math.round(Number(benefit?.cobrado_centavos ?? item.preco_centavos ?? item.preco_snapshot ?? 0) || 0)
+    );
+    return {
+      id: item.id,
+      nome: item.nome,
+      duracao_min: item.duracao_min,
+      preco_centavos_snapshot: precoCentavosSnapshot,
+      preco_snapshot: precoCentavosSnapshot,
+      ordem: idx + 1,
+      loyalty_benefit_type: benefit?.benefit_type || 'full',
+      loyalty_discount_percent: benefit?.discount_percent ?? null,
+    };
+  });
+};
+
 const fetchServicesForAppointment = async (db, estabelecimentoId, serviceIds) => {
   if (!serviceIds.length) return { items: [], missing: serviceIds };
   const placeholders = serviceIds.map(() => '?').join(', ');
@@ -320,6 +364,7 @@ const hydrateAppointmentsWithItems = async (db, rows) => {
     row.servico_nome = summary.serviceLabel || row.servico_nome || '';
     row.duracao_total = summary.duracaoTotal;
     row.preco_total = summary.precoTotal;
+    row.loyalty_benefit_snapshot = safeJsonParse(row.loyalty_benefit_snapshot_json);
   });
   return rows;
 };
@@ -506,10 +551,7 @@ router.post('/:id/deposit/pix', authRequired, isCliente, async (req, res) => {
     const expiredByAgendamento =
       ag.deposit_expires_at && new Date(ag.deposit_expires_at).getTime() <= Date.now();
     if (expiredByAgendamento) {
-      await conn.query(
-        "UPDATE agendamentos SET status='cancelado', deposit_expires_at=NOW() WHERE id=? AND status='pendente_pagamento'",
-        [id]
-      );
+      await cancelPendingPaymentAppointmentTx(id, { db: conn });
       await conn.query(
         "UPDATE appointment_payments SET status='expired' WHERE agendamento_id=? AND status='pending'",
         [id]
@@ -569,10 +611,7 @@ router.post('/:id/deposit/pix', authRequired, isCliente, async (req, res) => {
         pix_ticket_url: payload.pix?.ticket_url || null,
       });
     }
-    await conn.query(
-      "UPDATE agendamentos SET status='cancelado', deposit_expires_at=NOW() WHERE id=? AND status='pendente_pagamento'",
-      [id]
-    );
+    await cancelPendingPaymentAppointmentTx(id, { db: conn });
     await conn.query(
       "UPDATE appointment_payments SET status='expired' WHERE agendamento_id=? AND status='pending'",
       [id]
@@ -603,7 +642,7 @@ router.post('/:id/deposit/pix', authRequired, isCliente, async (req, res) => {
 // Criar agendamento (cliente)
 router.post('/', authRequired, isCliente, ensureSubscriptionOperationalAccess({
   getEstabelecimentoId: (req) => req.body?.estabelecimento_id || req.body?.establishment_id || null,
-  message: 'Este estabelecimento esta com a assinatura indisponivel para novos agendamentos no momento.',
+  message: 'Este estabelecimento está com a assinatura indisponível para novos agendamentos no momento.',
 }), async (req, res) => {
   let conn;
   let txStarted = false;
@@ -614,20 +653,20 @@ router.post('/', authRequired, isCliente, ensureSubscriptionOperationalAccess({
     const profissional_id = professionalCandidate == null ? null : Number(professionalCandidate);
 
     if (profissional_id !== null && !Number.isFinite(profissional_id)) {
-      return res.status(400).json({ error: 'profissional_invalido', message: 'Profissional invalido.' });
+      return res.status(400).json({ error: 'profissional_invalido', message: 'Profissional inválido.' });
     }
 
     // 1) validacao basica
     if (!estabelecimento_id || !serviceIds.length || !inicio) {
       return res.status(400).json({
         error: 'invalid_payload',
-        message: 'Campos obrigatorios: estabelecimento_id, servico_ids, inicio (ISO).'
+        message: 'Campos obrigatórios: estabelecimento_id, servico_ids, inicio (ISO).'
       });
     }
 
     const inicioDate = new Date(inicio);
     if (Number.isNaN(inicioDate.getTime())) {
-      return res.status(400).json({ error: 'invalid_date', message: 'Formato de data/hora invalido.' });
+      return res.status(400).json({ error: 'invalid_date', message: 'Formato de data/hora inválido.' });
     }
     if (inicioDate.getTime() <= Date.now()) {
       return res.status(400).json({ error: 'past_datetime', message: 'Não é possível agendar no passado.' });
@@ -640,14 +679,14 @@ router.post('/', authRequired, isCliente, ensureSubscriptionOperationalAccess({
     }
     const { items: serviceItems, missing } = await fetchServicesForAppointment(pool, estabelecimento_id, serviceIds);
     if (missing.length) {
-      return res.status(400).json({ error: 'servico_invalido', message: 'Servico invalido ou inativo para este estabelecimento.' });
+      return res.status(400).json({ error: 'servico_invalido', message: 'Serviço inválido ou inativo para este estabelecimento.' });
     }
     if (serviceItems.some((item) => !Number.isFinite(item.duracao_min) || item.duracao_min <= 0)) {
-      return res.status(400).json({ error: 'duracao_invalida', message: 'Duracao do servico invalida.' });
+      return res.status(400).json({ error: 'duracao_invalida', message: 'Duração do serviço inválida.' });
     }
     const summary = summarizeServices(serviceItems);
     const primaryServiceId = summary.serviceIds[0] || serviceIds[0];
-    const serviceLabel = summary.serviceLabel || serviceItems[0]?.nome || 'servico';
+    const serviceLabel = summary.serviceLabel || serviceItems[0]?.nome || 'serviço';
 
     const professionalMap = await fetchServiceProfessionalMap(pool, serviceIds);
     const servicesRequiringProfessional = serviceIds.filter((id) => (professionalMap.get(id)?.size || 0) > 0);
@@ -655,7 +694,7 @@ router.post('/', authRequired, isCliente, ensureSubscriptionOperationalAccess({
     let profissionalRow = null;
 
     if (requiresProfessional && profissional_id == null) {
-      return res.status(400).json({ error: 'profissional_obrigatorio', message: 'Escolha um profissional para estes servicos.' });
+      return res.status(400).json({ error: 'profissional_obrigatorio', message: 'Escolha um profissional para estes serviços.' });
     }
 
     if (profissional_id != null) {
@@ -664,7 +703,7 @@ router.post('/', authRequired, isCliente, ensureSubscriptionOperationalAccess({
         [profissional_id, estabelecimento_id]
       );
       if (!profRow) {
-        return res.status(400).json({ error: 'profissional_invalido', message: 'Profissional nao encontrado para este estabelecimento.' });
+        return res.status(400).json({ error: 'profissional_invalido', message: 'Profissional não encontrado para este estabelecimento.' });
       }
       if (!profRow.ativo) {
         return res.status(400).json({ error: 'profissional_inativo', message: 'Profissional inativo.' });
@@ -672,7 +711,7 @@ router.post('/', authRequired, isCliente, ensureSubscriptionOperationalAccess({
       if (requiresProfessional) {
         const valid = servicesRequiringProfessional.every((id) => professionalMap.get(id)?.has(profissional_id));
         if (!valid) {
-          return res.status(400).json({ error: 'profissional_servico', message: 'Profissional nao esta associado a todos os servicos selecionados.' });
+          return res.status(400).json({ error: 'profissional_servico', message: 'Profissional não está associado a todos os serviços selecionados.' });
         }
       }
       profissionalRow = profRow;
@@ -680,7 +719,7 @@ router.post('/', authRequired, isCliente, ensureSubscriptionOperationalAccess({
 
     const duracaoTotalComBuffer = summary.duracaoTotal + APPOINTMENT_BUFFER_MIN;
     if (!Number.isFinite(duracaoTotalComBuffer) || duracaoTotalComBuffer <= 0) {
-      return res.status(400).json({ error: 'duracao_invalida', message: 'Duracao do servico invalida.' });
+      return res.status(400).json({ error: 'duracao_invalida', message: 'Duração do serviço inválida.' });
     }
     const fimDate = new Date(inicioDate.getTime() + duracaoTotalComBuffer * 60_000);
     const expediente = await getExpediente({
@@ -731,7 +770,16 @@ router.post('/', authRequired, isCliente, ensureSubscriptionOperationalAccess({
       });
     }
 
-    const totalCentavosPreview = Math.max(0, Math.round(summary.precoTotal || 0));
+    const loyaltyPreview = await previewClientLoyaltyBenefits({
+      clienteId: req.user.id,
+      estabelecimentoId: estabelecimento_id,
+      serviceItems,
+      appointmentAt: inicioDate,
+    });
+    const totalCentavosPreview = Math.max(
+      0,
+      Math.round(Number(loyaltyPreview?.total_cobrado_centavos ?? summary.precoTotal ?? 0) || 0)
+    );
     const depositConfig = await resolveDepositConfig(estabelecimento_id, planContext);
     const depositEnabled = depositConfig.allowed && depositConfig.enabled;
     const depositPercent = depositEnabled ? Number(depositConfig.percent || 0) : null;
@@ -758,7 +806,13 @@ router.post('/', authRequired, isCliente, ensureSubscriptionOperationalAccess({
       }
       mpAccessToken = mpAccess.accessToken;
     }
-    const depositRequired = Boolean(depositEnabled);
+    const depositRequired = Boolean(
+      depositEnabled &&
+      Number.isFinite(totalCentavosPreview) &&
+      totalCentavosPreview > 0 &&
+      Number.isFinite(depositCentavos) &&
+      depositCentavos > 0
+    );
     const origem = 'cliente_app';
 
     // 3) transacao + checagem de conflito
@@ -794,6 +848,15 @@ router.post('/', authRequired, isCliente, ensureSubscriptionOperationalAccess({
       return res.status(409).json({ error: 'slot_ocupado', message: 'Horário indisponível.' });
     }
 
+    const loyaltyApplication = await applyClientLoyaltyBenefitsTx({
+      db: conn,
+      clienteId: req.user.id,
+      estabelecimentoId: estabelecimento_id,
+      serviceItems,
+      appointmentAt: inicioDate,
+    });
+    const loyaltySnapshotJson = loyaltyApplication?.snapshot ? safeJson(loyaltyApplication.snapshot) : null;
+
     // 4) insere (deposito: pendente_pagamento | sem deposito: confirmado)
     let appointmentId = null;
     let depositPaymentId = null;
@@ -803,8 +866,9 @@ router.post('/', authRequired, isCliente, ensureSubscriptionOperationalAccess({
       const [r] = await conn.query(
         `INSERT INTO agendamentos
           (cliente_id, estabelecimento_id, servico_id, profissional_id, inicio, fim, status, origem, total_centavos,
-           deposit_required, deposit_percent, deposit_centavos, deposit_expires_at)
-         VALUES (?,?,?,?,?,?, 'pendente_pagamento', ?, ?, 1, ?, ?, ?)`,
+           deposit_required, deposit_percent, deposit_centavos, deposit_expires_at,
+           loyalty_subscription_id, loyalty_credit_applied, loyalty_discount_percent, loyalty_benefit_snapshot_json)
+         VALUES (?,?,?,?,?,?, 'pendente_pagamento', ?, ?, 1, ?, ?, ?, ?, ?, ?, ?)`,
         [
           req.user.id,
           estabelecimento_id,
@@ -817,6 +881,10 @@ router.post('/', authRequired, isCliente, ensureSubscriptionOperationalAccess({
           depositPercent,
           Math.max(0, Math.round(depositCentavos || 0)),
           depositExpiresAt,
+          loyaltyApplication?.subscription?.id || null,
+          loyaltyApplication?.loyalty_credit_applied ? 1 : 0,
+          loyaltyApplication?.loyalty_discount_percent ?? null,
+          loyaltySnapshotJson,
         ]
       );
       appointmentId = r.insertId;
@@ -838,8 +906,9 @@ router.post('/', authRequired, isCliente, ensureSubscriptionOperationalAccess({
     } else {
       const [r] = await conn.query(
         `INSERT INTO agendamentos
-          (cliente_id, estabelecimento_id, servico_id, profissional_id, inicio, fim, status, origem, total_centavos)
-         VALUES (?,?,?,?,?,?, 'confirmado', ?, ?)`,
+          (cliente_id, estabelecimento_id, servico_id, profissional_id, inicio, fim, status, origem, total_centavos,
+           loyalty_subscription_id, loyalty_credit_applied, loyalty_discount_percent, loyalty_benefit_snapshot_json)
+         VALUES (?,?,?,?,?,?, 'confirmado', ?, ?, ?, ?, ?, ?)`,
         [
           req.user.id,
           estabelecimento_id,
@@ -849,17 +918,24 @@ router.post('/', authRequired, isCliente, ensureSubscriptionOperationalAccess({
           fimDate,
           origem,
           totalCentavosPreview,
+          loyaltyApplication?.subscription?.id || null,
+          loyaltyApplication?.loyalty_credit_applied ? 1 : 0,
+          loyaltyApplication?.loyalty_discount_percent ?? null,
+          loyaltySnapshotJson,
         ]
       );
       appointmentId = r.insertId;
     }
+    const loyaltyPricing = buildLoyaltyPricingMap(loyaltyApplication);
     const itemValues = serviceItems.map((item, idx) => {
-      const precoSnapshot = Math.max(0, Math.round(item.preco_centavos || 0));
+      const benefit = loyaltyPricing.get(Number(item.id));
+      const precoSnapshot = Math.max(0, Math.round((benefit?.cobrado_centavos ?? item.preco_centavos ?? 0)));
       if (precoSnapshot <= 0) {
         console.warn('[agendamentos][preco_snapshot_zero]', {
           estabelecimento_id,
           servico_id: item.id,
           preco_centavos: item.preco_centavos,
+          loyalty_benefit_type: benefit?.benefit_type || null,
         });
       }
       return [
@@ -884,7 +960,15 @@ router.post('/', authRequired, isCliente, ensureSubscriptionOperationalAccess({
     );
     totalCentavosFinal = Number(totalRow?.total_centavos || 0);
     console.info('[agendamentos][total]', { appointmentId, totalCentavosFinal });
-    if (!Number.isFinite(totalCentavosFinal) || totalCentavosFinal <= 0) {
+    if (
+      !Number.isFinite(totalCentavosFinal) ||
+      totalCentavosFinal < 0 ||
+      (
+        totalCentavosFinal === 0 &&
+        !loyaltyApplication?.loyalty_credit_applied &&
+        loyaltyApplication?.loyalty_discount_percent == null
+      )
+    ) {
       if (txStarted && conn) {
         await conn.rollback();
       }
@@ -895,7 +979,7 @@ router.post('/', authRequired, isCliente, ensureSubscriptionOperationalAccess({
       }
       return res.status(400).json({
         error: 'invalid_total',
-        message: 'ServiÃ§o sem preÃ§o configurado',
+        message: 'Serviço sem preço configurado',
       });
     }
 
@@ -912,7 +996,7 @@ router.post('/', authRequired, isCliente, ensureSubscriptionOperationalAccess({
         }
         return res.status(400).json({
           error: 'invalid_total',
-          message: 'ServiÃ§o sem preÃ§o configurado',
+          message: 'Serviço sem preço configurado',
         });
       }
     }
@@ -998,6 +1082,10 @@ router.post('/', authRequired, isCliente, ensureSubscriptionOperationalAccess({
           pix_ticket_url: pix?.ticket_url || null,
           amount_centavos: depositCentavosFinal,
           pix,
+          loyalty_subscription_id: novo.loyalty_subscription_id || null,
+          loyalty_credit_applied: Boolean(novo.loyalty_credit_applied),
+          loyalty_discount_percent: novo.loyalty_discount_percent == null ? null : Number(novo.loyalty_discount_percent),
+          loyalty_benefit_snapshot: safeJsonParse(novo.loyalty_benefit_snapshot_json),
         });
       } catch (err) {
         console.error('[agendamentos][deposit] erro ao criar PIX:', err?.message || err);
@@ -1006,13 +1094,10 @@ router.post('/', authRequired, isCliente, ensureSubscriptionOperationalAccess({
           'UPDATE appointment_payments SET status=?, raw_payload=? WHERE id=?',
           ['failed', payload, depositPaymentId]
         );
-        await pool.query(
-          "UPDATE agendamentos SET status='cancelado', deposit_expires_at=NOW() WHERE id=? AND status='pendente_pagamento'",
-          [appointmentId]
-        );
+        await cancelPendingPaymentAppointmentTx(appointmentId, { db: pool });
         return res.status(502).json({
           error: 'payment_create_failed',
-          message: 'Nao foi possivel gerar o PIX do sinal. Tente novamente.',
+          message: 'Não foi possível gerar o PIX do sinal. Tente novamente.',
         });
       }
     }
@@ -1071,7 +1156,7 @@ router.post('/', authRequired, isCliente, ensureSubscriptionOperationalAccess({
             estabelecimentoNome: estNomeLabel,
           })
         : [serviceLabel, inicioBR, estNomeLabel];
-      const waMsg = `ƒo. - Novo agendamento registrado: ${serviceLabel}${profNome ? ' / ' + profNome : ''} em ${inicioBR} ƒ?" ${estNomeLabel}. ƒ?" Obrigado!`;
+      const waMsg = `Novo agendamento registrado: ${serviceLabel}${profNome ? ' / ' + profNome : ''} em ${inicioBR} - ${estNomeLabel}. Obrigado!`;
       const fallbackBodyParams = isConfirmV2 ? tplParams : [waMsg];
       if (!blockClientWhatsapp && telCli) {
         if (/^triple|3$/.test(paramMode)) {
@@ -1125,27 +1210,21 @@ router.post('/', authRequired, isCliente, ensureSubscriptionOperationalAccess({
       servico_id: novo.servico_id,
       servico_ids: summary.serviceIds,
       servico_nome: serviceLabel,
-      servicos: serviceItems.map((item, idx) => {
-        const precoCentavosSnapshot = Math.max(0, Math.round(item.preco_centavos || 0));
-        return {
-          id: item.id,
-          nome: item.nome,
-          duracao_min: item.duracao_min,
-          preco_centavos_snapshot: precoCentavosSnapshot,
-          preco_snapshot: precoCentavosSnapshot,
-          ordem: idx + 1,
-        };
-      }),
+      servicos: serializeAppointmentServiceItems(serviceItems, loyaltyApplication),
       buffer_min: APPOINTMENT_BUFFER_MIN,
       duracao_total: summary.duracaoTotal,
       duracao_total_com_buffer: duracaoTotalComBuffer,
-      preco_total: summary.precoTotal,
+      preco_total: totalCentavosFinal,
       profissional_id: novo.profissional_id,
       profissional_nome: profissionalRow?.nome || null,
       profissional_avatar_url: profissionalRow?.avatar_url || null,
       inicio: novo.inicio,
       fim: novo.fim,
-      status: novo.status
+      status: novo.status,
+      loyalty_subscription_id: novo.loyalty_subscription_id || null,
+      loyalty_credit_applied: Boolean(novo.loyalty_credit_applied),
+      loyalty_discount_percent: novo.loyalty_discount_percent == null ? null : Number(novo.loyalty_discount_percent),
+      loyalty_benefit_snapshot: safeJsonParse(novo.loyalty_benefit_snapshot_json),
     });
 
   } catch (e) {
@@ -1192,22 +1271,22 @@ router.post('/estabelecimento', authRequired, isEstabelecimento, ensureSubscript
 
     const estabelecimento_id = req.user?.id;
     if (!estabelecimento_id) {
-      return res.status(403).json({ error: 'forbidden', message: 'Estabelecimento invalido.' });
+      return res.status(403).json({ error: 'forbidden', message: 'Estabelecimento inválido.' });
     }
     if (estabelecimentoIdRaw && Number(estabelecimentoIdRaw) !== Number(estabelecimento_id)) {
-      return res.status(403).json({ error: 'forbidden', message: 'Estabelecimento invalido.' });
+      return res.status(403).json({ error: 'forbidden', message: 'Estabelecimento inválido.' });
     }
 
     const professionalCandidate = profissionalIdRaw != null ? profissionalIdRaw : profissionalId;
     const profissional_id = professionalCandidate == null ? null : Number(professionalCandidate);
     if (profissional_id !== null && !Number.isFinite(profissional_id)) {
-      return res.status(400).json({ error: 'profissional_invalido', message: 'Profissional invalido.' });
+      return res.status(400).json({ error: 'profissional_invalido', message: 'Profissional inválido.' });
     }
 
     if (!serviceIds.length || !inicio || !nome || !email || !telefone) {
       return res.status(400).json({
         error: 'invalid_payload',
-        message: 'Campos obrigatorios: servico_ids, inicio, nome, email, telefone.'
+        message: 'Campos obrigatórios: servico_ids, inicio, nome, e-mail, telefone.'
       });
     }
 
@@ -1221,10 +1300,10 @@ router.post('/estabelecimento', authRequired, isEstabelecimento, ensureSubscript
     const dataNascimentoRaw = data_nascimento ?? dataNascimento;
     const dataNascimentoValue = normalizeBirthdate(dataNascimentoRaw);
     if (dataNascimentoRaw && String(dataNascimentoRaw).trim() && !dataNascimentoValue) {
-      return res.status(400).json({ error: 'data_nascimento_invalida', message: 'Informe uma data de nascimento valida.' });
+      return res.status(400).json({ error: 'data_nascimento_invalida', message: 'Informe uma data de nascimento válida.' });
     }
     if (cepDigits && cepDigits.length !== 8) {
-      return res.status(400).json({ error: 'cep_invalido', message: 'Informe um CEP valido com 8 digitos.' });
+      return res.status(400).json({ error: 'cep_invalido', message: 'Informe um CEP válido com 8 dígitos.' });
     }
     if (estadoTrim && !/^[A-Z]{2}$/.test(estadoTrim)) {
       return res.status(400).json({ error: 'estado_invalido', message: 'Informe a UF com 2 letras.' });
@@ -1232,7 +1311,7 @@ router.post('/estabelecimento', authRequired, isEstabelecimento, ensureSubscript
 
     const inicioDate = new Date(inicio);
     if (Number.isNaN(inicioDate.getTime())) {
-      return res.status(400).json({ error: 'invalid_date', message: 'Formato de data/hora invalido.' });
+      return res.status(400).json({ error: 'invalid_date', message: 'Formato de data/hora inválido.' });
     }
     if (inicioDate.getTime() <= Date.now()) {
       return res.status(400).json({ error: 'past_datetime', message: 'Não é possível agendar no passado.' });
@@ -1249,7 +1328,7 @@ router.post('/estabelecimento', authRequired, isEstabelecimento, ensureSubscript
     }
     const summary = summarizeServices(serviceItems);
     const primaryServiceId = summary.serviceIds[0] || serviceIds[0];
-    const serviceLabel = summary.serviceLabel || serviceItems[0]?.nome || 'servico';
+    const serviceLabel = summary.serviceLabel || serviceItems[0]?.nome || 'serviço';
 
     const professionalMap = await fetchServiceProfessionalMap(pool, serviceIds);
     const servicesRequiringProfessional = serviceIds.filter((id) => (professionalMap.get(id)?.size || 0) > 0);
@@ -1257,7 +1336,7 @@ router.post('/estabelecimento', authRequired, isEstabelecimento, ensureSubscript
     let profissionalRow = null;
 
     if (requiresProfessional && profissional_id == null) {
-      return res.status(400).json({ error: 'profissional_obrigatorio', message: 'Escolha um profissional para estes servicos.' });
+      return res.status(400).json({ error: 'profissional_obrigatorio', message: 'Escolha um profissional para estes serviços.' });
     }
 
     if (profissional_id != null) {
@@ -1266,7 +1345,7 @@ router.post('/estabelecimento', authRequired, isEstabelecimento, ensureSubscript
         [profissional_id, estabelecimento_id]
       );
       if (!profRow) {
-        return res.status(400).json({ error: 'profissional_invalido', message: 'Profissional nao encontrado para este estabelecimento.' });
+        return res.status(400).json({ error: 'profissional_invalido', message: 'Profissional não encontrado para este estabelecimento.' });
       }
       if (!profRow.ativo) {
         return res.status(400).json({ error: 'profissional_inativo', message: 'Profissional inativo.' });
@@ -1274,7 +1353,7 @@ router.post('/estabelecimento', authRequired, isEstabelecimento, ensureSubscript
       if (requiresProfessional) {
         const valid = servicesRequiringProfessional.every((id) => professionalMap.get(id)?.has(profissional_id));
         if (!valid) {
-          return res.status(400).json({ error: 'profissional_servico', message: 'Profissional nao esta associado a todos os servicos selecionados.' });
+          return res.status(400).json({ error: 'profissional_servico', message: 'Profissional não está associado a todos os serviços selecionados.' });
         }
       }
       profissionalRow = profRow;
@@ -1322,7 +1401,7 @@ router.post('/estabelecimento', authRequired, isEstabelecimento, ensureSubscript
       }));
       return res.status(403).json({
         error: 'plan_limit_agendamentos',
-        message: formatPlanLimitExceeded(planConfig, 'appointments') || 'Limite de agendamentos atingido para este mes.',
+        message: formatPlanLimitExceeded(planConfig, 'appointments') || 'Limite de agendamentos atingido para este mês.',
         details: {
           limit: limitCheck.limit,
           total: limitCheck.total,
@@ -1363,7 +1442,7 @@ router.post('/estabelecimento', authRequired, isEstabelecimento, ensureSubscript
     if (userByEmail && userByPhone && userByEmail.id !== userByPhone.id) {
       return res.status(409).json({
         error: 'cliente_conflito',
-        message: 'Ja existe cliente com este email ou telefone. Revise os dados antes de continuar.',
+        message: 'Já existe cliente com este e-mail ou telefone. Revise os dados antes de continuar.',
       });
     }
     const existingUser = userByEmail || userByPhone;
@@ -1375,7 +1454,7 @@ router.post('/estabelecimento', authRequired, isEstabelecimento, ensureSubscript
       if (emailMismatch || phoneMismatch) {
         return res.status(409).json({
           error: 'cliente_conflito',
-          message: 'Ja existe cliente com este email ou telefone. Revise os dados antes de continuar.',
+          message: 'Já existe cliente com este e-mail ou telefone. Revise os dados antes de continuar.',
         });
       }
       userId = existingUser.id;
@@ -1447,6 +1526,16 @@ router.post('/estabelecimento', authRequired, isEstabelecimento, ensureSubscript
     }
 
     const origem = 'estabelecimento_painel';
+    const loyaltyPreview = await previewClientLoyaltyBenefits({
+      clienteId: userId,
+      estabelecimentoId: estabelecimento_id,
+      serviceItems,
+      appointmentAt: inicioDate,
+    });
+    const totalCentavosPreview = Math.max(
+      0,
+      Math.round(Number(loyaltyPreview?.total_cobrado_centavos ?? summary.precoTotal ?? 0) || 0)
+    );
 
     conn = await pool.getConnection();
     await conn.beginTransaction();
@@ -1475,17 +1564,45 @@ router.post('/estabelecimento', authRequired, isEstabelecimento, ensureSubscript
       return res.status(409).json({ error: 'slot_ocupado' });
     }
 
+    const loyaltyApplication = await applyClientLoyaltyBenefitsTx({
+      db: conn,
+      clienteId: userId,
+      estabelecimentoId: estabelecimento_id,
+      serviceItems,
+      appointmentAt: inicioDate,
+    });
+    const loyaltySnapshotJson = loyaltyApplication?.snapshot ? safeJson(loyaltyApplication.snapshot) : null;
+
     const [ins] = await conn.query(
-      'INSERT INTO agendamentos (cliente_id, estabelecimento_id, servico_id, profissional_id, inicio, fim, origem) VALUES (?,?,?,?,?,?,?)',
-      [userId, estabelecimento_id, primaryServiceId, profissional_id || null, inicioDate, fimDate, origem]
+      `INSERT INTO agendamentos
+        (cliente_id, estabelecimento_id, servico_id, profissional_id, inicio, fim, origem, total_centavos,
+         loyalty_subscription_id, loyalty_credit_applied, loyalty_discount_percent, loyalty_benefit_snapshot_json)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+      [
+        userId,
+        estabelecimento_id,
+        primaryServiceId,
+        profissional_id || null,
+        inicioDate,
+        fimDate,
+        origem,
+        totalCentavosPreview,
+        loyaltyApplication?.subscription?.id || null,
+        loyaltyApplication?.loyalty_credit_applied ? 1 : 0,
+        loyaltyApplication?.loyalty_discount_percent ?? null,
+        loyaltySnapshotJson,
+      ]
     );
+    const loyaltyPricing = buildLoyaltyPricingMap(loyaltyApplication);
     const itemValues = serviceItems.map((item, idx) => {
-      const precoSnapshot = Math.max(0, Math.round(item.preco_centavos || 0));
+      const benefit = loyaltyPricing.get(Number(item.id));
+      const precoSnapshot = Math.max(0, Math.round((benefit?.cobrado_centavos ?? item.preco_centavos ?? 0)));
       if (precoSnapshot <= 0) {
         console.warn('[agendamentos][preco_snapshot_zero]', {
           estabelecimento_id,
           servico_id: item.id,
           preco_centavos: item.preco_centavos,
+          loyalty_benefit_type: benefit?.benefit_type || null,
         });
       }
       return [
@@ -1503,6 +1620,29 @@ router.post('/estabelecimento', authRequired, isEstabelecimento, ensureSubscript
         itemValues.flat()
       );
     }
+
+    const [[totalRow]] = await conn.query(
+      'SELECT COALESCE(SUM(preco_snapshot), 0) AS total_centavos FROM agendamento_itens WHERE agendamento_id=?',
+      [ins.insertId]
+    );
+    const totalCentavosFinal = Number(totalRow?.total_centavos || 0);
+    if (
+      !Number.isFinite(totalCentavosFinal) ||
+      totalCentavosFinal < 0 ||
+      (
+        totalCentavosFinal === 0 &&
+        !loyaltyApplication?.loyalty_credit_applied &&
+        loyaltyApplication?.loyalty_discount_percent == null
+      )
+    ) {
+      if (txStarted && conn) {
+        await conn.rollback();
+      }
+      txStarted = false;
+      if (conn) conn.release();
+      return res.status(400).json({ error: 'invalid_total', message: 'ServiÃ§o sem preÃ§o configurado' });
+    }
+    await conn.query('UPDATE agendamentos SET total_centavos=? WHERE id=?', [totalCentavosFinal, ins.insertId]);
 
     const [[novo]] = await conn.query('SELECT * FROM agendamentos WHERE id=?', [ins.insertId]);
     const [[cli]] = await conn.query('SELECT email, telefone, nome FROM usuarios WHERE id=?', [userId]);
@@ -1610,27 +1750,21 @@ router.post('/estabelecimento', authRequired, isEstabelecimento, ensureSubscript
       servico_id: novo.servico_id,
       servico_ids: summary.serviceIds,
       servico_nome: serviceLabel,
-      servicos: serviceItems.map((item, idx) => {
-        const precoCentavosSnapshot = Math.max(0, Math.round(item.preco_centavos || 0));
-        return {
-          id: item.id,
-          nome: item.nome,
-          duracao_min: item.duracao_min,
-          preco_centavos_snapshot: precoCentavosSnapshot,
-          preco_snapshot: precoCentavosSnapshot,
-          ordem: idx + 1,
-        };
-      }),
+      servicos: serializeAppointmentServiceItems(serviceItems, loyaltyApplication),
       buffer_min: APPOINTMENT_BUFFER_MIN,
       duracao_total: summary.duracaoTotal,
       duracao_total_com_buffer: duracaoTotalComBuffer,
-      preco_total: summary.precoTotal,
+      preco_total: totalCentavosFinal,
       profissional_id: novo.profissional_id,
       profissional_nome: profissionalRow?.nome || null,
       profissional_avatar_url: profissionalRow?.avatar_url || null,
       inicio: novo.inicio,
       fim: novo.fim,
       status: novo.status,
+      loyalty_subscription_id: novo.loyalty_subscription_id || null,
+      loyalty_credit_applied: Boolean(novo.loyalty_credit_applied),
+      loyalty_discount_percent: novo.loyalty_discount_percent == null ? null : Number(novo.loyalty_discount_percent),
+      loyalty_benefit_snapshot: safeJsonParse(novo.loyalty_benefit_snapshot_json),
     });
   } catch (e) {
     try { if (txStarted && conn) await conn.rollback(); } catch {}
@@ -1658,7 +1792,7 @@ router.put('/:id/reschedule-estab', authRequired, isEstabelecimento, ensureSubsc
 
     const inicioDate = new Date(inicio);
     if (Number.isNaN(inicioDate.getTime())) {
-      return res.status(400).json({ error: 'invalid_date', message: 'Formato de data/hora invalido.' });
+      return res.status(400).json({ error: 'invalid_date', message: 'Formato de data/hora inválido.' });
     }
     if (inicioDate.getTime() <= Date.now()) {
       return res.status(400).json({ error: 'past_datetime', message: 'Não é possível reagendar no passado.' });
@@ -1681,7 +1815,7 @@ router.put('/:id/reschedule-estab', authRequired, isEstabelecimento, ensureSubsc
       }
       conn.release();
       conn = null;
-      return res.status(404).json({ error: 'not_found', message: 'Agendamento nao encontrado.' });
+      return res.status(404).json({ error: 'not_found', message: 'Agendamento não encontrado.' });
     }
 
     const statusNorm = String(ag.status || '').toLowerCase();
@@ -1727,11 +1861,11 @@ router.put('/:id/reschedule-estab', authRequired, isEstabelecimento, ensureSubsc
       }
       conn.release();
       conn = null;
-      return res.status(400).json({ error: 'servico_invalido', message: 'Servico invalido ou inativo.' });
+      return res.status(400).json({ error: 'servico_invalido', message: 'Serviço inválido ou inativo.' });
     }
     const summary = summarizeServices(serviceItems);
     const serviceIds = summary.serviceIds.length ? summary.serviceIds : (ag.servico_id ? [ag.servico_id] : []);
-    const serviceLabel = summary.serviceLabel || serviceItems[0]?.nome || 'servico';
+    const serviceLabel = summary.serviceLabel || serviceItems[0]?.nome || 'serviço';
 
     const duracaoTotalComBuffer = summary.duracaoTotal + APPOINTMENT_BUFFER_MIN;
     if (!Number.isFinite(duracaoTotalComBuffer) || duracaoTotalComBuffer <= 0) {
@@ -1740,7 +1874,7 @@ router.put('/:id/reschedule-estab', authRequired, isEstabelecimento, ensureSubsc
       }
       conn.release();
       conn = null;
-      return res.status(400).json({ error: 'duracao_invalida', message: 'Duracao do servico invalida.' });
+      return res.status(400).json({ error: 'duracao_invalida', message: 'Duração do serviço inválida.' });
     }
 
     const fimDate = new Date(inicioDate.getTime() + duracaoTotalComBuffer * 60_000);
@@ -1832,7 +1966,7 @@ router.put('/:id/reschedule-estab', authRequired, isEstabelecimento, ensureSubsc
         if (Number.isFinite(oldMs) && Number.isFinite(newMs) && oldMs === newMs) return;
       }
       const clientName = cli?.nome || 'cliente';
-      const serviceName = serviceLabel || 'servico';
+      const serviceName = serviceLabel || 'serviço';
       const estName = est?.nome || 'estabelecimento';
       const oldLabel = oldInicioIso ? brDateTime(oldInicioIso) : '';
       const newLabel = brDateTime(updatedInicioIso);
@@ -1901,6 +2035,8 @@ router.put('/:id/cancel', authRequired, isCliente, async (req, res) => {
       }
       return res.status(404).json({ error: 'not_found', message: 'Agendamento não encontrado.' });
     }
+
+    await restoreAppointmentLoyaltyBenefitsTx(id, { db: pool });
 
     // contatos para notificar (opcional)
     const [[a]]   = await pool.query('SELECT estabelecimento_id, servico_id, profissional_id, inicio FROM agendamentos WHERE id=?', [id]);
@@ -2021,7 +2157,7 @@ router.put('/:id/cancel-estab', authRequired, isEstabelecimento, async (req, res
       serviceItems = fallback.items || [];
     }
     const summary = summarizeServices(serviceItems);
-    const serviceLabel = summary.serviceLabel || serviceItems[0]?.nome || 'servico';
+    const serviceLabel = summary.serviceLabel || serviceItems[0]?.nome || 'serviço';
 
     const statusNorm = String(ag.status || '').toLowerCase();
     if (statusNorm === 'cancelado') {
@@ -2055,6 +2191,8 @@ router.put('/:id/cancel-estab', authRequired, isEstabelecimento, async (req, res
       }
       return res.status(404).json({ error: 'not_found', message: 'Agendamento não encontrado.' });
     }
+
+    await restoreAppointmentLoyaltyBenefitsTx(id, { db: pool });
 
     const [[cli]] = await pool.query('SELECT nome, telefone FROM usuarios WHERE id=?', [ag?.cliente_id || 0]);
     const [[est]] = await pool.query(
@@ -2133,7 +2271,7 @@ router.put('/:id/cancel-estab', authRequired, isEstabelecimento, async (req, res
             agendamentoId: id,
             to: telCli,
             kind: 'cancel_cli',
-            message: `Seu agendamento ${id} (${serviceLabel ?? 'servico'}) em ${inicioBR} foi cancelado pelo estabelecimento.`,
+            message: `Seu agendamento ${id} (${serviceLabel ?? 'serviço'}) em ${inicioBR} foi cancelado pelo estabelecimento.`,
           });
         }
       }

@@ -187,7 +187,7 @@ function buildCsvHeaders() {
   return [
     { key: 'data', label: 'Data' },
     { key: 'cliente', label: 'Cliente' },
-    { key: 'servico', label: 'Servico' },
+    { key: 'servico', label: 'Serviço' },
     { key: 'profissional', label: 'Profissional' },
     { key: 'inicio', label: 'Inicio' },
     { key: 'fim', label: 'Fim' },
@@ -233,7 +233,7 @@ async function resolveReportContext(req, { requireAdvanced = false } = {}) {
     return {
       error: {
         status: 403,
-        body: { error: 'plan_restricted', message: 'Relatorios avancados disponiveis a partir do plano Pro.' },
+        body: { error: 'plan_restricted', message: 'Relatórios avançados disponíveis a partir do plano Pro.' },
       },
     };
   }

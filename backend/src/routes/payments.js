@@ -11,6 +11,7 @@ import { verifyPublicDepositToken } from '../lib/public_deposit_token.js';
 import { canAccessPaymentStatus, serializePaymentStatusResponse } from '../lib/payment_status_access.js';
 import { buildRateLimitClientKey, consumeRateLimit, observeAbuseFlood, setRateLimitHeaders } from '../lib/request_rate_limit.js';
 import { logBlockedRouteAccess, logSecurityEvent } from '../lib/route_access.js';
+import { cancelPendingPaymentAppointmentTx } from '../lib/appointment_loyalty.js';
 
 const router = Router();
 
@@ -65,10 +66,7 @@ async function markPaymentExpired({ paymentRow, rawPayload = null, connection })
     'UPDATE appointment_payments SET status=?, raw_payload=? WHERE id=?',
     ['expired', rawPayload, paymentRow.id]
   );
-  await connection.query(
-    "UPDATE agendamentos SET status='cancelado', deposit_expires_at=NOW() WHERE id=? AND status='pendente_pagamento'",
-    [paymentRow.agendamento_id]
-  );
+  await cancelPendingPaymentAppointmentTx(paymentRow.agendamento_id, { db: connection });
 }
 
 async function markPaymentPaid({ paymentRow, rawPayload = null, providerReference = null, connection }) {

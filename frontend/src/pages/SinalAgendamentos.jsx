@@ -16,18 +16,18 @@ export default function SinalAgendamentos() {
   } = useBusinessSettings({ loadMercadoPago: true, loadDeposit: true });
 
   if (!isEstablishment) {
-    return <p className="muted">Disponivel apenas para contas de estabelecimento.</p>;
+    return <p className="muted">Disponível apenas para contas de estabelecimento.</p>;
   }
 
   const account = mercadoPago.account || null;
-  const tokenSuffix = account?.token_last4 ? `Final ${account.token_last4}` : 'Conta ainda nao autorizada';
+  const tokenSuffix = account?.token_last4 ? `Final ${account.token_last4}` : 'Conta ainda não autorizada';
   const statusLabel = mercadoPagoConnected ? 'Conectado' : 'Desconectado';
 
   return (
     <div className="grid config-page settings-module-page" style={{ gap: 16 }}>
       <section className="card config-page__hero settings-module-hero">
         <div className="settings-module-hero__copy">
-          <span className="settings-module-hero__eyebrow">Modulo financeiro</span>
+          <span className="settings-module-hero__eyebrow">Módulo financeiro</span>
           <h2>Sinal nos agendamentos</h2>
           <p className="muted">
             Conecte sua conta Mercado Pago e defina um percentual de sinal via PIX para confirmar novos agendamentos.
@@ -36,7 +36,7 @@ export default function SinalAgendamentos() {
         <div className="settings-module-hero__meta">
           <div className="settings-module-hero__pill">Mercado Pago + PIX</div>
           <Link className="btn btn--outline btn--sm" to="/configuracoes">
-            Voltar para Configuracoes
+            Voltar para Configurações
           </Link>
         </div>
       </section>
@@ -52,7 +52,7 @@ export default function SinalAgendamentos() {
 
           {!deposit.allowed ? (
             <div className="notice notice--info">
-              Conexao disponivel apenas para planos Pro e Premium. <Link to="/planos">Conhecer planos</Link>
+              Conexão disponível apenas para planos Pro e Premium. <Link to="/planos">Conhecer planos</Link>
             </div>
           ) : null}
 
@@ -65,12 +65,12 @@ export default function SinalAgendamentos() {
             <div className="settings-module-kpi">
               <span className="settings-module-kpi__label">Recebimento</span>
               <strong>{deposit.allowed ? 'Liberado' : 'Bloqueado no plano'}</strong>
-              <span className="muted">Ativacao valida apenas para planos elegiveis.</span>
+              <span className="muted">Ativação válida apenas para planos elegíveis.</span>
             </div>
             <div className="settings-module-kpi">
               <span className="settings-module-kpi__label">Checkout</span>
               <strong>PIX imediato</strong>
-              <span className="muted">O cliente paga no fluxo do agendamento e a confirmacao e automatica.</span>
+              <span className="muted">O cliente paga no fluxo do agendamento e a confirmação é automática.</span>
             </div>
           </div>
 
@@ -85,7 +85,7 @@ export default function SinalAgendamentos() {
             <div className="notice notice--success">Conta Mercado Pago conectada com sucesso.</div>
           ) : null}
           {!mercadoPago.loading && !mercadoPagoConnected ? (
-            <div className="notice notice--warn">Mercado Pago nao conectado. Sem essa conexao o sinal nao pode ser cobrado.</div>
+            <div className="notice notice--warn">Mercado Pago não conectado. Sem essa conexão o sinal não pode ser cobrado.</div>
           ) : null}
           {account?.mp_user_id ? (
             <span className="muted" style={{ fontSize: 12 }}>mp_user_id: {account.mp_user_id}</span>
@@ -100,7 +100,7 @@ export default function SinalAgendamentos() {
               onClick={() => void startMercadoPagoConnect()}
               disabled={mercadoPago.connectLoading || !deposit.allowed}
             >
-              {mercadoPago.connectLoading ? <span className="spinner" /> : deposit.allowed ? 'Conectar Mercado Pago' : 'Disponivel em Pro/Premium'}
+              {mercadoPago.connectLoading ? <span className="spinner" /> : deposit.allowed ? 'Conectar Mercado Pago' : 'Disponível em Pro/Premium'}
             </button>
             {mercadoPagoConnected ? (
               <button
@@ -120,7 +120,7 @@ export default function SinalAgendamentos() {
           <ul className="settings-module-list">
             <li>O cliente gera o PIX durante o agendamento.</li>
             <li>Assim que o pagamento confirma, o atendimento fica garantido.</li>
-            <li>Sem conta Mercado Pago conectada, o sinal fica indisponivel.</li>
+            <li>Sem conta Mercado Pago conectada, o sinal fica indisponível.</li>
           </ul>
           <div className="settings-module-aside__footer">
             <Link className="btn btn--ghost btn--sm" to="/planos">
@@ -133,7 +133,7 @@ export default function SinalAgendamentos() {
       <section className="settings-module-card settings-module-card--form">
         <div className="settings-module-form__header">
           <div>
-            <h3>Configuracao do sinal</h3>
+            <h3>Configuração do sinal</h3>
             <p className="muted" style={{ marginBottom: 0 }}>
               Exija um percentual via PIX para confirmar novos agendamentos. O pagamento expira em {deposit.holdMinutes} min.
             </p>
@@ -146,7 +146,7 @@ export default function SinalAgendamentos() {
         {deposit.loading ? (
           <div className="row" style={{ gap: 8, alignItems: 'center' }}>
             <span className="spinner" aria-hidden="true" />
-            <span className="muted">Carregando configuracoes do sinal...</span>
+            <span className="muted">Carregando configurações do sinal...</span>
           </div>
         ) : deposit.allowed ? (
           <div className="settings-module-form__grid">
@@ -189,7 +189,7 @@ export default function SinalAgendamentos() {
                   disabled={!deposit.enabled || deposit.saving}
                 />
               </label>
-              <span className="muted">Minimo 5% e maximo 90%.</span>
+              <span className="muted">Mínimo de 5% e máximo de 90%.</span>
             </div>
 
             {deposit.noticeMessage ? (
@@ -211,7 +211,7 @@ export default function SinalAgendamentos() {
           </div>
         ) : (
           <div className="settings-module-empty-state">
-            <div className="notice notice--info">Recurso disponivel apenas para planos Pro e Premium.</div>
+            <div className="notice notice--info">Recurso disponível apenas para planos Pro e Premium.</div>
             <Link className="btn btn--outline btn--sm" to="/planos">
               Conhecer planos
             </Link>

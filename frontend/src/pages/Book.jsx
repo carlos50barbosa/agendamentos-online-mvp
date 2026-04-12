@@ -291,7 +291,7 @@ export default function Book(){
 
       if (e?.data?.error === 'otp_required') {
 
-        setOtpMsg('Verifique seu email para continuar. Envie e valide o Código.');
+        setOtpMsg('Verifique seu e-mail para continuar. Envie e valide o código.');
 
       }
 
@@ -311,7 +311,7 @@ export default function Book(){
 
     if (!emailTrim) {
 
-      setError('Informe um email válido para receber o Código.');
+      setError('Informe um e-mail válido para receber o código.');
 
       return;
 
@@ -325,7 +325,7 @@ export default function Book(){
 
       setOtpReqId(r?.request_id || '');
 
-      setOtpMsg('Código enviado para o seu email.');
+      setOtpMsg('Código enviado para o seu e-mail.');
 
     } catch (e) {
 
@@ -560,7 +560,7 @@ export default function Book(){
 
                     <input className="chatinput" placeholder="Seu nome" value={nome} onChange={e => setNome(e.target.value)} />
 
-                    <input className="chatinput" placeholder="Seu email" value={email} onChange={e => setEmail(e.target.value)} />
+                    <input className="chatinput" placeholder="Seu e-mail" value={email} onChange={e => setEmail(e.target.value)} />
 
                     <input className="chatinput" placeholder="Seu WhatsApp (00) 00000-0000" value={formatPhone(phone)} onChange={e => {
 
@@ -594,7 +594,7 @@ export default function Book(){
             <div className="chatpanel" style={{ marginTop: 8 }}>
 
               <div className="chatmsg chatmsg--bot">
-                Prontinho! Seu agendamento foi criado. Confirme por email em até 10 minutos,
+                Prontinho! Seu agendamento foi criado. Confirme por e-mail em até 10 minutos,
                 <strong> senão ele será cancelado automaticamente.</strong>
               </div>
               <div className="chatrow" style={{ marginTop: 8 }}>

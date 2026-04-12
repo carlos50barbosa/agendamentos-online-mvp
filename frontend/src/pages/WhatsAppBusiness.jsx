@@ -23,7 +23,7 @@ function HistoryItem({ item }) {
         {item.priceLabel ? <span className={m.historyPrice}>{item.priceLabel}</span> : null}
       </div>
       <div className={m.historyMeta}>
-        <span className={m.historyDate}>{item.createdLabel || 'Data indisponivel'}</span>
+        <span className={m.historyDate}>{item.createdLabel || 'Data indisponível'}</span>
         {item.statusLabel ? <span className={statusChipClass(item.statusTone)}>{item.statusLabel}</span> : null}
       </div>
     </li>
@@ -31,9 +31,9 @@ function HistoryItem({ item }) {
 }
 
 function formatConnectionDate(value) {
-  if (!value) return 'Nao disponivel';
+  if (!value) return 'Não disponível';
   const date = new Date(value);
-  if (!Number.isFinite(date.getTime())) return 'Nao disponivel';
+  if (!Number.isFinite(date.getTime())) return 'Não disponível';
   return date.toLocaleString('pt-BR', {
     day: '2-digit',
     month: '2-digit',
@@ -91,12 +91,12 @@ export default function WhatsAppBusiness() {
   } = useBusinessSettings({ loadWhatsApp: true });
 
   if (!isEstablishment) {
-    return <p className="muted">Disponivel apenas para contas de estabelecimento.</p>;
+    return <p className="muted">Disponível apenas para contas de estabelecimento.</p>;
   }
 
   const account = whatsapp.account || null;
-  const phoneLabel = account?.display_phone_number || 'Numero indisponivel';
-  const verifiedNameLabel = account?.verified_name || 'Nao informado';
+  const phoneLabel = account?.display_phone_number || 'Número indisponível';
+  const verifiedNameLabel = account?.verified_name || 'Não informado';
   const planLabel = String(planInfo.plan || 'starter').toUpperCase();
   const historyPanelId = 'whatsapp-business-history';
   const pixPack = pixModal.data?.pack || null;
@@ -120,9 +120,9 @@ export default function WhatsAppBusiness() {
     validating: 'Validando',
     disconnected: 'Desconectado',
     error: 'Erro',
-    not_connected: 'Nao conectado',
+    not_connected: 'Não conectado',
   };
-  const statusLabel = statusLabelMap[accountStatus] || 'Nao conectado';
+  const statusLabel = statusLabelMap[accountStatus] || 'Não conectado';
   const connectedAtLabel = formatConnectionDate(account?.connected_at);
   const lastSyncLabel = formatConnectionDate(account?.last_sync_at);
   const lastValidatedLabel = formatConnectionDate(account?.token_last_validated_at);
@@ -131,27 +131,27 @@ export default function WhatsAppBusiness() {
   const canSaveConnection = Boolean(whatsapp.validated && manualPreview && !whatsapp.saveLoading);
   const manualSteps = [
     'Acesse o Meta for Developers / WhatsApp Cloud API.',
-    'Gere ou copie um access token com permissao para o numero.',
-    'Copie o WABA ID e o Phone Number ID do numero que sera usado.',
-    'Cole os dados abaixo, valide a conexao e salve.',
+    'Gere ou copie um access token com permissão para o número.',
+    'Copie o WABA ID e o Phone Number ID do número que será usado.',
+    'Cole os dados abaixo, valide a conexão e salve.',
   ];
 
   return (
     <div className="grid config-page settings-module-page" style={{ gap: 16 }}>
       <section className="card config-page__hero settings-module-hero">
         <div className="settings-module-hero__copy">
-          <span className="settings-module-hero__eyebrow">Modulo dedicado</span>
+          <span className="settings-module-hero__eyebrow">Módulo dedicado</span>
           <h2>WhatsApp Business</h2>
           <p className="muted">
             {whatsappConnectEnabled
-              ? 'Gerencie a conexao do WhatsApp Business do estabelecimento, acompanhe a franquia do plano e recarregue creditos extras via PIX.'
-              : 'Em breve voce podera conectar o seu proprio numero do WhatsApp Business diretamente ao Agendamentos Online por meio da integracao oficial da Meta.'}
+              ? 'Gerencie a conexão do WhatsApp Business do estabelecimento, acompanhe a franquia do plano e recarregue créditos extras via PIX.'
+              : 'Em breve você poderá conectar o seu próprio número do WhatsApp Business diretamente ao Agendamentos Online por meio da integração oficial da Meta.'}
           </p>
         </div>
         <div className="settings-module-hero__meta">
           <div className="settings-module-hero__pill">Plano {planLabel}</div>
           <Link className="btn btn--outline btn--sm" to="/configuracoes">
-            Voltar para Configuracoes
+            Voltar para Configurações
           </Link>
         </div>
       </section>
@@ -159,9 +159,9 @@ export default function WhatsAppBusiness() {
       {whatsappConnectEnabled ? (
       <section className="settings-module-card settings-module-card--status">
         <div>
-          <h3>Conexao manual com Meta</h3>
+          <h3>Conexão manual com Meta</h3>
           <p className="muted">
-            Informe manualmente o token e os IDs da sua conta Meta. O backend valida na Graph API antes de salvar e, se nao houver conta valida, o sistema continua no fallback global configurado.
+            Informe manualmente o token e os IDs da sua conta Meta. O backend valida na Graph API antes de salvar e, se não houver conta válida, o sistema continua no fallback global configurado.
           </p>
         </div>
 
@@ -176,7 +176,7 @@ export default function WhatsAppBusiness() {
           <div className="box" style={{ padding: 18, display: 'grid', gap: 16 }}>
             <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
               <div>
-                <div className="muted" style={{ fontSize: 12 }}>Status da integracao</div>
+                <div className="muted" style={{ fontSize: 12 }}>Status da integração</div>
                 <strong style={{ display: 'block', fontSize: 20 }}>{statusLabel}</strong>
               </div>
               <span className={statusChipClass(statusTone)}>{statusLabel}</span>
@@ -184,18 +184,18 @@ export default function WhatsAppBusiness() {
 
             <div className="settings-module-status-grid">
               <div className="settings-module-kpi">
-                <span className="settings-module-kpi__label">Numero conectado</span>
-                <strong>{whatsappConnected ? phoneLabel : 'Nao conectado'}</strong>
-                <span className="muted">{whatsappConnected ? verifiedNameLabel : 'Sem conta propria ativa para este tenant.'}</span>
+                <span className="settings-module-kpi__label">Número conectado</span>
+                <strong>{whatsappConnected ? phoneLabel : 'Não conectado'}</strong>
+                <span className="muted">{whatsappConnected ? verifiedNameLabel : 'Sem conta própria ativa para este tenant.'}</span>
               </div>
               <div className="settings-module-kpi">
                 <span className="settings-module-kpi__label">Franquia atual</span>
                 <strong>
                   {walletSummary.available
                     ? `${walletSummary.includedLimit.toLocaleString('pt-BR')} msgs/mes`
-                    : 'Indisponivel'}
+                    : 'Indisponível'}
                 </strong>
-                <span className="muted">Mes de referencia: {walletSummary.monthLabel}</span>
+                <span className="muted">Mês de referência: {walletSummary.monthLabel}</span>
               </div>
               <div className="settings-module-kpi">
                 <span className="settings-module-kpi__label">Saldo total</span>
@@ -211,10 +211,10 @@ export default function WhatsAppBusiness() {
               </div>
             ) : null}
             {!whatsapp.loading && whatsappConnected ? (
-              <div className="notice notice--success">Conectado ao numero {phoneLabel}. Os envios deste tenant usam a conta propria antes do fallback global.</div>
+              <div className="notice notice--success">Conectado ao número {phoneLabel}. Os envios deste tenant usam a conta própria antes do fallback global.</div>
             ) : null}
             {!whatsapp.loading && !whatsappConnected ? (
-              <div className="notice notice--warn">Nenhuma conta propria conectada. Enquanto isso, o sistema pode continuar usando o numero global do .env.</div>
+              <div className="notice notice--warn">Nenhuma conta própria conectada. Enquanto isso, o sistema pode continuar usando o número global do `.env`.</div>
             ) : null}
             {whatsapp.error ? <div className="notice notice--error">{whatsapp.error}</div> : null}
             {whatsapp.notice ? <div className="notice notice--success">{whatsapp.notice}</div> : null}
@@ -228,18 +228,18 @@ export default function WhatsAppBusiness() {
             >
               <div>
                 <div className="muted" style={{ fontSize: 12 }}>WABA ID</div>
-                <strong>{account?.waba_id || 'Nao disponivel'}</strong>
+                <strong>{account?.waba_id || 'Não disponível'}</strong>
               </div>
               <div>
                 <div className="muted" style={{ fontSize: 12 }}>phone_number_id</div>
-                <strong>{account?.phone_number_id || 'Nao disponivel'}</strong>
+                <strong>{account?.phone_number_id || 'Não disponível'}</strong>
               </div>
               <div>
                 <div className="muted" style={{ fontSize: 12 }}>Business Account ID</div>
-                <strong>{account?.business_account_id || 'Nao disponivel'}</strong>
+                <strong>{account?.business_account_id || 'Não disponível'}</strong>
               </div>
               <div>
-                <div className="muted" style={{ fontSize: 12 }}>Ultima validacao do token</div>
+                <div className="muted" style={{ fontSize: 12 }}>Última validação do token</div>
                 <strong>{lastValidatedLabel}</strong>
               </div>
               <div>
@@ -247,14 +247,14 @@ export default function WhatsAppBusiness() {
                 <strong>{connectedAtLabel}</strong>
               </div>
               <div>
-                <div className="muted" style={{ fontSize: 12 }}>Ultima sincronizacao</div>
+                <div className="muted" style={{ fontSize: 12 }}>Última sincronização</div>
                 <strong>{lastSyncLabel}</strong>
               </div>
             </div>
 
             {account?.last_error ? (
               <div className="notice notice--warn">
-                Ultimo erro registrado: {account.last_error}
+                Último erro registrado: {account.last_error}
               </div>
             ) : null}
 
@@ -292,10 +292,10 @@ export default function WhatsAppBusiness() {
               ))}
             </div>
             <div className="notice notice--warn" style={{ margin: 0 }}>
-              Os dados sao usados apenas para integrar o numero do estabelecimento ao sistema. O token e armazenado com seguranca no backend.
+              Os dados são usados apenas para integrar o número do estabelecimento ao sistema. O token é armazenado com segurança no backend.
             </div>
             <div className="notice notice--success" style={{ margin: 0 }}>
-              Se a conta do tenant nao estiver valida, o sistema continua podendo usar o numero padrao global quando essa politica estiver ativa.
+              Se a conta do tenant não estiver válida, o sistema continua podendo usar o número padrão global quando essa política estiver ativa.
             </div>
           </aside>
         </div>
@@ -303,13 +303,13 @@ export default function WhatsAppBusiness() {
         <div className="box" style={{ padding: 18, marginTop: 16, display: 'grid', gap: 16 }}>
           <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
             <div>
-              <h4 style={{ margin: 0 }}>Formulario manual</h4>
+              <h4 style={{ margin: 0 }}>Formulário manual</h4>
               <p className="muted" style={{ margin: '4px 0 0' }}>
-                Preencha os dados da Meta, valide a conexao e so depois salve para este estabelecimento.
+                Preencha os dados da Meta, valide a conexão e só depois salve para este estabelecimento.
               </p>
             </div>
             <span className={statusChipClass(isEditing ? 'pending' : statusTone)}>
-              {isEditing ? 'Edicao ativa' : statusLabel}
+              {isEditing ? 'Edição ativa' : statusLabel}
             </span>
           </div>
 
@@ -337,7 +337,7 @@ export default function WhatsAppBusiness() {
                     className="input"
                     value={whatsapp.form.waba_id}
                     onChange={(event) => updateWhatsAppManualField('waba_id', event.target.value)}
-                    placeholder="Obrigatorio"
+                    placeholder="Obrigatório"
                   />
                 </label>
                 <label style={{ display: 'grid', gap: 6 }}>
@@ -346,7 +346,7 @@ export default function WhatsAppBusiness() {
                     className="input"
                     value={whatsapp.form.phone_number_id}
                     onChange={(event) => updateWhatsAppManualField('phone_number_id', event.target.value)}
-                    placeholder="Obrigatorio"
+                    placeholder="Obrigatório"
                   />
                 </label>
                 <label style={{ display: 'grid', gap: 6 }}>
@@ -355,7 +355,7 @@ export default function WhatsAppBusiness() {
                     className="input"
                     value={whatsapp.form.descriptive_name}
                     onChange={(event) => updateWhatsAppManualField('descriptive_name', event.target.value)}
-                    placeholder="Ex.: Recepcao principal"
+                    placeholder="Ex.: Recepção principal"
                   />
                 </label>
               </div>
@@ -378,7 +378,7 @@ export default function WhatsAppBusiness() {
                   onClick={() => void validateWhatsAppManualConnection()}
                   disabled={whatsapp.validationLoading}
                 >
-                  {whatsapp.validationLoading ? <span className="spinner" /> : 'Validar conexao'}
+                  {whatsapp.validationLoading ? <span className="spinner" /> : 'Validar conexão'}
                 </button>
                 <button
                   type="button"
@@ -386,7 +386,7 @@ export default function WhatsAppBusiness() {
                   onClick={() => void saveWhatsAppManualConnection()}
                   disabled={!canSaveConnection}
                 >
-                  {whatsapp.saveLoading ? <span className="spinner" /> : 'Salvar conexao'}
+                  {whatsapp.saveLoading ? <span className="spinner" /> : 'Salvar conexão'}
                 </button>
                 <button
                   type="button"
@@ -394,7 +394,7 @@ export default function WhatsAppBusiness() {
                   onClick={cancelWhatsAppManualEdit}
                   disabled={whatsapp.validationLoading || whatsapp.saveLoading}
                 >
-                  Cancelar edicao
+                  Cancelar edição
                 </button>
               </div>
             </>
@@ -418,24 +418,24 @@ export default function WhatsAppBusiness() {
                 }}
               >
                 <div>
-                  <div className="muted" style={{ fontSize: 12 }}>Numero validado</div>
-                  <strong>{manualPreview.display_phone_number || 'Nao informado'}</strong>
+                  <div className="muted" style={{ fontSize: 12 }}>Número validado</div>
+                  <strong>{manualPreview.display_phone_number || 'Não informado'}</strong>
                 </div>
                 <div>
                   <div className="muted" style={{ fontSize: 12 }}>Nome verificado</div>
-                  <strong>{manualPreview.verified_name || 'Nao informado'}</strong>
+                  <strong>{manualPreview.verified_name || 'Não informado'}</strong>
                 </div>
                 <div>
                   <div className="muted" style={{ fontSize: 12 }}>WABA ID</div>
-                  <strong>{manualPreview.waba_id || 'Nao informado'}</strong>
+                  <strong>{manualPreview.waba_id || 'Não informado'}</strong>
                 </div>
                 <div>
                   <div className="muted" style={{ fontSize: 12 }}>Phone Number ID</div>
-                  <strong>{manualPreview.phone_number_id || 'Nao informado'}</strong>
+                  <strong>{manualPreview.phone_number_id || 'Não informado'}</strong>
                 </div>
                 <div>
                   <div className="muted" style={{ fontSize: 12 }}>Business Account ID</div>
-                  <strong>{manualPreview.business_account_id || 'Nao informado'}</strong>
+                  <strong>{manualPreview.business_account_id || 'Não informado'}</strong>
                 </div>
                 <div>
                   <div className="muted" style={{ fontSize: 12 }}>Token validado em</div>
@@ -488,7 +488,7 @@ export default function WhatsAppBusiness() {
                   <span className={statusChipClass('pending')}>Em breve</span>
                   <h3 style={{ margin: '8px 0 4px' }}>Integracao com WhatsApp Business</h3>
                   <p className="muted" style={{ margin: 0 }}>
-                    Em breve voce podera conectar o seu proprio numero do WhatsApp Business diretamente ao Agendamentos Online por meio da integracao oficial da Meta.
+                    Em breve você poderá conectar o seu próprio número do WhatsApp Business diretamente ao Agendamentos Online por meio da integração oficial da Meta.
                   </p>
                 </div>
               </div>
@@ -498,7 +498,7 @@ export default function WhatsAppBusiness() {
             </div>
 
             <div className="notice notice--success" style={{ margin: 0 }}>
-              Estamos preparando a integracao oficial com a Meta para que voce possa conectar seu WhatsApp Business com mais seguranca, simplicidade e estabilidade.
+              Estamos preparando a integração oficial com a Meta para que você possa conectar seu WhatsApp Business com mais segurança, simplicidade e estabilidade.
             </div>
 
             <div
@@ -509,15 +509,15 @@ export default function WhatsAppBusiness() {
               }}
             >
               {[
-                'Confirmacoes automaticas de agendamento',
-                'Lembretes automaticos para clientes',
-                'Mensagens enviadas com o numero do seu estabelecimento',
-                'Gestao centralizada da comunicacao no painel',
+                'Confirmações automáticas de agendamento',
+                'Lembretes automáticos para clientes',
+                'Mensagens enviadas com o número do seu estabelecimento',
+                'Gestão centralizada da comunicação no painel',
               ].map((item) => (
                 <div key={item} className="box" style={{ padding: 14 }}>
                   <strong style={{ display: 'block', marginBottom: 4 }}>{item}</strong>
                   <span className="muted" style={{ fontSize: 13 }}>
-                    Recurso premium em fase final de liberacao.
+                    Recurso premium em fase final de liberação.
                   </span>
                 </div>
               ))}
@@ -525,10 +525,10 @@ export default function WhatsAppBusiness() {
 
             <div className="row" style={{ gap: 10, flexWrap: 'wrap' }}>
               <button type="button" className="btn btn--primary" disabled style={{ opacity: 0.7, cursor: 'not-allowed' }}>
-                Disponivel em breve
+                Disponível em breve
               </button>
               <button type="button" className="btn btn--outline" disabled style={{ opacity: 0.65, cursor: 'not-allowed' }}>
-                Integracao oficial da Meta
+                Integração oficial da Meta
               </button>
             </div>
           </div>
@@ -539,18 +539,18 @@ export default function WhatsAppBusiness() {
               <h4 style={{ margin: '6px 0 0' }}>Em breve</h4>
             </div>
             <p className="muted" style={{ margin: 0 }}>
-              Estamos finalizando a liberacao dessa funcionalidade para oferecer uma experiencia mais simples, segura e oficial para o seu estabelecimento.
+              Estamos finalizando a liberação dessa funcionalidade para oferecer uma experiência mais simples, segura e oficial para o seu estabelecimento.
             </p>
             <div className="box" style={{ padding: 14 }}>
-              <strong style={{ display: 'block', marginBottom: 6 }}>O que estara disponivel quando liberar</strong>
+              <strong style={{ display: 'block', marginBottom: 6 }}>O que estará disponível quando liberar</strong>
               <ul style={{ margin: 0, paddingLeft: 18, display: 'grid', gap: 8 }}>
-                <li>Ativacao direta por esta tela.</li>
+                <li>Ativação direta por esta tela.</li>
                 <li>Onboarding oficial da Meta.</li>
-                <li>Experiencia mais estavel para o estabelecimento.</li>
+                <li>Experiência mais estável para o estabelecimento.</li>
               </ul>
             </div>
             <p className="muted" style={{ margin: 0 }}>
-              Assim que a funcionalidade estiver disponivel, voce podera ativar a conexao diretamente por esta tela.
+              Assim que a funcionalidade estiver disponível, você poderá ativar a conexão diretamente por esta tela.
             </p>
           </aside>
         </div>
@@ -560,8 +560,8 @@ export default function WhatsAppBusiness() {
       <section className="box config-page__wallet-box settings-module-wallet-shell">
         <div className="config-page__wallet-box-head settings-module-wallet-head">
           <div>
-            <h4>Mensagens / Creditos</h4>
-            <p>Acompanhe o limite mensal e recarregue pacotes extras via PIX quando necessario.</p>
+            <h4>Mensagens / Créditos</h4>
+            <p>Acompanhe o limite mensal e recarregue pacotes extras via PIX quando necessário.</p>
           </div>
           {walletSummary.planBadge ? <span className="settings-module-wallet-badge">{walletSummary.planBadge}</span> : null}
         </div>
@@ -581,7 +581,7 @@ export default function WhatsAppBusiness() {
                 {billing.loading ? (
                   <div className="row" style={{ gap: 8, alignItems: 'center' }}>
                     <span className="spinner" aria-hidden="true" />
-                    <span className="muted">Carregando creditos do WhatsApp...</span>
+                    <span className="muted">Carregando créditos do WhatsApp...</span>
                   </div>
                 ) : null}
 
@@ -592,7 +592,7 @@ export default function WhatsAppBusiness() {
                     <div className={m.statGrid}>
                       <div className={m.statCard}>
                         <div className={m.statHeader}>
-                          <div className={m.statLabel}>Incluido no plano</div>
+                          <div className={m.statLabel}>Incluído no plano</div>
                           {walletSummary.remainingLabel ? <div className={m.statRemaining}>{walletSummary.remainingLabel}</div> : null}
                         </div>
                         <div className={m.progress} aria-hidden="true">
@@ -605,13 +605,13 @@ export default function WhatsAppBusiness() {
                       </div>
 
                       <div className={m.statCard}>
-                        <div className={m.statLabel}>Creditos extras</div>
+                        <div className={m.statLabel}>Créditos extras</div>
                         <div className={m.statValue}>{walletSummary.extraBalance.toLocaleString('pt-BR')}</div>
-                        <div className={m.statHint}>Creditos comprados via PIX</div>
+                        <div className={m.statHint}>Créditos comprados via PIX</div>
                       </div>
 
                       <div className={`${m.statCard} ${m.statHighlight}`}>
-                        <div className={m.statLabel}>Total disponivel</div>
+                        <div className={m.statLabel}>Total disponível</div>
                         <div className={m.statValue}>{walletSummary.totalBalance.toLocaleString('pt-BR')}</div>
                         <div className={m.statHint}>
                           ~ {walletSummary.appointmentsEstimate.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} agend. (5 msg = 1)
@@ -626,7 +626,7 @@ export default function WhatsAppBusiness() {
                     ) : null}
                   </>
                 ) : !billing.loading ? (
-                  <p className="muted" style={{ marginTop: 0 }}>Saldo indisponivel.</p>
+                  <p className="muted" style={{ marginTop: 0 }}>Saldo indisponível.</p>
                 ) : null}
 
                 <div className={m.section}>
@@ -680,7 +680,7 @@ export default function WhatsAppBusiness() {
                         </div>
                       );
                     }) : (
-                      <div className={m.emptyRow}>Nenhum pacote disponivel no momento.</div>
+                      <div className={m.emptyRow}>Nenhum pacote disponível no momento.</div>
                     )}
                   </div>
                   {topupError ? <div className={`notice notice--error ${m.inlineNotice}`}>{topupError}</div> : null}
@@ -689,8 +689,8 @@ export default function WhatsAppBusiness() {
                 <div className={m.section}>
                   <div className={m.sectionHeader}>
                     <div className={m.historyHeading}>
-                      <span className={m.sectionTitle}>Historico de recargas</span>
-                      <span className={m.historySubtext}>Mostrando as ultimas {Math.min(recentTopupHistory.length, 5)}</span>
+                      <span className={m.sectionTitle}>Histórico de recargas</span>
+                      <span className={m.historySubtext}>Mostrando as últimas {Math.min(recentTopupHistory.length, 5)}</span>
                     </div>
                   </div>
 
@@ -711,7 +711,7 @@ export default function WhatsAppBusiness() {
                         aria-expanded={historyExpanded}
                         aria-controls={historyPanelId}
                       >
-                        {historyExpanded ? 'Ocultar historico completo' : 'Ver historico completo'}
+                        {historyExpanded ? 'Ocultar histórico completo' : 'Ver histórico completo'}
                       </button>
                     </div>
                   ) : null}
@@ -722,11 +722,11 @@ export default function WhatsAppBusiness() {
                         <div className={m.historyFilters}>
                           {hasHistoryDates ? (
                             <label className={m.historyFilter}>
-                              <span>Periodo</span>
+                              <span>Período</span>
                               <select value={historyRange} onChange={(event) => setHistoryRange(event.target.value)}>
                                 <option value="all">Tudo</option>
-                                <option value="30">Ultimos 30 dias</option>
-                                <option value="90">Ultimos 90 dias</option>
+                                <option value="30">Últimos 30 dias</option>
+                                <option value="90">Últimos 90 dias</option>
                                 <option value="year">Este ano</option>
                               </select>
                             </label>
@@ -750,7 +750,7 @@ export default function WhatsAppBusiness() {
                           {visibleTopupHistory.map((item) => <HistoryItem key={item.key} item={item} />)}
                         </ul>
                       ) : (
-                        <p className="muted" style={{ margin: 0 }}>Nenhum registro no periodo.</p>
+                        <p className="muted" style={{ margin: 0 }}>Nenhum registro no período.</p>
                       )}
 
                       {hasMoreHistory ? (
@@ -772,7 +772,7 @@ export default function WhatsAppBusiness() {
 
           <aside className={m.asideCol}>
             <div className={`plan-card__features ${m.planColLeft}`}>
-              <span className="plan-card__features-title">Resumo do modulo</span>
+              <span className="plan-card__features-title">Resumo do módulo</span>
               <ul>
                 {walletSummary.planSummaryItems.map((item) => <li key={item}>{item}</li>)}
               </ul>
@@ -786,14 +786,14 @@ export default function WhatsAppBusiness() {
                 aria-expanded={helpOpen}
                 aria-controls="whatsapp-business-help"
               >
-                <span className={m.helpTitle}>Ajuda rapida</span>
+                <span className={m.helpTitle}>Ajuda rápida</span>
                 <IconChevronRight className={m.helpIcon} aria-hidden="true" />
               </button>
               <div id="whatsapp-business-help" className={`${m.helpBody} ${helpOpen ? m.helpBodyOpen : ''}`}>
                 <ul className={m.helpList}>
-                  <li>Use o numero oficial do estabelecimento para confirmacoes e lembretes.</li>
+                  <li>Use o número oficial do estabelecimento para confirmações e lembretes.</li>
                   <li>Quando a franquia termina, os envios seguem por e-mail e painel.</li>
-                  <li>Pacotes extras caem automaticamente apos a confirmacao do PIX.</li>
+                  <li>Pacotes extras caem automaticamente após a confirmação do PIX.</li>
                 </ul>
               </div>
             </div>
@@ -838,7 +838,7 @@ export default function WhatsAppBusiness() {
               ) : (
                 <div className="row" style={{ alignItems: 'center', gap: 8 }}>
                   <span className="spinner" aria-hidden="true" />
-                  <span>Aguardando confirmacao do pagamento...</span>
+                  <span>Aguardando confirmação do pagamento...</span>
                 </div>
               )}
               {pixNotice ? <p className="muted" style={{ margin: 0 }}>{pixNotice}</p> : null}

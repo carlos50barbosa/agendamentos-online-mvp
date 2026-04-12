@@ -374,7 +374,7 @@ export default function Assinatura() {
 
       return { subscriptionResponse, billingResponse, statsResponse };
     } catch (requestError) {
-      setError(getErrorMessage(requestError, 'Nao foi possivel carregar a assinatura agora.'));
+      setError(getErrorMessage(requestError, 'Não foi possível carregar a assinatura agora.'));
       return null;
     } finally {
       if (!silent) setLoading(false);
@@ -440,15 +440,15 @@ export default function Assinatura() {
     if (currentPaymentMethod === 'credit_card' && (hasDelinquentStatus || planStatusKey === 'pending_payment')) {
       return {
         mode: 'update',
-        label: hasDelinquentStatus ? 'Salvar cartao para regularizar' : 'Atualizar cartao',
+        label: hasDelinquentStatus ? 'Salvar cartão para regularizar' : 'Atualizar cartão',
       };
     }
     if (currentPaymentMethod === 'credit_card') {
-      return { mode: 'update', label: 'Trocar cartao' };
+      return { mode: 'update', label: 'Trocar cartão' };
     }
     return {
       mode: 'subscribe',
-      label: hasDelinquentStatus ? 'Salvar cartao para reativar' : 'Assinar com cartao',
+      label: hasDelinquentStatus ? 'Salvar cartão para reativar' : 'Assinar com cartão',
     };
   }, [currentPaymentMethod, hasDelinquentStatus, planStatusKey]);
 
@@ -553,7 +553,7 @@ export default function Assinatura() {
     } catch (requestError) {
       setNotice({
         type: 'error',
-        message: getErrorMessage(requestError, 'Nao foi possivel iniciar o teste gratuito agora.'),
+        message: getErrorMessage(requestError, 'Não foi possível iniciar o teste gratuito agora.'),
       });
       return false;
     } finally {
@@ -583,13 +583,13 @@ export default function Assinatura() {
       await refreshData({ silent: true });
       setNotice({
         type: 'info',
-        message: 'PIX gerado com sucesso. Pague e acompanhe a confirmacao pelo seu banco.',
+        message: 'PIX gerado com sucesso. Pague e acompanhe a confirmação pelo seu banco.',
       });
       return true;
     } catch (requestError) {
       setNotice({
         type: 'error',
-        message: getErrorMessage(requestError, 'Falha ao gerar cobranca PIX.'),
+        message: getErrorMessage(requestError, 'Falha ao gerar cobrança PIX.'),
       });
       return false;
     } finally {
@@ -615,7 +615,7 @@ export default function Assinatura() {
       }
       setNotice({
         type: 'info',
-        message: 'PIX de renovacao gerado. Assim que o pagamento confirmar, a assinatura sera atualizada automaticamente.',
+        message: 'PIX de renovação gerado. Assim que o pagamento confirmar, a assinatura será atualizada automaticamente.',
       });
       return true;
     } catch (requestError) {
@@ -650,7 +650,7 @@ export default function Assinatura() {
       };
 
       if (!payload.card_token) {
-        throw new Error('Nao foi possivel tokenizar o cartao.');
+        throw new Error('Não foi possível tokenizar o cartão.');
       }
 
       if (submitIntent === 'recover') {
@@ -663,12 +663,12 @@ export default function Assinatura() {
           setCardRecoveryReady(false);
           setNotice({
             type: 'success',
-            message: 'Pagamento aprovado. A assinatura foi reativada e a renovacao automatica segue no cartao.',
+            message: 'Pagamento aprovado. A assinatura foi reativada e a renovação automática segue no cartão.',
           });
           return true;
         }
         setCardRecoveryReady(true);
-        const message = response?.message || 'A cobranca pendente nao foi aprovada. Gere um PIX ou tente outro cartao.';
+        const message = response?.message || 'A cobrança pendente não foi aprovada. Gere um PIX ou tente outro cartão.';
         setCardState((current) => ({ ...current, error: message }));
         setNotice({ type: 'error', message });
         return false;
@@ -693,13 +693,13 @@ export default function Assinatura() {
         setNotice({
           type: 'success',
           message: cardAction.mode === 'update'
-            ? 'Cartao atualizado. Vamos sincronizar a cobranca recorrente automaticamente.'
-            : 'Assinatura enviada no cartao. A renovacao automatica passa a ser o fluxo principal.',
+            ? 'Cartão atualizado. Vamos sincronizar a cobrança recorrente automaticamente.'
+            : 'Assinatura enviada no cartão. A renovação automática passa a ser o fluxo principal.',
         });
       }
       return true;
     } catch (requestError) {
-      const message = getErrorMessage(requestError, 'Falha ao processar o cartao agora.');
+      const message = getErrorMessage(requestError, 'Falha ao processar o cartão agora.');
       setCardState((current) => ({ ...current, error: message }));
       if (submitIntent === 'recover') {
         setCardRecoveryReady(true);
@@ -747,14 +747,14 @@ export default function Assinatura() {
           iframe: true,
           form: {
             id: 'subscription-card-form',
-            cardNumber: { id: 'subscription-card-number', placeholder: 'Numero do cartao' },
+            cardNumber: { id: 'subscription-card-number', placeholder: 'Número do cartão' },
             expirationDate: { id: 'subscription-card-expiration', placeholder: 'MM/AA' },
             securityCode: { id: 'subscription-card-security-code', placeholder: 'CVV' },
-            cardholderName: { id: 'subscription-cardholder-name', placeholder: 'Titular do cartao' },
+            cardholderName: { id: 'subscription-cardholder-name', placeholder: 'Titular do cartão' },
             issuer: { id: 'subscription-card-issuer', placeholder: 'Banco emissor' },
             installments: { id: 'subscription-card-installments', placeholder: 'Parcelas' },
             identificationType: { id: 'subscription-card-id-type', placeholder: 'Documento' },
-            identificationNumber: { id: 'subscription-card-id-number', placeholder: 'Numero do documento' },
+            identificationNumber: { id: 'subscription-card-id-number', placeholder: 'Número do documento' },
             cardholderEmail: { id: 'subscription-card-email', placeholder: 'E-mail' },
           },
           callbacks: {
@@ -765,7 +765,7 @@ export default function Assinatura() {
                   ...current,
                   ready: false,
                   loading: false,
-                  error: 'Nao foi possivel montar o formulario do cartao.',
+                  error: 'Não foi possível montar o formulário do cartão.',
                 }));
                 return;
               }
@@ -786,7 +786,7 @@ export default function Assinatura() {
           ...current,
           ready: false,
           loading: false,
-          error: 'Nao foi possivel carregar o SDK de cartao do gateway.',
+          error: 'Não foi possível carregar o SDK de cartão do gateway.',
         }));
       }
     };
@@ -823,12 +823,12 @@ export default function Assinatura() {
         await refreshData({ silent: true });
       } else if (pixAttemptsRef.current >= PIX_POLL_MAX_ATTEMPTS) {
         clearPixPolling();
-        setPixNotice('Ainda nao confirmou. Se voce ja pagou, aguarde alguns instantes e clique em Atualizar.');
+        setPixNotice('Ainda não confirmou. Se você já pagou, aguarde alguns instantes e clique em Atualizar.');
       }
       return response;
     } catch (requestError) {
       if (!silent) {
-        setPixNotice(getErrorMessage(requestError, 'Nao foi possivel atualizar o status agora.'));
+        setPixNotice(getErrorMessage(requestError, 'Não foi possível atualizar o status agora.'));
       }
       return null;
     } finally {
@@ -860,10 +860,10 @@ export default function Assinatura() {
     if (!pixCode) return false;
     try {
       const ok = await copyText(pixCode);
-      setPixCopyNotice(ok ? 'Chave PIX copiada.' : 'Nao foi possivel copiar agora.');
+      setPixCopyNotice(ok ? 'Chave PIX copiada.' : 'Não foi possível copiar agora.');
       return ok;
     } catch {
-      setPixCopyNotice('Nao foi possivel copiar agora.');
+      setPixCopyNotice('Não foi possível copiar agora.');
       return false;
     }
   }, [pixCode]);
@@ -898,11 +898,11 @@ export default function Assinatura() {
       try {
         if (checkoutStatus) {
           if (checkoutStatus === 'sucesso') {
-            setNotice({ type: 'success', message: 'Pagamento confirmado. A assinatura sera atualizada automaticamente.' });
+            setNotice({ type: 'success', message: 'Pagamento confirmado. A assinatura será atualizada automaticamente.' });
           } else if (checkoutStatus === 'pendente') {
-            setNotice({ type: 'warn', message: 'Pagamento pendente de confirmacao.' });
+            setNotice({ type: 'warn', message: 'Pagamento pendente de confirmação.' });
           } else if (checkoutStatus === 'erro') {
-            setNotice({ type: 'error', message: 'O PIX foi cancelado ou expirou antes da confirmacao.' });
+            setNotice({ type: 'error', message: 'O PIX foi cancelado ou expirou antes da confirmação.' });
           }
         }
 
@@ -921,7 +921,7 @@ export default function Assinatura() {
           if (trialAvailable) {
             await handleStartTrial();
           } else {
-            setNotice({ type: 'info', message: 'Teste gratis indisponivel para a situacao atual da conta.' });
+            setNotice({ type: 'info', message: 'Teste grátis indisponível para a situação atual da conta.' });
           }
         } else if (intentPlan) {
             await handleStartCheckout(intentPlan, intentCycle || checkoutCycle);
@@ -951,17 +951,17 @@ export default function Assinatura() {
   ]);
 
   if (!isEstablishment) {
-    return <p className="muted">Disponivel apenas para contas de estabelecimento.</p>;
+    return <p className="muted">Disponível apenas para contas de estabelecimento.</p>;
   }
 
   return (
     <div className="grid config-page settings-module-page subscription-page" style={{ gap: 16 }}>
       <section className="card config-page__hero settings-module-hero subscription-page__hero">
         <div className="settings-module-hero__copy subscription-page__hero-copy">
-          <span className="settings-module-hero__eyebrow">Gestao da assinatura</span>
+          <span className="settings-module-hero__eyebrow">Gestão da assinatura</span>
           <h2>Plano e assinatura</h2>
           <p className="muted">
-            Acompanhe o plano atual, limites operacionais, status da cobranca e os proximos passos da sua conta.
+            Acompanhe o plano atual, limites operacionais, status da cobrança e os próximos passos da sua conta.
           </p>
         </div>
         <div className="settings-module-hero__meta subscription-page__hero-meta">
@@ -970,7 +970,7 @@ export default function Assinatura() {
             {planStatusLabel}
           </div>
           <Link className="btn btn--outline btn--sm" to="/configuracoes">
-            Voltar para Configuracoes
+            Voltar para Configurações
           </Link>
         </div>
       </section>
@@ -991,8 +991,8 @@ export default function Assinatura() {
       {!loading && accessMode !== 'full' ? (
         <div className={`notice notice--${coreFeaturesAllowed ? 'warn' : 'error'}`}>
           {coreFeaturesAllowed
-            ? 'Existe uma cobranca pendente. Regularize cartao ou PIX para evitar bloqueio.'
-            : 'As funcionalidades principais estao bloqueadas ate a regularizacao. Login, assinatura, PIX e historico financeiro continuam liberados.'}
+            ? 'Existe uma cobrança pendente. Regularize cartão ou PIX para evitar bloqueio.'
+            : 'As funcionalidades principais estão bloqueadas até a regularização. Login, assinatura, PIX e histórico financeiro continuam liberados.'}
         </div>
       ) : null}
 
@@ -1006,34 +1006,34 @@ export default function Assinatura() {
         </div>
 
         <div className="settings-module-card subscription-page__summary-card">
-          <span className="subscription-page__eyebrow">Proximo marco</span>
+          <span className="subscription-page__eyebrow">Próximo marco</span>
           <h3>{nextDueLabel}</h3>
           <p className="muted">
             {planStatusKey === 'past_due'
-              ? 'Cartao falhou. Regularize dentro da tolerancia para evitar bloqueio.'
+              ? 'Cartão falhou. Regularize dentro da tolerância para evitar bloqueio.'
               : renewalRequired
-                ? 'Existe renovacao manual ou cobranca pendente para resolver.'
+                ? 'Existe renovação manual ou cobrança pendente para resolver.'
                 : activeUntil
-                  ? 'Ciclo atual registrado no backend de cobranca.'
+                  ? 'Ciclo atual registrado no backend de cobrança.'
                   : 'Sem vencimento confirmado no momento.'}
           </p>
         </div>
 
         <div className="settings-module-card subscription-page__summary-card">
-          <span className="subscription-page__eyebrow">Teste gratis</span>
+          <span className="subscription-page__eyebrow">Teste grátis</span>
           <h3>
             {trialDaysLeft != null && planStatusKey === 'trialing'
               ? `${trialDaysLeft} ${trialDaysLeft === 1 ? 'dia' : 'dias'}`
               : trialAvailable
-                ? 'Disponivel'
+                ? 'Disponível'
                 : 'Encerrado'}
           </h3>
           <p className="muted">
             {planStatusKey === 'trialing' && trialEndsAt
-              ? `Valido ate ${formatDateLong(trialEndsAt)}.`
+              ? `Válido até ${formatDateLong(trialEndsAt)}.`
               : trialAvailable
-                ? 'Ative 7 dias do plano Pro sem cartao.'
-                : 'O periodo de teste ja foi consumido nesta conta.'}
+                ? 'Ative 7 dias do plano Pro sem cartão.'
+                : 'O período de teste já foi consumido nesta conta.'}
           </p>
         </div>
 
@@ -1042,8 +1042,8 @@ export default function Assinatura() {
           <h3>{paymentMethodLabel}</h3>
           <p className="muted">
             {currentPaymentMethod === 'credit_card'
-              ? 'Renovacao automatica habilitada no cartao.'
-              : `PIX manual ativo. Referencia atual: ${formatCurrencyFromCents(selectedPlanPriceCents)}.`}
+              ? 'Renovação automática habilitada no cartão.'
+              : `PIX manual ativo. Referência atual: ${formatCurrencyFromCents(selectedPlanPriceCents)}.`}
           </p>
         </div>
       </div>
@@ -1053,7 +1053,7 @@ export default function Assinatura() {
           <div className="subscription-page__section-head">
             <div>
               <h3>Resumo operacional</h3>
-              <p className="muted">Limites do plano e uso atual da operacao do estabelecimento.</p>
+              <p className="muted">Limites do plano e uso atual da operação do estabelecimento.</p>
             </div>
             <Link className="btn btn--ghost btn--sm" to="/planos#planos">
               Comparar planos
@@ -1068,9 +1068,9 @@ export default function Assinatura() {
               tone={getUsageTone(professionalsUsage.total, professionalsUsage.limit)}
             />
             <UsageCard
-              label="Servicos"
+              label="Serviços"
               value={`${servicesUsage.total.toLocaleString('pt-BR')} / ${getLimitLabel(servicesUsage.limit)}`}
-              hint="Cadastros disponiveis para venda"
+              hint="Cadastros disponíveis para venda"
               tone={getUsageTone(servicesUsage.total, servicesUsage.limit)}
             />
             <UsageCard
@@ -1089,17 +1089,17 @@ export default function Assinatura() {
 
           <div className="subscription-page__usage-grid subscription-page__usage-grid--secondary">
             <UsageCard
-              label="Agendamentos do mes"
+              label="Agendamentos do mês"
               value={appointmentUsage.limit == null
                 ? appointmentUsage.total.toLocaleString('pt-BR')
                 : `${appointmentUsage.total.toLocaleString('pt-BR')} / ${getLimitLabel(appointmentUsage.limit)}`}
-              hint={appointmentUsage.month || 'Mes atual'}
+              hint={appointmentUsage.month || 'Mês atual'}
               tone={getUsageTone(appointmentUsage.total, appointmentUsage.limit)}
             />
             <UsageCard
-              label="Relatorios"
-              value={planContext?.limits?.allowAdvancedReports ? 'Avancados' : 'Basicos'}
-              hint={planContext?.limits?.allowAdvancedReports ? 'Indicadores em tempo real liberados.' : 'Atualize para recursos avancados.'}
+              label="Relatórios"
+              value={planContext?.limits?.allowAdvancedReports ? 'Avançados' : 'Básicos'}
+              hint={planContext?.limits?.allowAdvancedReports ? 'Indicadores em tempo real liberados.' : 'Atualize para recursos avançados.'}
               tone={planContext?.limits?.allowAdvancedReports ? 'ok' : 'warning'}
             />
           </div>
@@ -1109,7 +1109,7 @@ export default function Assinatura() {
           <div className="subscription-page__section-head subscription-page__section-head--compact">
             <div>
               <h3>PIX manual</h3>
-              <p className="muted">Use PIX para primeira assinatura, renovacao, reativacao ou contingencia.</p>
+              <p className="muted">Use PIX para primeira assinatura, renovação, reativação ou contingência.</p>
             </div>
           </div>
 
@@ -1124,7 +1124,7 @@ export default function Assinatura() {
           <div className="subscription-page__action-stack">
             {trialAvailable ? (
               <button type="button" className="btn btn--outline btn--outline-brand" onClick={() => void handleStartTrial()} disabled={trialLoading}>
-                {trialLoading ? <span className="spinner" /> : 'Ativar 7 dias gratis do Pro'}
+                {trialLoading ? <span className="spinner" /> : 'Ativar 7 dias grátis do Pro'}
               </button>
             ) : null}
 
@@ -1136,7 +1136,7 @@ export default function Assinatura() {
           <div className="subscription-page__callout">
             <strong>Regra do PIX</strong>
             <p className="muted">
-              PIX nao renova sozinho. Se a cobranca vencer sem pagamento, a assinatura nao continua automaticamente e o acesso principal pode ser bloqueado.
+              PIX não renova sozinho. Se a cobrança vencer sem pagamento, a assinatura não continua automaticamente e o acesso principal pode ser bloqueado.
             </p>
           </div>
         </aside>
@@ -1146,7 +1146,7 @@ export default function Assinatura() {
         <div className="subscription-page__section-head">
           <div>
             <h3>Forma de pagamento</h3>
-            <p className="muted">Cartao de credito e o metodo principal com renovacao automatica. PIX continua como alternativa manual.</p>
+            <p className="muted">Cartão de crédito é o método principal com renovação automática. PIX continua como alternativa manual.</p>
           </div>
           <div className={`subscription-page__status-chip subscription-page__status-chip--${currentPaymentMethod === 'credit_card' ? 'success' : 'warning'}`}>
             {paymentMethodLabel}
@@ -1156,15 +1156,15 @@ export default function Assinatura() {
         <div className="subscription-page__payment-grid">
           <div className="subscription-page__payment-panel subscription-page__payment-panel--recommended">
             <span className="subscription-page__payment-tag">Recomendado</span>
-            <h4>Cartao de credito</h4>
-            <p className="muted">Renovacao automatica, sem interrupcoes enquanto as cobrancas forem aprovadas.</p>
+            <h4>Cartão de crédito</h4>
+            <p className="muted">Renovação automática, sem interrupções enquanto as cobranças forem aprovadas.</p>
             <form id="subscription-card-form" className="subscription-page__card-form">
               <div id="subscription-card-number" className="input subscription-page__card-frame" />
               <div className="subscription-page__card-inline">
                 <div id="subscription-card-expiration" className="input subscription-page__card-frame" />
                 <div id="subscription-card-security-code" className="input subscription-page__card-frame" />
               </div>
-              <input id="subscription-cardholder-name" className="input" placeholder="Titular do cartao" />
+              <input id="subscription-cardholder-name" className="input" placeholder="Titular do cartão" />
               <div className="subscription-page__card-inline">
                 <select id="subscription-card-issuer" className="input" defaultValue="" />
                 <select id="subscription-card-installments" className="input" defaultValue="" />
@@ -1186,13 +1186,13 @@ export default function Assinatura() {
                   : cardAction.label}
               </button>
             </form>
-            {cardState.loading ? <span className="muted">Carregando formulario seguro do gateway...</span> : null}
+            {cardState.loading ? <span className="muted">Carregando formulário seguro do gateway...</span> : null}
             {cardState.error ? <span className="muted" style={{ color: '#b91c1c' }}>{cardState.error}</span> : null}
             {cardRecoveryReady && hasDelinquentStatus ? (
               <div className="subscription-page__callout">
-                <strong>Cartao cadastrado com sucesso. Falta quitar a pendencia para reativar o plano.</strong>
+                <strong>Cartão cadastrado com sucesso. Falta quitar a pendência para reativar o plano.</strong>
                 <p className="muted">
-                  O cadastro do cartao nao libera o acesso sozinho. Quite a cobranca pendente agora ou gere um PIX manual.
+                  O cadastro do cartão não libera o acesso sozinho. Quite a cobrança pendente agora ou gere um PIX manual.
                 </p>
                 <div className="subscription-page__payment-actions">
                   <button
@@ -1201,7 +1201,7 @@ export default function Assinatura() {
                     onClick={handleRecoverNowWithCard}
                     disabled={cardState.loading || cardState.submitting || !cardGatewayPublicKey}
                   >
-                    {cardState.submitting ? <span className="spinner" /> : 'Pagar agora com cartao'}
+                    {cardState.submitting ? <span className="spinner" /> : 'Pagar agora com cartão'}
                   </button>
                   <button
                     type="button"
@@ -1225,7 +1225,7 @@ export default function Assinatura() {
           <div className="subscription-page__payment-panel">
             <span className="subscription-page__payment-tag subscription-page__payment-tag--manual">Manual</span>
             <h4>PIX</h4>
-            <p className="muted">Gere um PIX para contratar, renovar, reativar ou cobrir falha do cartao. Se nao pagar, a renovacao nao acontece sozinha.</p>
+            <p className="muted">Gere um PIX para contratar, renovar, reativar ou cobrir falha do cartão. Se não pagar, a renovação não acontece sozinha.</p>
             <div className="subscription-page__payment-actions">
               {openRenewalPayment ? (
                 <button type="button" className="btn btn--outline" onClick={handleOpenPendingRenewal}>
@@ -1234,7 +1234,7 @@ export default function Assinatura() {
               ) : null}
               {!openRenewalPayment && renewalRequired ? (
                 <button type="button" className="btn btn--outline" onClick={() => void handleGenerateRenewalPix()} disabled={renewalLoading}>
-                  {renewalLoading ? <span className="spinner" /> : 'Gerar PIX de renovacao'}
+                  {renewalLoading ? <span className="spinner" /> : 'Gerar PIX de renovação'}
                 </button>
               ) : null}
               <button
@@ -1253,8 +1253,8 @@ export default function Assinatura() {
       <section className="settings-module-card subscription-page__history-card">
         <div className="subscription-page__section-head">
           <div>
-            <h3>Historico financeiro</h3>
-            <p className="muted">Eventos recentes de assinatura, cobranca, PIX e regularizacao.</p>
+            <h3>Histórico financeiro</h3>
+            <p className="muted">Eventos recentes de assinatura, cobrança, PIX e regularização.</p>
           </div>
           <div className={`subscription-page__status-chip subscription-page__status-chip--${getStatusTone(billingStatus?.state)}`}>
             {getStatusLabel(billingStatus?.state)}
@@ -1273,8 +1273,8 @@ export default function Assinatura() {
           <>
             <div className="subscription-page__section-head subscription-page__section-head--compact">
               <div>
-                <h3>Historico de assinaturas</h3>
-                <p className="muted">Ultimos ciclos e mudancas registrados localmente.</p>
+                <h3>Histórico de assinaturas</h3>
+                <p className="muted">Últimos ciclos e mudanças registrados localmente.</p>
               </div>
             </div>
             <ul className="subscription-page__history-list">
@@ -1285,7 +1285,7 @@ export default function Assinatura() {
           </>
         ) : null}
         {!history.length && !financialEvents.length ? (
-          <div className="subscription-page__empty">Nenhuma movimentacao recente para exibir.</div>
+          <div className="subscription-page__empty">Nenhuma movimentação recente para exibir.</div>
         ) : null}
       </section>
 
@@ -1327,7 +1327,7 @@ export default function Assinatura() {
                 ) : (
                   <div className="row" style={{ alignItems: 'center', gap: 8 }}>
                     <span className="spinner" aria-hidden="true" />
-                    <span>Aguardando confirmacao do pagamento...</span>
+                    <span>Aguardando confirmação do pagamento...</span>
                   </div>
                 )}
                 {pixNotice ? <p className="muted" style={{ margin: 0 }}>{pixNotice}</p> : null}
@@ -1378,10 +1378,10 @@ export default function Assinatura() {
                   ? 'Pagamento confirmado. Renovamos o plano automaticamente.'
                   : 'Pagamento confirmado. Atualizamos a assinatura automaticamente.'
                 : isRenewalPix
-                  ? 'Pague pelo app do seu banco e aguarde a confirmacao automatica. Renovacao liberada apos a aprovacao.'
+                  ? 'Pague pelo app do seu banco e aguarde a confirmação automática. Renovação liberada após a aprovação.'
                   : isCheckoutPix
-                    ? 'Pague pelo app do seu banco e aguarde a confirmacao automatica. O novo plano sera liberado apos a aprovacao.'
-                    : 'Pague pelo app do seu banco e aguarde a confirmacao automatica.'}
+                    ? 'Pague pelo app do seu banco e aguarde a confirmação automática. O novo plano será liberado após a aprovação.'
+                    : 'Pague pelo app do seu banco e aguarde a confirmação automática.'}
             </p>
           </div>
         </Modal>

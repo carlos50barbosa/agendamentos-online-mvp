@@ -112,17 +112,17 @@ class BotEngine {
     if (!result.ok || !result.services?.length) {
       return {
         ok: false,
-        text: 'Nao consegui carregar servicos agora.',
+        text: 'Não consegui carregar serviços agora.',
         endpointCalled: result.endpoint,
         endpointResult: { status: result.status, latency_ms: result.elapsedMs || null },
       };
     }
     const view = renderList({
-      title: 'Escolha o servico:',
+      title: 'Escolha o serviço:',
       items: result.services,
       page: ctx.servicePage || 0,
       pageSize: PAGE.servicos,
-      format: (s) => s.nome || `Servico #${s.id}`,
+      format: (s) => s.nome || `Serviço #${s.id}`,
     });
     ctx.servicePage = view.paged.page;
     ctx.serviceOptions = result.services;
@@ -139,7 +139,7 @@ class BotEngine {
     if (!result.ok) {
       return {
         ok: false,
-        text: 'Nao consegui carregar profissionais agora.',
+        text: 'Não consegui carregar profissionais agora.',
         endpointCalled: result.endpoint,
         endpointResult: { status: result.status, latency_ms: result.elapsedMs || null },
       };
@@ -152,7 +152,7 @@ class BotEngine {
       return {
         ok: true,
         noProfessionalRequired: true,
-        text: 'Este servico nao exige profissional especifico.',
+        text: 'Este serviço não exige profissional específico.',
         endpointCalled: result.endpoint,
         endpointResult: { status: result.status, total: 0, latency_ms: result.elapsedMs || null },
       };
@@ -183,13 +183,13 @@ class BotEngine {
     if (!days.length) {
       return {
         ok: false,
-        text: 'Nao encontrei horarios disponiveis nos proximos dias.',
+        text: 'Não encontrei horários disponíveis nos próximos dias.',
         endpointCalled: result.endpoint,
         endpointResult: { status: result.status, totalDays: 0, latency_ms: result.elapsedMs || null },
       };
     }
     const lines = ['Escolha o dia:'];
-    days.forEach((d, i) => lines.push(`${i + 1}) ${d.label} (${d.totalSlots} horarios)`));
+    days.forEach((d, i) => lines.push(`${i + 1}) ${d.label} (${d.totalSlots} horários)`));
     lines.push('0) Menu');
     return {
       ok: true,
@@ -210,13 +210,13 @@ class BotEngine {
     if (!hours.length) {
       return {
         ok: false,
-        text: 'Este dia nao possui horarios livres.',
+        text: 'Este dia não possui horários livres.',
         endpointCalled: result.endpoint,
         endpointResult: { status: result.status, total: 0, latency_ms: result.elapsedMs || null },
       };
     }
     const view = renderList({
-      title: `Escolha o horario para ${ctx.diaSelecionado}:`,
+      title: `Escolha o horário para ${ctx.diaSelecionado}:`,
       items: hours,
       page: ctx.hourPage || 0,
       pageSize: PAGE.horas,
@@ -238,7 +238,7 @@ class BotEngine {
     if (!items.length) {
       return {
         ok: false,
-        text: 'Nao encontrei agendamentos remarcaveis. Digite 0 para menu.',
+        text: 'Não encontrei agendamentos remarcáveis. Digite 0 para menu.',
         endpointCalled: result.endpoint,
         endpointResult: { status: result.status, total: 0, latency_ms: result.elapsedMs || null },
       };
@@ -266,7 +266,7 @@ class BotEngine {
     if (!items.length) {
       return {
         ok: false,
-        text: 'Nao encontrei agendamentos cancelaveis. Digite 0 para menu.',
+        text: 'Não encontrei agendamentos canceláveis. Digite 0 para menu.',
         endpointCalled: result.endpoint,
         endpointResult: { status: result.status, total: 0, latency_ms: result.elapsedMs || null },
       };
@@ -290,7 +290,7 @@ class BotEngine {
   consumeGuard(ctx, seed) {
     const actionKey = keyForAction(seed);
     if (isDuplicateAction(ctx, actionKey)) {
-      return { blocked: true, message: 'Recebi a mesma solicitacao agora. Aguarde alguns segundos e tente novamente.' };
+      return { blocked: true, message: 'Recebi a mesma solicitação agora. Aguarde alguns segundos e tente novamente.' };
     }
     ctx.lastActionKey = actionKey;
     ctx.lastActionAt = Date.now();
@@ -394,7 +394,7 @@ class BotEngine {
       } else {
         const page = pagedList(ctx.serviceOptions || [], ctx.servicePage || 0, PAGE.servicos);
         if (choice === 9) {
-          if (!page.hasMore) await use(STATES.AGENDAR_SERVICO, { ...out, text: `Nao ha mais itens.\n${out.text}` }, 'NO_MORE');
+          if (!page.hasMore) await use(STATES.AGENDAR_SERVICO, { ...out, text: `Não há mais itens.\n${out.text}` }, 'NO_MORE');
           else { ctx.servicePage = (ctx.servicePage || 0) + 1; await use(STATES.AGENDAR_SERVICO, await this.showServices(tenantId, ctx), 'PAGE'); }
         } else if (choice < 1 || choice > page.items.length) {
           await use(STATES.AGENDAR_SERVICO, { ...out, text: `Opcao invalida.\n${out.text}` }, 'INVALID_OPTION');
@@ -416,7 +416,7 @@ class BotEngine {
       const page = pagedList(ctx.professionalOptions || [], ctx.professionalPage || 0, PAGE.profissionais);
       if (!choice) await use(STATES.AGENDAR_PROFISSIONAL, { ...out, text: `Digite o numero da opcao.\n${out.text}` }, 'INVALID_INPUT');
       else if (choice === 9) {
-        if (!page.hasMore) await use(STATES.AGENDAR_PROFISSIONAL, { ...out, text: `Nao ha mais itens.\n${out.text}` }, 'NO_MORE');
+          if (!page.hasMore) await use(STATES.AGENDAR_PROFISSIONAL, { ...out, text: `Não há mais itens.\n${out.text}` }, 'NO_MORE');
         else { ctx.professionalPage = (ctx.professionalPage || 0) + 1; await use(STATES.AGENDAR_PROFISSIONAL, await this.showProfessionals(tenantId, ctx), 'PAGE'); }
       } else if (choice < 1 || choice > page.items.length) await use(STATES.AGENDAR_PROFISSIONAL, { ...out, text: `Opcao invalida.\n${out.text}` }, 'INVALID_OPTION');
       else {
@@ -439,7 +439,7 @@ class BotEngine {
       const page = pagedList(ctx.hourOptions || [], ctx.hourPage || 0, PAGE.horas);
       if (!choice) await use(STATES.AGENDAR_HORA, { ...out, text: `Digite o numero da opcao.\n${out.text}` }, 'INVALID_INPUT');
       else if (choice === 9) {
-        if (!page.hasMore) await use(STATES.AGENDAR_HORA, { ...out, text: `Nao ha mais itens.\n${out.text}` }, 'NO_MORE');
+        if (!page.hasMore) await use(STATES.AGENDAR_HORA, { ...out, text: `Não há mais itens.\n${out.text}` }, 'NO_MORE');
         else { ctx.hourPage = (ctx.hourPage || 0) + 1; await use(STATES.AGENDAR_HORA, await this.showHours(tenantId, ctx), 'PAGE'); }
       } else if (choice < 1 || choice > page.items.length) await use(STATES.AGENDAR_HORA, { ...out, text: `Opcao invalida.\n${out.text}` }, 'INVALID_OPTION');
       else {
@@ -447,8 +447,8 @@ class BotEngine {
         ctx.slotSelecionado = sel.datetime;
         replyText = [
           'Confirmar agendamento?',
-          `Servico: ${ctx.servicoNome || '-'}`,
-          `Profissional: ${ctx.profissionalNome || 'Sem preferencia'}`,
+          `Serviço: ${ctx.servicoNome || '-'}`,
+          `Profissional: ${ctx.profissionalNome || 'Sem preferência'}`,
           `Data/Hora: ${toDateTimeLabel(ctx.slotSelecionado)}`,
           '',
           '1) Confirmar',
@@ -496,7 +496,7 @@ class BotEngine {
               await use(STATES.AGENDAR_HORA, await this.showHours(tenantId, ctx), 'CONFLICT');
             } else {
               nextState = STATES.AGENDAR_CONFIRMAR;
-              replyText = summarizeError(create.data, 'Nao foi possivel concluir agora.');
+              replyText = summarizeError(create.data, 'Não foi possível concluir agora.');
               action = 'CREATE_FAIL';
               endpointCalled = create.endpoint;
               endpointResult = { status: create.status, error: create.data?.error || null, latency_ms: create.elapsedMs || null };
@@ -509,7 +509,7 @@ class BotEngine {
       const page = pagedList(ctx.remarcarAppointments || [], ctx.remarcarPage || 0, PAGE.agendamentos);
       if (!choice) await use(STATES.REMARCAR_ESCOLHER_AGENDAMENTO, { ...out, text: `Digite o numero da opcao.\n${out.text}` }, 'INVALID_INPUT');
       else if (choice === 9) {
-        if (!page.hasMore) await use(STATES.REMARCAR_ESCOLHER_AGENDAMENTO, { ...out, text: `Nao ha mais itens.\n${out.text}` }, 'NO_MORE');
+        if (!page.hasMore) await use(STATES.REMARCAR_ESCOLHER_AGENDAMENTO, { ...out, text: `Não há mais itens.\n${out.text}` }, 'NO_MORE');
         else { ctx.remarcarPage = (ctx.remarcarPage || 0) + 1; await use(STATES.REMARCAR_ESCOLHER_AGENDAMENTO, await this.showRemarcaveis(tenantId, fromPhone, ctx), 'PAGE'); }
       } else if (choice < 1 || choice > page.items.length) await use(STATES.REMARCAR_ESCOLHER_AGENDAMENTO, { ...out, text: `Opcao invalida.\n${out.text}` }, 'INVALID_OPTION');
       else {
@@ -537,16 +537,16 @@ class BotEngine {
       const page = pagedList(ctx.hourOptions || [], ctx.hourPage || 0, PAGE.horas);
       if (!choice) await use(STATES.REMARCAR_ESCOLHER_HORA, { ...out, text: `Digite o numero da opcao.\n${out.text}` }, 'INVALID_INPUT');
       else if (choice === 9) {
-        if (!page.hasMore) await use(STATES.REMARCAR_ESCOLHER_HORA, { ...out, text: `Nao ha mais itens.\n${out.text}` }, 'NO_MORE');
+        if (!page.hasMore) await use(STATES.REMARCAR_ESCOLHER_HORA, { ...out, text: `Não há mais itens.\n${out.text}` }, 'NO_MORE');
         else { ctx.hourPage = (ctx.hourPage || 0) + 1; await use(STATES.REMARCAR_ESCOLHER_HORA, await this.showHours(tenantId, ctx), 'PAGE'); }
       } else if (choice < 1 || choice > page.items.length) await use(STATES.REMARCAR_ESCOLHER_HORA, { ...out, text: `Opcao invalida.\n${out.text}` }, 'INVALID_OPTION');
       else {
         const sel = page.items[choice - 1];
         ctx.slotSelecionado = sel.datetime;
         replyText = [
-          'Confirmar remarcacao?',
-          `Horario atual: ${toDateTimeLabel(ctx.agendamentoInicio)}`,
-          `Novo horario: ${toDateTimeLabel(ctx.slotSelecionado)}`,
+          'Confirmar remarcação?',
+          `Horário atual: ${toDateTimeLabel(ctx.agendamentoInicio)}`,
+          `Novo horário: ${toDateTimeLabel(ctx.slotSelecionado)}`,
           '',
           '1) Confirmar',
           '2) Voltar',
@@ -584,7 +584,7 @@ class BotEngine {
             await use(STATES.REMARCAR_ESCOLHER_HORA, await this.showHours(tenantId, ctx), 'CONFLICT');
           } else {
             nextState = STATES.REMARCAR_CONFIRMAR;
-            replyText = summarizeError(result.data, 'Nao foi possivel remarcar agora.');
+            replyText = summarizeError(result.data, 'Não foi possível remarcar agora.');
             action = 'REMARCAR_FAIL';
             endpointCalled = result.endpoint;
             endpointResult = { status: result.status, error: result.data?.error || null, latency_ms: result.elapsedMs || null };
@@ -596,7 +596,7 @@ class BotEngine {
       const page = pagedList(ctx.cancelarAppointments || [], ctx.cancelarPage || 0, PAGE.agendamentos);
       if (!choice) await use(STATES.CANCELAR_ESCOLHER_AGENDAMENTO, { ...out, text: `Digite o numero da opcao.\n${out.text}` }, 'INVALID_INPUT');
       else if (choice === 9) {
-        if (!page.hasMore) await use(STATES.CANCELAR_ESCOLHER_AGENDAMENTO, { ...out, text: `Nao ha mais itens.\n${out.text}` }, 'NO_MORE');
+        if (!page.hasMore) await use(STATES.CANCELAR_ESCOLHER_AGENDAMENTO, { ...out, text: `Não há mais itens.\n${out.text}` }, 'NO_MORE');
         else { ctx.cancelarPage = (ctx.cancelarPage || 0) + 1; await use(STATES.CANCELAR_ESCOLHER_AGENDAMENTO, await this.showCancelaveis(tenantId, fromPhone, ctx), 'PAGE'); }
       } else if (choice < 1 || choice > page.items.length) await use(STATES.CANCELAR_ESCOLHER_AGENDAMENTO, { ...out, text: `Opcao invalida.\n${out.text}` }, 'INVALID_OPTION');
       else {
@@ -608,11 +608,11 @@ class BotEngine {
         nextState = STATES.CANCELAR_CONFIRMAR;
         replyText = [
           'Cancelar mesmo?',
-          `Servico: ${ctx.servicoNome || '-'}`,
-          `Horario: ${toDateTimeLabel(ctx.agendamentoInicio)}`,
+          `Serviço: ${ctx.servicoNome || '-'}`,
+          `Horário: ${toDateTimeLabel(ctx.agendamentoInicio)}`,
           '',
           '1) Sim',
-          '2) Nao',
+          '2) Não',
           '0) Menu',
         ].join('\n');
         action = 'CANCEL_CONFIRMAR';
@@ -642,7 +642,7 @@ class BotEngine {
             endpointResult = { status: result.status, latency_ms: result.elapsedMs || null };
           } else {
             nextState = STATES.CANCELAR_CONFIRMAR;
-            replyText = `${summarizeError(result.data, 'Nao foi possivel cancelar agora.')}\nDigite \"humano\" para atendimento ou 0 para menu.`;
+            replyText = `${summarizeError(result.data, 'Não foi possível cancelar agora.')}\nDigite \"humano\" para atendimento ou 0 para menu.`;
             action = 'CANCEL_FAIL';
             endpointCalled = result.endpoint;
             endpointResult = { status: result.status, error: result.data?.error || null, latency_ms: result.elapsedMs || null };

@@ -31,6 +31,27 @@ function getErrorMessage(error, fallback) {
   return error?.data?.message || error?.message || fallback;
 }
 
+function getMercadoPagoConnectErrorMessage(error) {
+  if (error?.data?.error !== 'mp_config_missing') {
+    return getErrorMessage(error, 'Nao foi possivel iniciar a conexao.');
+  }
+
+  const missing = Array.isArray(error?.data?.missing)
+    ? error.data.missing.filter((item) => Boolean(item))
+    : [];
+  const suggestedRedirect = String(error?.data?.example_redirect_uri || '').trim();
+  const parts = ['Configuracao do Mercado Pago incompleta no backend.'];
+
+  if (missing.length) {
+    parts.push(`Faltam: ${missing.join(', ')}.`);
+  }
+  if (missing.includes('MP_REDIRECT_URI') && suggestedRedirect) {
+    parts.push(`Use ${suggestedRedirect} como callback no app do Mercado Pago e no backend.`);
+  }
+
+  return parts.join(' ');
+}
+
 function formatCurrencyFromCents(value) {
   if (typeof value !== 'number' || !Number.isFinite(value)) return '';
   return (Number(value) / 100).toLocaleString('pt-BR', {
@@ -453,7 +474,7 @@ export function useBusinessSettings(options = {}) {
         ...current,
         loading: false,
         noticeType: 'error',
-        noticeMessage: getErrorMessage(error, 'Nao foi possivel carregar o sinal.'),
+        noticeMessage: getErrorMessage(error, 'Não foi possível carregar o sinal.'),
       }));
       return null;
     }
@@ -508,14 +529,14 @@ export function useBusinessSettings(options = {}) {
 
     if (waStatus) {
       const waErrorByReason = {
-        manual_connection_required: 'O fluxo automatico foi aposentado. Use a conexao manual assistida abaixo.',
-        legacy_oauth_deprecated: 'O fluxo antigo foi aposentado. Use a conexao manual assistida abaixo.',
+        manual_connection_required: 'O fluxo automático foi aposentado. Use a conexão manual assistida abaixo.',
+        legacy_oauth_deprecated: 'O fluxo antigo foi aposentado. Use a conexão manual assistida abaixo.',
       };
       const waMessageMap = {
         connected: { notice: 'WhatsApp conectado com sucesso.' },
         disconnected: { notice: 'WhatsApp desconectado.' },
-        error: { error: waErrorByReason[waReason] || 'Nao foi possivel concluir a conexao do WhatsApp.' },
-        phone_in_use: { error: 'Esse numero ja esta conectado a outro estabelecimento.' },
+        error: { error: waErrorByReason[waReason] || 'Não foi possível concluir a conexão do WhatsApp.' },
+        phone_in_use: { error: 'Esse número já está conectado a outro estabelecimento.' },
       };
       const waPayload = waMessageMap[waStatus];
       if (waPayload?.notice || waPayload?.error) {
@@ -534,7 +555,7 @@ export function useBusinessSettings(options = {}) {
       const mpMessageMap = {
         connected: { notice: 'Mercado Pago conectado com sucesso.' },
         disconnected: { notice: 'Mercado Pago desconectado.' },
-        error: { error: 'Nao foi possivel concluir a conexao do Mercado Pago.' },
+        error: { error: 'Não foi possível concluir a conexão do Mercado Pago.' },
       };
       const mpPayload = mpMessageMap[mpStatus];
       if (mpPayload?.notice || mpPayload?.error) {
@@ -679,7 +700,7 @@ export function useBusinessSettings(options = {}) {
       appointmentsEstimate: totalBalance > 0 ? totalBalance / 5 : 0,
       planBadge:
         planInfo.activeUntil
-          ? `Assinatura ativa ate ${formatLongDate(planInfo.activeUntil)}`
+          ? `Assinatura ativa até ${formatLongDate(planInfo.activeUntil)}`
           : includedLimit > 0
             ? 'Incluido no plano'
             : '',
@@ -687,10 +708,10 @@ export function useBusinessSettings(options = {}) {
       remainingLabel: includedBalance >= 0 ? `Restam ${Math.max(includedBalance, 0).toLocaleString('pt-BR')}` : '',
       planSummaryItems: [
         includedLimit
-          ? `WhatsApp: ${includedLimit.toLocaleString('pt-BR')} msgs/mes incluidos no plano.`
-          : 'WhatsApp com franquia mensal indisponivel no momento.',
+          ? `WhatsApp: ${includedLimit.toLocaleString('pt-BR')} mensagens/mês incluídas no plano.`
+          : 'WhatsApp com franquia mensal indisponível no momento.',
         'Max. 5 mensagens por agendamento.',
-        planInfo.allowAdvanced ? 'Relatorios avancados ativos.' : 'Relatorios basicos ativos.',
+        planInfo.allowAdvanced ? 'Relatórios avançados ativos.' : 'Relatórios básicos ativos.',
       ],
     };
   }, [billing.wallet, planInfo.activeUntil, planInfo.allowAdvanced]);
@@ -754,7 +775,7 @@ export function useBusinessSettings(options = {}) {
         validationLoading: false,
         validated: true,
         preview: response?.preview || null,
-        notice: 'Dados validados com sucesso na Meta. Revise o resumo e salve a conexao.',
+        notice: 'Dados validados com sucesso na Meta. Revise o resumo e salve a conexão.',
       }));
       return response;
     } catch (error) {
@@ -763,7 +784,7 @@ export function useBusinessSettings(options = {}) {
         validationLoading: false,
         validated: false,
         preview: null,
-        error: getErrorMessage(error, 'Nao foi possivel validar os dados do WhatsApp na Meta.'),
+        error: getErrorMessage(error, 'Não foi possível validar os dados do WhatsApp na Meta.'),
       }));
       return null;
     }
@@ -774,7 +795,7 @@ export function useBusinessSettings(options = {}) {
     if (!whatsapp.validated) {
       setWhatsapp((current) => ({
         ...current,
-        error: 'Valide a conexao antes de salvar.',
+        error: 'Valide a conexão antes de salvar.',
       }));
       return null;
     }
@@ -802,7 +823,7 @@ export function useBusinessSettings(options = {}) {
       setWhatsapp((current) => ({
         ...current,
         saveLoading: false,
-        error: getErrorMessage(error, 'Nao foi possivel salvar a conexao manual do WhatsApp.'),
+        error: getErrorMessage(error, 'Não foi possível salvar a conexão manual do WhatsApp.'),
       }));
       return null;
     }
@@ -832,7 +853,7 @@ export function useBusinessSettings(options = {}) {
       setWhatsapp((current) => ({
         ...current,
         disconnectLoading: false,
-        error: getErrorMessage(error, 'Nao foi possivel desconectar o WhatsApp.'),
+        error: getErrorMessage(error, 'Não foi possível desconectar o WhatsApp.'),
       }));
     }
   }, [isEstablishment, whatsappConnectEnabled]);
@@ -842,7 +863,7 @@ export function useBusinessSettings(options = {}) {
     if (!deposit.allowed) {
       setMercadoPago((current) => ({
         ...current,
-        error: 'Recurso disponivel apenas para planos Pro e Premium.',
+        error: 'Recurso disponível apenas para planos Pro e Premium.',
         notice: '',
       }));
       return;
@@ -855,13 +876,13 @@ export function useBusinessSettings(options = {}) {
     }));
     try {
       const response = await Api.mpConnectStart();
-      if (!response?.url) throw new Error('URL de conexao indisponivel.');
+      if (!response?.url) throw new Error('URL de conexão indisponível.');
       window.location.assign(response.url);
     } catch (error) {
       setMercadoPago((current) => ({
         ...current,
         connectLoading: false,
-        error: getErrorMessage(error, 'Nao foi possivel iniciar a conexao.'),
+        error: getMercadoPagoConnectErrorMessage(error),
       }));
     }
   }, [deposit.allowed, isEstablishment]);
@@ -886,7 +907,7 @@ export function useBusinessSettings(options = {}) {
       setMercadoPago((current) => ({
         ...current,
         disconnectLoading: false,
-        error: getErrorMessage(error, 'Nao foi possivel desconectar o Mercado Pago.'),
+        error: getErrorMessage(error, 'Não foi possível desconectar o Mercado Pago.'),
       }));
     }
   }, [isEstablishment, refreshMercadoPagoConnection]);
@@ -961,7 +982,7 @@ export function useBusinessSettings(options = {}) {
         percent: config.percent != null ? String(config.percent) : '',
         holdMinutes: Number(config.hold_minutes) || DEFAULT_DEPOSIT_HOLD_MINUTES,
         noticeType: 'success',
-        noticeMessage: 'Configuracao atualizada com sucesso.',
+        noticeMessage: 'Configuração atualizada com sucesso.',
       }));
       return true;
     } catch (error) {
@@ -969,7 +990,7 @@ export function useBusinessSettings(options = {}) {
         ...current,
         saving: false,
         noticeType: 'error',
-        noticeMessage: getErrorMessage(error, 'Nao foi possivel salvar o sinal.'),
+        noticeMessage: getErrorMessage(error, 'Não foi possível salvar o sinal.'),
       }));
       return false;
     }
@@ -1022,7 +1043,7 @@ export function useBusinessSettings(options = {}) {
       await refreshWhatsAppBilling();
       return true;
     } catch (error) {
-      setTopupError(getErrorMessage(error, 'Falha ao gerar a cobranca PIX do pacote.'));
+      setTopupError(getErrorMessage(error, 'Falha ao gerar a cobrança PIX do pacote.'));
       return false;
     } finally {
       setTopupLoadingKey('');
@@ -1061,12 +1082,12 @@ export function useBusinessSettings(options = {}) {
         await refreshWhatsAppBilling();
       } else if (pixAttemptsRef.current >= PIX_POLL_MAX_ATTEMPTS) {
         clearPixPolling();
-        setPixNotice('Ainda nao confirmou. Se voce ja pagou, aguarde alguns instantes e clique em Atualizar.');
+        setPixNotice('Ainda não confirmou. Se você já pagou, aguarde alguns instantes e clique em Atualizar.');
       }
       return response;
     } catch (error) {
       if (!silent) {
-        setPixNotice(getErrorMessage(error, 'Nao foi possivel atualizar o status agora.'));
+        setPixNotice(getErrorMessage(error, 'Não foi possível atualizar o status agora.'));
       }
       return null;
     } finally {
@@ -1103,10 +1124,10 @@ export function useBusinessSettings(options = {}) {
     if (!pixCode) return false;
     try {
       const ok = await copyText(pixCode);
-      setPixCopyNotice(ok ? 'Chave PIX copiada.' : 'Nao foi possivel copiar agora.');
+      setPixCopyNotice(ok ? 'Chave PIX copiada.' : 'Não foi possível copiar agora.');
       return ok;
     } catch {
-      setPixCopyNotice('Nao foi possivel copiar agora.');
+      setPixCopyNotice('Não foi possível copiar agora.');
       return false;
     }
   }, [pixCode]);

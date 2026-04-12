@@ -428,7 +428,7 @@ router.put('/me', auth, async (req, res) => {
       return res.status(400).json({ error: 'nome_invalido', message: 'Informe seu nome.' });
     }
     if (!email) {
-      return res.status(400).json({ error: 'email_invalido', message: 'Informe um email.' });
+      return res.status(400).json({ error: 'email_invalido', message: 'Informe um e-mail.' });
     }
 
     const emailNorm = email.toLowerCase();
@@ -577,8 +577,8 @@ router.put('/me', auth, async (req, res) => {
       const codeHash = await bcrypt.hash(code, 10);
       const expiresAt = new Date(Date.now() + 30 * 60 * 1000);
       await pool.query('INSERT INTO email_change_tokens (user_id, new_email, code_hash, expires_at) VALUES (?,?,?,?)', [userId, emailNorm, codeHash, expiresAt]);
-      const subject = 'Confirme seu novo email';
-      const html = `<p>Ola!</p><p>Use o código <strong>${code}</strong> para confirmar seu novo email.</p><p>O código expira em 30 minutos.</p>`;
+      const subject = 'Confirme seu novo e-mail';
+      const html = `<p>Olá!</p><p>Use o código <strong>${code}</strong> para confirmar seu novo e-mail.</p><p>O código expira em 30 minutos.</p>`;
       try { await notifyEmail(emailNorm, subject, html); } catch (err) { console.error('[auth/me][email]', err); }
 
       const [[userRow]] = await pool.query("SELECT id, nome, email, telefone, data_nascimento, cpf_cnpj, cep, endereco, numero, complemento, bairro, cidade, estado, avatar_url, tipo, notify_email_estab, notify_whatsapp_estab, plan, plan_status, plan_trial_ends_at, plan_active_until, plan_subscription_id FROM usuarios WHERE id=? LIMIT 1", [userId]);

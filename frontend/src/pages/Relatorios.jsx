@@ -32,15 +32,15 @@ const WEEKDAY_LABELS = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sab'];
 const STATUS_FILTERS = [
   { value: 'confirmado', label: 'Confirmados' },
   { value: 'pendente', label: 'Pendentes' },
-  { value: 'concluido', label: 'Concluidos' },
+  { value: 'concluido', label: 'Concluídos' },
   { value: 'cancelado', label: 'Cancelados' },
 ];
 
 const DEFAULT_RANGE = '30d';
 const RANGE_OPTIONS = [
-  { value: '7d', label: 'Ultimos 7 dias' },
-  { value: '30d', label: 'Ultimos 30 dias' },
-  { value: '90d', label: 'Ultimos 90 dias' },
+  { value: '7d', label: 'Últimos 7 dias' },
+  { value: '30d', label: 'Últimos 30 dias' },
+  { value: '90d', label: 'Últimos 90 dias' },
   { value: 'custom', label: 'Intervalo personalizado' },
 ];
 
@@ -117,7 +117,7 @@ function buildPdfHtml({ rangeLabel, metrics, miniMetrics, dailyRows, serviceRows
     <head>
       <meta charset="utf-8" />
       <meta name="viewport" content="width=device-width,initial-scale=1" />
-      <title>Relatorios</title>
+      <title>Relatórios</title>
       <style>
         body { font-family: Arial, sans-serif; color:#0f172a; margin:24px; }
         h1 { font-size:20px; margin:0 0 6px; }
@@ -134,41 +134,41 @@ function buildPdfHtml({ rangeLabel, metrics, miniMetrics, dailyRows, serviceRows
       </style>
     </head>
     <body>
-      <h1>Relatorios do estabelecimento</h1>
+      <h1>Relatórios do estabelecimento</h1>
       ${rangeLabel ? `<div class="muted">${rangeLabel}</div>` : ''}
       <div class="grid">${metricCards}</div>
       <div class="grid">${miniCards}</div>
-      <div class="section-title">Resumo diario</div>
+      <div class="section-title">Resumo diário</div>
       <table>
         <thead>
           <tr>
             <th>Dia</th>
             <th>Confirmados</th>
             <th>Cancelados</th>
-            <th>Concluidos</th>
+            <th>Concluídos</th>
             <th>No-show</th>
             <th>Receita</th>
           </tr>
         </thead>
         <tbody>
-          ${dailyLines || '<tr><td colspan="6">Sem dados no periodo.</td></tr>'}
+          ${dailyLines || '<tr><td colspan="6">Sem dados no período.</td></tr>'}
         </tbody>
       </table>
-      <div class="section-title">Servicos com mais agendamentos</div>
+      <div class="section-title">Serviços com mais agendamentos</div>
       <table>
         <thead>
           <tr>
-            <th>Servico</th>
+            <th>Serviço</th>
             <th>Total</th>
             <th>Confirmados</th>
             <th>Cancelados</th>
-            <th>Concluidos</th>
+            <th>Concluídos</th>
             <th>Receita</th>
-            <th>Ticket medio</th>
+            <th>Ticket médio</th>
           </tr>
         </thead>
         <tbody>
-          ${serviceLines || '<tr><td colspan="7">Sem dados no periodo.</td></tr>'}
+          ${serviceLines || '<tr><td colspan="7">Sem dados no período.</td></tr>'}
         </tbody>
       </table>
     </body>
@@ -254,8 +254,8 @@ export default function Relatorios() {
 
   const filterError = useMemo(() => {
     if (!showCustomRangeInputs) return '';
-    if (!customStart || !customEnd) return 'Informe data inicial e final para gerar o relatorio.';
-    if (customStart > customEnd) return 'A data inicial nao pode ser maior que a data final.';
+    if (!customStart || !customEnd) return 'Informe data inicial e final para gerar o relatório.';
+    if (customStart > customEnd) return 'A data inicial não pode ser maior que a data final.';
     return '';
   }, [showCustomRangeInputs, customStart, customEnd]);
 
@@ -300,7 +300,7 @@ export default function Relatorios() {
       })
       .catch((err) => {
         if (!active) return;
-        const message = err?.message || 'Nao foi possivel carregar os relatorios.';
+        const message = err?.message || 'Não foi possível carregar os relatórios.';
         setError(message);
         setData(null);
       })
@@ -337,7 +337,7 @@ export default function Relatorios() {
       })
       .catch((err) => {
         if (!active) return;
-        const message = err?.message || 'Nao foi possivel carregar os relatorios Pro.';
+        const message = err?.message || 'Não foi possível carregar os relatórios Pro.';
         setProError(message);
         setFunilData([]);
         setProfissionaisData([]);
@@ -375,7 +375,7 @@ export default function Relatorios() {
       },
       {
         key: 'concluidos',
-        label: 'Concluidos',
+        label: 'Concluídos',
         value: concluidos,
         hint: confirmados ? `${formatPercent(realizationRate)} dos confirmados` : null,
       },
@@ -387,7 +387,7 @@ export default function Relatorios() {
       },
       {
         key: 'receitaConcluida',
-        label: 'Receita concluida',
+        label: 'Receita concluída',
         value: centsToCurrency(revenue.concluida),
         hint: revenue.perdida ? `Perdida: ${centsToCurrency(revenue.perdida)}` : null,
       },
@@ -399,7 +399,7 @@ export default function Relatorios() {
       },
       {
         key: 'ticketMedio',
-        label: 'Ticket medio',
+        label: 'Ticket médio',
         value: centsToCurrency(revenue.ticket_medio),
         hint: null,
       },
@@ -411,7 +411,7 @@ export default function Relatorios() {
     return [
       {
         key: 'taxaConfirmacao',
-        label: 'Taxa de confirmacao',
+        label: 'Taxa de confirmação',
         value: formatPercent(rates.taxa_confirmacao || 0),
       },
       {
@@ -506,7 +506,7 @@ export default function Relatorios() {
 
   const handleDownload = async () => {
     if (!data || !allowAdvanced) {
-      setError('Exportacao disponivel a partir do plano Pro.');
+      setError('Exportação disponível a partir do plano Pro.');
       return;
     }
     if (showCustomRangeInputs && filterError) {
@@ -535,7 +535,7 @@ export default function Relatorios() {
 
   const handleExportPdf = () => {
     if (!data || !allowAdvanced) {
-      setError('Exportacao disponivel a partir do plano Pro.');
+      setError('Exportação disponível a partir do plano Pro.');
       return;
     }
     const rangeLabel = renderRangeSummary(true);
@@ -563,7 +563,7 @@ export default function Relatorios() {
     const startLabel = startLocal ? formatDetailedDate(startLocal) : new Date(start).toLocaleDateString('pt-BR');
     const endLabel = endLocal ? formatDetailedDate(endLocal) : new Date(end).toLocaleDateString('pt-BR');
     const parts = [
-      `Periodo analisado: ${startLabel} - ${endLabel} (${days} dias)`,
+      `Período analisado: ${startLabel} - ${endLabel} (${days} dias)`,
     ];
     if (statusFilters.length) {
       const statusLabels = STATUS_FILTERS
@@ -572,7 +572,7 @@ export default function Relatorios() {
       if (statusLabels.length) parts.push(statusLabels.join(', '));
     }
     if (selectedService) {
-      parts.push(`Servico: ${selectedService.nome || selectedService.title || selectedService.name}`);
+      parts.push(`Serviço: ${selectedService.nome || selectedService.title || selectedService.name}`);
     }
     if (profissionalFilter !== 'all') {
       const prof = profissionalOptions.find((p) => String(p.id) === String(profissionalFilter));
@@ -600,9 +600,9 @@ export default function Relatorios() {
     return (
       <div className="report-page">
         <div className="card report-card">
-          <h2 className="report-heading">Relatorios</h2>
+          <h2 className="report-heading">Relatórios</h2>
           <div className="box error report-alert">
-            Relatorios disponiveis apenas para estabelecimentos.
+            Relatórios disponíveis apenas para estabelecimentos.
           </div>
         </div>
       </div>
@@ -615,7 +615,7 @@ export default function Relatorios() {
         <div className="report-header">
           <div className="report-title">
             <IconChart aria-hidden className="report-title__icon" />
-            <h2 className="report-heading">Relatorios do estabelecimento</h2>
+            <h2 className="report-heading">Relatórios do estabelecimento</h2>
           </div>
           <div className="report-filters">
             <select
@@ -640,7 +640,7 @@ export default function Relatorios() {
                   onChange={(event) => setCustomStart(event.target.value)}
                   disabled={loading}
                 />
-                <span className="report-filters__separator muted">ate</span>
+                <span className="report-filters__separator muted">até</span>
                 <input
                   type="date"
                   className="input"
@@ -671,13 +671,13 @@ export default function Relatorios() {
         )}
         {!allowAdvanced && (
           <div className="box info report-alert">
-            Filtros personalizados, funil e exportacao estao disponiveis a partir do plano Pro.
+            Filtros personalizados, funil e exportação estão disponíveis a partir do plano Pro.
           </div>
         )}
 
         <div className={`report-advanced ${allowAdvanced ? '' : 'is-locked'}`}>
           <div className="report-advanced__header">
-            <span className="report-advanced__title">Filtros avancados</span>
+            <span className="report-advanced__title">Filtros avançados</span>
             {!allowAdvanced && <span className="badge badge--pro">Pro</span>}
           </div>
           <div className="report-advanced__filters">
@@ -701,14 +701,14 @@ export default function Relatorios() {
               </div>
             </div>
             <div className="report-advanced__group">
-              <span className="report-advanced__label">Servico</span>
+              <span className="report-advanced__label">Serviço</span>
               <select
                 className="input"
                 value={serviceFilter}
                 onChange={(event) => setServiceFilter(event.target.value)}
                 disabled={!allowAdvanced || loading || !serviceOptions.length}
               >
-                <option value="all">Todos os servicos</option>
+                <option value="all">Todos os serviços</option>
                 {serviceOptions.map((svc) => (
                   <option key={svc.id} value={svc.id}>
                     {svc.nome || svc.title || svc.name}
@@ -751,7 +751,7 @@ export default function Relatorios() {
           </div>
           {!allowAdvanced && (
             <div className="report-advanced__cta">
-              Desbloqueie filtros por profissional, origem e status avancado no plano Pro.
+              Desbloqueie filtros por profissional, origem e status avançado no plano Pro.
               <a className="btn btn--outline btn--sm" href="/planos">Ver planos</a>
             </div>
           )}
@@ -777,7 +777,7 @@ export default function Relatorios() {
                   </div>
                 ))
               ) : (
-                <div className="empty report-empty">Nenhum dado disponivel para o periodo selecionado.</div>
+                <div className="empty report-empty">Nenhum dado disponível para o período selecionado.</div>
               )}
             </div>
 
@@ -794,7 +794,7 @@ export default function Relatorios() {
 
             <section className="report-section">
               <div className="report-section__header">
-                <h3>Volume diario</h3>
+                <h3>Volume diário</h3>
                 <div className="report-actions">
                   {allowAdvanced && (
                     <>
@@ -821,10 +821,10 @@ export default function Relatorios() {
               </div>
 
               {!displayDaily.length ? (
-                <div className="empty">Nenhum agendamento no periodo selecionado.</div>
+                <div className="empty">Nenhum agendamento no período selecionado.</div>
               ) : (
                 <>
-                  <div className="report-chart" role="img" aria-label="Comparativo diario de confirmados e cancelados">
+                  <div className="report-chart" role="img" aria-label="Comparativo diário de confirmados e cancelados">
                     <div className="report-chart__grid">
                       {displayDaily.map((item) => {
                         const total = Number(item.confirmados || 0) + Number(item.cancelados || 0);
@@ -861,7 +861,7 @@ export default function Relatorios() {
                           <th>Dia</th>
                           <th>Confirmados</th>
                           <th>Cancelados</th>
-                          <th>Concluidos</th>
+                          <th>Concluídos</th>
                           <th>No-show</th>
                           <th>Receita (BRL)</th>
                         </tr>
@@ -886,7 +886,7 @@ export default function Relatorios() {
 
             <section className="report-section">
               <div className="report-section__header">
-                <h3>Insights do periodo</h3>
+                <h3>Insights do período</h3>
               </div>
               <div className="report-grid">
                 <div className="report-panel">
@@ -902,7 +902,7 @@ export default function Relatorios() {
                         {[
                           { key: 'agendados', label: 'Agendados', value: funnelTotals.agendados },
                           { key: 'confirmados', label: 'Confirmados', value: funnelTotals.confirmados },
-                          { key: 'concluidos', label: 'Concluidos', value: funnelTotals.concluidos },
+                          { key: 'concluidos', label: 'Concluídos', value: funnelTotals.concluidos },
                         ].map((step) => {
                           const maxValue = Math.max(funnelTotals.agendados, 1);
                           const width = `${Math.round((step.value / maxValue) * 100)}%`;
@@ -917,8 +917,8 @@ export default function Relatorios() {
                           );
                         })}
                         <div className="report-funnel__rates">
-                          <span>Confirmacao: {formatPercent(funnelTotals.confirmados / Math.max(funnelTotals.agendados, 1))}</span>
-                          <span>Conclusao: {formatPercent(funnelTotals.concluidos / Math.max(funnelTotals.confirmados, 1))}</span>
+                          <span>Confirmação: {formatPercent(funnelTotals.confirmados / Math.max(funnelTotals.agendados, 1))}</span>
+                          <span>Conclusão: {formatPercent(funnelTotals.concluidos / Math.max(funnelTotals.confirmados, 1))}</span>
                         </div>
                         {funilData.length > 0 && (
                           <div className="report-funnel__list">
@@ -934,7 +934,7 @@ export default function Relatorios() {
                     )
                   ) : (
                     <div className="report-lock">
-                      Disponivel no plano Pro.
+                      Disponível no plano Pro.
                     </div>
                   )}
                 </div>
@@ -944,7 +944,7 @@ export default function Relatorios() {
                     <h4>Dias da semana</h4>
                   </div>
                   {!daysOfWeek.length ? (
-                    <div className="empty">Sem dados para o periodo.</div>
+                    <div className="empty">Sem dados para o período.</div>
                   ) : (
                     <div className="report-chart report-chart--compact">
                       <div className="report-chart__grid">
@@ -971,10 +971,10 @@ export default function Relatorios() {
 
                 <div className="report-panel">
                   <div className="report-panel__header">
-                    <h4>Antecedencia</h4>
+                    <h4>Antecedência</h4>
                   </div>
                   {!leadTime.length ? (
-                    <div className="empty">Sem dados para o periodo.</div>
+                    <div className="empty">Sem dados para o período.</div>
                   ) : (
                     <div className="report-chart report-chart--compact">
                       <div className="report-chart__grid">
@@ -1039,7 +1039,7 @@ export default function Relatorios() {
 
               {tableTab === 'daily' && (
                 !dailyData.length ? (
-                  <div className="empty">Nenhum agendamento no periodo selecionado.</div>
+                  <div className="empty">Nenhum agendamento no período selecionado.</div>
                 ) : (
                   <div className="report-table-wrapper">
                     <table className="report-table">
@@ -1048,7 +1048,7 @@ export default function Relatorios() {
                           <th>Dia</th>
                           <th>Confirmados</th>
                           <th>Cancelados</th>
-                          <th>Concluidos</th>
+                          <th>Concluídos</th>
                           <th>No-show</th>
                           <th>Receita (BRL)</th>
                         </tr>
@@ -1072,21 +1072,21 @@ export default function Relatorios() {
 
               {tableTab === 'services' && (
                 !services.length ? (
-                  <div className="empty">Nenhum servico movimentou agendamentos no periodo.</div>
+                  <div className="empty">Nenhum serviço movimentou agendamentos no período.</div>
                 ) : (
                   <div className="report-table-wrapper">
                     <table className="report-table">
                       <thead>
                         <tr>
-                          <th>Servico</th>
+                          <th>Serviço</th>
                           <th>Total</th>
                           <th>Confirmados</th>
                           <th>Cancelados</th>
-                          <th>Concluidos</th>
+                          <th>Concluídos</th>
                           <th>Receita</th>
-                          <th>Ticket medio</th>
+                          <th>Ticket médio</th>
                           <th>% Cancelamento</th>
-                          <th>% Conclusao</th>
+                          <th>% Conclusão</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -1115,10 +1115,10 @@ export default function Relatorios() {
 
               {tableTab === 'profissionais' && (
                 !allowAdvanced ? (
-                  <div className="report-lock">Disponivel no plano Pro.</div>
+                  <div className="report-lock">Disponível no plano Pro.</div>
                 ) : (
                   !profissionaisData.length ? (
-                    <div className="empty">Nenhum profissional com agendamentos no periodo.</div>
+                    <div className="empty">Nenhum profissional com agendamentos no período.</div>
                   ) : (
                     <div className="report-table-wrapper">
                       <table className="report-table">
@@ -1126,12 +1126,12 @@ export default function Relatorios() {
                           <tr>
                             <th>Profissional</th>
                             <th>Total</th>
-                            <th>Concluidos</th>
+                            <th>Concluídos</th>
                             <th>Cancelados</th>
                             <th>No-show</th>
                             <th>Receita</th>
-                            <th>Ticket medio</th>
-                            <th>Ocupacao (min)</th>
+                            <th>Ticket médio</th>
+                            <th>Ocupação (min)</th>
                           </tr>
                         </thead>
                         <tbody>

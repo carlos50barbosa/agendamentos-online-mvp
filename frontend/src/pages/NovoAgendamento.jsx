@@ -45,28 +45,27 @@ const PUBLIC_PAGE_THEME_DEFAULTS = Object.freeze({
 
 const BOOKING_BRAND = Object.freeze({
   name: "Agendamentos Online",
-  tagline: "Agenda institucional com aparencia SaaS profissional",
-  heroEyebrow: "Agendamento institucional",
-  heroHeading: "Encontre o atendimento certo com previsibilidade e confianca",
-  heroSubtitle:
-    "Pesquise estabelecimentos, compare informacoes essenciais e reserve servicos em um fluxo claro, organizado e profissional.",
+  tagline: "",
+  heroEyebrow: "",
+  heroHeading: "Onde voce quer agendar?",
+  heroSubtitle: "",
   contactLabel: "Falar com atendimento",
   contactMeta: "Suporte comercial",
   flowEyebrow: "Agendamento profissional",
-  serviceTitle: "Defina os servicos do atendimento",
+  serviceTitle: "Defina os serviços do atendimento",
   serviceSubtitle:
-    "Selecione os servicos desejados para liberar disponibilidade, profissionais e duracao compativeis.",
-  scheduleTitle: "Escolha data e horario",
+    "Selecione os serviços desejados para liberar disponibilidade, profissionais e duração compatíveis.",
+  scheduleTitle: "Escolha data e horário",
   scheduleSubtitle:
     "Revise o contexto do atendimento, selecione o profissional e confirme a melhor disponibilidade.",
-  servicesPanelEyebrow: "Catalogo de servicos",
+  servicesPanelEyebrow: "Catálogo de serviços",
   servicesPanelTitle: "Monte o atendimento com clareza",
   servicesPanelDescription:
-    "A disponibilidade sera calculada a partir dos servicos selecionados, mantendo o fluxo objetivo e confiavel.",
-  schedulePanelEyebrow: "Agenda disponivel",
+    "A disponibilidade será calculada a partir dos serviços selecionados, mantendo o fluxo objetivo e confiável.",
+  schedulePanelEyebrow: "Agenda disponível",
   schedulePanelTitle: "Organize a reserva em poucos passos",
   schedulePanelDescription:
-    "Escolha profissional, data e horario com uma visualizacao consistente e pronta para producao.",
+    "Escolha profissional, data e horário com uma visualização consistente e pronta para produção.",
 });
 
 const APPOINTMENT_FLOW_STEPS = Object.freeze([
@@ -76,24 +75,31 @@ const APPOINTMENT_FLOW_STEPS = Object.freeze([
   "Confirmacao",
 ]);
 
+const APPOINTMENT_FLOW_STEP_LABELS = Object.freeze({
+  Estabelecimento: "Estabelecimento",
+  Servico: "Serviço",
+  Horario: "Horário",
+  Confirmacao: "Confirmação",
+});
+
 const APPOINTMENT_FLOW_STEP_SHORT_LABELS = Object.freeze({
   Estabelecimento: "Local",
-  Servico: "Servico",
-  Horario: "Horario",
+  Servico: "Serviço",
+  Horario: "Horário",
   Confirmacao: "Confirmar",
 });
 
 const DISCOVERY_SORT_OPTIONS = Object.freeze([
-  { value: "relevance", label: "Relevancia" },
+  { value: "relevance", label: "Relevância" },
   { value: "proximity", label: "Proximidade" },
-  { value: "rating", label: "Melhor avaliacao" },
+  { value: "rating", label: "Melhor avaliação" },
   { value: "availability", label: "Disponibilidade", disabled: true },
 ]);
 
 const DISCOVERY_CATEGORY_FILTERS = Object.freeze([
   { value: "barbearia", label: "Barbearia" },
-  { value: "salao", label: "Salao" },
-  { value: "clinica", label: "Clinica" },
+  { value: "salao", label: "Salão" },
+  { value: "clinica", label: "Clínica" },
 ]);
 
 function normalizeHexColor(value) {
@@ -1776,7 +1782,8 @@ const AppointmentFlowStepper = ({ currentStep = 1, compact = false, className = 
     {APPOINTMENT_FLOW_STEPS.map((label, index) => {
 
       const stepNumber = index + 1;
-      const shortLabel = APPOINTMENT_FLOW_STEP_SHORT_LABELS[label] || label;
+      const displayLabel = APPOINTMENT_FLOW_STEP_LABELS[label] || label;
+      const shortLabel = APPOINTMENT_FLOW_STEP_SHORT_LABELS[label] || displayLabel;
 
       const status =
 
@@ -1800,7 +1807,7 @@ const AppointmentFlowStepper = ({ currentStep = 1, compact = false, className = 
 
           </span>
 
-          <span className="appointment-stepper__label appointment-stepper__label--full">{label}</span>
+          <span className="appointment-stepper__label appointment-stepper__label--full">{displayLabel}</span>
 
           <span className="appointment-stepper__label appointment-stepper__label--short">{shortLabel}</span>
 
@@ -1821,7 +1828,8 @@ const AppointmentProgressLine = ({ currentStep = 1, className = '' }) => (
   >
     {APPOINTMENT_FLOW_STEPS.map((label, index) => {
       const stepNumber = index + 1;
-      const shortLabel = APPOINTMENT_FLOW_STEP_SHORT_LABELS[label] || label;
+      const displayLabel = APPOINTMENT_FLOW_STEP_LABELS[label] || label;
+      const shortLabel = APPOINTMENT_FLOW_STEP_SHORT_LABELS[label] || displayLabel;
       const status =
         stepNumber < currentStep
           ? 'done'
@@ -1833,7 +1841,7 @@ const AppointmentProgressLine = ({ currentStep = 1, className = '' }) => (
         <li key={label} className={`appointment-progress-line__item is-${status}`}>
           {index > 0 ? <span className="appointment-progress-line__connector" aria-hidden="true" /> : null}
           <span className="appointment-progress-line__dot" aria-hidden="true" />
-          <span className="appointment-progress-line__label appointment-progress-line__label--full">{label}</span>
+          <span className="appointment-progress-line__label appointment-progress-line__label--full">{displayLabel}</span>
           <span className="appointment-progress-line__label appointment-progress-line__label--short">{shortLabel}</span>
         </li>
       );
@@ -2007,7 +2015,7 @@ const SlotButton = ({ slot, isSelected, onClick, density = "compact" }) => {
     : isSelected
       ? "Selecionado"
       : isAvailableLabel(slot.label)
-        ? "Disponivel"
+        ? "Disponível"
         : tooltipLabel;
 
   const className = [
@@ -2055,7 +2063,7 @@ const SlotButton = ({ slot, isSelected, onClick, density = "compact" }) => {
 
 };
 
-const ServiceCard = ({ service, selected, onSelect }) => {
+const ServiceCard = ({ service, selected, onSelect, loyaltyHint = null }) => {
 
   const duration = ServiceHelpers.duration(service);
 
@@ -2093,7 +2101,7 @@ const ServiceCard = ({ service, selected, onSelect }) => {
 
         <div className={`mini-card__media${imageUrl ? '' : ' mini-card__media--fallback'}`}>
           {imageUrl ? (
-            <img src={imageUrl} alt={`Imagem do servico ${title}`} />
+            <img src={imageUrl} alt={`Imagem do serviço ${title}`} />
           ) : (
             <span>{fallbackLabel}</span>
           )}
@@ -2103,7 +2111,7 @@ const ServiceCard = ({ service, selected, onSelect }) => {
 
           <div className="mini-card__header">
             <div className="mini-card__heading">
-              <span className="mini-card__eyebrow">{selected ? 'Selecionado' : 'Servico'}</span>
+              <span className="mini-card__eyebrow">{selected ? 'Selecionado' : 'Serviço'}</span>
               <div className="mini-card__title">{title}</div>
             </div>
             <span className={`mini-card__state${selected ? ' is-selected' : ''}`}>
@@ -2119,6 +2127,12 @@ const ServiceCard = ({ service, selected, onSelect }) => {
               {showPrice && <span className="mini-card__price">{price}</span>}
             </div>
           )}
+
+          {loyaltyHint?.label ? (
+            <div className={`mini-card__loyalty mini-card__loyalty--${loyaltyHint.tone || 'info'}`}>
+              {loyaltyHint.label}
+            </div>
+          ) : null}
 
         </div>
 
@@ -2323,7 +2337,7 @@ const EstablishmentCardLegacy = ({ est, selected, onSelect }) => {
 
           ) : (
 
-            <span className="establishment-card__distance">Mapa indisponivel</span>
+            <span className="establishment-card__distance">Mapa indisponível</span>
 
           )}
 
@@ -2375,7 +2389,7 @@ const EstablishmentCard = ({ est, selected, onSelect, distanceKm = null }) => {
 
   const hasRatings = Number.isFinite(ratingAverageRaw) && ratingCount > 0;
 
-  const ratingLabel = hasRatings ? ratingNumberFormatter.format(ratingAverageRaw) : 'Sem avaliacoes';
+  const ratingLabel = hasRatings ? ratingNumberFormatter.format(ratingAverageRaw) : 'Sem avaliações';
 
   const categoryLabel = getEstablishmentCategoryLabel(est);
 
@@ -2561,9 +2575,9 @@ const EstablishmentCard = ({ est, selected, onSelect, distanceKm = null }) => {
 
                   hasRatings
 
-                    ? `Avaliacao ${ratingLabel} de 5, com ${ratingCount} ${ratingCount === 1 ? 'avaliacao' : 'avaliacoes'}`
+                    ? `Avaliação ${ratingLabel} de 5, com ${ratingCount} ${ratingCount === 1 ? 'avaliação' : 'avaliações'}`
 
-                    : 'Estabelecimento ainda sem avaliacoes'
+                    : 'Estabelecimento ainda sem avaliações'
 
                 }
 
@@ -2571,7 +2585,7 @@ const EstablishmentCard = ({ est, selected, onSelect, distanceKm = null }) => {
 
                 <span aria-hidden>★</span>
 
-                {hasRatings ? ratingLabel : 'Sem avaliacoes'}
+                {hasRatings ? ratingLabel : 'Sem avaliações'}
 
               </span>
 
@@ -2601,7 +2615,7 @@ const EstablishmentCard = ({ est, selected, onSelect, distanceKm = null }) => {
 
       </div>
 
-      <p className="establishment-card__address">{address || 'Endereco nao informado'}</p>
+      <p className="establishment-card__address">{address || 'Endereço não informado'}</p>
 
       <div className="establishment-card__footer">
 
@@ -2619,7 +2633,7 @@ const EstablishmentCard = ({ est, selected, onSelect, distanceKm = null }) => {
 
           <span className="establishment-card__map-link establishment-card__map-link--muted">
 
-            Mapa indisponivel
+            Mapa indisponível
 
           </span>
 
@@ -2627,7 +2641,7 @@ const EstablishmentCard = ({ est, selected, onSelect, distanceKm = null }) => {
 
         <button type="button" className="btn btn--primary establishment-card__cta" onClick={handlePrimaryAction}>
 
-          Ver horarios
+          Ver horários
 
         </button>
 
@@ -2937,6 +2951,7 @@ export default function NovoAgendamento() {
   const [professionalMenuOpen, setProfessionalMenuOpen] = useState(false);
 
   const [serviceSearch, setServiceSearch] = useState("");
+  const [loyaltyContext, setLoyaltyContext] = useState({ loading: false, data: null, error: '' });
 
   const professionalMenuRef = useRef(null);
 
@@ -3091,9 +3106,52 @@ export default function NovoAgendamento() {
 
   const serviceDuration = serviceSummary.duration;
 
-  const servicePrice = ServiceHelpers.formatPrice(serviceSummary.price);
+  const serviceBasePrice = serviceSummary.price;
 
   const serviceLabel = serviceSummary.label || (selectedService ? ServiceHelpers.title(selectedService) : '');
+
+  const loyaltyDetails = loyaltyContext.data?.subscription || null;
+  const loyaltyPlan = loyaltyDetails?.plan || loyaltyContext.data?.plan || null;
+  const loyaltyCreditsByService = loyaltyContext.data?.credits_by_service || {};
+  const loyaltyPreview = loyaltyContext.data?.preview || null;
+  const loyaltyServiceHints = useMemo(() => {
+    const discountPercent = loyaltyPlan?.desconto_percentual_extras ?? null;
+    const hints = {};
+    services.forEach((service) => {
+      const credit = loyaltyCreditsByService[String(service.id)];
+      if (credit && Number(credit.quantidade_restante || 0) > 0) {
+        hints[String(service.id)] = {
+          tone: 'credit',
+          label: `${credit.quantidade_restante} credito(s) disponivel(is)`,
+        };
+        return;
+      }
+      if (discountPercent != null && Number(discountPercent) > 0) {
+        hints[String(service.id)] = {
+          tone: 'discount',
+          label: `${discountPercent}% off no extra`,
+        };
+      }
+    });
+    return hints;
+  }, [loyaltyCreditsByService, loyaltyPlan?.desconto_percentual_extras, services]);
+  const loyaltyBannerText = useMemo(() => {
+    if (!loyaltyDetails?.plan?.nome) return '';
+    if (loyaltyPreview?.loyalty_credit_applied) {
+      return `Seu plano ${loyaltyDetails.plan.nome} vai consumir credito(s) neste agendamento.`;
+    }
+    if (loyaltyPreview?.loyalty_discount_percent != null) {
+      return `Seu plano ${loyaltyDetails.plan.nome} aplica ${loyaltyPreview.loyalty_discount_percent}% de desconto nos servicos extras.`;
+    }
+    const activeCredits = Object.values(loyaltyCreditsByService).filter((credit) => Number(credit?.quantidade_restante || 0) > 0).length;
+    if (activeCredits > 0) {
+      return `Plano ${loyaltyDetails.plan.nome} ativo com ${activeCredits} servico(s) com credito neste ciclo.`;
+    }
+    return `Plano ${loyaltyDetails.plan.nome} ativo neste estabelecimento.`;
+  }, [loyaltyCreditsByService, loyaltyDetails?.plan?.nome, loyaltyPreview]);
+  const servicePrice = ServiceHelpers.formatPrice(
+    loyaltyPreview?.total_cobrado_centavos ?? serviceBasePrice
+  );
 
   const serviceProfessionalSets = useMemo(
 
@@ -3208,6 +3266,41 @@ export default function NovoAgendamento() {
   const selectedExtras = selectedEstablishmentId ? establishmentExtras[selectedEstablishmentId] : null;
 
   const selectedProfessionals = selectedEstablishmentId ? professionalsByEstab[selectedEstablishmentId] : null;
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!isAuthenticated || !isClientUser || !establishmentId) {
+      setLoyaltyContext({ loading: false, data: null, error: '' });
+      return undefined;
+    }
+
+    const loadLoyaltyContext = async () => {
+      setLoyaltyContext((current) => ({ ...current, loading: true, error: '' }));
+      try {
+        const response = await Api.clientLoyaltyContext({
+          estabelecimento_id: establishmentId,
+          servico_ids: normalizedServiceIds.join(','),
+        });
+        if (!cancelled) {
+          setLoyaltyContext({ loading: false, data: response, error: '' });
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setLoyaltyContext({
+            loading: false,
+            data: null,
+            error: error?.data?.message || error?.message || 'Nao foi possivel carregar os beneficios do plano.',
+          });
+        }
+      }
+    };
+
+    void loadLoyaltyContext();
+    return () => {
+      cancelled = true;
+    };
+  }, [establishmentId, isAuthenticated, isClientUser, normalizedServiceIds]);
 
   const profileData = selectedExtras?.profile || null;
 
@@ -4091,7 +4184,7 @@ export default function NovoAgendamento() {
   }, []);
   const buildDepositAppointmentInfo = useCallback(() => ({
     inicioISO: selectedSlot?.datetime || null,
-    servicoNome: serviceLabel || "servico",
+    servicoNome: serviceLabel || "serviço",
     estabelecimentoNome: selectedEstablishmentName || selectedEstablishment?.name || "seu estabelecimento",
     profissionalNome: selectedProfessional?.nome || selectedProfessional?.name || "",
     duracaoMin: serviceDuration || 0,
@@ -4375,7 +4468,7 @@ export default function NovoAgendamento() {
         setSearchParams(sp, { replace: true });
       } catch {
         if (!cancelled) {
-          showToast('error', 'Nao foi possivel carregar a pagina do estabelecimento.');
+          showToast('error', 'Não foi possível carregar a página do estabelecimento.');
         }
       }
     })();
@@ -5345,7 +5438,7 @@ useEffect(() => {
 
     if (!selectedServices.length) {
 
-      return "Selecione os servicos para continuar.";
+      return "Selecione os serviços para continuar.";
 
     }
 
@@ -5379,7 +5472,7 @@ useEffect(() => {
 
     if (requiresProfessional && !serviceProfessionals.length) {
 
-      return "Nenhum profissional atende todos os servicos selecionados.";
+      return "Nenhum profissional atende todos os serviços selecionados.";
 
     }
 
@@ -5464,7 +5557,7 @@ useEffect(() => {
       } else {
         await scheduleWhatsAppReminders({
           inicioISO: selectedSlot.datetime,
-          servicoNome: serviceLabel || "servico",
+          servicoNome: serviceLabel || "serviço",
           estabelecimentoNome: selectedEstablishment?.name || "seu estabelecimento",
         });
         showToast("success", "Agendado com sucesso!");
@@ -5508,7 +5601,7 @@ useEffect(() => {
 
             setModal((p) => ({ ...p, isOpen: false }));
 
-            showToast("success", "Seu agendamento ja existia e foi confirmado.");
+            showToast("success", "Seu agendamento já existia e foi confirmado.");
 
             {
 
@@ -5692,7 +5785,7 @@ useEffect(() => {
 
       if (!email) {
 
-        setGuestModal((prev) => ({ ...prev, error: "Informe um email válido para confirmar o agendamento." }));
+        setGuestModal((prev) => ({ ...prev, error: "Informe um e-mail válido para confirmar o agendamento." }));
 
         return;
 
@@ -5700,7 +5793,7 @@ useEffect(() => {
 
       if (!isValidEmail(email)) {
 
-        setGuestModal((prev) => ({ ...prev, error: "Informe um email válido." }));
+        setGuestModal((prev) => ({ ...prev, error: "Informe um e-mail válido." }));
 
         return;
 
@@ -5814,9 +5907,9 @@ useEffect(() => {
           loading: false,
           step: "success",
           error: "",
-          info: "Enviamos um email de confirmação. Confirme em até 10 minutos, senão o agendamento será cancelado automaticamente.",
+          info: "Enviamos um e-mail de confirmação. Confirme em até 10 minutos, senão o agendamento será cancelado automaticamente.",
         }));
-        showToast("success", "Agendamento realizado! Confira seu email e confirme em até 10 minutos para evitar o cancelamento automático.");
+        showToast("success", "Agendamento realizado! Confira seu e-mail e confirme em até 10 minutos para evitar o cancelamento automático.");
       } catch (e) {
 
         if (e?.data?.error === 'plan_limit_agendamentos') {
@@ -5861,7 +5954,7 @@ useEffect(() => {
 
               error: "",
 
-              info: "Enviamos um código para seu email. Digite para confirmar.",
+              info: "Enviamos um código para seu e-mail. Digite para confirmar.",
 
             }));
 
@@ -5969,7 +6062,7 @@ useEffect(() => {
 
     if (!guestModal.otpCode || !guestModal.otpCode.trim()) {
 
-      setGuestModal((prev) => ({ ...prev, error: "Informe o código recebido por email." }));
+      setGuestModal((prev) => ({ ...prev, error: "Informe o código recebido por e-mail." }));
 
       return;
 
@@ -6007,7 +6100,7 @@ useEffect(() => {
 
     if (!email) {
 
-      setGuestModal((prev) => ({ ...prev, error: "Informe o email para reenviar o código." }));
+      setGuestModal((prev) => ({ ...prev, error: "Informe o e-mail para reenviar o código." }));
 
       return;
 
@@ -6015,7 +6108,7 @@ useEffect(() => {
 
     if (!isValidEmail(email)) {
 
-      setGuestModal((prev) => ({ ...prev, error: "Informe um email válido." }));
+      setGuestModal((prev) => ({ ...prev, error: "Informe um e-mail válido." }));
 
       return;
 
@@ -6035,7 +6128,7 @@ useEffect(() => {
 
         otpReqId: resp?.request_id || prev.otpReqId || "",
 
-        info: "Código reenviado para seu email.",
+        info: "Código reenviado para seu e-mail.",
 
         step: "otp",
 
@@ -6081,7 +6174,7 @@ useEffect(() => {
 
     if (!navigator?.geolocation) {
 
-      setGeoError('Geolocalizacao nao esta disponível neste dispositivo.');
+      setGeoError('Geolocalização não está disponível neste dispositivo.');
 
       return;
 
@@ -6113,7 +6206,7 @@ useEffect(() => {
 
         setLocating(false);
 
-        setGeoError('Não foi possível obter sua localizacao.');
+        setGeoError('Não foi possível obter sua localização.');
 
       },
 
@@ -7191,7 +7284,7 @@ useEffect(() => {
     if (!selectedServices.length) return '';
 
     const parts = [
-      selectedServices.length === 1 ? '1 servico' : `${selectedServices.length} servicos`,
+      selectedServices.length === 1 ? '1 serviço' : `${selectedServices.length} serviços`,
     ];
 
     if (serviceDuration > 0) parts.push(`${serviceDuration} min`);
@@ -7248,25 +7341,25 @@ useEffect(() => {
 
     if (normalizedQuery) {
 
-      return 'Selecione um estabelecimento para continuar com servicos, agenda e confirmacao.';
+      return 'Escolha um estabelecimento para continuar.';
 
     }
 
     if (favoritesOnly) {
 
-      return 'Mostrando sua selecao de estabelecimentos salvos para agilizar novos agendamentos.';
+      return 'Mostrando seus favoritos.';
 
     }
 
     if (discoveryCategory !== 'all' && activeDiscoveryCategoryLabel) {
 
-      return `Resultados filtrados para a categoria ${activeDiscoveryCategoryLabel}.`;
+      return `Categoria: ${activeDiscoveryCategoryLabel}.`;
 
     }
 
     if (discoverySort === 'rating') {
 
-      return 'Resultados priorizados por consistencia de avaliacao e confianca percebida.';
+      return 'Ordenado por avaliacao.';
 
     }
 
@@ -7274,13 +7367,13 @@ useEffect(() => {
 
       return geocoding
 
-        ? 'Atualizando distancias para destacar opcoes mais proximas.'
+        ? 'Atualizando distancias...'
 
-        : 'Resultados priorizados pela menor distancia em relacao a voce.';
+        : 'Ordenado por proximidade.';
 
     }
 
-    return 'Escolha um estabelecimento para seguir com servicos, disponibilidade e confirmacao.';
+    return 'Escolha um estabelecimento para continuar.';
 
   })();
 
@@ -7290,13 +7383,13 @@ useEffect(() => {
 
   ) : locating ? (
 
-    <span className="appointment-discovery-hero__meta-text">Obtendo sua localizacao...</span>
+    <span className="appointment-discovery-hero__meta-text">Localizando...</span>
 
   ) : userLocation ? (
 
     <span className="appointment-discovery-hero__meta-text">
 
-      {geocoding ? 'Calculando distancias dos estabelecimentos...' : 'Localizacao ativa para destacar opcoes mais proximas.'}
+      {geocoding ? 'Atualizando distancias...' : 'Localizacao ativa.'}
 
     </span>
 
@@ -7304,7 +7397,7 @@ useEffect(() => {
 
     <span className="appointment-discovery-hero__meta-text">
 
-      Ative sua localizacao para ordenar por proximidade.
+      Use sua localizacao para ver o que esta perto.
 
     </span>
 
@@ -7338,7 +7431,7 @@ useEffect(() => {
 
           tone="error"
 
-          title="Nao foi possivel carregar os estabelecimentos"
+          title="Não foi possível carregar os estabelecimentos"
 
           description="Atualize a busca ou tente novamente em instantes."
 
@@ -7362,7 +7455,7 @@ useEffect(() => {
 
       const emptyTitle = favoritesOnly
 
-        ? 'Voce ainda nao tem favoritos por aqui'
+        ? 'Você ainda não tem favoritos por aqui'
 
         : discoveryCategory !== 'all' && activeDiscoveryCategoryLabel
 
@@ -7372,15 +7465,15 @@ useEffect(() => {
 
             ? 'Nenhum estabelecimento encontrado'
 
-            : 'Ainda nao encontramos opcoes para exibir';
+            : 'Ainda não encontramos opções para exibir';
 
       const emptyDescription = favoritesOnly
 
-        ? 'Explore estabelecimentos, favorite os melhores e volte para agendar mais rapido.'
+        ? 'Explore estabelecimentos, favorite os melhores e volte para agendar mais rápido.'
 
         : normalizedQuery
 
-          ? 'Tente buscar por nome, servico, bairro ou cidade com termos mais amplos.'
+          ? 'Tente buscar por nome, serviço, bairro ou cidade com termos mais amplos.'
 
           : 'Ajuste os filtros ou tente novamente mais tarde.';
 
@@ -7520,9 +7613,9 @@ useEffect(() => {
 
               className="novo-agendamento__service-search-input"
 
-              placeholder="Buscar servico pelo nome"
+              placeholder="Buscar serviço pelo nome"
 
-              aria-label="Buscar servico"
+              aria-label="Buscar serviço"
 
               value={serviceSearch}
 
@@ -7535,6 +7628,34 @@ useEffect(() => {
           </label>
 
         </div>
+
+        {loyaltyContext.error ? (
+          <div className="novo-agendamento__loyalty-banner novo-agendamento__loyalty-banner--error">
+            {loyaltyContext.error}
+          </div>
+        ) : loyaltyDetails ? (
+          <div className="novo-agendamento__loyalty-banner">
+            <div>
+              <strong>{loyaltyDetails.plan?.nome || 'Plano ativo'}</strong>
+              <p>{loyaltyBannerText}</p>
+            </div>
+            {selectedEstablishmentId ? (
+              <Link className="btn btn--outline btn--sm" to={`/cliente/fidelidade?estabelecimento=${selectedEstablishmentId}`}>
+                Ver assinatura
+              </Link>
+            ) : null}
+          </div>
+        ) : isClientUser && establishmentId ? (
+          <div className="novo-agendamento__loyalty-banner novo-agendamento__loyalty-banner--subtle">
+            <div>
+              <strong>Sem plano ativo neste estabelecimento</strong>
+              <p>Se quiser, voce pode assinar um plano antes de concluir o agendamento.</p>
+            </div>
+            <Link className="btn btn--outline btn--sm" to={`/planos-fidelidade/${establishmentId}`}>
+              Ver planos
+            </Link>
+          </div>
+        ) : null}
 
         <div ref={servicesSectionRef} className="novo-agendamento__services">
 
@@ -7559,6 +7680,8 @@ useEffect(() => {
                 selected={normalizedServiceIds.includes(String(s.id))}
 
                 onSelect={handleServiceClick}
+
+                loyaltyHint={loyaltyServiceHints[String(s.id)] || null}
 
               />
 
@@ -7608,7 +7731,7 @@ useEffect(() => {
 
             <div className="row" style={{ gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
 
-              <strong className="novo-agendamento__professional-title">Selecione o profissional responsavel</strong>
+              <strong className="novo-agendamento__professional-title">Selecione o profissional responsável</strong>
 
             </div>
 
@@ -7712,7 +7835,7 @@ useEffect(() => {
 
             <div className="inline-summary__item inline-summary__item--service">
 
-              <span className="inline-summary__value">{serviceLabel || 'Servicos ainda nao definidos'}</span>
+              <span className="inline-summary__value">{serviceLabel || 'Serviços ainda não definidos'}</span>
 
               {(serviceDuration || servicePrice !== 'R$ 0,00') && (
 
@@ -7732,7 +7855,7 @@ useEffect(() => {
 
           <div className="novo-agendamento__summary-actions-row">
 
-            <button type="button" className="novo-agendamento__change-service" onClick={handleChangeService}>Revisar servicos</button>
+            <button type="button" className="novo-agendamento__change-service" onClick={handleChangeService}>Revisar serviços</button>
 
             <details className="filters">
 
@@ -7820,6 +7943,12 @@ useEffect(() => {
           </div>
 
         </div>
+
+        {loyaltyDetails ? (
+          <div className="novo-agendamento__loyalty-inline">
+            {loyaltyBannerText}
+          </div>
+        ) : null}
 
         <div className="novo-agendamento__calendar">
 
@@ -7969,7 +8098,7 @@ useEffect(() => {
 
               serviceProfessionals.length > 0 && !selectedProfessional ? (
 
-                <div className="empty">Selecione um profissional para liberar os horarios disponiveis.</div>
+                <div className="empty">Selecione um profissional para liberar os horários disponíveis.</div>
 
               ) : (
 
@@ -8019,7 +8148,7 @@ useEffect(() => {
 
             ) : (
 
-              <div className="empty">Escolha uma data no calendario para consultar os horarios.</div>
+              <div className="empty">Escolha uma data no calendário para consultar os horários.</div>
 
             )}
 
@@ -8085,18 +8214,11 @@ useEffect(() => {
 
               onSubmit={handleSearchSubmit}
 
-              placeholder="Buscar por estabelecimento, servico, bairro ou cidade"
+              placeholder="Buscar por estabelecimento, serviço, bairro ou cidade"
 
               inputRef={estSearchInputRef}
 
               headingId="novo-agendamento-hero-title"
-
-              headerAction={(
-                <Link to="/contato" className="appointment-discovery-hero__contact-btn">
-                  <span>{BOOKING_BRAND.contactLabel}</span>
-                  <small>{BOOKING_BRAND.contactMeta}</small>
-                </Link>
-              )}
 
               stepper={<AppointmentFlowStepper currentStep={step} />}
 
@@ -8116,7 +8238,8 @@ useEffect(() => {
 
               >
 
-                {locating ? 'Localizando...' : userLocation ? 'Perto de mim ativo' : 'Perto de mim'}
+                <IconMapPin style={{ width: 16, height: 16 }} aria-hidden />
+                <span>{locating ? 'Localizando...' : userLocation ? 'Localizacao ativa' : 'Usar localizacao'}</span>
 
               </button>
 
@@ -8148,9 +8271,9 @@ useEffect(() => {
 
                 <div className="novo-agendamento__quick-filters-copy">
 
-                  <span className="novo-agendamento__section-eyebrow">Refinamento operacional</span>
+                  <span className="novo-agendamento__section-eyebrow">Filtros</span>
 
-                  <p>Priorize proximidade, reputacao e categoria para encontrar a agenda certa com menos ruido visual.</p>
+                  <p>Refine os resultados.</p>
 
                 </div>
 
@@ -8182,7 +8305,7 @@ useEffect(() => {
 
                   <DiscoveryFilterChip disabled note="Em breve">
 
-                    Com horarios hoje
+                    Com horários hoje
 
                   </DiscoveryFilterChip>
 
@@ -8226,7 +8349,7 @@ useEffect(() => {
 
                     <span className="novo-agendamento__section-eyebrow">
 
-                      {normalizedQuery ? 'Resultados da busca' : 'Pronto para agendar'}
+                      {normalizedQuery ? 'Busca' : 'Resultados'}
 
                     </span>
 
@@ -8621,7 +8744,7 @@ useEffect(() => {
             helper={
               step === 2
                 ? 'Selecione o escopo do atendimento antes de consultar a agenda.'
-                : 'Escolha um horario para revisar a reserva com seguranca.'
+                : 'Escolha um horário para revisar a reserva com segurança.'
             }
             onBack={step === 2 ? handleBackFromServices : handleBackFromSchedule}
             onContinue={step === 2 ? handleContinueFromServices : handleConfirmClick}

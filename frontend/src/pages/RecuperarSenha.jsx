@@ -52,7 +52,7 @@ export default function RecuperarSenha(){
 
           {sent ? (
             <div className="box" role="status" style={{ marginTop: 10, borderColor: 'var(--success-border)', color: 'var(--success-text)', background: 'var(--success-bg)' }}>
-              Se existir uma conta para <strong>{email}</strong>, você receberá um email com instruções.
+              Se existir uma conta para <strong>{email}</strong>, você receberá um e-mail com instruções.
             </div>
           ) : (
             <>
@@ -60,7 +60,7 @@ export default function RecuperarSenha(){
                 <input
                   className="input"
                   type="email"
-                  placeholder="Seu email"
+                  placeholder="Seu e-mail"
                   value={email}
                   onChange={e=>setEmail(e.target.value)}
                   autoComplete="email"

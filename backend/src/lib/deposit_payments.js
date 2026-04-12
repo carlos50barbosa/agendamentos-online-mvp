@@ -1,5 +1,6 @@
 // backend/src/lib/deposit_payments.js
 import { pool } from './db.js';
+import { cancelPendingPaymentAppointmentTx } from './appointment_loyalty.js';
 
 function parseJsonMaybe(payload) {
   if (payload === null || payload === undefined) return null;
@@ -68,10 +69,6 @@ export async function markDepositPaymentExpired(dbOrConn, paymentRow) {
     'UPDATE appointment_payments SET status=? WHERE id=?',
     ['expired', paymentRow.id]
   );
-  await db.query(
-    "UPDATE agendamentos SET status='cancelado', deposit_expires_at=NOW() WHERE id=? AND status='pendente_pagamento'",
-    [paymentRow.agendamento_id]
-  );
+  await cancelPendingPaymentAppointmentTx(paymentRow.agendamento_id, { db });
   return { ok: true };
 }
-

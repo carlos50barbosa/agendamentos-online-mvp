@@ -388,7 +388,7 @@ export default function Cadastro() {
 
         if (!data || data.erro) {
 
-        setCepStatus({ loading: false, error: 'Nao foi possivel buscar o CEP.' });
+        setCepStatus({ loading: false, error: 'Não foi possível buscar o CEP.' });
 
           return;
 
@@ -418,7 +418,7 @@ export default function Cadastro() {
 
         if (!active) return;
 
-        setCepStatus({ loading: false, error: 'Nao foi possivel buscar o CEP.' });
+        setCepStatus({ loading: false, error: 'Não foi possível buscar o CEP.' });
 
       });
 

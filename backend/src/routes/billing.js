@@ -56,6 +56,12 @@ import { resolveMpAccessToken } from '../services/mpAccounts.js'
 import { logBlockedRouteAccess, resolveRouteTokenAccess } from '../lib/route_access.js'
 import { loadEffectiveSubscriptionContext } from '../lib/subscription_state.js'
 import { normalizeSubscriptionStatus } from '../lib/subscription_normalization.js'
+import {
+  syncClientLoyaltyAuthorizedPaymentFromGateway,
+  syncClientLoyaltyCardSubscriptionFromGateway,
+  syncClientLoyaltyPixPaymentFromGateway,
+} from '../lib/client_loyalty_billing.js'
+import { cancelPendingPaymentAppointmentTx } from '../lib/appointment_loyalty.js'
 
 const router = Router()
 const DAY_MS = 86400000
@@ -983,10 +989,7 @@ async function handleDepositPaymentWebhook({ resourceId, event, bodyUserId = nul
           WHERE id=?`,
         [failureStatus, rawPayload, String(payment.id), externalReference || null, locked.id]
       )
-      await conn.query(
-        "UPDATE agendamentos SET status='cancelado', deposit_expires_at=NOW() WHERE id=? AND status='pendente_pagamento'",
-        [locked.agendamento_id]
-      )
+      await cancelPendingPaymentAppointmentTx(locked.agendamento_id, { db: conn })
       await conn.commit()
       return { ok: true, handled: true, status: failureStatus, appointmentId: locked.agendamento_id }
     }
@@ -1261,7 +1264,7 @@ router.post('/card/subscribe', auth, isEstabelecimento, async (req, res) => {
     const { plan, billing_cycle: rawCycle, card_token, cardToken, payer_email, payerEmail } = req.body || {}
     const token = String(card_token || cardToken || '').trim()
     if (!token) {
-      return res.status(400).json({ error: 'card_token_required', message: 'Token do cartao nao informado.' })
+      return res.status(400).json({ error: 'card_token_required', message: 'Token do cartão não informado.' })
     }
 
     const targetPlan = String(plan || req.user.plan || 'starter').toLowerCase()
@@ -1308,7 +1311,7 @@ router.post('/card/subscribe', auth, isEstabelecimento, async (req, res) => {
     console.error('POST /billing/card/subscribe', error)
     return res.status(400).json({
       error: 'card_subscription_failed',
-      message: error?.message || 'Falha ao criar assinatura recorrente no cartao.',
+      message: error?.message || 'Falha ao criar assinatura recorrente no cartão.',
     })
   }
 })
@@ -1317,7 +1320,7 @@ router.post('/card/update', auth, isEstabelecimento, async (req, res) => {
   try {
     const token = String(req.body?.card_token || req.body?.cardToken || '').trim()
     if (!token) {
-      return res.status(400).json({ error: 'card_token_required', message: 'Token do cartao nao informado.' })
+      return res.status(400).json({ error: 'card_token_required', message: 'Token do cartão não informado.' })
     }
 
     const previousContext = await loadEffectiveSubscriptionContext(req.user.id)
@@ -1422,7 +1425,7 @@ router.post('/card/update', auth, isEstabelecimento, async (req, res) => {
     console.error('POST /billing/card/update', error)
     return res.status(400).json({
       error: 'card_update_failed',
-      message: error?.message || 'Falha ao atualizar o cartao.',
+      message: error?.message || 'Falha ao atualizar o cartão.',
     })
   }
 })
@@ -1431,7 +1434,7 @@ router.post('/card/recover', auth, isEstabelecimento, async (req, res) => {
   try {
     const token = String(req.body?.card_token || req.body?.cardToken || '').trim()
     if (!token) {
-      return res.status(400).json({ error: 'card_token_required', message: 'Token do cartao nao informado.' })
+      return res.status(400).json({ error: 'card_token_required', message: 'Token do cartão não informado.' })
     }
 
     const idempotencyKey = String(req.headers['idempotency-key'] || '').trim() || randomUUID()
@@ -1442,7 +1445,7 @@ router.post('/card/recover', auth, isEstabelecimento, async (req, res) => {
     if (!targetSubscription?.gatewaySubscriptionId || !requiresCardRecovery(currentStatus)) {
       return res.status(409).json({
         error: 'card_recovery_not_required',
-        message: 'Nao existe uma pendencia elegivel para regularizacao imediata no cartao.',
+        message: 'Não existe uma pendência elegível para regularização imediata no cartão.',
       })
     }
 
@@ -1476,8 +1479,8 @@ router.post('/card/recover', auth, isEstabelecimento, async (req, res) => {
         idempotent: true,
         recovery_status: paid ? 'approved' : 'rejected',
         message: paid
-          ? 'A cobranca pendente ja foi quitada neste cartao.'
-          : 'A ultima tentativa no cartao nao foi aprovada. Voce pode tentar novamente ou gerar um PIX.',
+          ? 'A cobrança pendente já foi quitada neste cartão.'
+          : 'A última tentativa no cartão não foi aprovada. Você pode tentar novamente ou gerar um PIX.',
         plan_status: refreshedContext.computedState.resolvedStatus,
         access_state: refreshedContext.computedState.accessState,
         subscription: serializeSubscription(refreshedSubscription),
@@ -1604,7 +1607,7 @@ router.post('/card/recover', auth, isEstabelecimento, async (req, res) => {
       ok: true,
       paid: false,
       recovery_status: payment.rawStatus || 'rejected',
-      message: 'O cartao foi validado, mas a cobranca pendente nao foi aprovada. Tente novamente ou gere um PIX.',
+      message: 'O cartão foi validado, mas a cobrança pendente não foi aprovada. Tente novamente ou gere um PIX.',
       plan_status: effectiveContext.computedState.resolvedStatus,
       access_state: effectiveContext.computedState.accessState,
       subscription: serializeSubscription(updated),
@@ -1614,7 +1617,7 @@ router.post('/card/recover', auth, isEstabelecimento, async (req, res) => {
     console.error('POST /billing/card/recover', error)
     return res.status(400).json({
       error: 'card_recovery_failed',
-      message: error?.message || 'Falha ao cobrar a pendencia no cartao.',
+      message: error?.message || 'Falha ao cobrar a pendência no cartão.',
     })
   }
 })
@@ -1773,7 +1776,7 @@ router.post('/whatsapp/pix', auth, isEstabelecimento, async (req, res) => {
     const detail =
       (responseData && (responseData.message || responseData.error || responseData.error_message)) ||
       (Array.isArray(error?.cause) && (error.cause[0]?.description || error.cause[0]?.error)) ||
-      error?.message || 'Falha ao criar cobranca PIX'
+      error?.message || 'Falha ao criar cobrança PIX'
     console.error('POST /billing/whatsapp/pix', detail, cause || error)
     return res.status(400).json({ error: 'pix_failed', message: detail, cause })
   }
@@ -1865,6 +1868,24 @@ router.post('/webhook', async (req, res) => {
         if (depositResult?.ok && depositResult?.status) {
           return res.status(200).json({ ok: true, processed: false, deposit: true, status: depositResult.status })
         }
+        const loyaltyResult = await syncClientLoyaltyPixPaymentFromGateway(resourceId, {
+          bodyUserId: normalizedUserId,
+          gatewayEventId: resourceId,
+        })
+        if (loyaltyResult?.ok) {
+          console.log('[billing:webhook][loyalty] payment', resourceId, loyaltyResult?.handled ? 'processed' : 'ignored', {
+            ok: !!loyaltyResult?.ok,
+            status: loyaltyResult?.status || null,
+            reason: loyaltyResult?.reason || null,
+          })
+          return res.status(200).json({
+            ok: true,
+            processed: Boolean(loyaltyResult?.handled),
+            loyalty: true,
+            status: loyaltyResult?.status || null,
+            reason: loyaltyResult?.reason || null,
+          })
+        }
         console.warn('[billing:webhook] ignored_foreign_user', {
           resource_id: verification.id || null,
           body_user_id: bodyUserId,
@@ -1883,6 +1904,24 @@ router.post('/webhook', async (req, res) => {
     }
 
     if (topic === 'subscription_authorized_payment') {
+      const loyaltyResult = await syncClientLoyaltyAuthorizedPaymentFromGateway(resourceId, {
+        bodyUserId,
+        gatewayEventId: resourceId,
+      })
+      if (loyaltyResult?.ok) {
+        console.log('[billing:webhook][loyalty] subscription_authorized_payment', resourceId, loyaltyResult?.handled ? 'processed' : 'ignored', {
+          ok: !!loyaltyResult?.ok,
+          reason: loyaltyResult?.reason || null,
+          status: loyaltyResult?.status || null,
+        })
+        return res.status(200).json({
+          ok: true,
+          processed: Boolean(loyaltyResult?.handled),
+          loyalty: true,
+          reason: loyaltyResult?.reason || null,
+          status: loyaltyResult?.status || null,
+        })
+      }
       const result = await syncAuthorizedPaymentFromGateway(resourceId, { gatewayEventId: resourceId })
       console.log('[billing:webhook] subscription_authorized_payment', resourceId, result?.ok ? 'processed' : 'ignored', {
         ok: !!result?.ok,
@@ -1892,6 +1931,24 @@ router.post('/webhook', async (req, res) => {
     }
 
     if (topic === 'subscription_preapproval') {
+      const loyaltyResult = await syncClientLoyaltyCardSubscriptionFromGateway(resourceId, {
+        bodyUserId,
+        gatewayEventId: resourceId,
+      })
+      if (loyaltyResult?.ok) {
+        console.log('[billing:webhook][loyalty] subscription_preapproval', resourceId, loyaltyResult?.handled ? 'processed' : 'ignored', {
+          ok: !!loyaltyResult?.ok,
+          reason: loyaltyResult?.reason || null,
+          status: loyaltyResult?.status || null,
+        })
+        return res.status(200).json({
+          ok: true,
+          processed: Boolean(loyaltyResult?.handled),
+          loyalty: true,
+          reason: loyaltyResult?.reason || null,
+          status: loyaltyResult?.status || null,
+        })
+      }
       const result = await syncCardSubscriptionFromGateway(resourceId, { gatewayEventId: resourceId })
       console.log('[billing:webhook] subscription_preapproval', resourceId, result?.ok ? 'processed' : 'ignored', {
         ok: !!result?.ok,

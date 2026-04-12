@@ -49,16 +49,16 @@ function buildSubscriptionBlockMessage(context, fallbackMessage) {
   if (fallbackMessage) return fallbackMessage
   const status = context?.computedState?.resolvedStatus || 'unpaid'
   if (status === 'pending_pix') {
-    return 'Existe um PIX pendente. Conclua ou gere uma nova cobranca para liberar este recurso.'
+    return 'Existe um PIX pendente. Conclua ou gere uma nova cobrança para liberar este recurso.'
   }
   if (status === 'pending_payment') {
-    return 'Seu cartao ainda nao teve a cobranca confirmada. Atualize a forma de pagamento ou aguarde a confirmacao.'
+    return 'Seu cartão ainda não teve a cobrança confirmada. Atualize a forma de pagamento ou aguarde a confirmação.'
   }
   if (status === 'past_due') {
-    return 'Sua assinatura esta com cobranca pendente. Regularize para evitar bloqueio.'
+    return 'Sua assinatura está com cobrança pendente. Regularize para evitar bloqueio.'
   }
   if (status === 'expired') {
-    return 'Sua assinatura expirou. Gere um novo PIX ou atualize o cartao para continuar.'
+    return 'Sua assinatura expirou. Gere um novo PIX ou atualize o cartão para continuar.'
   }
   if (status === 'canceled') {
     return 'Sua assinatura foi cancelada. Reative o plano para continuar usando este recurso.'

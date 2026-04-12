@@ -70,10 +70,10 @@ function ProfessionalFormFields({
           </label>
 
           <label className="professionals-page__field">
-            <span className="professionals-page__label">Descricao profissional</span>
+            <span className="professionals-page__label">Descrição profissional</span>
             <textarea
               className="input professionals-page__textarea"
-              placeholder="Conte rapidamente quais servicos essa pessoa executa e como ela atende."
+              placeholder="Conte rapidamente quais serviços essa pessoa executa e como atende."
               value={form.descricao}
               onChange={(event) => setForm((current) => ({ ...current, descricao: event.target.value }))}
               rows={5}
@@ -97,7 +97,7 @@ function ProfessionalFormFields({
 
             <div className="professionals-page__avatar-copy">
               <strong>Foto de perfil</strong>
-              <p>Perfis com imagem e descricao transmitem mais confianca para novos clientes.</p>
+              <p>Perfis com imagem e descrição transmitem mais confiança para novos clientes.</p>
             </div>
           </div>
 
@@ -119,15 +119,15 @@ function ProfessionalFormFields({
           </div>
 
           <small className="muted professionals-page__help">
-            Formatos aceitos: PNG, JPG ou WEBP, com ate 2MB.
+            Formatos aceitos: PNG, JPG ou WEBP, com até 2 MB.
           </small>
         </div>
       </div>
 
       <div className="professionals-page__status-box">
         <div className="professionals-page__status-copy">
-          <strong>{form.ativo ? 'Perfil ativo para operacao' : 'Perfil pausado temporariamente'}</strong>
-          <p>Profissionais ativos ficam disponiveis para vinculo em servicos e organizacao da agenda.</p>
+          <strong>{form.ativo ? 'Perfil ativo para operação' : 'Perfil pausado temporariamente'}</strong>
+          <p>Profissionais ativos ficam disponíveis para vínculo em serviços e organização da agenda.</p>
         </div>
 
         <div className="professionals-page__status-control">
@@ -264,7 +264,7 @@ export default function ProfissionaisEstabelecimento() {
         key: 'active',
         label: 'Perfis ativos',
         value: activeCount,
-        help: activeCount === 1 ? '1 profissional disponivel.' : `${activeCount} profissionais disponiveis.`,
+        help: activeCount === 1 ? '1 profissional disponível.' : `${activeCount} profissionais disponíveis.`,
         icon: IconChart,
       },
       {
@@ -273,8 +273,8 @@ export default function ProfissionaisEstabelecimento() {
         value: completeProfiles,
         help:
           completeProfiles === 1
-            ? '1 perfil com foto e descricao.'
-            : `${completeProfiles} perfis com foto e descricao.`,
+            ? '1 perfil com foto e descrição.'
+            : `${completeProfiles} perfis com foto e descrição.`,
         icon: IconStar,
       },
       {
@@ -368,7 +368,7 @@ export default function ProfissionaisEstabelecimento() {
       const dataUrl = await readFileAsDataUrl(file);
       onSuccess(dataUrl);
     } catch {
-      showToast('error', 'Nao foi possivel ler a imagem.');
+      showToast('error', 'Não foi possível ler a imagem.');
     }
   }
 
@@ -425,7 +425,7 @@ export default function ProfissionaisEstabelecimento() {
         error?.status === 402 &&
         ['plan_delinquent', 'subscription_access_blocked'].includes(error?.data?.error)
       ) {
-        showToast('error', error?.data?.message || 'Assinatura indisponivel. Regularize para continuar.');
+        showToast('error', error?.data?.message || 'Assinatura indisponível. Regularize para continuar.');
       } else if (error?.data?.error === 'avatar_invalido') {
         showToast('error', 'Envie uma imagem PNG, JPG ou WEBP.');
       } else if (error?.data?.error === 'avatar_grande') {
@@ -530,7 +530,7 @@ export default function ProfissionaisEstabelecimento() {
       <section className="card professionals-page__hero">
         <div className="professionals-page__hero-top">
           <div className="professionals-page__hero-copy">
-            <span className="professionals-page__eyebrow">Gestao da equipe</span>
+            <span className="professionals-page__eyebrow">Gestão da equipe</span>
             <h1 className="professionals-page__title">Profissionais</h1>
             <p className="professionals-page__subtitle">
               Organize a equipe, mantenha perfis bem apresentados e controle quem fica ativo para operar.
@@ -573,7 +573,7 @@ export default function ProfissionaisEstabelecimento() {
             <IconSearch className="professionals-page__search-icon" aria-hidden="true" />
             <input
               className="input professionals-page__search-input"
-              placeholder="Buscar por nome ou descricao"
+              placeholder="Buscar por nome ou descrição"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
             />
@@ -624,7 +624,7 @@ export default function ProfissionaisEstabelecimento() {
             <p>
               {list.length
                 ? 'Ajuste a busca ou troque o filtro para encontrar o perfil desejado.'
-                : 'Cadastre profissionais com foto, descricao e status operacional para manter o painel mais organizado.'}
+                : 'Cadastre profissionais com foto, descrição e status operacional para manter o painel mais organizado.'}
             </p>
             <div className="professionals-page__empty-actions">
               {list.length ? (
@@ -697,15 +697,15 @@ export default function ProfissionaisEstabelecimento() {
                   <div className="professionals-page__meta">
                     <div className="professionals-page__meta-card">
                       <span>Status</span>
-                      <strong>{professional.ativo ? 'Disponivel' : 'Pausado'}</strong>
+                      <strong>{professional.ativo ? 'Disponível' : 'Pausado'}</strong>
                     </div>
                     <div className="professionals-page__meta-card">
-                      <span>Apresentacao</span>
+                      <span>Apresentação</span>
                       <strong>{hasDescription ? 'Pronta' : 'Ajustar bio'}</strong>
                     </div>
                     <div className="professionals-page__meta-card">
                       <span>Perfil</span>
-                      <strong>{isComplete ? 'Completo' : 'Em construcao'}</strong>
+                      <strong>{isComplete ? 'Completo' : 'Em construção'}</strong>
                     </div>
                   </div>
 
@@ -795,7 +795,7 @@ export default function ProfissionaisEstabelecimento() {
               className="btn btn--primary"
               disabled={editSaving || editInvalid}
             >
-              {editSaving ? <span className="spinner" /> : 'Salvar alteracoes'}
+              {editSaving ? <span className="spinner" /> : 'Salvar alterações'}
             </button>,
           ]}
         >
@@ -840,10 +840,10 @@ export default function ProfissionaisEstabelecimento() {
         >
           <div className="professionals-page__delete-dialog">
             <p>
-              Voce esta prestes a remover <strong>{deleteTarget.nome}</strong> do cadastro.
+              Você está prestes a remover <strong>{deleteTarget.nome}</strong> do cadastro.
             </p>
             <p className="muted">
-              Essa acao remove o perfil da equipe e pode impactar a organizacao da agenda vinculada.
+              Essa ação remove o perfil da equipe e pode impactar a organização da agenda vinculada.
             </p>
           </div>
         </Modal>

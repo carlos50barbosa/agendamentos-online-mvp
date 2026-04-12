@@ -12,7 +12,7 @@ export default function AppointmentDiscoveryHero({
   query = '',
   onChange = () => {},
   onSubmit = () => {},
-  placeholder = 'Buscar por estabelecimento, servico, bairro ou cidade',
+  placeholder = 'Buscar por estabelecimento, serviço, bairro ou cidade',
   inputRef = null,
   meta = null,
   stepper = null,
@@ -28,13 +28,19 @@ export default function AppointmentDiscoveryHero({
               <LogoAO size={64} className="appointment-discovery-hero__logo" />
             </div>
             <div className="appointment-discovery-hero__copy">
-              <div className="appointment-discovery-hero__brand-line">
-                <span className="appointment-discovery-hero__brand-name">{brandName}</span>
-                {brandTagline ? (
-                  <span className="appointment-discovery-hero__brand-tagline">{brandTagline}</span>
-                ) : null}
-              </div>
-              <span className="appointment-discovery-hero__eyebrow">{eyebrow}</span>
+              {(brandName || brandTagline) ? (
+                <div className="appointment-discovery-hero__brand-line">
+                  {brandName ? (
+                    <span className="appointment-discovery-hero__brand-name">{brandName}</span>
+                  ) : null}
+                  {brandTagline ? (
+                    <span className="appointment-discovery-hero__brand-tagline">{brandTagline}</span>
+                  ) : null}
+                </div>
+              ) : null}
+              {eyebrow ? (
+                <span className="appointment-discovery-hero__eyebrow">{eyebrow}</span>
+              ) : null}
               <h1 id={headingId} className="appointment-discovery-hero__title">
                 {heading}
               </h1>
@@ -80,14 +86,14 @@ export default function AppointmentDiscoveryHero({
           </div>
 
           <div className="appointment-search-panel__actions">
-            <button type="submit" className="btn btn--primary appointment-search-panel__submit">
-              Buscar
-            </button>
             {children ? (
               <div className="appointment-search-panel__secondary-actions">
                 {children}
               </div>
             ) : null}
+            <button type="submit" className="btn btn--primary appointment-search-panel__submit">
+              Buscar
+            </button>
           </div>
         </form>
 
