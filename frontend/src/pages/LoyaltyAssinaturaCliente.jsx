@@ -40,10 +40,30 @@ function getStatusLabel(value) {
   return labels[key] || (key || 'Indefinido')
 }
 
+function getFailureFriendlyMessage(failure) {
+  const detail = String(failure?.status_detail || '').toLowerCase().trim()
+  const messages = {
+    cc_rejected_bad_filled_card_number: 'Numero do cartao invalido.',
+    cc_rejected_bad_filled_date: 'Data de validade invalida.',
+    cc_rejected_bad_filled_other: 'Dados do cartao invalidos.',
+    cc_rejected_bad_filled_security_code: 'Codigo de seguranca invalido.',
+    cc_rejected_blacklist: 'Pagamento recusado por regra de seguranca do gateway.',
+    cc_rejected_call_for_authorize: 'O banco nao autorizou a compra. Entre em contato com o banco ou use outro cartao.',
+    cc_rejected_card_disabled: 'Este cartao esta desabilitado. Entre em contato com o banco.',
+    cc_rejected_card_error: 'Nao foi possivel processar o cartao. Tente novamente ou use outro cartao.',
+    cc_rejected_duplicated_payment: 'O gateway identificou uma tentativa de pagamento duplicada.',
+    cc_rejected_high_risk: 'Pagamento recusado por analise de risco do Mercado Pago. Tente outro cartao ou outro comprador.',
+    cc_rejected_insufficient_amount: 'Cartao sem limite ou saldo suficiente para esta cobranca.',
+    cc_rejected_invalid_installments: 'Configuracao de parcelas invalida para este cartao.',
+    cc_rejected_max_attempts: 'Muitas tentativas com este cartao. Aguarde um pouco antes de tentar novamente.',
+    cc_rejected_other_reason: 'O banco emissor recusou o pagamento.',
+  }
+  return messages[detail] || ''
+}
+
 function formatFailureDetail(failure) {
   if (!failure) return ''
   const parts = [
-    failure.status_detail || null,
     failure.description || null,
     failure.message || null,
   ].filter(Boolean)
@@ -96,6 +116,7 @@ export default function LoyaltyAssinaturaCliente() {
   const currentStatus = String(currentDetails?.subscription?.status || '').toLowerCase().trim()
   const isCardPendingActivation = currentStatus === 'pending_payment' && String(currentDetails?.subscription?.payment_method || '').toLowerCase() === 'credit_card'
   const latestFailure = currentDetails?.latest_failure || null
+  const latestFailureFriendlyText = getFailureFriendlyMessage(latestFailure)
   const latestFailureText = formatFailureDetail(latestFailure)
 
   const loadData = useCallback(async () => {
@@ -326,7 +347,11 @@ export default function LoyaltyAssinaturaCliente() {
           {latestFailure ? (
             <div className="loyalty-failure-box">
               <strong>Motivo da ultima falha</strong>
-              <span>{latestFailureText || latestFailure.status || 'Falha informada pelo gateway.'}</span>
+              <span>{latestFailureFriendlyText || latestFailureText || latestFailure.status || 'Falha informada pelo gateway.'}</span>
+              {latestFailureText && latestFailureText !== latestFailureFriendlyText ? (
+                <span>Detalhe tecnico: {latestFailureText}</span>
+              ) : null}
+              {latestFailure.status_detail ? <span>Status do gateway: {latestFailure.status_detail}</span> : null}
               {latestFailure.code ? <span>Codigo: {latestFailure.code}</span> : null}
               {latestFailure.created_at ? <span>Registrado em: {formatDate(latestFailure.created_at)}</span> : null}
             </div>
