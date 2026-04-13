@@ -128,6 +128,7 @@ function mapAuthorizedPaymentResponse(data) {
     preapprovalId: data.preapproval_id || data.subscription_id || null,
     status,
     rawStatus: data.status || null,
+    statusDetail: data.status_detail || null,
     paymentMethod: normalizePaymentMethod(data.payment_method_id || 'credit_card') || 'credit_card',
     amountCents: data.transaction_amount != null
       ? Math.round(Number(data.transaction_amount || 0) * 100)
@@ -150,6 +151,7 @@ function mapCardChargeResponse(data) {
     id: data.id || null,
     status,
     rawStatus: data.status || null,
+    statusDetail: data.status_detail || null,
     paymentMethod: normalizePaymentMethod(data.payment_method_id || 'credit_card') || 'credit_card',
     amountCents: data.transaction_amount != null
       ? Math.round(Number(data.transaction_amount || 0) * 100)

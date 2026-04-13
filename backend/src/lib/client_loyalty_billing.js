@@ -35,7 +35,7 @@ const CLIENT_LOYALTY_CARD_START_DELAY_MS = Math.max(
   65000
 )
 const CLIENT_LOYALTY_CARD_PENDING_WINDOW_MS = Math.max(
-  Number(process.env.CLIENT_LOYALTY_CARD_PENDING_WINDOW_MS || 15 * 60 * 1000) || (15 * 60 * 1000),
+  Number(process.env.CLIENT_LOYALTY_CARD_PENDING_WINDOW_MS || 2 * 60 * 60 * 1000) || (2 * 60 * 60 * 1000),
   60000
 )
 const DAY_MS = 86400000
@@ -162,6 +162,75 @@ function isPendingCardCheckoutStillInFlight(subscription, referenceDate = new Da
   }
 
   return false
+}
+
+function getFirstGatewayCause(value) {
+  if (Array.isArray(value)) return value.find(Boolean) || null
+  if (Array.isArray(value?.cause)) return value.cause.find(Boolean) || null
+  return null
+}
+
+function extractGatewayFailureDetails(payload = null, fallbackStatus = null) {
+  const raw = payload?.raw || payload || null
+  const payment = raw?.payment || raw?.authorized_payment || raw || null
+  const gatewayCause =
+    getFirstGatewayCause(payment) ||
+    getFirstGatewayCause(raw) ||
+    getFirstGatewayCause(raw?.subscription) ||
+    null
+
+  const details = {
+    status: payment?.status || raw?.status || fallbackStatus || null,
+    status_detail: payment?.status_detail || payment?.statusDetail || raw?.status_detail || raw?.statusDetail || null,
+    code: gatewayCause?.code != null ? String(gatewayCause.code) : null,
+    description:
+      gatewayCause?.description ||
+      payment?.detail ||
+      payment?.status_reason ||
+      raw?.detail ||
+      raw?.error_description ||
+      null,
+    message:
+      payment?.message ||
+      payment?.status_message ||
+      raw?.message ||
+      raw?.status_message ||
+      null,
+  }
+
+  return Object.values(details).some(Boolean) ? details : null
+}
+
+function extractClientLoyaltyFailureFromEvent(event) {
+  if (!event) return null
+  const payload = event.payload_json || null
+  const normalized = {
+    status: payload?.payment_status || null,
+    status_detail: payload?.payment_status_detail || null,
+    code: payload?.payment_rejection_code != null ? String(payload.payment_rejection_code) : null,
+    description: payload?.payment_rejection_description || null,
+    message: payload?.payment_status_message || null,
+    event_type: event.tipo_evento || null,
+    gateway_event_id: event.gateway_event_id || null,
+    created_at: event.created_at || null,
+  }
+  if (Object.values(normalized).some(Boolean)) return normalized
+
+  const fallback = extractGatewayFailureDetails(payload?.raw || payload, payload?.payment_status || null)
+  if (!fallback) return null
+  return {
+    ...fallback,
+    event_type: event.tipo_evento || null,
+    gateway_event_id: event.gateway_event_id || null,
+    created_at: event.created_at || null,
+  }
+}
+
+function findLatestClientLoyaltyFailure(events = []) {
+  const candidate = (Array.isArray(events) ? events : []).find((event) =>
+    ['payment_failed', 'payment_expired'].includes(String(event?.tipo_evento || '').toLowerCase())
+  )
+  return candidate ? extractClientLoyaltyFailureFromEvent(candidate) : null
 }
 
 async function fetchEstablishmentSummary(estabelecimentoId, { db = pool } = {}) {
@@ -379,11 +448,17 @@ async function markSubscriptionPastDueTx(subscriptionId, {
     graceUntil,
   }, { db })
 
+  const failureDetails = extractGatewayFailureDetails(rawPayload, paymentStatus || null)
+
   await appendClientLoyaltySubscriptionEvent(subscriptionId, {
     eventType: nextStatus === 'past_due' ? 'payment_failed' : 'payment_expired',
     gatewayEventId: gatewayEventId || gatewayPaymentId || gatewaySubscriptionId || null,
     payload: {
       payment_status: paymentStatus || null,
+      payment_status_detail: failureDetails?.status_detail || null,
+      payment_status_message: failureDetails?.message || null,
+      payment_rejection_code: failureDetails?.code || null,
+      payment_rejection_description: failureDetails?.description || null,
       raw: rawPayload,
     },
   }, { db })
@@ -416,13 +491,16 @@ export async function startClientLoyaltyCardSubscription({
   const current = await getPreferredClientLoyaltySubscription(clienteId, estabelecimentoId, { db })
   if (current) {
     const state = computeClientLoyaltySubscriptionState(current)
+    const pendingCardCheckout = isPendingCardCheckoutStillInFlight(current)
     if (
       state.benefitsActive ||
       state.resolvedStatus === 'pending_pix' ||
-      isPendingCardCheckoutStillInFlight(current)
+      pendingCardCheckout
     ) {
       throw createError(
-        'Ja existe uma assinatura em andamento para este estabelecimento.',
+        pendingCardCheckout
+          ? 'Ja existe uma assinatura aguardando a primeira cobranca do cartao para este estabelecimento. O Mercado Pago pode levar ate cerca de 1 hora para confirmar.'
+          : 'Ja existe uma assinatura em andamento para este estabelecimento.',
         409,
         'client_loyalty_subscription_conflict'
       )
@@ -815,6 +893,21 @@ export async function syncClientLoyaltyAuthorizedPaymentFromGateway(authorizedPa
       return { ok: true, handled: true, status: 'active', subscription: activated }
     }
 
+    const failureDetails = extractGatewayFailureDetails(
+      { payment: paymentResult.raw, subscription: gatewayResult.raw },
+      authorizedPayment.rawStatus || authorizedPayment.status || null
+    )
+    console.warn('[client-loyalty][authorized-payment] failed', {
+      subscription_id: localSubscription.id,
+      authorized_payment_id: authorizedPayment.id || authorizedPaymentId,
+      gateway_subscription_id: authorizedPayment.preapprovalId || null,
+      status: failureDetails?.status || authorizedPayment.rawStatus || authorizedPayment.status || null,
+      status_detail: failureDetails?.status_detail || authorizedPayment.statusDetail || null,
+      rejection_code: failureDetails?.code || null,
+      rejection_description: failureDetails?.description || null,
+      message: failureDetails?.message || null,
+    })
+
     const updated = await markSubscriptionPastDueTx(localSubscription.id, {
       paymentStatus: authorizedPayment.status || null,
       gatewayPaymentId: authorizedPayment.id || null,
@@ -828,7 +921,7 @@ export async function syncClientLoyaltyAuthorizedPaymentFromGateway(authorizedPa
       gatewayEventId: gatewayEventId || authorizedPayment.id || authorizedPaymentId,
     }, { db: conn })
     await conn.commit()
-    return { ok: true, handled: true, status: updated.status, subscription: updated }
+    return { ok: true, handled: true, status: updated.status, subscription: updated, failure: failureDetails }
   } catch (error) {
     try { await conn.rollback() } catch {}
     throw error
@@ -907,6 +1000,7 @@ export async function loadClientLoyaltySubscriptionDetails(subscriptionInput, {
   const events = includeEvents
     ? await listClientLoyaltySubscriptionEvents(subscription.id, { db, limit: eventLimit })
     : []
+  const latestFailure = findLatestClientLoyaltyFailure(events)
 
   return {
     subscription: serializeClientLoyaltySubscription(subscription),
@@ -921,5 +1015,6 @@ export async function loadClientLoyaltySubscriptionDetails(subscriptionInput, {
       : null,
     credits,
     events,
+    latest_failure: latestFailure,
   }
 }

@@ -1913,6 +1913,9 @@ router.post('/webhook', async (req, res) => {
           ok: !!loyaltyResult?.ok,
           reason: loyaltyResult?.reason || null,
           status: loyaltyResult?.status || null,
+          status_detail: loyaltyResult?.failure?.status_detail || null,
+          rejection_code: loyaltyResult?.failure?.code || null,
+          rejection_description: loyaltyResult?.failure?.description || null,
         })
         return res.status(200).json({
           ok: true,

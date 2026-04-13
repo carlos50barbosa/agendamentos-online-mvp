@@ -40,6 +40,16 @@ function getStatusLabel(value) {
   return labels[key] || (key || 'Indefinido')
 }
 
+function formatFailureDetail(failure) {
+  if (!failure) return ''
+  const parts = [
+    failure.status_detail || null,
+    failure.description || null,
+    failure.message || null,
+  ].filter(Boolean)
+  return parts.join(' | ')
+}
+
 async function loadMercadoPagoSdk() {
   if (typeof window === 'undefined') throw new Error('browser_unavailable')
   if (window.MercadoPago) return window.MercadoPago
@@ -83,6 +93,10 @@ export default function LoyaltyAssinaturaCliente() {
   const [paymentMethod, setPaymentMethod] = useState('pix')
   const [pixCheckout, setPixCheckout] = useState(null)
   const [cardState, setCardState] = useState({ loading: false, ready: false, error: '' })
+  const currentStatus = String(currentDetails?.subscription?.status || '').toLowerCase().trim()
+  const isCardPendingActivation = currentStatus === 'pending_payment' && String(currentDetails?.subscription?.payment_method || '').toLowerCase() === 'credit_card'
+  const latestFailure = currentDetails?.latest_failure || null
+  const latestFailureText = formatFailureDetail(latestFailure)
 
   const loadData = useCallback(async () => {
     setLoading(true)
@@ -185,7 +199,7 @@ export default function LoyaltyAssinaturaCliente() {
         identification_type: cardFormData.identificationType || null,
         identification_number: cardFormData.identificationNumber || null,
       })
-      setNotice({ type: 'success', message: 'Cartao validado. A primeira cobranca sera confirmada pelo gateway em instantes.' })
+      setNotice({ type: 'success', message: 'Cartao validado. A primeira cobranca sera confirmada pelo Mercado Pago. Esse processo pode levar ate cerca de 1 hora.' })
       await loadData()
       return true
     } catch (error) {
@@ -296,10 +310,27 @@ export default function LoyaltyAssinaturaCliente() {
           </div>
 
           <div className="loyalty-current__meta">
-            <span>Proxima cobranca: {formatDate(currentDetails.subscription?.next_billing_at)}</span>
-            <span>Periodo atual: {formatDate(currentDetails.subscription?.current_period_start)} ate {formatDate(currentDetails.subscription?.current_period_end)}</span>
+            <span>
+              {isCardPendingActivation
+                ? 'Primeira cobranca: aguardando confirmacao do Mercado Pago (pode levar ate cerca de 1 hora)'
+                : `Proxima cobranca: ${formatDate(currentDetails.subscription?.next_billing_at)}`}
+            </span>
+            <span>
+              {currentDetails.subscription?.current_period_start && currentDetails.subscription?.current_period_end
+                ? `Periodo atual: ${formatDate(currentDetails.subscription?.current_period_start)} ate ${formatDate(currentDetails.subscription?.current_period_end)}`
+                : 'Periodo atual: sera liberado apos a primeira cobranca'}
+            </span>
             <span>Pagamento: {currentDetails.subscription?.payment_method || '-'}</span>
           </div>
+
+          {latestFailure ? (
+            <div className="loyalty-failure-box">
+              <strong>Motivo da ultima falha</strong>
+              <span>{latestFailureText || latestFailure.status || 'Falha informada pelo gateway.'}</span>
+              {latestFailure.code ? <span>Codigo: {latestFailure.code}</span> : null}
+              {latestFailure.created_at ? <span>Registrado em: {formatDate(latestFailure.created_at)}</span> : null}
+            </div>
+          ) : null}
 
           <div className="loyalty-grid loyalty-grid--two">
             <div className="loyalty-card loyalty-card--nested">
@@ -404,7 +435,7 @@ export default function LoyaltyAssinaturaCliente() {
                 </div>
               ) : (
                 <div className="loyalty-checkout-block">
-                  <p>Cartao com primeira cobranca em instantes e renovacao automatica mensal.</p>
+                  <p>Cartao com primeira cobranca confirmada pelo Mercado Pago, o que pode levar ate cerca de 1 hora, e renovacao automatica mensal.</p>
                   <form id="client-loyalty-card-form" className="loyalty-card-form">
                     <div className="loyalty-card-form__grid">
                       <div id="client-loyalty-card-number" className="input loyalty-card-form__field" />
