@@ -34,6 +34,12 @@ const CATEGORIES = [
   { label: 'MASSAGEM', query: 'massagem' },
 ];
 
+const LANDING_NAV = [
+  { label: 'Como funciona', href: '#como-funciona' },
+  { label: 'Destaques', href: '#destaques' },
+  { label: 'FAQ', href: '#faq' },
+];
+
 const FAQ_ITEMS = [
   {
     question: 'Preciso instalar aplicativo?',
@@ -153,6 +159,20 @@ export default function LandingPublica() {
       });
   }, [featured]);
 
+  const heroMetrics = useMemo(() => ([
+    { label: 'Fluxo guiado', value: `${STEPS.length} etapas` },
+    { label: 'Categorias ativas', value: `${String(CATEGORIES.length).padStart(2, '0')} nichos` },
+    { label: 'Perfis em destaque', value: `${featuredCards.length || FEATURED_LIMIT} opcoes` },
+  ]), [featuredCards.length]);
+
+  const heroSpotlights = useMemo(() => featuredCards.slice(0, 2), [featuredCards]);
+
+  const heroStyle = useMemo(() => (
+    heroSpotlights[0]?.image
+      ? { '--landing-hero-image': `url("${heroSpotlights[0].image}")` }
+      : undefined
+  ), [heroSpotlights]);
+
   const year = new Date().getFullYear();
 
   return (
@@ -165,6 +185,13 @@ export default function LandingPublica() {
               <strong>Agendamentos Online</strong>
             </span>
           </Link>
+          <nav className="landing-header__nav" aria-label="Navegacao principal">
+            {LANDING_NAV.map((item) => (
+              <a key={item.href} href={item.href}>
+                {item.label}
+              </a>
+            ))}
+          </nav>
           <div className="landing-header__actions">
             <Link to="/login" className="btn btn--outline btn--sm">Entrar</Link>
             <Link to="/cadastro" className="btn btn--outline-brand btn--sm">Criar conta</Link>
@@ -186,6 +213,11 @@ export default function LandingPublica() {
           id="landing-menu"
           ref={panelRef}
         >
+          {LANDING_NAV.map((item) => (
+            <a key={item.href} href={item.href} onClick={() => setMenuOpen(false)}>
+              {item.label}
+            </a>
+          ))}
           <Link to="/login" className="btn btn--outline btn--sm" onClick={() => setMenuOpen(false)}>
             Entrar
           </Link>
@@ -196,14 +228,14 @@ export default function LandingPublica() {
       </header>
 
       <div className="landing">
-        <section className="landing-hero">
+        <section className="landing-hero" style={heroStyle}>
           <div className="landing-hero__bg" aria-hidden="true" />
           <div className="landing-hero__inner">
             <div className="landing-hero__content">
-              <p className="landing-hero__eyebrow">Agende com praticidade</p>
-              <h1>O jeito mais simples de agendar serviços de beleza e bem-estar</h1>
+              <p className="landing-hero__eyebrow">Plataforma premium de agendamentos</p>
+              <h1>Agenda profissional com clareza, confianca e operacao moderna.</h1>
               <p className="landing-hero__subtitle">
-                Descubra estabelecimentos perto de você, escolha o horário ideal e confirme em segundos.
+                Descubra estabelecimentos, compare disponibilidade e confirme seu horario em uma jornada enxuta, segura e pronta para uso no celular.
               </p>
               <div className="landing-hero__trust" role="list">
                 {BENEFITS.map((benefit) => {
@@ -218,15 +250,66 @@ export default function LandingPublica() {
               </div>
               <div className="landing-hero__actions">
                 <button type="button" className="btn btn--primary btn--lg" onClick={handlePrimaryCta}>
-                  Agendar agora
+                  Buscar horarios
                 </button>
                 <button
                   type="button"
                   className="btn btn--outline btn--lg"
                   onClick={handleScrollToHow}
                 >
-                  Como funciona
+                  Entender o fluxo
                 </button>
+              </div>
+            </div>
+            <div className="landing-hero__stats" role="list" aria-label="Resumo da plataforma">
+              {heroMetrics.map((item) => (
+                <div key={item.label} className="landing-hero__stat" role="listitem">
+                  <strong>{item.value}</strong>
+                  <span>{item.label}</span>
+                </div>
+              ))}
+            </div>
+            <div className="landing-hero__panels">
+              <div className="landing-hero__panel">
+                <div className="landing-hero__panel-title">
+                  <strong>Jornada orientada</strong>
+                  <span>Uma selecao limpa, sem ruido visual e com cada etapa no lugar certo.</span>
+                </div>
+                <div className="landing-hero__process" role="list" aria-label="Etapas do agendamento">
+                  {STEPS.map((step, index) => (
+                    <div key={step.title} className="landing-hero__process-item" role="listitem">
+                      <span className="landing-hero__process-step">{index + 1}</span>
+                      <div>
+                        <strong>{step.title}</strong>
+                        <span>{step.text}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="landing-hero__panel">
+                <div className="landing-hero__panel-title">
+                  <strong>Locais em evidência</strong>
+                  <span>Perfis com identidade, atendimento claro e disponibilidade pronta para consulta.</span>
+                </div>
+                <div className="landing-hero__spotlights">
+                  {heroSpotlights.length > 0 ? heroSpotlights.map((item) => (
+                    <div key={item.id} className="landing-hero__spotlight">
+                      <div className="landing-hero__spotlight-media">
+                        <img src={item.image} alt={`Foto do estabelecimento ${item.name}`} />
+                      </div>
+                      <div className="landing-hero__spotlight-copy">
+                        <strong>{item.name}</strong>
+                        <span>{item.address || 'Endereco nao informado'}</span>
+                      </div>
+                    </div>
+                  )) : (
+                    <div className="landing-hero__spotlight-copy">
+                      <strong>Catalogo em crescimento</strong>
+                      <span>Novos estabelecimentos aparecem aqui assim que estiverem disponiveis.</span>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           </div>
@@ -268,7 +351,7 @@ export default function LandingPublica() {
         </section>
 
         {featuredCards.length > 0 && (
-          <section className="landing-section landing-featured">
+          <section className="landing-section landing-featured" id="destaques">
             <div className="landing-section__head">
               <h2>Em destaque</h2>
               <p>Agende rapidamente nos estabelecimentos mais procurados.</p>
@@ -305,7 +388,7 @@ export default function LandingPublica() {
           </section>
         )}
 
-        <section className="landing-section landing-faq">
+        <section className="landing-section landing-faq" id="faq">
           <div className="landing-section__head">
             <h2>FAQ rápido</h2>
             <p>Tire dúvidas comuns antes de agendar.</p>

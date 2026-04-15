@@ -232,6 +232,13 @@ export default function ClientAppointmentsPage() {
     });
   }, [appointments, search, statusFilter]);
 
+  const appointmentMetrics = useMemo(() => ([
+    { label: 'Total', value: appointments.length },
+    { label: 'Confirmados', value: appointments.filter((item) => item.effectiveStatus === 'confirmado').length },
+    { label: 'Concluidos', value: appointments.filter((item) => item.effectiveStatus === 'concluido').length },
+    { label: 'Pendentes', value: appointments.filter((item) => ['pendente', 'pendente_pagamento'].includes(item.effectiveStatus)).length },
+  ]), [appointments]);
+
   const isBaseEmpty = appointments.length === 0;
 
   const openNewAppointment = useCallback(() => {
@@ -369,14 +376,17 @@ export default function ClientAppointmentsPage() {
   return (
     <>
       <div
-        className="tw-mx-auto tw-min-h-full tw-w-full tw-max-w-6xl tw-min-w-0 tw-space-y-5 tw-rounded-2xl tw-bg-slate-50 tw-px-4 tw-py-4 tw-pb-40 md:tw-px-6 md:tw-pb-0"
+        className="appointments-page tw-mx-auto tw-min-h-full tw-w-full tw-max-w-6xl tw-min-w-0 tw-space-y-5 tw-rounded-2xl tw-bg-transparent tw-px-4 tw-py-4 tw-pb-40 md:tw-px-6 md:tw-pb-0"
       >
-        <section className="tw-rounded-2xl tw-border tw-border-slate-200 tw-bg-white tw-p-4 tw-shadow-sm md:tw-p-6">
+        <section className="tw-rounded-2xl tw-border tw-border-slate-200/80 tw-bg-white/95 tw-p-4 tw-shadow-sm md:tw-p-6">
           <div className="tw-flex tw-flex-col tw-gap-4 md:tw-flex-row md:tw-items-end md:tw-justify-between">
             <div>
-              <h1 className="tw-m-0 tw-text-2xl tw-font-semibold tw-text-slate-900">Meus Agendamentos</h1>
+              <span className="tw-inline-flex tw-min-h-[28px] tw-items-center tw-rounded-full tw-border tw-border-slate-200 tw-bg-slate-50 tw-px-3 tw-text-[0.68rem] tw-font-semibold tw-uppercase tw-tracking-[0.18em] tw-text-slate-600">
+                Painel do cliente
+              </span>
+              <h1 className="tw-m-0 tw-mt-3 tw-text-2xl tw-font-semibold tw-text-slate-900">Meus Agendamentos</h1>
               <p className="tw-m-0 tw-mt-1 tw-text-sm tw-text-slate-500">
-                Acompanhe seus horários e status
+                Acompanhe seus horarios, pagamentos e status em uma visao unificada.
               </p>
             </div>
 
@@ -384,7 +394,7 @@ export default function ClientAppointmentsPage() {
               <label className="tw-flex tw-flex-col tw-gap-1 tw-text-xs tw-font-medium tw-text-slate-500">
                 Status
                 <select
-                  className="tw-h-10 tw-rounded-xl tw-border tw-border-slate-200 tw-bg-white tw-px-3 tw-text-sm tw-text-slate-700 focus-visible:tw-outline-none focus-visible:tw-ring-2 focus-visible:tw-ring-indigo-200 focus-visible:tw-ring-offset-2"
+                  className="tw-h-10 tw-rounded-lg tw-border tw-border-slate-200 tw-bg-white tw-px-3 tw-text-sm tw-text-slate-700 focus-visible:tw-outline-none focus-visible:tw-ring-2 focus-visible:tw-ring-sky-100 focus-visible:tw-ring-offset-2"
                   value={statusFilter}
                   onChange={(event) => setStatusFilter(event.target.value)}
                   aria-label="Filtrar agendamentos por status"
@@ -402,7 +412,7 @@ export default function ClientAppointmentsPage() {
                 <span className="tw-relative tw-flex tw-items-center">
                   <IconSearch className="tw-pointer-events-none tw-absolute tw-left-3 tw-h-4 tw-w-4 tw-text-slate-400" aria-hidden="true" />
                   <input
-                    className="tw-h-10 tw-w-full tw-rounded-xl tw-border tw-border-slate-200 tw-bg-white tw-pl-9 tw-pr-3 tw-text-sm tw-text-slate-700 tw-placeholder:text-slate-400 focus-visible:tw-outline-none focus-visible:tw-ring-2 focus-visible:tw-ring-indigo-200 focus-visible:tw-ring-offset-2"
+                    className="tw-h-10 tw-w-full tw-rounded-lg tw-border tw-border-slate-200 tw-bg-white tw-pl-9 tw-pr-3 tw-text-sm tw-text-slate-700 tw-placeholder:text-slate-400 focus-visible:tw-outline-none focus-visible:tw-ring-2 focus-visible:tw-ring-sky-100 focus-visible:tw-ring-offset-2"
                     placeholder="Serviço ou estabelecimento"
                     value={search}
                     onChange={(event) => setSearch(event.target.value)}
@@ -431,9 +441,9 @@ export default function ClientAppointmentsPage() {
                   key={chip.value}
                   type="button"
                   onClick={() => setStatusFilter(chip.value)}
-                  className={`tw-whitespace-nowrap tw-rounded-full tw-border tw-px-3 tw-py-1.5 tw-text-sm tw-font-semibold tw-transition-colors tw-duration-150 focus-visible:tw-outline-none focus-visible:tw-ring-2 focus-visible:tw-ring-slate-300 focus-visible:tw-ring-offset-2 ${
+                  className={`tw-whitespace-nowrap tw-rounded-lg tw-border tw-px-3 tw-py-1.5 tw-text-sm tw-font-semibold tw-transition-colors tw-duration-150 focus-visible:tw-outline-none focus-visible:tw-ring-2 focus-visible:tw-ring-slate-300 focus-visible:tw-ring-offset-2 ${
                     selected
-                      ? 'tw-border-slate-900 tw-bg-slate-900 tw-text-white'
+                      ? 'tw-border-[#123e63] tw-bg-[#123e63] tw-text-white'
                       : 'tw-border-slate-200 tw-bg-white tw-text-slate-600 hover:tw-bg-slate-50'
                   }`}
                   aria-pressed={selected}
@@ -442,6 +452,15 @@ export default function ClientAppointmentsPage() {
                 </button>
               );
             })}
+          </div>
+
+          <div className="tw-mt-5 tw-grid tw-gap-3 sm:tw-grid-cols-2 xl:tw-grid-cols-4">
+            {appointmentMetrics.map((metric) => (
+              <div key={metric.label} className="appointments-page__metric tw-flex tw-flex-col tw-gap-2 tw-p-4">
+                <span className="tw-text-[0.72rem] tw-font-semibold tw-uppercase tw-tracking-[0.14em]">{metric.label}</span>
+                <strong className="tw-text-2xl tw-font-semibold">{metric.value}</strong>
+              </div>
+            ))}
           </div>
         </section>
 

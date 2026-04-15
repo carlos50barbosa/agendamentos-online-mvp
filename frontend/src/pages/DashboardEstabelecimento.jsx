@@ -1299,6 +1299,41 @@ export default function DashboardEstabelecimento() {
 
     <div className="dashboard-narrow dashboard-pro dashboard-estab-pro">
 
+      <section className="page-shell__hero dashboard-estab-hero">
+        <div className="page-toolbar">
+          <div className="page-toolbar__copy">
+            <span className="page-shell__eyebrow">Painel executivo</span>
+            <h1 className="page-shell__title">Operacao da agenda em tempo real</h1>
+            <p className="page-shell__subtitle">
+              Veja proximos atendimentos, confirmacoes e produtividade da equipe em uma leitura unica e consistente.
+            </p>
+          </div>
+          <div className="page-shell__actions">
+            <NavLink to="/servicos" className="btn btn--outline">Servicos</NavLink>
+            <NavLink to="/clientes" className="btn btn--primary">Clientes</NavLink>
+          </div>
+        </div>
+
+        <div className="page-shell__stats" role="list" aria-label="Indicadores principais">
+          <div className="page-shell__stat" role="listitem">
+            <span className="page-shell__stat-label">Agenda filtrada</span>
+            <strong className="page-shell__stat-value">{filtered.length}</strong>
+          </div>
+          <div className="page-shell__stat" role="listitem">
+            <span className="page-shell__stat-label">Recebidos</span>
+            <strong className="page-shell__stat-value">{totals.recebidos}</strong>
+          </div>
+          <div className="page-shell__stat" role="listitem">
+            <span className="page-shell__stat-label">Cancelados</span>
+            <strong className="page-shell__stat-value">{totals.cancelados}</strong>
+          </div>
+          <div className="page-shell__stat" role="listitem">
+            <span className="page-shell__stat-label">Profissionais</span>
+            <strong className="page-shell__stat-value">{professionals.length}</strong>
+          </div>
+        </div>
+      </section>
+
       <div className="agenda-panel">
 
         <div className="agenda-hdr">

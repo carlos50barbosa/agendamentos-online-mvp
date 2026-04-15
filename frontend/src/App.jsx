@@ -578,6 +578,9 @@ function Sidebar({ open, user, isDesktop, isDark, isPlanos, toggleTheme }) {
     : '/login?tipo=cliente';
 
   const navigation = useMemo(() => buildNavigation(resolvedUser), [resolvedUser]);
+  const dashboardTarget = navigation.isAuthenticated
+    ? (resolvedUser?.tipo === 'estabelecimento' ? '/estab' : '/cliente')
+    : '/';
 
   const showActive = true;
 
@@ -620,6 +623,20 @@ function Sidebar({ open, user, isDesktop, isDark, isPlanos, toggleTheme }) {
     <aside className={`sidebar ${resolvedUser?.tipo === 'estabelecimento' ? 'sidebar--estab' : ''} ${scrolled ? 'is-scrolled' : ''}`} ref={setEl}>
 
       <div className="sidebar__inner">
+        <div className="sidebar__brand-block">
+          <NavLink to={dashboardTarget} className="brand brand--sidebar">
+            <LogoAO size={32} />
+            <span className="brand__text">
+              <strong>Agendamentos Online</strong>
+              <small>{navigation.isAuthenticated ? 'Workspace operacional' : 'Acesso da plataforma'}</small>
+            </span>
+          </NavLink>
+          {navigation.isAuthenticated && (
+            <span className="sidebar__account-pill">
+              {resolvedUser?.tipo === 'estabelecimento' ? 'Perfil profissional' : 'Conta do cliente'}
+            </span>
+          )}
+        </div>
         <nav id="mainnav" className="mainnav mainnav--vertical">
           {!navigation.isAuthenticated ? (
 
@@ -657,7 +674,12 @@ function Sidebar({ open, user, isDesktop, isDark, isPlanos, toggleTheme }) {
 
                 <div className="profilebox__info">
 
-                  <div className="profilebox__name">{resolvedUser?.nome || resolvedUser?.name || 'Usuário'}</div>
+                  <div className="profilebox__header">
+                    <div className="profilebox__name">{resolvedUser?.nome || resolvedUser?.name || 'Usuário'}</div>
+                    <span className="profilebox__role">
+                      {resolvedUser?.tipo === 'estabelecimento' ? 'Profissional' : 'Cliente'}
+                    </span>
+                  </div>
 
                   {resolvedUser?.email && <div className="profilebox__sub">{resolvedUser.email}</div>}
 
@@ -1367,14 +1389,34 @@ const topbarAlert = useMemo(() => {
 
                   <strong>Agendamentos Online</strong>
 
-                  <small>Rápido e sem fricção</small>
+                  <small>Agenda, clientes e operacao em um so lugar</small>
 
                 </span>
 
               </NavLink>
 
               {topbarNavigation.isAuthenticated ? (
-                !isDesktop && (
+                isDesktop ? (
+                  <div className="app-topbar__desktop-actions">
+                    <div className="app-topbar__account">
+                      <span className="app-topbar__account-label">
+                        {currentUser?.tipo === 'estabelecimento' ? 'Workspace premium' : 'Conta ativa'}
+                      </span>
+                      <strong>{currentUser?.nome || currentUser?.name || 'Usuário'}</strong>
+                    </div>
+                    <button
+                      type="button"
+                      className={`theme-toggle theme-toggle--text${isPlanos ? ' is-disabled' : ''}`}
+                      onClick={isPlanos ? undefined : toggleTheme}
+                      disabled={isPlanos}
+                      aria-label={isPlanos ? 'Tema fixo no modo claro' : `Ativar tema ${isDark ? 'claro' : 'escuro'}`}
+                      title={isPlanos ? 'Tema fixo no modo claro' : isDark ? 'Alternar para tema claro' : 'Alternar para tema escuro'}
+                    >
+                      {isPlanos ? <IconSun aria-hidden="true" /> : isDark ? <IconSun aria-hidden="true" /> : <IconMoon aria-hidden="true" />}
+                      <span className="app-topbar__theme-label">{isPlanos ? 'Tema claro' : isDark ? 'Tema escuro' : 'Tema claro'}</span>
+                    </button>
+                  </div>
+                ) : (
                   <div className="app-topbar__menu">
                     <button
                       type="button"
@@ -1457,7 +1499,7 @@ const topbarAlert = useMemo(() => {
                 )
               ) : (
                 <NavLink to="/login" className="btn btn--primary btn--sm app-topbar__login">
-                  Login | Cadastro
+                  Entrar na plataforma
                 </NavLink>
               )}
             </div>

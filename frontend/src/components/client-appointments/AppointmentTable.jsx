@@ -10,7 +10,7 @@ export default function AppointmentTable({
   payLoadingId = null,
 }) {
   return (
-    <div className="tw-hidden tw-overflow-hidden tw-rounded-2xl tw-border tw-border-slate-200 tw-bg-white tw-shadow-sm md:tw-block">
+    <div className="tw-hidden tw-overflow-hidden tw-rounded-lg tw-border tw-border-slate-200/80 tw-bg-white/95 tw-shadow-sm md:tw-block">
       <table className="tw-min-w-full tw-border-separate tw-border-spacing-0">
         <thead className="tw-bg-slate-50">
           <tr>

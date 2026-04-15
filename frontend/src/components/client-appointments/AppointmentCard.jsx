@@ -12,7 +12,7 @@ export default function AppointmentCard({
 }) {
   return (
     <article
-      className={`tw-rounded-2xl tw-border tw-border-slate-200 tw-bg-white tw-p-4 tw-shadow-sm ${className}`.trim()}
+      className={`tw-rounded-lg tw-border tw-border-slate-200/80 tw-bg-white/95 tw-p-4 tw-shadow-sm ${className}`.trim()}
     >
       <header className="tw-flex tw-flex-wrap tw-items-start tw-justify-between tw-gap-2">
         <div className="tw-min-w-0 tw-flex-1">

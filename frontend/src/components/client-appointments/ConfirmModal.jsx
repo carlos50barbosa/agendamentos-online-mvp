@@ -60,7 +60,7 @@ export default function ConfirmModal({
       }}
     >
       <div
-        className="tw-w-full tw-max-w-md tw-rounded-2xl tw-border tw-border-slate-200 tw-bg-white tw-p-6 tw-shadow-xl"
+        className="tw-w-full tw-max-w-md tw-rounded-lg tw-border tw-border-slate-200/80 tw-bg-white/95 tw-p-6 tw-shadow-xl"
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}

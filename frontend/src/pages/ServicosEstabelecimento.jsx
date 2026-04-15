@@ -856,11 +856,53 @@ export default function ServicosEstabelecimento() {
 
   }, [list, query, statusFilter]);
 
+  const activeServicesCount = useMemo(() => list.filter((item) => item?.ativo).length, [list]);
+  const inactiveServicesCount = useMemo(() => list.filter((item) => !item?.ativo).length, [list]);
+
 
 
   return (
 
-    <div className="grid" style={{ gap: 16 }}>
+    <div className="grid services-page" style={{ gap: 16 }}>
+
+      <section className="page-shell__hero">
+        <div className="page-toolbar">
+          <div className="page-toolbar__copy">
+            <span className="page-shell__eyebrow">Catalogo profissional</span>
+            <h1 className="page-shell__title">Servicos com apresentacao premium e operacao clara</h1>
+            <p className="page-shell__subtitle">
+              Organize preco, duracao, profissionais vinculados e imagem de cada servico em uma base consistente para o agendamento.
+            </p>
+          </div>
+          <div className="page-shell__actions">
+            <button className="btn btn--outline" type="button" onClick={openAdd}>
+              Novo servico
+            </button>
+            <Link className="btn btn--primary" to="/profissionais">
+              Ver equipe
+            </Link>
+          </div>
+        </div>
+
+        <div className="page-shell__stats" role="list" aria-label="Indicadores de servicos">
+          <div className="page-shell__stat" role="listitem">
+            <span className="page-shell__stat-label">Total cadastrado</span>
+            <strong className="page-shell__stat-value">{list.length}</strong>
+          </div>
+          <div className="page-shell__stat" role="listitem">
+            <span className="page-shell__stat-label">Ativos</span>
+            <strong className="page-shell__stat-value">{activeServicesCount}</strong>
+          </div>
+          <div className="page-shell__stat" role="listitem">
+            <span className="page-shell__stat-label">Inativos</span>
+            <strong className="page-shell__stat-value">{inactiveServicesCount}</strong>
+          </div>
+          <div className="page-shell__stat" role="listitem">
+            <span className="page-shell__stat-label">Profissionais</span>
+            <strong className="page-shell__stat-value">{pros.length}</strong>
+          </div>
+        </div>
+      </section>
 
       {trialInfo && trialInfo.plan === 'starter' && trialDaysLeft > 0 && (
 
@@ -892,27 +934,23 @@ export default function ServicosEstabelecimento() {
 
       {/* Meus Serviços */}
 
-      <div className="card">
+      <div className="card services-page__panel">
 
-        <div className="header-row" style={{ display: "flex", gap: 10, alignItems: "flex-start", flexDirection: "column", marginBottom: 12 }}>
+        <div className="page-toolbar" style={{ marginBottom: 12 }}>
 
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap", width: "100%" }}>
+          <div className="page-toolbar__copy">
 
-            <h2 style={{ margin: 0, fontSize: 20 }}>Meus Serviços</h2>
+            <h2>Meus Servicos</h2>
 
-            <button className="btn btn--primary btn--sm" type="button" onClick={openAdd}>
-
-              Adicionar serviço
-
-            </button>
+            <p>Filtre por status, revise o catalogo e ajuste rapidamente o que aparece para o cliente.</p>
 
           </div>
 
-          <div className="filters" style={{ display: "flex", gap: 8, flexWrap: 'wrap' }}>
+          <div className="page-toolbar__filters">
 
             <input
 
-              className="input"
+              className="input page-toolbar__search"
 
               placeholder="Buscar por nome..."
 
@@ -940,6 +978,12 @@ export default function ServicosEstabelecimento() {
 
             </select>
 
+            <button className="btn btn--primary btn--sm" type="button" onClick={openAdd}>
+
+              Adicionar servico
+
+            </button>
+
           </div>
 
         </div>
@@ -964,7 +1008,7 @@ export default function ServicosEstabelecimento() {
 
           <>
 
-            <div className="count" style={{ marginBottom: 8 }}>
+            <div className="services-page__count" style={{ marginBottom: 8 }}>
 
               Exibindo <b>{filtered.length}</b>{" "}
 

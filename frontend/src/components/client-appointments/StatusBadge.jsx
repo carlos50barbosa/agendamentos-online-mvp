@@ -11,23 +11,23 @@ const PENDING_PAYMENT_STATUSES = new Set([
 const STATUS_META = {
   confirmado: {
     label: 'Confirmado',
-    className: 'tw-bg-emerald-50 tw-text-emerald-700 tw-ring-1 tw-ring-inset tw-ring-emerald-200',
+    className: 'tw-bg-emerald-50 tw-text-emerald-700 tw-ring-1 tw-ring-inset tw-ring-emerald-100',
   },
   concluido: {
     label: 'Concluído',
-    className: 'tw-bg-sky-50 tw-text-sky-700 tw-ring-1 tw-ring-inset tw-ring-sky-200',
+    className: 'tw-bg-slate-100 tw-text-slate-700 tw-ring-1 tw-ring-inset tw-ring-slate-200',
   },
   cancelado: {
     label: 'Cancelado',
-    className: 'tw-bg-rose-50 tw-text-rose-700 tw-ring-1 tw-ring-inset tw-ring-rose-200',
+    className: 'tw-bg-rose-50 tw-text-rose-700 tw-ring-1 tw-ring-inset tw-ring-rose-100',
   },
   pendente: {
     label: 'Pendente',
-    className: 'tw-bg-amber-50 tw-text-amber-800 tw-ring-1 tw-ring-inset tw-ring-amber-200',
+    className: 'tw-bg-sky-50 tw-text-sky-700 tw-ring-1 tw-ring-inset tw-ring-sky-100',
   },
   pendente_pagamento: {
     label: 'Aguardando pagamento',
-    className: 'tw-bg-amber-50 tw-text-amber-800 tw-ring-1 tw-ring-inset tw-ring-amber-200',
+    className: 'tw-bg-sky-50 tw-text-sky-700 tw-ring-1 tw-ring-inset tw-ring-sky-100',
   },
 };
 

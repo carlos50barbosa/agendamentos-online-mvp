@@ -9,7 +9,7 @@ export default function AppointmentCardList({
   payLoadingId = null,
 }) {
   return (
-    <div className="md:tw-hidden tw-overflow-hidden tw-rounded-2xl tw-border tw-border-slate-200 tw-bg-white tw-shadow-sm">
+    <div className="md:tw-hidden tw-overflow-hidden tw-rounded-lg tw-border tw-border-slate-200/80 tw-bg-white/95 tw-shadow-sm">
       {appointments.map((appointment, index) => (
         <div
           key={appointment.id}
