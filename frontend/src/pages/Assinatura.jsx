@@ -1175,7 +1175,7 @@ export default function Assinatura() {
             <span className="subscription-page__payment-tag">Recomendado</span>
             <h4>Cartão de crédito</h4>
             <p className="muted">Renovação automática, sem interrupções enquanto as cobranças forem aprovadas.</p>
-            <form id="subscription-card-form" className="subscription-page__card-form">
+            <form key={cardFormResetKey} id="subscription-card-form" className="subscription-page__card-form">
               <div id="subscription-card-number" className="input subscription-page__card-frame" />
               <div className="subscription-page__card-inline">
                 <div id="subscription-card-expiration" className="input subscription-page__card-frame" />
@@ -1196,7 +1196,7 @@ export default function Assinatura() {
                 type="submit"
                 className="btn btn--primary"
                 onClick={() => { cardSubmitIntentRef.current = 'save'; }}
-                disabled={cardState.loading || cardState.submitting || !cardGatewayPublicKey}
+                disabled={cardState.loading || cardState.submitting || !cardState.ready || !cardGatewayPublicKey}
               >
                 {cardState.submitting
                   ? <span className="spinner" />
@@ -1216,7 +1216,7 @@ export default function Assinatura() {
                     type="button"
                     className="btn btn--primary"
                     onClick={handleRecoverNowWithCard}
-                    disabled={cardState.loading || cardState.submitting || !cardGatewayPublicKey}
+                    disabled={cardState.loading || cardState.submitting || !cardState.ready || !cardGatewayPublicKey}
                   >
                     {cardState.submitting ? <span className="spinner" /> : 'Pagar agora com cartão'}
                   </button>

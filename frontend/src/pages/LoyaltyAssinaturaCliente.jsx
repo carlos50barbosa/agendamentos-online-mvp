@@ -487,7 +487,7 @@ export default function LoyaltyAssinaturaCliente() {
               ) : (
                 <div className="loyalty-checkout-block">
                   <p>Cartão com primeira cobrança confirmada pelo Mercado Pago, o que pode levar até cerca de 1 hora, e renovação automática mensal.</p>
-                  <form id="client-loyalty-card-form" className="loyalty-card-form">
+                  <form key={cardFormResetKey} id="client-loyalty-card-form" className="loyalty-card-form">
                     <div className="loyalty-card-form__grid">
                       <div id="client-loyalty-card-number" className="input loyalty-card-form__field" />
                       <div id="client-loyalty-card-expiration" className="input loyalty-card-form__field" />
