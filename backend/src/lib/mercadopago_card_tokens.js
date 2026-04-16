@@ -5,6 +5,7 @@ const CARD_TOKEN_USAGE_MAX_ENTRIES = 20000
 const CARD_TOKEN_REDACTED = '[REDACTED_CARD_TOKEN]'
 const CARD_NUMBER_REDACTED = '[REDACTED_CARD_NUMBER]'
 const CVV_REDACTED = '[REDACTED_CVV]'
+const IDENTIFICATION_REDACTED = '[REDACTED_IDENTIFICATION]'
 const disposableCardTokenRegistry = new Map()
 
 function nowIso() {
@@ -331,6 +332,22 @@ export function sanitizeMercadoPagoSensitivePayload(value, seen = new WeakSet())
 
     if (['card_number', 'cardnumber'].includes(normalizedKey)) {
       next[key] = CARD_NUMBER_REDACTED
+      continue
+    }
+
+    if (
+      ['identification_number', 'document_number', 'cpf', 'cnpj', 'cpf_cnpj'].includes(normalizedKey)
+    ) {
+      next[key] = IDENTIFICATION_REDACTED
+      continue
+    }
+
+    if (['identification', 'document'].includes(normalizedKey) && entry && typeof entry === 'object') {
+      const sanitizedNested = sanitizeMercadoPagoSensitivePayload(entry, seen)
+      if (sanitizedNested && typeof sanitizedNested === 'object' && 'number' in sanitizedNested) {
+        sanitizedNested.number = IDENTIFICATION_REDACTED
+      }
+      next[key] = sanitizedNested
       continue
     }
 

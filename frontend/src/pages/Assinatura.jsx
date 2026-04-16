@@ -71,6 +71,10 @@ function getErrorMessage(error, fallback) {
   return error?.data?.message || error?.message || fallback;
 }
 
+function getPaymentResultMessage(result, fallback) {
+  return result?.payment_result?.user_message || result?.message || fallback;
+}
+
 function formatCurrencyFromCents(value) {
   if (typeof value !== 'number' || !Number.isFinite(value)) return '-';
   return (Number(value) / 100).toLocaleString('pt-BR', {
@@ -379,7 +383,12 @@ export default function Assinatura() {
       setSelectedCycle((current) => current || preferredCycle || 'mensal');
 
       try {
-        const plan = subscriptionResponse?.plan?.plan || billingResponse?.plan || 'starter';
+        const plan =
+          subscriptionResponse?.subscription?.plan ||
+          billingResponse?.subscription?.plan ||
+          subscriptionResponse?.plan?.plan ||
+          billingResponse?.plan ||
+          'starter';
         const status = subscriptionResponse?.plan?.status || billingResponse?.plan_status || 'trialing';
         const trialEnd = subscriptionResponse?.plan?.trial?.ends_at || billingResponse?.trial?.endsAt || null;
         localStorage.setItem('plan_current', plan);
@@ -409,7 +418,13 @@ export default function Assinatura() {
   }, [clearPixPolling, refreshData]);
 
   const planContext = subscriptionData?.plan || null;
-  const planKey = normalizePlanKey(planContext?.plan || billingStatus?.plan || 'starter');
+  const planKey = normalizePlanKey(
+    subscriptionData?.subscription?.plan ||
+    billingStatus?.subscription?.plan ||
+    planContext?.plan ||
+    billingStatus?.plan ||
+    'starter',
+  );
   const planMeta = PLAN_META[planKey] || PLAN_META.starter;
   const planStatusKey = normalizeStatusKey(
     subscriptionData?.subscription?.status || billingStatus?.subscription?.status || planContext?.status,
@@ -522,6 +537,7 @@ export default function Assinatura() {
     const list = Array.isArray(subscriptionData?.events) ? subscriptionData.events : [];
     return list.slice(0, 10);
   }, [subscriptionData?.events]);
+  const latestPaymentResult = subscriptionData?.latest_payment_result || null;
 
   const nextDueLabel = renewalRequired
     ? formatDateLong(billingStatus?.due_at || activeUntil)
@@ -655,7 +671,7 @@ export default function Assinatura() {
     try {
       const payload = {
         plan: planKey,
-        billing_cycle: checkoutCycle,
+        billing_cycle: cardAction.mode === 'update' ? currentCycle : checkoutCycle,
         card_token: cardFormData?.token,
         payer_email: cardFormData?.cardholderEmail || user?.email || '',
         payment_method_id: cardFormData?.paymentMethodId || null,
@@ -681,7 +697,20 @@ export default function Assinatura() {
           return true;
         }
         resetCardFormForNewToken();
-        setCardRecoveryReady(true);
+        if (response?.pending) {
+          resetCardFormForNewToken();
+          setCardRecoveryReady(false);
+          setCardState((current) => ({ ...current, error: '' }));
+          setNotice({
+            type: 'warning',
+            message: getPaymentResultMessage(
+              response,
+              'O pagamento estÃ¡ em anÃ¡lise pelo Mercado Pago. Aguarde a confirmaÃ§Ã£o antes de tentar novamente.',
+            ),
+          });
+          return false;
+        }
+        setCardRecoveryReady(response?.payment_result?.manual_retry_allowed !== false);
         const message = response?.message || 'A cobrança pendente não foi aprovada. Gere um PIX ou tente outro cartão.';
         setCardState((current) => ({ ...current, error: message }));
         setNotice({ type: 'error', message });
@@ -727,7 +756,7 @@ export default function Assinatura() {
       cardSubmittingRef.current = false;
       setCardState((current) => ({ ...current, submitting: false }));
     }
-  }, [cardAction.mode, checkoutCycle, establishmentId, planKey, refreshData, resetCardFormForNewToken, user?.email]);
+  }, [cardAction.mode, checkoutCycle, currentCycle, establishmentId, planKey, refreshData, resetCardFormForNewToken, user?.email]);
 
   const handleRecoverNowWithCard = useCallback(() => {
     const form = document.getElementById('subscription-card-form');
@@ -1175,6 +1204,11 @@ export default function Assinatura() {
             <span className="subscription-page__payment-tag">Recomendado</span>
             <h4>Cartão de crédito</h4>
             <p className="muted">Renovação automática, sem interrupções enquanto as cobranças forem aprovadas.</p>
+            {['past_due', 'unpaid', 'expired', 'pending_payment'].includes(planStatusKey) ? (
+              <p className="muted">
+                Regularização do plano {planMeta.label} ({BILLING_CYCLE_LABELS[currentCycle] || 'Mensal'}). Esse envio mantém o plano atual.
+              </p>
+            ) : null}
             <form key={cardFormResetKey} id="subscription-card-form" className="subscription-page__card-form">
               <div id="subscription-card-number" className="input subscription-page__card-frame" />
               <div className="subscription-page__card-inline">

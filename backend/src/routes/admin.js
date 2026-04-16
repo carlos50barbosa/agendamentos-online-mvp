@@ -3,6 +3,7 @@ import { Router } from 'express';
 import { pool } from '../lib/db.js';
 import { syncMercadoPagoPayment } from '../lib/billing.js';
 import { cleanupPasswordResets } from '../lib/maintenance.js';
+import { enrichMercadoPagoSubscriptionEvent } from '../lib/mercadopago_payment_outcome.js';
 import { getTenantBotSettings, upsertTenantBotSettings } from '../bot/storage/settingsStore.js';
 
 const IDENT_RE = /^[a-zA-Z0-9_]+$/;
@@ -57,8 +58,17 @@ router.get('/billing/events', checkAdmin, async (req, res) => {
       let status = null;
       let status_detail = null;
       let kind = null;
+      let normalized_reason = null;
+      let action_recommendation = null;
+      let decision = null;
       try {
         const payload = r.payload ? JSON.parse(r.payload) : null;
+        const enriched = enrichMercadoPagoSubscriptionEvent({
+          event_type: r.event_type,
+          gateway_event_id: r.gateway_event_id,
+          created_at: r.created_at,
+          payload,
+        }, { includePending: true });
         if (payload?.preapproval) {
           kind = 'preapproval';
           status = payload.preapproval.status || null;
@@ -70,9 +80,14 @@ router.get('/billing/events', checkAdmin, async (req, res) => {
         } else if (payload?.event?.type) {
           kind = String(payload.event.type);
         }
+        status = enriched?.status || status;
+        status_detail = enriched?.status_detail || status_detail;
+        normalized_reason = enriched?.normalized_reason || null;
+        action_recommendation = enriched?.action_recommendation || null;
+        decision = enriched?.decision || null;
       } catch {}
       const { payload, ...rest } = r;
-      return { ...rest, kind, status, status_detail };
+      return { ...rest, kind, status, status_detail, normalized_reason, action_recommendation, decision };
     });
     res.json({ events, limit });
   } catch (e) {

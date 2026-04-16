@@ -10,6 +10,7 @@ import {
   toMercadoPagoCardFlowError,
 } from './mercadopago_card_tokens.js'
 import { getBillingCycleConfig, getPlanLabel, getPlanPriceCents, normalizeBillingCycle, PLAN_TIERS } from './plans.js'
+import { summarizeMercadoPagoGatewayResult } from './mercadopago_payment_outcome.js'
 import { normalizePaymentMethod, normalizeSubscriptionStatus } from './subscription_normalization.js'
 
 const API_BASE = 'https://api.mercadopago.com'
@@ -77,6 +78,13 @@ function buildBackUrl() {
   return `${FRONTEND_BASE}/assinatura`
 }
 
+function buildBillingWebhookUrl() {
+  const isDevFront = /^(https?:\/\/)?(localhost|127\.0\.0\.1):3001$/i.test(FRONTEND_BASE)
+  const defaultApi = isDevFront ? 'http://localhost:3002' : `${FRONTEND_BASE}/api`
+  const apiBase = String(process.env.API_BASE_URL || process.env.BACKEND_BASE_URL || defaultApi).replace(/\/$/, '')
+  return apiBase.endsWith('/api') ? `${apiBase}/billing/webhook` : `${apiBase}/api/billing/webhook`
+}
+
 function buildExternalReference(estabelecimentoId, plan, cycle) {
   return [
     'subscription',
@@ -114,6 +122,147 @@ function normalizeGatewayIsoDate(value) {
   const parsedMs = Date.parse(value)
   if (!Number.isFinite(parsedMs)) return null
   return new Date(parsedMs).toISOString()
+}
+
+function digitsOnly(value) {
+  return String(value || '').replace(/\D/g, '')
+}
+
+function splitFullName(value) {
+  const parts = String(value || '').trim().split(/\s+/).filter(Boolean)
+  if (!parts.length) return { firstName: null, lastName: null }
+  if (parts.length === 1) return { firstName: parts[0], lastName: null }
+  return {
+    firstName: parts[0],
+    lastName: parts.slice(1).join(' '),
+  }
+}
+
+function inferIdentificationType(value) {
+  const digits = digitsOnly(value)
+  if (digits.length === 11) return 'CPF'
+  if (digits.length === 14) return 'CNPJ'
+  return null
+}
+
+function normalizeIdentification({ type = null, number = null } = {}) {
+  const normalizedNumber = digitsOnly(number)
+  if (!normalizedNumber) return null
+  const normalizedType = String(type || '').trim().toUpperCase() || inferIdentificationType(normalizedNumber)
+  if (!normalizedType) return null
+  return {
+    type: normalizedType,
+    number: normalizedNumber,
+  }
+}
+
+function normalizeBrazilPhone(value) {
+  const digits = digitsOnly(value)
+  if (!digits) return null
+  let normalized = digits
+  if (normalized.startsWith('55') && normalized.length >= 12) {
+    normalized = normalized.slice(2)
+  }
+  if (normalized.length < 10 || normalized.length > 11) return null
+  return {
+    area_code: normalized.slice(0, 2),
+    number: normalized.slice(2),
+  }
+}
+
+function normalizeAddress(address = {}) {
+  if (!address || typeof address !== 'object') return null
+  const zipCode = digitsOnly(address.zipCode || address.zip_code || address.cep)
+  const streetName = String(address.streetName || address.street_name || address.endereco || '').trim()
+  const streetNumberRaw = String(address.streetNumber || address.street_number || address.numero || '').trim()
+  const neighborhood = String(address.neighborhood || address.bairro || '').trim()
+  const city = String(address.city || address.cidade || '').trim()
+  const federalUnit = String(address.federalUnit || address.federal_unit || address.estado || '').trim().toUpperCase()
+  const normalized = {}
+  if (zipCode) normalized.zip_code = zipCode
+  if (streetName) normalized.street_name = streetName
+  if (/^\d+$/.test(streetNumberRaw)) normalized.street_number = Number(streetNumberRaw)
+  else if (streetNumberRaw) normalized.street_number = streetNumberRaw
+  if (neighborhood) normalized.neighborhood = neighborhood
+  if (city) normalized.city = city
+  if (federalUnit) normalized.federal_unit = federalUnit
+  return Object.keys(normalized).length ? normalized : null
+}
+
+function buildMercadoPagoPaymentPayer(payerProfile = {}, { fallbackEmail = null } = {}) {
+  const email = String(payerProfile?.email || fallbackEmail || '').trim() || null
+  const nameParts = splitFullName(payerProfile?.fullName || payerProfile?.name || payerProfile?.cardholderName)
+  const identification = normalizeIdentification({
+    type: payerProfile?.identification?.type || payerProfile?.identificationType || null,
+    number: payerProfile?.identification?.number || payerProfile?.identificationNumber || null,
+  })
+  const phone = normalizeBrazilPhone(payerProfile?.phone || payerProfile?.telefone)
+  const address = normalizeAddress(payerProfile?.address || {})
+
+  const payer = {}
+  if (email) payer.email = email
+  if (nameParts.firstName) payer.first_name = nameParts.firstName
+  if (nameParts.lastName) payer.last_name = nameParts.lastName
+  if (identification) payer.identification = identification
+  if (phone) payer.phone = phone
+  if (address) payer.address = address
+  return Object.keys(payer).length ? payer : null
+}
+
+function buildMercadoPagoAdditionalInfo({
+  payerProfile = {},
+  description = null,
+  amountCents = null,
+  subscription = null,
+} = {}) {
+  const nameParts = splitFullName(payerProfile?.fullName || payerProfile?.name || payerProfile?.cardholderName)
+  const phone = normalizeBrazilPhone(payerProfile?.phone || payerProfile?.telefone)
+  const address = normalizeAddress(payerProfile?.address || {})
+  const payer = {}
+  if (nameParts.firstName) payer.first_name = nameParts.firstName
+  if (nameParts.lastName) payer.last_name = nameParts.lastName
+  if (phone) payer.phone = phone
+  if (address) payer.address = address
+
+  const items = []
+  if (amountCents != null) {
+    items.push({
+      id: subscription?.id != null ? `subscription:${subscription.id}` : 'subscription_recovery',
+      title: description || 'Regularizacao de assinatura',
+      description: description || 'Regularizacao de assinatura',
+      quantity: 1,
+      unit_price: amountToGatewayValue(amountCents),
+      category_id: 'services',
+      type: 'service',
+    })
+  }
+
+  const additionalInfo = {}
+  if (Object.keys(payer).length) additionalInfo.payer = payer
+  if (items.length) additionalInfo.items = items
+  return Object.keys(additionalInfo).length ? additionalInfo : undefined
+}
+
+function maskDocumentForLog(value) {
+  const digits = digitsOnly(value)
+  if (!digits) return null
+  if (digits.length <= 4) return `***${digits.slice(-1)}`
+  return `${digits.slice(0, 3)}***${digits.slice(-2)}`
+}
+
+function summarizePayerForLog(payer = null) {
+  if (!payer || typeof payer !== 'object') return null
+  return {
+    email_present: Boolean(payer.email),
+    first_name_present: Boolean(payer.first_name),
+    last_name_present: Boolean(payer.last_name),
+    identification_type: payer.identification?.type || null,
+    identification_masked: maskDocumentForLog(payer.identification?.number || null),
+    phone_present: Boolean(payer.phone?.number),
+    zip_code_present: Boolean(payer.address?.zip_code),
+    city_present: Boolean(payer.address?.city),
+    federal_unit_present: Boolean(payer.address?.federal_unit),
+  }
 }
 
 function mapPreapprovalResponse(data, { fallbackPlan = 'starter', fallbackCycle = 'mensal', fallbackStartDate = null } = {}) {
@@ -157,48 +306,54 @@ function mapPreapprovalResponse(data, { fallbackPlan = 'starter', fallbackCycle 
 
 function mapAuthorizedPaymentResponse(data) {
   if (!data) return null
-  const statusRaw = String(data.status || '').toLowerCase()
-  let status = 'pending_payment'
-  if (statusRaw === 'approved') status = 'active'
-  else if (['pending', 'in_process', 'authorized'].includes(statusRaw)) status = 'pending_payment'
-  else if (['rejected', 'cancelled', 'canceled', 'failed', 'refunded', 'charged_back'].includes(statusRaw)) status = 'past_due'
+  const paymentResult = summarizeMercadoPagoGatewayResult(data)
 
   return {
     id: data.id || null,
     preapprovalId: data.preapproval_id || data.subscription_id || null,
-    status,
+    status: paymentResult?.should_activate_subscription
+      ? 'active'
+      : paymentResult?.status_group === 'pending'
+        ? 'pending_payment'
+        : 'past_due',
     rawStatus: data.status || null,
     statusDetail: data.status_detail || null,
     paymentMethod: normalizePaymentMethod(data.payment_method_id || 'credit_card') || 'credit_card',
+    paymentTypeId: data.payment_type_id || null,
     amountCents: data.transaction_amount != null
       ? Math.round(Number(data.transaction_amount || 0) * 100)
       : null,
     currency: data.currency_id || BILLING_CURRENCY,
     paidAt: data.date_approved || data.last_modified || null,
+    liveMode: data.live_mode ?? null,
+    paymentResult,
     raw: data,
   }
 }
 
 function mapCardChargeResponse(data) {
   if (!data) return null
-  const statusRaw = String(data.status || '').toLowerCase()
-  let status = 'pending_payment'
-  if (statusRaw === 'approved') status = 'active'
-  else if (['pending', 'in_process', 'authorized'].includes(statusRaw)) status = 'pending_payment'
-  else if (['rejected', 'cancelled', 'canceled', 'failed', 'refunded', 'charged_back'].includes(statusRaw)) status = 'past_due'
+  const paymentResult = summarizeMercadoPagoGatewayResult(data)
 
   return {
     id: data.id || null,
-    status,
+    status: paymentResult?.should_activate_subscription
+      ? 'active'
+      : paymentResult?.status_group === 'pending'
+        ? 'pending_payment'
+        : 'past_due',
     rawStatus: data.status || null,
     statusDetail: data.status_detail || null,
     paymentMethod: normalizePaymentMethod(data.payment_method_id || 'credit_card') || 'credit_card',
+    paymentTypeId: data.payment_type_id || null,
     amountCents: data.transaction_amount != null
       ? Math.round(Number(data.transaction_amount || 0) * 100)
       : null,
     currency: data.currency_id || BILLING_CURRENCY,
     paidAt: data.date_approved || data.last_modified || null,
     externalReference: data.external_reference || null,
+    liveMode: data.live_mode ?? null,
+    paymentResult,
     raw: data,
   }
 }
@@ -551,6 +706,7 @@ export async function createMercadoPagoCardRecoveryPayment({
   description,
   cardToken,
   payerEmail,
+  payerProfile = null,
   paymentMethodId = null,
   issuerId = null,
   identificationType = null,
@@ -562,6 +718,20 @@ export async function createMercadoPagoCardRecoveryPayment({
 } = {}) {
   if (!subscription?.gatewaySubscriptionId) throw new Error('gateway_subscription_id_required')
   if (!cardToken) throw new Error('card_token_required')
+
+  const payer = buildMercadoPagoPaymentPayer({
+    ...(payerProfile || {}),
+    email: payerEmail || payerProfile?.email || estabelecimento?.email || null,
+    identificationType: identificationType || payerProfile?.identificationType || null,
+    identificationNumber: identificationNumber || payerProfile?.identificationNumber || null,
+    identification: payerProfile?.identification || null,
+  }, { fallbackEmail: estabelecimento?.email || null })
+  const additionalInfo = buildMercadoPagoAdditionalInfo({
+    payerProfile,
+    description,
+    amountCents,
+    subscription,
+  })
 
   const body = {
     transaction_amount: amountToGatewayValue(amountCents),
@@ -576,14 +746,12 @@ export async function createMercadoPagoCardRecoveryPayment({
       subscription_id: String(subscription.id || ''),
       gateway_subscription_id: String(subscription.gatewaySubscriptionId || ''),
       estabelecimento_id: String(estabelecimento?.id || subscription.estabelecimentoId || ''),
+      plan: String(subscription.plan || ''),
+      billing_cycle: String(subscription.billingCycle || ''),
     },
-    payer: {
-      email: payerEmail || estabelecimento?.email || null,
-      identification:
-        identificationType && identificationNumber
-          ? { type: identificationType, number: identificationNumber }
-          : undefined,
-    },
+    notification_url: buildBillingWebhookUrl(),
+    payer: payer || undefined,
+    additional_info: additionalInfo,
   }
   if (paymentMethodId) body.payment_method_id = paymentMethodId
   if (issuerId) body.issuer_id = issuerId
@@ -596,6 +764,7 @@ export async function createMercadoPagoCardRecoveryPayment({
     external_reference: externalReference || null,
     idempotency_key: idempotencyKey || null,
     request_id: requestContext?.requestId || null,
+    payer: summarizePayerForLog(payer),
   })
 
   const credentialDiagnostics = resolveCredentialDiagnostics(accessToken)

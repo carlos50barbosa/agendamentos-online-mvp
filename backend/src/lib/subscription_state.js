@@ -55,6 +55,31 @@ function statusPriority(status) {
   }
 }
 
+function subscriptionAnchorTime(subscription) {
+  const candidates = [
+    subscription?.currentPeriodEnd,
+    subscription?.current_period_end,
+    subscription?.nextBillingAt,
+    subscription?.next_billing_at,
+    subscription?.currentPeriodStart,
+    subscription?.current_period_start,
+    subscription?.lastPaymentAt,
+    subscription?.last_payment_at,
+    subscription?.trialEndsAt,
+    subscription?.trial_ends_at,
+    subscription?.createdAt,
+    subscription?.created_at,
+    subscription?.updatedAt,
+    subscription?.updated_at,
+  ]
+
+  for (const candidate of candidates) {
+    const date = toDate(candidate)
+    if (date) return date.getTime()
+  }
+  return 0
+}
+
 export function pickEffectiveSubscription(subscriptions = []) {
   const candidates = Array.isArray(subscriptions)
     ? subscriptions.filter((item) => item && !isTopupSubscription(item))
@@ -66,6 +91,10 @@ export function pickEffectiveSubscription(subscriptions = []) {
     const currentPriority = statusPriority(current.status)
     const bestPriority = statusPriority(best.status)
     if (currentPriority !== bestPriority) return currentPriority > bestPriority ? current : best
+
+    const currentAnchor = subscriptionAnchorTime(current)
+    const bestAnchor = subscriptionAnchorTime(best)
+    if (currentAnchor !== bestAnchor) return currentAnchor > bestAnchor ? current : best
 
     const currentUpdatedAt = toDate(current.updatedAt || current.updated_at || current.createdAt || current.created_at)?.getTime() || 0
     const bestUpdatedAt = toDate(best.updatedAt || best.updated_at || best.createdAt || best.created_at)?.getTime() || 0
@@ -230,7 +259,7 @@ function shouldSyncUserPlanContext(planContext, subscription, computedState) {
 }
 
 export async function loadEffectiveSubscriptionContext(estabelecimentoId, { refresh = true } = {}) {
-  const planContext = await getPlanContext(estabelecimentoId)
+  let planContext = await getPlanContext(estabelecimentoId)
   const subscriptions = await listSubscriptionsForEstabelecimento(estabelecimentoId)
   let subscription = pickEffectiveSubscription(subscriptions)
   let computedState = computeSubscriptionState({ subscription, planContext })
@@ -265,6 +294,8 @@ export async function loadEffectiveSubscriptionContext(estabelecimentoId, { refr
       activeUntil: computedState.currentPeriodEnd,
       subscriptionId: subscription?.id || null,
     })
+    planContext = await getPlanContext(estabelecimentoId)
+    computedState = computeSubscriptionState({ subscription, planContext })
   }
 
   return {

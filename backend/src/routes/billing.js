@@ -58,6 +58,11 @@ import { logBlockedRouteAccess, resolveRouteTokenAccess } from '../lib/route_acc
 import { loadEffectiveSubscriptionContext } from '../lib/subscription_state.js'
 import { normalizeSubscriptionStatus } from '../lib/subscription_normalization.js'
 import {
+  enrichMercadoPagoSubscriptionEvent,
+  findLatestMercadoPagoPaymentResult,
+  summarizeMercadoPagoGatewayResult,
+} from '../lib/mercadopago_payment_outcome.js'
+import {
   syncClientLoyaltyAuthorizedPaymentFromGateway,
   syncClientLoyaltyCardSubscriptionFromGateway,
   syncClientLoyaltyPixPaymentFromGateway,
@@ -169,6 +174,142 @@ function buildCardRecoveryExternalReference(subscriptionId, idempotencyKey) {
     'attempt',
     String(idempotencyKey || randomUUID()),
   ].join(':')
+}
+
+function digitsOnly(value) {
+  return String(value || '').replace(/\D/g, '')
+}
+
+function inferIdentificationType(value) {
+  const digits = digitsOnly(value)
+  if (digits.length === 11) return 'CPF'
+  if (digits.length === 14) return 'CNPJ'
+  return null
+}
+
+function buildBillingPayerProfile(user = {}, payload = {}) {
+  const identificationNumber =
+    digitsOnly(
+      payload?.identification_number ||
+      payload?.identificationNumber ||
+      user?.cpf_cnpj ||
+      ''
+    ) || null
+  const identificationType =
+    String(
+      payload?.identification_type ||
+      payload?.identificationType ||
+      inferIdentificationType(identificationNumber) ||
+      ''
+    ).trim().toUpperCase() || null
+
+  return {
+    email: payload?.payer_email || payload?.payerEmail || user?.email || null,
+    fullName: user?.nome || null,
+    identificationType,
+    identificationNumber,
+    phone: user?.telefone || null,
+    address: {
+      zipCode: user?.cep || null,
+      streetName: user?.endereco || null,
+      streetNumber: user?.numero || null,
+      neighborhood: user?.bairro || null,
+      city: user?.cidade || null,
+      federalUnit: user?.estado || null,
+    },
+  }
+}
+
+function buildMercadoPagoPaymentEventPayload({
+  payment = null,
+  paymentResult = null,
+  gatewaySubscription = null,
+  requestId = null,
+  operation = null,
+  source = null,
+  recovery = false,
+  previousStatus = null,
+  nextStatus = null,
+  externalReference = null,
+  decision = null,
+} = {}) {
+  return {
+    operation: operation || null,
+    source: source || null,
+    recovery: Boolean(recovery),
+    previous_status: previousStatus || null,
+    next_status: nextStatus || null,
+    request_id: requestId || null,
+    payment_id: payment?.id != null ? String(payment.id) : paymentResult?.payment_id || null,
+    preapproval_id:
+      payment?.preapproval_id ||
+      payment?.subscription_id ||
+      paymentResult?.preapproval_id ||
+      gatewaySubscription?.id ||
+      null,
+    external_reference:
+      payment?.external_reference ||
+      paymentResult?.external_reference ||
+      externalReference ||
+      null,
+    live_mode: payment?.live_mode ?? paymentResult?.live_mode ?? null,
+    payment_method_id: payment?.payment_method_id || paymentResult?.payment_method_id || null,
+    payment_type_id: payment?.payment_type_id || paymentResult?.payment_type_id || null,
+    transaction_amount: payment?.transaction_amount ?? paymentResult?.transaction_amount ?? null,
+    decision: decision || paymentResult?.decision || null,
+    payment_result: paymentResult || null,
+    raw: {
+      payment: payment || null,
+      subscription: gatewaySubscription || null,
+    },
+  }
+}
+
+function logMercadoPagoPaymentDecision(tag, {
+  subscription = null,
+  paymentResult = null,
+  payment = null,
+  requestId = null,
+  source = null,
+  activated = false,
+} = {}) {
+  const level = paymentResult?.status_group === 'rejected'
+    ? 'warn'
+    : paymentResult?.status_group === 'pending'
+      ? 'info'
+      : 'info'
+  const logger = console[level] || console.info
+  logger(`[billing][${tag}]`, {
+    request_id: requestId || null,
+    source: source || null,
+    subscription_id: subscription?.id || null,
+    estabelecimento_id: subscription?.estabelecimentoId || null,
+    plan: subscription?.plan || null,
+    payment_id: payment?.id != null ? String(payment.id) : paymentResult?.payment_id || null,
+    preapproval_id:
+      payment?.preapproval_id ||
+      payment?.subscription_id ||
+      paymentResult?.preapproval_id ||
+      subscription?.gatewaySubscriptionId ||
+      null,
+    external_reference:
+      payment?.external_reference ||
+      paymentResult?.external_reference ||
+      subscription?.externalReference ||
+      null,
+    live_mode: payment?.live_mode ?? paymentResult?.live_mode ?? null,
+    payment_method_id: payment?.payment_method_id || paymentResult?.payment_method_id || null,
+    payment_type_id: payment?.payment_type_id || paymentResult?.payment_type_id || null,
+    transaction_amount: payment?.transaction_amount ?? paymentResult?.transaction_amount ?? null,
+    status: paymentResult?.status || null,
+    status_detail: paymentResult?.status_detail || null,
+    normalized_reason: paymentResult?.normalized_reason || null,
+    decision: paymentResult?.decision || null,
+    action_recommendation: paymentResult?.action_recommendation || null,
+    automatic_retry_allowed: paymentResult?.automatic_retry_allowed === true,
+    manual_retry_allowed: paymentResult?.manual_retry_allowed === true,
+    activated,
+  })
 }
 
 function createInternalRequestId(req) {
@@ -448,6 +589,156 @@ function addBillingCycleDate(date, cycle) {
   return current
 }
 
+async function finalizeApprovedCardRecovery({
+  targetSubscription,
+  payment,
+  paymentResult,
+  currentStatus,
+  billingCycle,
+  amountCents,
+  requestId = null,
+  externalReference = null,
+  source = 'api',
+} = {}) {
+  const paidAt = payment?.paidAt ? new Date(payment.paidAt) : new Date()
+  const expectedPeriodEnd = addBillingCycleDate(paidAt, billingCycle)
+  let alignedGatewaySubscription = null
+  try {
+    const aligned = await updateMercadoPagoCardSubscription(targetSubscription.gatewaySubscriptionId, {
+      amountCents,
+      billingCycle,
+      status: 'authorized',
+      startDate: expectedPeriodEnd,
+      requestContext: {
+        requestId,
+        route: source === 'webhook' ? '/billing/webhook' : '/billing/card/recover',
+        operation: 'card_subscription_align_after_recovery',
+        subscriptionId: targetSubscription.id,
+        externalReference,
+      },
+    })
+    alignedGatewaySubscription = aligned?.subscription || null
+  } catch (alignmentError) {
+    console.warn('[billing/card/recover][align_subscription]', {
+      subscription_id: targetSubscription.id,
+      gateway_subscription_id: targetSubscription.gatewaySubscriptionId,
+      message: alignmentError?.message || String(alignmentError),
+    })
+  }
+
+  const updated = await updateSubscription(targetSubscription.id, {
+    paymentMethod: 'credit_card',
+    gatewayCustomerId: alignedGatewaySubscription?.gatewayCustomerId || targetSubscription.gatewayCustomerId || null,
+    gatewayPaymentId: payment?.id || null,
+    status: 'active',
+    amountCents: payment?.amountCents || amountCents,
+    currency: payment?.currency || targetSubscription.currency || (config.billing?.currency || 'BRL'),
+    billingCycle,
+    currentPeriodStart: paidAt,
+    currentPeriodEnd: alignedGatewaySubscription?.currentPeriodEnd || expectedPeriodEnd || null,
+    nextBillingAt: alignedGatewaySubscription?.nextBillingAt || expectedPeriodEnd || null,
+    graceUntil: null,
+    lastPaymentAt: paidAt,
+  })
+
+  const eventPayload = buildMercadoPagoPaymentEventPayload({
+    payment: payment?.raw || null,
+    paymentResult,
+    gatewaySubscription: alignedGatewaySubscription?.raw || alignedGatewaySubscription || null,
+    requestId,
+    operation: 'card_recovery_payment',
+    source,
+    recovery: true,
+    previousStatus: currentStatus,
+    nextStatus: 'active',
+    externalReference,
+    decision: 'activate',
+  })
+
+  await appendSubscriptionEvent(updated.id, {
+    eventType: 'payment_recovered',
+    gatewayEventId: externalReference || payment?.id || null,
+    payload: eventPayload,
+  })
+  await appendSubscriptionEvent(updated.id, {
+    eventType: 'subscription_renewed',
+    gatewayEventId: `recovery:${payment?.id || externalReference || updated.id}`,
+    payload: eventPayload,
+  })
+
+  logMercadoPagoPaymentDecision('card_recovery_result', {
+    subscription: updated,
+    paymentResult,
+    payment: payment?.raw || null,
+    requestId,
+    source,
+    activated: true,
+  })
+
+  const effectiveContext = await loadEffectiveSubscriptionContext(updated.estabelecimentoId)
+
+  return {
+    updated,
+    effectiveContext,
+    paymentResult,
+  }
+}
+
+async function finalizeNonApprovedCardRecovery({
+  targetSubscription,
+  payment,
+  paymentResult,
+  currentStatus,
+  requestId = null,
+  externalReference = null,
+  source = 'api',
+} = {}) {
+  const eventType = paymentResult?.status_group === 'pending' ? 'payment_pending' : 'payment_failed'
+
+  const updated = await updateSubscription(targetSubscription.id, {
+    paymentMethod: 'credit_card',
+    gatewayPaymentId: payment?.id || targetSubscription.gatewayPaymentId || null,
+    status: currentStatus,
+    graceUntil: targetSubscription.graceUntil || null,
+    lastPaymentAt: targetSubscription.lastPaymentAt || null,
+  })
+
+  await appendSubscriptionEvent(updated.id, {
+    eventType,
+    gatewayEventId: externalReference || payment?.id || null,
+    payload: buildMercadoPagoPaymentEventPayload({
+      payment: payment?.raw || null,
+      paymentResult,
+      requestId,
+      operation: 'card_recovery_payment',
+      source,
+      recovery: true,
+      previousStatus: currentStatus,
+      nextStatus: currentStatus,
+      externalReference,
+      decision: paymentResult?.decision || null,
+    }),
+  })
+
+  logMercadoPagoPaymentDecision('card_recovery_result', {
+    subscription: updated,
+    paymentResult,
+    payment: payment?.raw || null,
+    requestId,
+    source,
+    activated: false,
+  })
+
+  const effectiveContext = await loadEffectiveSubscriptionContext(updated.estabelecimentoId)
+
+  return {
+    updated,
+    effectiveContext,
+    eventType,
+    paymentResult,
+  }
+}
+
 async function syncCardSubscriptionFromGateway(gatewaySubscriptionId, {
   gatewayEventId = null,
   eventType = null,
@@ -518,6 +809,7 @@ async function syncAuthorizedPaymentFromGateway(authorizedPaymentId, {
 } = {}) {
   const paymentResult = await getMercadoPagoAuthorizedPayment(authorizedPaymentId)
   const authorizedPayment = paymentResult.authorizedPayment
+  const paymentOutcome = authorizedPayment?.paymentResult || summarizeMercadoPagoGatewayResult(paymentResult.raw)
   if (!authorizedPayment?.preapprovalId) {
     return { ok: false, reason: 'preapproval_not_found' }
   }
@@ -562,21 +854,43 @@ async function syncAuthorizedPaymentFromGateway(authorizedPaymentId, {
   await appendSubscriptionEvent(updated.id, {
     eventType: normalizedEventType,
     gatewayEventId: gatewayEventId || authorizedPayment.id,
-    payload: {
+    payload: buildMercadoPagoPaymentEventPayload({
       payment: paymentResult.raw,
-      subscription: preapprovalResult.raw,
-    },
+      paymentResult: paymentOutcome,
+      gatewaySubscription: preapprovalResult.raw,
+      operation: 'subscription_authorized_payment',
+      source: 'webhook',
+      previousStatus: localSubscription.status,
+      nextStatus: updated.status,
+      externalReference: preapprovalResult?.subscription?.externalReference || localSubscription.externalReference || null,
+      decision: paymentOutcome?.decision || null,
+    }),
   })
   if (authorizedPayment.status === 'active') {
     await appendSubscriptionEvent(updated.id, {
       eventType: 'subscription_renewed',
       gatewayEventId: `renewal:${authorizedPayment.id}`,
-      payload: {
+      payload: buildMercadoPagoPaymentEventPayload({
         payment: paymentResult.raw,
-        subscription: preapprovalResult.raw,
-      },
+        paymentResult: paymentOutcome,
+        gatewaySubscription: preapprovalResult.raw,
+        operation: 'subscription_authorized_payment',
+        source: 'webhook',
+        previousStatus: localSubscription.status,
+        nextStatus: updated.status,
+        externalReference: preapprovalResult?.subscription?.externalReference || localSubscription.externalReference || null,
+        decision: paymentOutcome?.decision || null,
+      }),
     })
   }
+
+  logMercadoPagoPaymentDecision('authorized_payment_sync', {
+    subscription: updated,
+    paymentResult: paymentOutcome,
+    payment: paymentResult.raw,
+    source: 'webhook',
+    activated: authorizedPayment.status === 'active',
+  })
 
   const effectiveContext = await loadEffectiveSubscriptionContext(localSubscription.estabelecimentoId)
 
@@ -587,7 +901,117 @@ async function syncAuthorizedPaymentFromGateway(authorizedPaymentId, {
     effectiveSubscription: effectiveContext.subscription,
     authorizedPayment: paymentResult.raw,
     gatewaySubscription: preapprovalResult.raw,
+    paymentResult: paymentOutcome,
   }
+}
+
+async function syncCardRecoveryPaymentFromGateway(paymentId, {
+  gatewayEventId = null,
+} = {}) {
+  const paymentRaw = await fetchMercadoPagoPayment(paymentId)
+  const metadataKind = String(paymentRaw?.metadata?.kind || paymentRaw?.metadata?.type || '').toLowerCase()
+  const externalReference = String(paymentRaw?.external_reference || '').trim()
+  if (metadataKind !== 'subscription_recovery' && !externalReference.startsWith('subscription_recovery:')) {
+    return { ok: false, reason: 'not_subscription_recovery' }
+  }
+
+  const payment = {
+    id: paymentRaw?.id != null ? String(paymentRaw.id) : null,
+    raw: paymentRaw,
+    amountCents: paymentRaw?.transaction_amount != null
+      ? Math.round(Number(paymentRaw.transaction_amount || 0) * 100)
+      : null,
+    currency: paymentRaw?.currency_id || (config.billing?.currency || 'BRL'),
+    paidAt: paymentRaw?.date_approved || paymentRaw?.date_last_updated || paymentRaw?.last_modified || null,
+  }
+  const paymentResult = summarizeMercadoPagoGatewayResult(paymentRaw)
+  if (!paymentResult) {
+    return { ok: false, reason: 'payment_result_not_available' }
+  }
+
+  let targetSubscription = null
+  const metadataSubscriptionId = Number(paymentRaw?.metadata?.subscription_id || 0) || null
+  if (metadataSubscriptionId) {
+    targetSubscription = await getSubscriptionById(metadataSubscriptionId)
+  }
+  if (!targetSubscription && paymentRaw?.metadata?.gateway_subscription_id) {
+    targetSubscription = await getSubscriptionByGatewayId(String(paymentRaw.metadata.gateway_subscription_id))
+  }
+  if (!targetSubscription && /^subscription_recovery:sub:(\d+):/i.test(externalReference)) {
+    const match = externalReference.match(/^subscription_recovery:sub:(\d+):/i)
+    const subscriptionId = Number(match?.[1] || 0) || null
+    if (subscriptionId) {
+      targetSubscription = await getSubscriptionById(subscriptionId)
+    }
+  }
+  if (!targetSubscription) {
+    return { ok: false, reason: 'subscription_not_found' }
+  }
+
+  const currentStatus = normalizeSubscriptionStatus(targetSubscription.status, {
+    paymentMethod: targetSubscription.paymentMethod,
+  })
+  const alreadySamePayment = String(targetSubscription.gatewayPaymentId || '') === String(payment.id || '')
+  if (alreadySamePayment) {
+    if (paymentResult.should_activate_subscription && currentStatus === 'active') {
+      return { ok: true, handled: false, reason: 'already_processed', status: 'active', paymentResult }
+    }
+    if (!paymentResult.should_activate_subscription && currentStatus !== 'active') {
+      return {
+        ok: true,
+        handled: false,
+        reason: 'already_processed',
+        status: paymentResult.status_group === 'pending' ? 'pending_payment' : currentStatus,
+        paymentResult,
+      }
+    }
+  }
+
+  if (paymentResult.should_activate_subscription) {
+    const billingCycle = normalizeBillingCycle(targetSubscription.billingCycle || 'mensal')
+    const amountCents = Number(targetSubscription.amountCents || 0) || getPlanPriceCents(targetSubscription.plan, billingCycle)
+    const finalized = await finalizeApprovedCardRecovery({
+      targetSubscription,
+      payment,
+      paymentResult,
+      currentStatus,
+      billingCycle,
+      amountCents,
+      requestId: gatewayEventId || payment.id || null,
+      externalReference,
+      source: 'webhook',
+    })
+    return {
+      ok: true,
+      handled: true,
+      status: 'active',
+      subscription: finalized.updated,
+      computedState: finalized.effectiveContext.computedState,
+      paymentResult,
+    }
+  }
+
+  if (['pending', 'rejected'].includes(paymentResult.status_group)) {
+    const finalized = await finalizeNonApprovedCardRecovery({
+      targetSubscription,
+      payment,
+      paymentResult,
+      currentStatus,
+      requestId: gatewayEventId || payment.id || null,
+      externalReference,
+      source: 'webhook',
+    })
+    return {
+      ok: true,
+      handled: true,
+      status: paymentResult.status_group === 'pending' ? 'pending_payment' : currentStatus,
+      subscription: finalized.updated,
+      computedState: finalized.effectiveContext.computedState,
+      paymentResult,
+    }
+  }
+
+  return { ok: false, reason: 'unsupported_status', paymentResult }
 }
 
 function pickRecoverableCardSubscription(context) {
@@ -1263,6 +1687,14 @@ router.get('/subscription', auth, isEstabelecimento, async (req, res) => {
       console.warn('[billing/subscription][packs]', err?.message || err)
     }
 
+    const events = (await listSubscriptionEventsForEstabelecimento(req.user.id, { limit: 30 }))
+      .map((event) => enrichMercadoPagoSubscriptionEvent(event, { includePending: true }))
+    const latestPaymentResult = findLatestMercadoPagoPaymentResult(events, { includePending: true })
+    const latestFailure = findLatestMercadoPagoPaymentResult(events, {
+      includePending: false,
+      onlyFailures: true,
+    })
+
     return res.json({
       plan: serializedPlan,
       whatsapp_packages: (whatsappPacks.length ? whatsappPacks : WHATSAPP_TOPUP_PACKAGES).map(serializeWhatsAppPack).filter(Boolean),
@@ -1276,7 +1708,9 @@ router.get('/subscription', auth, isEstabelecimento, async (req, res) => {
         : null,
       history: history.map(serializeSubscription),
       topups: topups.map(serializeSubscription),
-      events: await listSubscriptionEventsForEstabelecimento(req.user.id, { limit: 30 }),
+      events,
+      latest_payment_result: latestPaymentResult,
+      latest_failure: latestFailure,
       current_plan: billingPlan
         ? {
             code: billingPlan.code,
@@ -1308,12 +1742,30 @@ router.post('/card/subscribe', auth, isEstabelecimento, async (req, res) => {
       })
     }
 
-    const targetPlan = String(plan || req.user.plan || 'starter').toLowerCase()
+    const currentContext = await loadEffectiveSubscriptionContext(req.user.id)
+    const targetPlan = String(
+      plan ||
+      currentContext?.subscription?.plan ||
+      currentContext?.planContext?.plan ||
+      req.user.plan ||
+      'starter'
+    ).toLowerCase()
     if (!PLAN_TIERS.includes(targetPlan)) {
       return res.status(400).json({ error: 'invalid_plan', message: 'Plano inválido.' })
     }
-    const billingCycle = normalizeBillingCycle(rawCycle || req.user.plan_cycle || 'mensal')
-    const currentPlan = String(req.user.plan || 'starter').toLowerCase()
+    const billingCycle = normalizeBillingCycle(
+      rawCycle ||
+      currentContext?.subscription?.billingCycle ||
+      currentContext?.planContext?.cycle ||
+      req.user.plan_cycle ||
+      'mensal'
+    )
+    const currentPlan = String(
+      currentContext?.subscription?.plan ||
+      currentContext?.planContext?.plan ||
+      req.user.plan ||
+      'starter'
+    ).toLowerCase()
 
     if (isDowngrade(currentPlan, targetPlan)) {
       const limits = resolvePlanConfig(targetPlan)
@@ -1381,21 +1833,6 @@ router.post('/card/update', auth, isEstabelecimento, async (req, res) => {
 
     const previousContext = await loadEffectiveSubscriptionContext(req.user.id)
     const { planContext, subscriptions, subscription: effective, computedState } = previousContext
-    const billingCycle = normalizeBillingCycle(
-      req.body?.billing_cycle ||
-      effective?.billingCycle ||
-      planContext?.cycle ||
-      req.user.plan_cycle ||
-      'mensal'
-    )
-    const targetPlan = String(
-      req.body?.plan ||
-      effective?.plan ||
-      planContext?.plan ||
-      req.user.plan ||
-      'starter'
-    ).toLowerCase()
-
     const targetCardSubscription = (() => {
       const recoverable = pickRecoverableCardSubscription(previousContext)
       if (recoverable?.gatewaySubscriptionId) return recoverable
@@ -1408,6 +1845,23 @@ router.post('/card/update', auth, isEstabelecimento, async (req, res) => {
         !['canceled'].includes(String(item.status || '').toLowerCase())
       ) || null
     })()
+
+    const billingCycle = normalizeBillingCycle(
+      targetCardSubscription?.billingCycle ||
+      effective?.billingCycle ||
+      req.body?.billing_cycle ||
+      planContext?.cycle ||
+      req.user.plan_cycle ||
+      'mensal'
+    )
+    const targetPlan = String(
+      targetCardSubscription?.plan ||
+      effective?.plan ||
+      req.body?.plan ||
+      planContext?.plan ||
+      req.user.plan ||
+      'starter'
+    ).toLowerCase()
 
     if (!targetCardSubscription?.gatewaySubscriptionId) {
       const created = await createOrReplaceCardSubscription({
@@ -1545,26 +1999,34 @@ router.post('/card/recover', auth, isEstabelecimento, async (req, res) => {
     const externalReference = buildCardRecoveryExternalReference(targetSubscription.id, idempotencyKey)
 
     const previousOutcome = await getSubscriptionEventByGatewayEventId(targetSubscription.id, externalReference, {
-      eventTypes: ['payment_recovered', 'payment_failed'],
+      eventTypes: ['payment_recovered', 'payment_failed', 'payment_pending'],
     })
     if (previousOutcome) {
       const refreshedContext = await loadEffectiveSubscriptionContext(req.user.id)
       const refreshedSubscription =
         (refreshedContext.subscription?.id === targetSubscription.id && refreshedContext.subscription) ||
         await getSubscriptionById(targetSubscription.id)
+      const paymentResult = previousOutcome.payload?.payment_result || null
       const paid = previousOutcome.event_type === 'payment_recovered'
+      const pending = previousOutcome.event_type === 'payment_pending'
       return res.json({
         ok: true,
         paid,
+        pending,
         idempotent: true,
-        recovery_status: paid ? 'approved' : 'rejected',
+        recovery_status: paid ? 'approved' : pending ? 'pending' : 'rejected',
         message: paid
           ? 'A cobrança pendente já foi quitada neste cartão.'
-          : 'A última tentativa no cartão não foi aprovada. Você pode tentar novamente ou gerar um PIX.',
+          : (paymentResult?.user_message || (
+              pending
+                ? 'Ja existe uma cobranca em analise. Aguarde a confirmacao antes de tentar novamente.'
+                : 'A ultima tentativa no cartao nao foi aprovada. Voce pode tentar novamente ou gerar um PIX.'
+            )),
         plan_status: refreshedContext.computedState.resolvedStatus,
         access_state: refreshedContext.computedState.accessState,
         subscription: serializeSubscription(refreshedSubscription),
-        payment: previousOutcome.payload?.payment || null,
+        payment: previousOutcome.payload?.raw?.payment || null,
+        payment_result: paymentResult,
         request_id: requestId,
       })
     }
@@ -1588,6 +2050,7 @@ router.post('/card/recover', auth, isEstabelecimento, async (req, res) => {
       description: `Regularizacao de assinatura Agendamentos Online - ${plan} (${billingCycle})`,
       cardToken: token,
       payerEmail: req.body?.payer_email || req.body?.payerEmail || req.user.email,
+      payerProfile: buildBillingPayerProfile(req.user, req.body),
       paymentMethodId: req.body?.payment_method_id || req.body?.paymentMethodId || null,
       issuerId: req.body?.issuer_id || req.body?.issuerId || null,
       identificationType: req.body?.identification_type || req.body?.identificationType || null,
@@ -1604,108 +2067,61 @@ router.post('/card/recover', auth, isEstabelecimento, async (req, res) => {
     if (!payment) {
       throw new Error('card_recovery_payment_invalid')
     }
+    const paymentOutcome = payment.paymentResult || summarizeMercadoPagoGatewayResult(paymentResult.raw)
 
-    if (payment.status === 'active') {
-      const paidAt = payment.paidAt ? new Date(payment.paidAt) : new Date()
-      const expectedPeriodEnd = addBillingCycleDate(paidAt, billingCycle)
-      let alignedGatewaySubscription = null
-      try {
-        const aligned = await updateMercadoPagoCardSubscription(targetSubscription.gatewaySubscriptionId, {
-          amountCents,
-          billingCycle,
-          status: 'authorized',
-          startDate: expectedPeriodEnd,
-          requestContext: {
-            requestId,
-            route: '/billing/card/recover',
-            operation: 'card_subscription_align_after_recovery',
-            subscriptionId: targetSubscription.id,
-            externalReference,
-          },
-        })
-        alignedGatewaySubscription = aligned?.subscription || null
-      } catch (alignmentError) {
-        console.warn('[billing/card/recover][align_subscription]', {
-          subscription_id: targetSubscription.id,
-          gateway_subscription_id: targetSubscription.gatewaySubscriptionId,
-          message: alignmentError?.message || String(alignmentError),
-        })
-      }
-
-      const updated = await updateSubscription(targetSubscription.id, {
-        paymentMethod: 'credit_card',
-        gatewayCustomerId: alignedGatewaySubscription?.gatewayCustomerId || targetSubscription.gatewayCustomerId || null,
-        gatewayPaymentId: payment.id || null,
-        status: 'active',
-        amountCents: payment.amountCents || amountCents,
-        currency: payment.currency || targetSubscription.currency || (config.billing?.currency || 'BRL'),
+    if (paymentOutcome?.should_activate_subscription) {
+      const finalized = await finalizeApprovedCardRecovery({
+        targetSubscription,
+        payment,
+        paymentResult: paymentOutcome,
+        currentStatus,
         billingCycle,
-        currentPeriodStart: paidAt,
-        currentPeriodEnd: alignedGatewaySubscription?.currentPeriodEnd || expectedPeriodEnd || null,
-        nextBillingAt: alignedGatewaySubscription?.nextBillingAt || expectedPeriodEnd || null,
-        graceUntil: null,
-        lastPaymentAt: paidAt,
+        amountCents,
+        requestId,
+        externalReference,
+        source: 'api',
       })
-
-      await appendSubscriptionEvent(updated.id, {
-        eventType: 'payment_recovered',
-        gatewayEventId: externalReference,
-        payload: {
-          payment: paymentResult.raw,
-          previous_status: currentStatus,
-          next_status: 'active',
-        },
-      })
-      await appendSubscriptionEvent(updated.id, {
-        eventType: 'subscription_renewed',
-        gatewayEventId: `recovery:${payment.id || externalReference}`,
-        payload: {
-          payment: paymentResult.raw,
-          recovery: true,
-        },
-      })
-
-      const effectiveContext = await loadEffectiveSubscriptionContext(req.user.id)
       return res.json({
         ok: true,
         paid: true,
+        pending: false,
         recovery_status: 'approved',
-        plan_status: effectiveContext.computedState.resolvedStatus,
-        access_state: effectiveContext.computedState.accessState,
-        subscription: serializeSubscription(updated),
+        message: paymentOutcome.user_message || 'Pagamento aprovado.',
+        plan_status: finalized.effectiveContext.computedState.resolvedStatus,
+        access_state: finalized.effectiveContext.computedState.accessState,
+        subscription: serializeSubscription(finalized.updated),
         payment: paymentResult.raw,
+        payment_result: paymentOutcome,
         request_id: requestId,
       })
     }
 
-    const updated = await updateSubscription(targetSubscription.id, {
-      paymentMethod: 'credit_card',
-      gatewayPaymentId: payment.id || targetSubscription.gatewayPaymentId || null,
-      status: currentStatus,
-      graceUntil: targetSubscription.graceUntil || context?.computedState?.graceUntil || null,
-      lastPaymentAt: targetSubscription.lastPaymentAt || null,
-    })
-    await appendSubscriptionEvent(updated.id, {
-      eventType: 'payment_failed',
-      gatewayEventId: externalReference,
-      payload: {
-        payment: paymentResult.raw,
-        previous_status: currentStatus,
-        next_status: currentStatus,
-        recovery: true,
-      },
+    const finalized = await finalizeNonApprovedCardRecovery({
+      targetSubscription,
+      payment,
+      paymentResult: paymentOutcome,
+      currentStatus,
+      requestId,
+      externalReference,
+      source: 'api',
     })
 
-    const effectiveContext = await loadEffectiveSubscriptionContext(req.user.id)
+    const pending = paymentOutcome?.status_group === 'pending'
     return res.json({
       ok: true,
       paid: false,
-      recovery_status: payment.rawStatus || 'rejected',
-      message: 'O cartão foi validado, mas a cobrança pendente não foi aprovada. Tente novamente ou gere um PIX.',
-      plan_status: effectiveContext.computedState.resolvedStatus,
-      access_state: effectiveContext.computedState.accessState,
-      subscription: serializeSubscription(updated),
+      pending,
+      recovery_status: pending ? 'pending' : payment.rawStatus || 'rejected',
+      message: paymentOutcome?.user_message || (
+        pending
+          ? 'O pagamento esta em analise pelo Mercado Pago. Aguarde a confirmacao antes de tentar novamente.'
+          : 'O cartao foi validado, mas a cobranca pendente nao foi aprovada. Tente novamente ou gere um PIX.'
+      ),
+      plan_status: finalized.effectiveContext.computedState.resolvedStatus,
+      access_state: finalized.effectiveContext.computedState.accessState,
+      subscription: serializeSubscription(finalized.updated),
       payment: paymentResult.raw,
+      payment_result: paymentOutcome,
       request_id: requestId,
     })
   } catch (error) {
@@ -1996,6 +2412,26 @@ router.post('/webhook', async (req, res) => {
         return res.status(200).json({ ok: true, ignored: true, reason: depositResult?.reason || 'foreign_user' })
       }
 
+      const recoveryResult = await syncCardRecoveryPaymentFromGateway(resourceId, {
+        gatewayEventId: resourceId,
+      })
+      if (recoveryResult?.ok) {
+        console.log('[billing:webhook] subscription_recovery_payment', resourceId, recoveryResult?.handled ? 'processed' : 'ignored', {
+          ok: !!recoveryResult?.ok,
+          reason: recoveryResult?.reason || null,
+          status: recoveryResult?.status || null,
+          normalized_reason: recoveryResult?.paymentResult?.normalized_reason || null,
+          status_detail: recoveryResult?.paymentResult?.status_detail || null,
+        })
+        return res.status(200).json({
+          ok: true,
+          processed: Boolean(recoveryResult?.handled),
+          recovery: true,
+          status: recoveryResult?.status || null,
+          reason: recoveryResult?.reason || null,
+        })
+      }
+
       const r = await syncMercadoPagoPayment(resourceId, event)
       console.log('[billing:webhook] payment', resourceId, r?.ok ? 'approved' : 'ignored', { ok: !!r?.ok })
       return res.status(200).json({ ok: true, processed: !!r?.ok })
@@ -2027,6 +2463,9 @@ router.post('/webhook', async (req, res) => {
       console.log('[billing:webhook] subscription_authorized_payment', resourceId, result?.ok ? 'processed' : 'ignored', {
         ok: !!result?.ok,
         reason: result?.reason || null,
+        status: result?.paymentResult?.status || null,
+        status_detail: result?.paymentResult?.status_detail || null,
+        normalized_reason: result?.paymentResult?.normalized_reason || null,
       })
       return res.status(200).json({ ok: true, processed: !!result?.ok, reason: result?.reason || null })
     }
