@@ -4,6 +4,16 @@ function normalizeToken(value) {
 }
 
 const securityEventCounters = new Map();
+const SUSPICIOUS_PATH_PATTERNS = [
+  /\/api\/v\d+\//i,
+  /(?:force-reset-password|recover-password|modular-connector|raster\/search)/i,
+  /(?:select\s+.+from|union\s+select|cast\s*\(|version\s*\(|information_schema|sleep\s*\(|benchmark\s*\()/i,
+  /(?:\.\.|%2e%2e|\/\.env|\/\.git|wp-admin|wp-login|phpmyadmin|adminer|cgi-bin|boaform|actuator|jmx-console)/i,
+];
+const SUSPICIOUS_QUERY_PATTERNS = [
+  /(?:union(?:\s|%20)+select|select(?:\s|%20)+version|cast\s*\(|information_schema|sleep\s*\(|benchmark\s*\()/i,
+  /(?:\-\-|%2d%2d|\/\*|\*\/|%27|%22|%3b)/i,
+];
 
 export function extractBearerTokenValue(headerValue) {
   const header = normalizeToken(headerValue);
@@ -58,17 +68,94 @@ export function resolveRouteTokenAccess(req, {
   };
 }
 
-export function getRequestAccessLogContext(req) {
+function sanitizeLogValue(value, maxLength = 256) {
+  const normalized = String(value ?? '').trim();
+  if (!normalized) return null;
+  return normalized.length > maxLength ? `${normalized.slice(0, maxLength)}...` : normalized;
+}
+
+function getRawRequestIp(req) {
   const forwarded = String(req?.headers?.['x-forwarded-for'] || '').trim();
+  if (forwarded) {
+    const [first] = forwarded.split(',');
+    const normalized = String(first || '').trim();
+    if (normalized) return normalized;
+  }
+  return (
+    String(req?.ip || '').trim() ||
+    String(req?.socket?.remoteAddress || '').trim() ||
+    null
+  );
+}
+
+export function maskIpForLog(value) {
+  const normalized = String(value ?? '').trim();
+  if (!normalized) return null;
+
+  if (normalized.includes('.')) {
+    const parts = normalized.split('.');
+    if (parts.length === 4 && parts.every((part) => /^\d+$/.test(part))) {
+      return `${parts[0]}.${parts[1]}.${parts[2]}.0`;
+    }
+  }
+
+  if (normalized.includes(':')) {
+    const parts = normalized.split(':').filter((part) => part.length > 0);
+    if (parts.length >= 2) {
+      return `${parts.slice(0, 3).join(':')}:*`;
+    }
+  }
+
+  return normalized;
+}
+
+export function normalizeRequestId(value) {
+  const normalized = String(value ?? '').trim();
+  if (!normalized) return '';
+  return normalized.replace(/[^A-Za-z0-9._:-]/g, '').slice(0, 128);
+}
+
+export function getRequestAccessLogContext(req) {
+  const ip = getRawRequestIp(req);
+  const originalUrl = String(req?.originalUrl || req?.url || '').trim();
   return {
     method: String(req?.method || '').trim() || null,
-    url: String(req?.originalUrl || req?.url || '').trim() || null,
-    ip: forwarded || String(req?.ip || '').trim() || null,
-    host: String(req?.headers?.host || '').trim() || null,
-    origin: String(req?.headers?.origin || '').trim() || null,
-    referer: String(req?.headers?.referer || '').trim() || null,
-    user_agent: String(req?.headers?.['user-agent'] || '').trim() || null,
+    url: originalUrl || null,
+    path: originalUrl ? originalUrl.split('?')[0] : (String(req?.path || '').trim() || null),
+    ip,
+    ip_masked: maskIpForLog(ip),
+    host: sanitizeLogValue(req?.headers?.host, 128),
+    origin: sanitizeLogValue(req?.headers?.origin, 256),
+    referer: sanitizeLogValue(req?.headers?.referer, 256),
+    user_agent: sanitizeLogValue(req?.headers?.['user-agent'], 256),
+    request_id: normalizeRequestId(req?.requestId || req?.headers?.['x-request-id']),
   };
+}
+
+export function classifySuspiciousRequest(req) {
+  const method = String(req?.method || '').trim().toUpperCase();
+  const url = String(req?.originalUrl || req?.url || '').trim();
+  const decodedUrl = (() => {
+    try {
+      return decodeURIComponent(url);
+    } catch {
+      return url;
+    }
+  })();
+  const normalized = `${url} ${decodedUrl}`.trim();
+  const reasons = [];
+
+  if (['TRACE', 'CONNECT'].includes(method)) {
+    reasons.push('unexpected_method');
+  }
+  if (SUSPICIOUS_PATH_PATTERNS.some((pattern) => pattern.test(normalized))) {
+    reasons.push('suspicious_path');
+  }
+  if (SUSPICIOUS_QUERY_PATTERNS.some((pattern) => pattern.test(normalized))) {
+    reasons.push('suspicious_query');
+  }
+
+  return Array.from(new Set(reasons));
 }
 
 function incrementSecurityEventCounter(counterKey, windowMs) {
@@ -100,6 +187,7 @@ export function logSecurityEvent(eventKey, req, details = {}, {
   const logger = typeof console[level] === 'function' ? console[level].bind(console) : console.warn.bind(console);
   logger(`[security][${eventKey}] event`, {
     ...context,
+    ip: context.ip_masked || context.ip || null,
     ...details,
     counter_window_ms: windowMs,
     counter_window_count: counter.windowCount,
@@ -113,6 +201,7 @@ export function logBlockedRouteAccess(routeKey, req, details = {}) {
   const counter = incrementSecurityEventCounter(`${routeKey}:${bucketKey}:blocked`, 300000);
   console.warn(`[security][${routeKey}] blocked`, {
     ...context,
+    ip: context.ip_masked || context.ip || null,
     ...details,
     counter_window_ms: 300000,
     counter_window_count: counter.windowCount,

@@ -12,8 +12,8 @@ export function getWhatsAppConnectFeatureState() {
     featureEnabled: enabled,
     mode: enabled ? 'enabled' : 'coming_soon',
     message: enabled
-      ? 'Integracao com WhatsApp Business habilitada.'
-      : 'Integracao com WhatsApp Business em breve.',
+      ? 'Integração com WhatsApp Business habilitada.'
+      : 'Integração com WhatsApp Business em breve.',
   };
 }
 

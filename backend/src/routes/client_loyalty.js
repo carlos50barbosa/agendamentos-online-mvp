@@ -1,7 +1,10 @@
 import { Router } from 'express'
+import { randomUUID } from 'node:crypto'
 import { auth, isCliente } from '../middleware/auth.js'
 import { pool } from '../lib/db.js'
 import { getMercadoPagoPublicKey } from '../lib/mercadopago_subscriptions.js'
+import { getMercadoPagoCredentialDiagnostics, toMercadoPagoCardFlowError } from '../lib/mercadopago_card_tokens.js'
+import { config } from '../lib/config.js'
 import {
   cancelClientLoyaltySubscriptionForClient,
   createClientLoyaltyPixCheckout,
@@ -19,11 +22,23 @@ import {
 
 const router = Router()
 
-function handleRouteError(res, error) {
-  return res.status(Number(error?.status || 500)).json({
-    error: error?.code || 'internal_error',
-    message: error?.message || 'Falha ao processar assinatura de fidelidade.',
-    details: error?.details || null,
+function createInternalRequestId(req) {
+  return String(req.requestId || req.headers['x-request-id'] || '').trim() || randomUUID()
+}
+
+function handleRouteError(res, error, requestId = null) {
+  const normalized = toMercadoPagoCardFlowError(error) || error
+  console.error('[client-loyalty] route_failed', {
+    request_id: requestId || null,
+    error: normalized?.code || 'internal_error',
+    message: normalized?.message || 'Falha ao processar assinatura de fidelidade.',
+    details: normalized?.details || null,
+  })
+  return res.status(Number(normalized?.status || 500)).json({
+    error: normalized?.code || 'internal_error',
+    message: normalized?.message || 'Falha ao processar assinatura de fidelidade.',
+    details: normalized?.details || null,
+    request_id: requestId || null,
   })
 }
 
@@ -68,6 +83,10 @@ router.get('/config', auth, isCliente, async (_req, res) => {
     gateway: 'mercadopago',
     mercadopago: {
       public_key: getMercadoPagoPublicKey(),
+      credentials: getMercadoPagoCredentialDiagnostics({
+        publicKey: getMercadoPagoPublicKey(),
+        accessToken: config.billing?.mercadopago?.accessToken || null,
+      }),
     },
   })
 })
@@ -130,6 +149,8 @@ router.get('/context', auth, isCliente, async (req, res) => {
 })
 
 router.post('/subscribe', auth, isCliente, async (req, res) => {
+  const requestId = createInternalRequestId(req)
+  res.set('X-Request-Id', requestId)
   try {
     const estabelecimentoId = normalizeId(req.body?.estabelecimento_id || req.body?.establishment_id)
     const loyaltyPlanId = normalizeId(req.body?.loyalty_plan_id || req.body?.plan_id)
@@ -146,17 +167,23 @@ router.post('/subscribe', auth, isCliente, async (req, res) => {
         clienteId: req.user.id,
         estabelecimentoId,
         loyaltyPlanId,
-        cardToken: req.body?.card_token,
+        cardToken: String(req.body?.card_token || '').trim(),
         payerEmail: req.body?.payer_email || req.user.email || '',
         paymentMethodId: req.body?.payment_method_id || null,
         issuerId: req.body?.issuer_id || null,
         identificationType: req.body?.identification_type || null,
         identificationNumber: req.body?.identification_number || null,
+        requestContext: {
+          requestId,
+          route: '/client-loyalty/subscribe',
+          operation: 'client_loyalty_card_subscription_create',
+        },
       })
       return res.status(201).json({
         ok: true,
         method: 'credit_card',
         subscription: await loadClientLoyaltySubscriptionDetails(result.subscription),
+        request_id: requestId,
       })
     }
 
@@ -174,13 +201,16 @@ router.post('/subscribe', auth, isCliente, async (req, res) => {
         id: result.payment?.id || null,
         status: result.payment?.status || null,
       },
+      request_id: requestId,
     })
   } catch (error) {
-    return handleRouteError(res, error)
+    return handleRouteError(res, error, requestId)
   }
 })
 
 router.post('/pay/pix', auth, isCliente, async (req, res) => {
+  const requestId = createInternalRequestId(req)
+  res.set('X-Request-Id', requestId)
   try {
     const estabelecimentoId = normalizeId(req.body?.estabelecimento_id || req.body?.establishment_id)
     const loyaltyPlanId = normalizeId(req.body?.loyalty_plan_id || req.body?.plan_id)
@@ -204,13 +234,16 @@ router.post('/pay/pix', auth, isCliente, async (req, res) => {
         id: result.payment?.id || null,
         status: result.payment?.status || null,
       },
+      request_id: requestId,
     })
   } catch (error) {
-    return handleRouteError(res, error)
+    return handleRouteError(res, error, requestId)
   }
 })
 
 router.post('/pay/card', auth, isCliente, async (req, res) => {
+  const requestId = createInternalRequestId(req)
+  res.set('X-Request-Id', requestId)
   try {
     const estabelecimentoId = normalizeId(req.body?.estabelecimento_id || req.body?.establishment_id)
     const loyaltyPlanId = normalizeId(req.body?.loyalty_plan_id || req.body?.plan_id)
@@ -231,13 +264,19 @@ router.post('/pay/card', auth, isCliente, async (req, res) => {
       issuerId: req.body?.issuer_id || null,
       identificationType: req.body?.identification_type || null,
       identificationNumber: req.body?.identification_number || null,
+      requestContext: {
+        requestId,
+        route: '/client-loyalty/pay/card',
+        operation: 'client_loyalty_card_subscription_create',
+      },
     })
     return res.status(201).json({
       ok: true,
       subscription: await loadClientLoyaltySubscriptionDetails(result.subscription),
+      request_id: requestId,
     })
   } catch (error) {
-    return handleRouteError(res, error)
+    return handleRouteError(res, error, requestId)
   }
 })
 

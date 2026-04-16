@@ -12,6 +12,12 @@ import { saveToken, saveUser } from '../utils/auth';
 
 import { LEGAL_METADATA } from '../utils/legal.js';
 
+const normalizeUiText = (value = '') =>
+  String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+
 
 
 const formatBRPhone = (value = '') => {
@@ -568,19 +574,20 @@ export default function Cadastro() {
 
       const message = e?.message || '';
 
+      const normalizedMessage = normalizeUiText(message);
       const friendly =
 
         message === 'email_exists'
 
-           ? 'Este e-mail ja esta cadastrado.'
+           ? 'Este e-mail já está cadastrado.'
 
           : message === 'telefone_obrigatorio'
 
-           ? 'Informe um telefone valido com DDD.'
+           ? 'Informe um telefone válido com DDD.'
 
-          : message.includes('endereco')
+          : normalizedMessage.includes('endereco')
 
-           ? 'Verifique os campos de endereco.'
+           ? 'Verifique os campos de endereço.'
 
           : 'Falha ao criar conta. Tente novamente.';
 
@@ -720,7 +727,7 @@ export default function Cadastro() {
 
                 <div className="signup-chooser__hint">
 
-                  Cliente agenda servicos. Estabelecimento recebe e organiza agendamentos.
+                  Cliente agenda serviços. Estabelecimento recebe e organiza agendamentos.
 
                 </div>
 
@@ -990,7 +997,7 @@ export default function Cadastro() {
 
                       <div className={`login-preview__hint strength strength--${senhaLabel?.toLowerCase() || 'fraca'}`}>
 
-                        Forca: {senhaLabel}
+                        Força: {senhaLabel}
 
                       </div>
 
@@ -1184,7 +1191,7 @@ export default function Cadastro() {
 
                       <div className="login-preview__field">
 
-                        <label className="login-preview__label" htmlFor="cadastro-endereco">Endereco</label>
+                        <label className="login-preview__label" htmlFor="cadastro-endereco">Endereço</label>
 
                         <input
 
@@ -1206,7 +1213,7 @@ export default function Cadastro() {
 
                         <div className="login-preview__field">
 
-                          <label className="login-preview__label" htmlFor="cadastro-numero">Numero</label>
+                          <label className="login-preview__label" htmlFor="cadastro-numero">Número</label>
 
                           <input
 

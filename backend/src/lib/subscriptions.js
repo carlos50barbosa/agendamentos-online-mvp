@@ -1,6 +1,7 @@
 ﻿// backend/src/lib/subscriptions.js
 import { pool } from './db.js'
 import { toDatabaseDateTime } from './database_datetime.js'
+import { sanitizeMercadoPagoSensitivePayload } from './mercadopago_card_tokens.js'
 import { normalizePaymentMethod, normalizeSubscriptionStatus } from './subscription_normalization.js'
 
 const COLUMN_MAP = {
@@ -223,7 +224,8 @@ export async function appendSubscriptionEvent(subscriptionId, { eventType, gatew
     INSERT INTO subscription_events (subscription_id, event_type, gateway_event_id, payload)
     VALUES (?, ?, ?, ?)
   `
-  const stringPayload = payload == null ? null : JSON.stringify(payload)
+  const safePayload = payload == null ? null : sanitizeMercadoPagoSensitivePayload(payload)
+  const stringPayload = safePayload == null ? null : JSON.stringify(safePayload)
   const [result] = await pool.query(sql, [subscriptionId, eventType, gatewayEventId || null, stringPayload])
   return { duplicated: false, id: result.insertId }
 }
@@ -263,7 +265,7 @@ export async function getSubscriptionEventByGatewayEventId(subscriptionId, gatew
     subscription_id: row.subscription_id,
     event_type: row.event_type,
     gateway_event_id: row.gateway_event_id || null,
-    payload: row.payload ? safeJsonParse(row.payload) : null,
+    payload: row.payload ? sanitizeMercadoPagoSensitivePayload(safeJsonParse(row.payload)) : null,
     created_at: row.created_at ? new Date(row.created_at).toISOString() : null,
   }
 }
@@ -294,7 +296,7 @@ export async function listSubscriptionEventsForEstabelecimento(estabelecimentoId
     subscription_id: row.subscription_id,
     event_type: row.event_type,
     gateway_event_id: row.gateway_event_id || null,
-    payload: row.payload ? safeJsonParse(row.payload) : null,
+    payload: row.payload ? sanitizeMercadoPagoSensitivePayload(safeJsonParse(row.payload)) : null,
     created_at: row.created_at ? new Date(row.created_at).toISOString() : null,
     plan: row.plan || null,
     status: normalizeSubscriptionStatus(row.status, { paymentMethod: row.payment_method }),

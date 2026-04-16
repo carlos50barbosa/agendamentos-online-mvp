@@ -2,10 +2,10 @@
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
-import morgan from 'morgan';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { mkdir } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
 
 import authRouter from './routes/auth.js';
 import servicosRouter from './routes/servicos.js';
@@ -31,12 +31,13 @@ import clientLoyaltyRouter from './routes/client_loyalty.js';
 import publicLoyaltyRouter from './routes/public_loyalty.js';
 import { pool } from './lib/db.js';
 import { config, getOperationalHardeningWarnings } from './lib/config.js';
-import { getRateLimitMaintenanceInfo, initializeRateLimitStore, startRateLimitStoreMaintenance } from './lib/request_rate_limit.js';
+import { buildRateLimitClientKey, consumeRateLimit, getRateLimitMaintenanceInfo, initializeRateLimitStore, setRateLimitHeaders, startRateLimitStoreMaintenance } from './lib/request_rate_limit.js';
 import { startMaintenance, startPublicPendingCleanup, startAppointmentPaymentCleanup } from './lib/maintenance.js';
 import { mountWebhooks } from './routes/webhooks.js';
 import { startBillingMonitor } from './lib/billing_monitor.js';
 import { startAppointmentReminders } from './lib/appointment_reminders.js';
 import { startEstabReminders } from './lib/estab_reminders.js';
+import { classifySuspiciousRequest, getRequestAccessLogContext, logSecurityEvent, normalizeRequestId } from './lib/route_access.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -63,8 +64,8 @@ const BILLING_ROUTES_ENABLED = (() => {
 // Se hoje o Nginx mantém /api até o Node, passe withApiPrefix=true (mas aceitamos ambos):
 mountWebhooks(app, true);
 
-app.set('trust proxy', 1);
-app.use(morgan('dev'));
+app.disable('x-powered-by');
+app.set('trust proxy', config.security?.trustProxy ?? 1);
 app.use(cors({
   origin: [
     'http://localhost:3001',
@@ -74,9 +75,48 @@ app.use(cors({
     'http://127.0.0.1:5173',
   ],
   credentials: true,
-  allowedHeaders: ['Content-Type', 'Authorization', 'Idempotency-Key', 'X-Admin-Token', 'X-Admin-Allow-Write', 'X-OTP-Token', 'X-Deposit-Token', 'X-Notify-Token', 'X-Billing-Health-Token'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Idempotency-Key', 'X-Request-Id', 'X-Admin-Token', 'X-Admin-Allow-Write', 'X-OTP-Token', 'X-Deposit-Token', 'X-Notify-Token', 'X-Billing-Health-Token'],
+  exposedHeaders: ['X-Request-Id', 'X-RateLimit-Limit', 'X-RateLimit-Remaining', 'X-RateLimit-Reset', 'Retry-After', 'Deprecation', 'Warning', 'Sunset', 'X-Legacy-Token-Fallback', 'X-Deprecated-Replacement', 'X-Legacy-Token-Phase'],
 }));
 app.options('*', cors());
+app.use((req, res, next) => {
+  const requestId = normalizeRequestId(req.headers['x-request-id']) || randomUUID();
+  req.requestId = requestId;
+  res.set('X-Request-Id', requestId);
+  next();
+});
+app.use((req, res, next) => {
+  res.set('Referrer-Policy', 'same-origin');
+  res.set('X-Content-Type-Options', 'nosniff');
+  res.set('X-Frame-Options', 'DENY');
+  res.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  res.set('Cross-Origin-Opener-Policy', 'same-origin');
+  next();
+});
+app.use((req, res, next) => {
+  const startedAt = process.hrtime.bigint();
+  res.on('finish', () => {
+    const durationMs = Number(process.hrtime.bigint() - startedAt) / 1e6;
+    const context = getRequestAccessLogContext(req);
+    const suspiciousSignals = res.statusCode === 404 ? classifySuspiciousRequest(req) : [];
+    const payload = {
+      request_id: req.requestId || context.request_id || null,
+      method: context.method,
+      path: context.path,
+      url: context.url,
+      status: res.statusCode,
+      duration_ms: Math.round(durationMs * 100) / 100,
+      ip: context.ip_masked || context.ip || null,
+      user_agent: context.user_agent,
+    };
+    if (suspiciousSignals.length) {
+      payload.scan_signals = suspiciousSignals;
+    }
+    const logger = res.statusCode >= 500 ? console.error : (suspiciousSignals.length ? console.warn : console.log);
+    logger('[http] completed', payload);
+  });
+  next();
+});
 app.use(whatsappWebhookPaths, express.json({
   limit: '5mb',
   verify: (req, _res, buf) => {
@@ -101,6 +141,60 @@ app.use((req, res, next) => {
     return send(body);
   };
   next();
+});
+app.use((req, res, next) => {
+  const path = String(req.path || '').toLowerCase();
+  const method = String(req.method || '').toUpperCase();
+  const hasAuthHeader = Boolean(String(req.headers.authorization || '').trim());
+  const isWebhookPath =
+    path.startsWith('/wa/webhook') ||
+    path.startsWith('/api/wa/webhook') ||
+    path.startsWith('/webhooks/whatsapp') ||
+    path.startsWith('/api/webhooks/whatsapp') ||
+    path.startsWith('/billing/webhook') ||
+    path.startsWith('/api/billing/webhook') ||
+    path.startsWith('/webhook/mercadopago') ||
+    path.startsWith('/api/webhook/mercadopago');
+  const isExcluded =
+    method === 'OPTIONS' ||
+    path === '/health' ||
+    path === '/api/health' ||
+    path.startsWith('/uploads/') ||
+    path.startsWith('/api/uploads/') ||
+    path.startsWith('/payments/') ||
+    path.startsWith('/api/payments/') ||
+    path.startsWith('/notify/') ||
+    path.startsWith('/api/notify/') ||
+    isWebhookPath;
+  const isPublicApiRoute =
+    path.startsWith('/api/') ||
+    path.startsWith('/auth/') ||
+    path.startsWith('/public/') ||
+    path.startsWith('/establishments/') ||
+    path === '/auth' ||
+    path === '/public' ||
+    path === '/establishments';
+
+  if (isExcluded || hasAuthHeader || !isPublicApiRoute) {
+    return next();
+  }
+
+  Promise.resolve().then(async () => {
+    const result = await consumeRateLimit({
+      bucketKey: `public-api:${buildRateLimitClientKey(req)}`,
+      windowMs: config.security?.rateLimit?.publicApi?.windowMs,
+      max: config.security?.rateLimit?.publicApi?.max,
+    });
+    setRateLimitHeaders(res, result);
+    if (!result.limited) return next();
+
+    logSecurityEvent('public-api:rate-limit', req, {
+      limit: result.limit,
+      retry_after_sec: result.retryAfterSec,
+      store_driver: result.storeDriver || null,
+    }, { level: 'warn' });
+    return res.status(429).json({ error: 'rate_limited', request_id: req.requestId || null });
+  }).catch(next);
 });
 
 app.use('/uploads', express.static(UPLOADS_DIR, { maxAge: '7d' }));
@@ -184,18 +278,60 @@ app.use('/api/mercadopago', mercadoPagoRouter);
 app.use('/api/wa/webhook', waTenantWebhookRouter);
 app.use('/api/webhooks/whatsapp', whatsappWebhookRouter);
 
+app.use((req, res) => {
+  const suspiciousSignals = classifySuspiciousRequest(req);
+  if (suspiciousSignals.length) {
+    logSecurityEvent('http:suspicious-not-found', req, {
+      request_id: req.requestId || null,
+      status: 404,
+      scan_signals: suspiciousSignals,
+    }, { level: 'warn' });
+  }
+  return res.status(404).json({ error: 'not_found', request_id: req.requestId || null });
+});
+
 // Middleware final de erro
 app.use((err, req, res, _next) => {
+  const requestId = req?.requestId || null;
   if (err?.type === 'entity.too.large' || err?.status === 413) {
     const path = req?.path || '';
     const isServiceRoute = path.startsWith('/servicos') || path.startsWith('/api/servicos');
     if (isServiceRoute) {
-      return res.status(413).json({ error: 'imagem_grande', message: 'Imagem maior que 2MB.' });
+      return res.status(413).json({ error: 'imagem_grande', message: 'Imagem maior que 2MB.', request_id: requestId });
     }
-    return res.status(413).json({ error: 'payload_too_large', message: 'Payload muito grande.' });
+    return res.status(413).json({ error: 'payload_too_large', message: 'Payload muito grande.', request_id: requestId });
   }
-  console.error('[UNHANDLED]', err);
-  res.status(err.status || 500).json({ error: 'internal_error', detail: err.message });
+  const isInvalidJson =
+    err?.type === 'entity.parse.failed' ||
+    (err instanceof SyntaxError && err?.status === 400 && Object.prototype.hasOwnProperty.call(err, 'body'));
+  if (isInvalidJson) {
+    console.warn('[http][invalid-json]', {
+      request_id: requestId,
+      path: req?.originalUrl || req?.url || null,
+      message: err?.message || null,
+    });
+    return res.status(400).json({ error: 'invalid_json', request_id: requestId });
+  }
+
+  const context = getRequestAccessLogContext(req);
+  console.error('[UNHANDLED]', {
+    request_id: requestId,
+    method: context.method,
+    path: context.path,
+    ip: context.ip_masked || context.ip || null,
+    error: err?.message || String(err),
+  });
+
+  const status = Number(err?.status || 500);
+  if (status >= 400 && status < 500 && err?.expose === true) {
+    return res.status(status).json({
+      error: err?.code || 'request_error',
+      message: err?.message || 'Requisição inválida.',
+      request_id: requestId,
+    });
+  }
+
+  return res.status(status).json({ error: 'internal_error', request_id: requestId });
 });
 
 const HOST = process.env.HOST || '127.0.0.1';
@@ -217,7 +353,7 @@ if (rateLimitStoreInfo.fallbackReason === 'rate_limit_mysql_table_missing') {
 }
 if (rateLimitStoreInfo.fallbackReason === 'rate_limit_redis_client_missing') {
   console.warn(
-    '[security][rate-limit] redis configurado sem client compativel no bootstrap; mantendo fallback seguro no store configurado.'
+    '[security][rate-limit] redis configurado sem client compatível no bootstrap; mantendo fallback seguro no store configurado.'
   );
 }
 if (

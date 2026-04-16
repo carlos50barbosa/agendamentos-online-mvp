@@ -33,14 +33,14 @@ function getErrorMessage(error, fallback) {
 
 function getMercadoPagoConnectErrorMessage(error) {
   if (error?.data?.error !== 'mp_config_missing') {
-    return getErrorMessage(error, 'Nao foi possivel iniciar a conexao.');
+    return getErrorMessage(error, 'Não foi possível iniciar a conexão.');
   }
 
   const missing = Array.isArray(error?.data?.missing)
     ? error.data.missing.filter((item) => Boolean(item))
     : [];
   const suggestedRedirect = String(error?.data?.example_redirect_uri || '').trim();
-  const parts = ['Configuracao do Mercado Pago incompleta no backend.'];
+  const parts = ['Configuração do Mercado Pago incompleta no backend.'];
 
   if (missing.length) {
     parts.push(`Faltam: ${missing.join(', ')}.`);
@@ -183,7 +183,7 @@ function getPixStatusMeta(statusValue, confirmed) {
     return { tone: 'pending', label: 'Pagamento pendente', icon: '...' };
   }
   if (raw.includes('rejected') || raw.includes('cancel') || raw.includes('fail')) {
-    return { tone: 'error', label: 'Pagamento nao confirmado', icon: '!' };
+    return { tone: 'error', label: 'Pagamento não confirmado', icon: '!' };
   }
   return raw
     ? { tone: 'neutral', label: 'Status em processamento', icon: 'o' }
@@ -365,7 +365,7 @@ export function useBusinessSettings(options = {}) {
       setBilling((current) => ({
         ...current,
         loading: false,
-        error: getErrorMessage(error, 'Falha ao carregar os creditos do WhatsApp.'),
+        error: getErrorMessage(error, 'Falha ao carregar os créditos do WhatsApp.'),
       }));
       return null;
     }
@@ -702,7 +702,7 @@ export function useBusinessSettings(options = {}) {
         planInfo.activeUntil
           ? `Assinatura ativa até ${formatLongDate(planInfo.activeUntil)}`
           : includedLimit > 0
-            ? 'Incluido no plano'
+            ? 'Incluído no plano'
             : '',
       includedUsageLabel: `Usadas ${used.toLocaleString('pt-BR')} de ${includedLimit.toLocaleString('pt-BR')}`,
       remainingLabel: includedBalance >= 0 ? `Restam ${Math.max(includedBalance, 0).toLocaleString('pt-BR')}` : '',

@@ -1460,7 +1460,7 @@ function _l() {
         try {
           const t = await I.mpConnectStart();
           if (!(t != null && t.url))
-            throw new Error("URL de conexao indisponivel.");
+            throw new Error("URL de conexão indisponível.");
           window.location.assign(t.url);
         } catch (t) {
           const s =
@@ -1562,7 +1562,7 @@ function _l() {
                 error: "Não foi possível concluir a conexão do WhatsApp.",
               },
               phone_in_use: {
-                error: "Esse numero ja esta conectado a outro estabelecimento.",
+                error: "Esse número já está conectado a outro estabelecimento.",
               },
             }[l];
             (d != null && d.notice
@@ -2952,7 +2952,7 @@ function _l() {
                           })
                         : e.jsx("span", {
                             className: "profile-avatar__hint",
-                            children: "PNG, JPG ou WEBP ate 2MB.",
+                            children: "PNG, JPG ou WEBP até 2MB.",
                       }),
                     ],
                   }),
@@ -3083,7 +3083,7 @@ function _l() {
                           className: "label config-profile-form__field",
                           style: { flex: "1 1 240px" },
                           children: [
-                            e.jsx("span", { children: "Endereco" }),
+                            e.jsx("span", { children: "Endereço" }),
                             e.jsx("input", {
                               className: "input",
                               value: T.endereco,
@@ -3291,7 +3291,7 @@ function _l() {
                       className: "small muted config-profile-form__security-hint",
                       style: { margin: "-4px 0 0" },
                       children:
-                        "Vamos pedir sua senha atual ao salvar as alteracoes.",
+                        "Vamos pedir sua senha atual ao salvar as alterações.",
                     }),
                 ],
               }),
@@ -3514,8 +3514,8 @@ function _l() {
                     e.jsxs("div", {
                       className: "notice notice--success",
                       children: [
-                        "Conectado ao numero ",
-                        Ut || Y || "indisponivel",
+                        "Conectado ao número ",
+                        Ut || Y || "indisponível",
                         ".",
                       ],
                     }),
@@ -4473,12 +4473,12 @@ function _l() {
                           children: [
                             e.jsx("h4", {
                               className: "public-profile__theme-title",
-                              children: "Identidade visual da pagina publica",
+                              children: "Identidade visual da página pública",
                             }),
                             e.jsx("p", {
                               className: "public-profile__theme-subtitle",
                               children:
-                                "Defina as cores usadas nos botoes, destaques e elementos principais da sua pagina publica de agendamento.",
+                                "Defina as cores usadas nos botões, destaques e elementos principais da sua página pública de agendamento.",
                             }),
                           ],
                         }),
@@ -4490,7 +4490,7 @@ function _l() {
                               De("accent_strong_color", ""));
                           },
                           disabled: C || A,
-                          children: "Usar padrao",
+                          children: "Usar padrão",
                         }),
                       ],
                     }),
@@ -4503,7 +4503,7 @@ function _l() {
                           children: "Previa",
                         }),
                         e.jsx("strong", {
-                          children: "Sua pagina com identidade propria",
+                          children: "Sua página com identidade própria",
                         }),
                         e.jsx("p", {
                           children:
@@ -4576,7 +4576,7 @@ function _l() {
                               className: "muted",
                               style: { fontSize: 12 },
                               children:
-                                "Use um hexadecimal como #0f766e. Deixe vazio para usar o tema padrao.",
+                                "Use um hexadecimal como #0f766e. Deixe vazio para usar o tema padrão.",
                             }),
                           ],
                         }),
@@ -4625,7 +4625,7 @@ function _l() {
                               className: "muted",
                               style: { fontSize: 12 },
                               children:
-                                "Ideal para contrastes, gradientes e estados de foco na pagina publica.",
+                                "Ideal para contrastes, gradientes e estados de foco na página pública.",
                             }),
                           ],
                         }),
@@ -5083,7 +5083,7 @@ function _l() {
                                 className: "muted",
                                 style: { margin: 0, fontSize: 13 },
                                 children:
-                                  "Essas imagens aparecem na pagina publica e no fluxo de agendamento (/novo).",
+                                  "Essas imagens aparecem na página pública e no fluxo de agendamento (/novo).",
                               }),
                             }),
                           }),
@@ -6074,7 +6074,7 @@ function _l() {
                     className: "muted",
                     style: { margin: "4px 0 0" },
                     children:
-                      "Assinatura, WhatsApp Business e Sinal agora possuem paginas proprias para reduzir acoplamento e manter os fluxos isolados.",
+                      "Assinatura, WhatsApp Business e Sinal agora possuem páginas próprias para reduzir acoplamento e manter os fluxos isolados.",
                   }),
                 ],
               }),

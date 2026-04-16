@@ -56,6 +56,7 @@ const FAQ_ITEMS = [
 ];
 
 const FEATURED_LIMIT = 6;
+const HERO_BRAND_MARK = '/static/logo-v3.png';
 
 const fallbackAvatar = (label) => {
   const name = encodeURIComponent(String(label || 'AO'));
@@ -162,16 +163,14 @@ export default function LandingPublica() {
   const heroMetrics = useMemo(() => ([
     { label: 'Fluxo guiado', value: `${STEPS.length} etapas` },
     { label: 'Categorias ativas', value: `${String(CATEGORIES.length).padStart(2, '0')} nichos` },
-    { label: 'Perfis em destaque', value: `${featuredCards.length || FEATURED_LIMIT} opcoes` },
+    { label: 'Perfis em destaque', value: `${featuredCards.length || FEATURED_LIMIT} opções` },
   ]), [featuredCards.length]);
 
   const heroSpotlights = useMemo(() => featuredCards.slice(0, 2), [featuredCards]);
 
   const heroStyle = useMemo(() => (
-    heroSpotlights[0]?.image
-      ? { '--landing-hero-image': `url("${heroSpotlights[0].image}")` }
-      : undefined
-  ), [heroSpotlights]);
+    { '--landing-hero-brand-mark': `url("${HERO_BRAND_MARK}")` }
+  ), []);
 
   const year = new Date().getFullYear();
 
@@ -185,7 +184,7 @@ export default function LandingPublica() {
               <strong>Agendamentos Online</strong>
             </span>
           </Link>
-          <nav className="landing-header__nav" aria-label="Navegacao principal">
+          <nav className="landing-header__nav" aria-label="Navegação principal">
             {LANDING_NAV.map((item) => (
               <a key={item.href} href={item.href}>
                 {item.label}
@@ -233,9 +232,9 @@ export default function LandingPublica() {
           <div className="landing-hero__inner">
             <div className="landing-hero__content">
               <p className="landing-hero__eyebrow">Plataforma premium de agendamentos</p>
-              <h1>Agenda profissional com clareza, confianca e operacao moderna.</h1>
+              <h1>Agenda profissional com clareza, confiança e operação moderna.</h1>
               <p className="landing-hero__subtitle">
-                Descubra estabelecimentos, compare disponibilidade e confirme seu horario em uma jornada enxuta, segura e pronta para uso no celular.
+                Descubra estabelecimentos, compare disponibilidade e confirme seu horário em uma jornada enxuta, segura e pronta para uso no celular.
               </p>
               <div className="landing-hero__trust" role="list">
                 {BENEFITS.map((benefit) => {
@@ -250,7 +249,7 @@ export default function LandingPublica() {
               </div>
               <div className="landing-hero__actions">
                 <button type="button" className="btn btn--primary btn--lg" onClick={handlePrimaryCta}>
-                  Buscar horarios
+                  Buscar horários
                 </button>
                 <button
                   type="button"
@@ -273,7 +272,7 @@ export default function LandingPublica() {
               <div className="landing-hero__panel">
                 <div className="landing-hero__panel-title">
                   <strong>Jornada orientada</strong>
-                  <span>Uma selecao limpa, sem ruido visual e com cada etapa no lugar certo.</span>
+                  <span>Uma seleção limpa, sem ruído visual e com cada etapa no lugar certo.</span>
                 </div>
                 <div className="landing-hero__process" role="list" aria-label="Etapas do agendamento">
                   {STEPS.map((step, index) => (
@@ -300,13 +299,13 @@ export default function LandingPublica() {
                       </div>
                       <div className="landing-hero__spotlight-copy">
                         <strong>{item.name}</strong>
-                        <span>{item.address || 'Endereco nao informado'}</span>
+                        <span>{item.address || 'Endereço não informado'}</span>
                       </div>
                     </div>
                   )) : (
                     <div className="landing-hero__spotlight-copy">
-                      <strong>Catalogo em crescimento</strong>
-                      <span>Novos estabelecimentos aparecem aqui assim que estiverem disponiveis.</span>
+                      <strong>Catálogo em crescimento</strong>
+                      <span>Novos estabelecimentos aparecem aqui assim que estiverem disponíveis.</span>
                     </div>
                   )}
                 </div>

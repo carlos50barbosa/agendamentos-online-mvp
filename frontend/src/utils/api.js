@@ -12,11 +12,16 @@ import { getToken, logout } from './auth.js';
 
 // 3) Em produção sem VITE_API_URL, usa o mesmo domínio do front (window.location.origin)
 
+const DEFAULT_PROD_API_BASE =
+  typeof window !== 'undefined'
+    ? `${window.location.origin}/api`
+    : '/api';
+
 const BASE = (
 
   import.meta.env.VITE_API_URL ||
 
-  (import.meta.env.DEV ? 'http://localhost:3002' : window.location.origin)
+  (import.meta.env.DEV ? 'http://localhost:3002' : DEFAULT_PROD_API_BASE)
 
 ).replace(/\/$/, '');
 
@@ -26,7 +31,7 @@ let BASE_URL_OBJ = null;
 
 try {
 
-  BASE_URL_OBJ = new URL(BASE);
+  BASE_URL_OBJ = new URL(BASE, typeof window !== 'undefined' ? window.location.origin : 'http://localhost');
 
 } catch {}
 
@@ -80,7 +85,7 @@ async function req(path, opt = {}) {
 
   // Evita enviar "Bearer null" nos endpoints públicos (/auth/login, /auth/register)
 
-  const isPublicAuth = /^\/?auth\/(login|register)/i.test(path);
+  const isPublicAuth = /^\/?auth\/(login|register|forgot|reset)$/i.test(path);
 
   if (token && !isPublicAuth) {
 

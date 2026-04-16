@@ -35,7 +35,7 @@ router.get('/plans/:id', auth, isEstabelecimento, async (req, res) => {
   try {
     const plan = await getLoyaltyPlanForEstablishment(req.user.id, Number(req.params.id))
     if (!plan) {
-      return res.status(404).json({ error: 'loyalty_plan_not_found', message: 'Plano nao encontrado.' })
+      return res.status(404).json({ error: 'loyalty_plan_not_found', message: 'Plano não encontrado.' })
     }
     return res.json({ plan })
   } catch (error) {

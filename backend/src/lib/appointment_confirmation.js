@@ -70,7 +70,7 @@ try {
 const ag = await fetchAppointmentSummary(appointmentId);
 if (!ag) return;
 const tmpl = await fetchEstablishmentTemplate(ag.estabelecimento_id);
-const serviceLabel = ag.servico_nome || 'servico';
+const serviceLabel = ag.servico_nome || 'serviço';
 const profNome = ag.profissional_nome || '';
 const profLabel = profNome ? ` com <b>${profNome}</b>` : '';
 const inicioISO = new Date(ag.inicio).toISOString();

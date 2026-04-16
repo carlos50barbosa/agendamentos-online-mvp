@@ -3,10 +3,11 @@ import LogoAO from './LogoAO.jsx';
 import { IconSearch } from './Icons.jsx';
 
 export default function AppointmentDiscoveryHero({
+  className = '',
   headingId = 'novo-agendamento-hero-title',
   eyebrow = 'Agendamento profissional',
   brandName = 'Agendamentos Online',
-  brandTagline = 'Plataforma institucional para reservas de servicos',
+  brandTagline = 'Plataforma institucional para reservas de serviços',
   heading = 'Encontre o atendimento ideal com mais clareza',
   subtitle = '',
   query = '',
@@ -20,7 +21,10 @@ export default function AppointmentDiscoveryHero({
   children = null,
 }) {
   return (
-    <section className="appointment-discovery-hero" aria-labelledby={headingId}>
+    <section
+      className={['appointment-discovery-hero', className].filter(Boolean).join(' ')}
+      aria-labelledby={headingId}
+    >
       <div className="appointment-discovery-hero__inner">
         <div className="appointment-discovery-hero__header">
           <div className="appointment-discovery-hero__brand">

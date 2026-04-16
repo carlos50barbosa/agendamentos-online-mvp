@@ -269,10 +269,10 @@ async function countPlanSubscribers(loyaltyPlanId, { db = pool } = {}) {
 
 async function assertPlanReadyForSubscription(plan, { db = pool } = {}) {
   if (!plan) {
-    throw createError('Plano de fidelidade nao encontrado.', 404, 'loyalty_plan_not_found')
+    throw createError('Plano de fidelidade não encontrado.', 404, 'loyalty_plan_not_found')
   }
   if (String(plan.status || '').toLowerCase() !== 'active') {
-    throw createError('Este plano nao esta disponivel para novas assinaturas.', 409, 'loyalty_plan_unavailable')
+    throw createError('Este plano não está disponível para novas assinaturas.', 409, 'loyalty_plan_unavailable')
   }
   if (plan.max_assinantes != null) {
     const activeSubscribers = await countPlanSubscribers(plan.id, { db })
@@ -285,7 +285,7 @@ async function assertPlanReadyForSubscription(plan, { db = pool } = {}) {
 async function resolveLoyaltyCheckoutContext(clienteId, estabelecimentoId, loyaltyPlanId, { db = pool } = {}) {
   const plan = await getLoyaltyPlanById(loyaltyPlanId, { db })
   if (!plan || Number(plan.estabelecimento_id) !== Number(estabelecimentoId)) {
-    throw createError('Plano de fidelidade nao encontrado para este estabelecimento.', 404, 'loyalty_plan_not_found')
+    throw createError('Plano de fidelidade não encontrado para este estabelecimento.', 404, 'loyalty_plan_not_found')
   }
   await assertPlanReadyForSubscription(plan, { db })
 
@@ -294,10 +294,10 @@ async function resolveLoyaltyCheckoutContext(clienteId, estabelecimentoId, loyal
     fetchClientSummary(clienteId, { db }),
   ])
   if (!estabelecimento) {
-    throw createError('Estabelecimento nao encontrado.', 404, 'estabelecimento_not_found')
+    throw createError('Estabelecimento não encontrado.', 404, 'estabelecimento_not_found')
   }
   if (!cliente) {
-    throw createError('Cliente nao encontrado.', 404, 'cliente_not_found')
+    throw createError('Cliente não encontrado.', 404, 'cliente_not_found')
   }
   return { plan, estabelecimento, cliente }
 }
@@ -306,7 +306,7 @@ async function resolveLoyaltyMpContext(estabelecimentoId) {
   const mpAccess = await resolveMpAccessToken(estabelecimentoId, { allowFallback: false })
   if (!mpAccess?.accessToken) {
     throw createError(
-      'O estabelecimento ainda nao conectou o Mercado Pago para vender este plano.',
+      'O estabelecimento ainda não conectou o Mercado Pago para vender este plano.',
       409,
       'mp_not_connected'
     )
@@ -379,7 +379,7 @@ async function activateSubscriptionCycleTx(subscriptionId, {
   await lockSubscriptionRow(subscriptionId, { db })
   const current = await getClientLoyaltySubscriptionById(subscriptionId, { db })
   if (!current) {
-    throw createError('Assinatura de fidelidade nao encontrada.', 404, 'client_loyalty_subscription_not_found')
+    throw createError('Assinatura de fidelidade não encontrada.', 404, 'client_loyalty_subscription_not_found')
   }
 
   const cycleStart = resolveCycleStart(current, paymentDate)
@@ -430,7 +430,7 @@ async function markSubscriptionPastDueTx(subscriptionId, {
   await lockSubscriptionRow(subscriptionId, { db })
   const current = await getClientLoyaltySubscriptionById(subscriptionId, { db })
   if (!current) {
-    throw createError('Assinatura de fidelidade nao encontrada.', 404, 'client_loyalty_subscription_not_found')
+    throw createError('Assinatura de fidelidade não encontrada.', 404, 'client_loyalty_subscription_not_found')
   }
 
   const state = computeClientLoyaltySubscriptionState(current)
@@ -477,9 +477,10 @@ export async function startClientLoyaltyCardSubscription({
   identificationType = null,
   identificationNumber = null,
   db = pool,
+  requestContext = {},
 } = {}) {
   if (!cardToken) {
-    throw createError('Token do cartao nao informado.', 400, 'card_token_required')
+    throw createError('Token do cartão não informado.', 400, 'card_token_required')
   }
 
   const { plan, estabelecimento, cliente } = await resolveLoyaltyCheckoutContext(
@@ -499,7 +500,7 @@ export async function startClientLoyaltyCardSubscription({
     ) {
       throw createError(
         pendingCardCheckout
-          ? 'Ja existe uma assinatura aguardando a primeira cobranca do cartao para este estabelecimento. O Mercado Pago pode levar ate cerca de 1 hora para confirmar.'
+          ? 'Já existe uma assinatura aguardando a primeira cobrança do cartão para este estabelecimento. O Mercado Pago pode levar até cerca de 1 hora para confirmar.'
           : 'Ja existe uma assinatura em andamento para este estabelecimento.',
         409,
         'client_loyalty_subscription_conflict'
@@ -525,6 +526,10 @@ export async function startClientLoyaltyCardSubscription({
     externalReference: buildCardExternalReference({ estabelecimentoId, clienteId, loyaltyPlanId }),
     startDate: recurringStartDate,
     accessToken: mpAccess.accessToken,
+    requestContext: {
+      ...requestContext,
+      operation: requestContext?.operation || 'client_loyalty_card_subscription_create',
+    },
   })
 
   const subscription = await createClientLoyaltySubscription({
@@ -940,7 +945,7 @@ export async function cancelClientLoyaltySubscriptionForClient({
     ? await getClientLoyaltySubscriptionById(subscriptionId, { db })
     : await getPreferredClientLoyaltySubscription(clienteId, estabelecimentoId, { db })
   if (!subscription || Number(subscription.clienteId) !== Number(clienteId)) {
-    throw createError('Assinatura de fidelidade nao encontrada.', 404, 'client_loyalty_subscription_not_found')
+    throw createError('Assinatura de fidelidade não encontrada.', 404, 'client_loyalty_subscription_not_found')
   }
 
   const state = computeClientLoyaltySubscriptionState(subscription)

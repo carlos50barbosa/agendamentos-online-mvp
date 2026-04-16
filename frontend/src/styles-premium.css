@@ -838,15 +838,22 @@ textarea.input:focus {
   overflow: hidden;
   color: #f8fbff;
   background:
-    linear-gradient(120deg, rgba(7, 17, 28, 0.74), rgba(18, 62, 99, 0.78)),
-    var(--landing-hero-image, linear-gradient(135deg, #123e63, #0d2e49));
-  background-size: cover;
-  background-position: center;
+    radial-gradient(circle at top right, rgba(185, 226, 215, 0.14), transparent 32%),
+    linear-gradient(120deg, rgba(7, 17, 28, 0.94), rgba(18, 62, 99, 0.88) 56%, rgba(9, 28, 46, 0.96));
   box-shadow: 0 28px 56px rgba(16, 32, 51, 0.16);
 }
 
 .landing-hero__bg {
-  display: none;
+  position: absolute;
+  top: 50%;
+  right: 36px;
+  width: min(34vw, 320px);
+  aspect-ratio: 1;
+  transform: translateY(-50%);
+  background: var(--landing-hero-brand-mark, none) center / contain no-repeat;
+  opacity: 0.11;
+  filter: brightness(0) invert(1);
+  pointer-events: none;
 }
 
 .landing-hero__inner {
@@ -1419,16 +1426,89 @@ textarea.input:focus {
 }
 
 .appointment-discovery-hero {
+  padding: 28px;
   border-color: rgba(18, 62, 99, 0.12);
   background: linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(238, 245, 248, 0.96));
+}
+
+.appointment-discovery-hero__inner {
+  gap: 18px;
 }
 
 .appointment-discovery-hero__logo-shell {
   border-radius: var(--radius);
 }
 
+.appointment-search-panel {
+  padding: 14px;
+}
+
 .appointment-search-panel__field {
+  min-height: 64px;
   border-radius: var(--radius);
+}
+
+.novo-agendamento__results-shell {
+  scroll-margin-top: 92px;
+}
+
+.novo-agendamento--discovery-focused .appointment-discovery-hero,
+.appointment-discovery-hero--compact {
+  padding: 22px;
+}
+
+.novo-agendamento--discovery-focused .appointment-discovery-hero__inner,
+.appointment-discovery-hero--compact .appointment-discovery-hero__inner {
+  gap: 14px;
+}
+
+.novo-agendamento--discovery-focused .appointment-discovery-hero__logo-shell,
+.appointment-discovery-hero--compact .appointment-discovery-hero__logo-shell {
+  width: 64px;
+  height: 64px;
+}
+
+.novo-agendamento--discovery-focused .appointment-discovery-hero__title,
+.appointment-discovery-hero--compact .appointment-discovery-hero__title {
+  max-width: 18ch;
+  font-size: clamp(1.8rem, 2.5vw, 2.5rem);
+}
+
+.novo-agendamento--discovery-focused .appointment-search-panel,
+.appointment-discovery-hero--compact .appointment-search-panel {
+  padding: 12px;
+}
+
+.novo-agendamento--discovery-focused .appointment-search-panel__field,
+.appointment-discovery-hero--compact .appointment-search-panel__field {
+  min-height: 58px;
+  padding-inline: 18px;
+}
+
+.novo-agendamento--discovery-focused .appointment-search-panel__submit,
+.appointment-discovery-hero--compact .appointment-search-panel__submit {
+  min-height: 50px;
+}
+
+.novo-agendamento--discovery-focused .appointment-discovery-hero__meta-text,
+.appointment-discovery-hero--compact .appointment-discovery-hero__meta-text {
+  min-height: 38px;
+}
+
+.novo-agendamento--discovery-focused .novo-agendamento__discovery-shell {
+  gap: 16px;
+}
+
+@media (min-width: 960px) {
+  .novo-agendamento__discovery-shell {
+    grid-template-columns: minmax(0, 280px) minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .novo-agendamento__quick-filters-panel {
+    position: sticky;
+    top: 88px;
+  }
 }
 
 .novo-agendamento__services .mini-card--selected,
@@ -1495,6 +1575,12 @@ textarea.input:focus {
     padding: 28px 20px 20px;
   }
 
+  .landing-hero__bg {
+    right: 18px;
+    width: min(42vw, 200px);
+    opacity: 0.09;
+  }
+
   .landing-hero__content h1 {
     max-width: none;
     font-size: clamp(2rem, 11vw, 3rem);
@@ -1519,6 +1605,26 @@ textarea.input:focus {
 
   .services-page__panel {
     padding: 18px;
+  }
+
+  .appointment-discovery-hero,
+  .novo-agendamento--discovery-focused .appointment-discovery-hero,
+  .appointment-discovery-hero--compact {
+    padding: 20px;
+  }
+
+  .appointment-discovery-hero__logo-shell,
+  .novo-agendamento--discovery-focused .appointment-discovery-hero__logo-shell,
+  .appointment-discovery-hero--compact .appointment-discovery-hero__logo-shell {
+    width: 56px;
+    height: 56px;
+  }
+
+  .appointment-discovery-hero__title,
+  .novo-agendamento--discovery-focused .appointment-discovery-hero__title,
+  .appointment-discovery-hero--compact .appointment-discovery-hero__title {
+    max-width: none;
+    font-size: clamp(1.8rem, 8vw, 2.3rem);
   }
 }
 

@@ -390,14 +390,14 @@ class BotEngine {
     } else if (prevState === STATES.AGENDAR_SERVICO) {
       const out = await this.showServices(tenantId, ctx);
       if (!choice) {
-        await use(STATES.AGENDAR_SERVICO, { ...out, text: `Digite o numero da opcao.\n${out.text}` }, 'INVALID_INPUT');
+        await use(STATES.AGENDAR_SERVICO, { ...out, text: `Digite o número da opção.\n${out.text}` }, 'INVALID_INPUT');
       } else {
         const page = pagedList(ctx.serviceOptions || [], ctx.servicePage || 0, PAGE.servicos);
         if (choice === 9) {
           if (!page.hasMore) await use(STATES.AGENDAR_SERVICO, { ...out, text: `Não há mais itens.\n${out.text}` }, 'NO_MORE');
           else { ctx.servicePage = (ctx.servicePage || 0) + 1; await use(STATES.AGENDAR_SERVICO, await this.showServices(tenantId, ctx), 'PAGE'); }
         } else if (choice < 1 || choice > page.items.length) {
-          await use(STATES.AGENDAR_SERVICO, { ...out, text: `Opcao invalida.\n${out.text}` }, 'INVALID_OPTION');
+          await use(STATES.AGENDAR_SERVICO, { ...out, text: `Opção inválida.\n${out.text}` }, 'INVALID_OPTION');
         } else {
           const sel = page.items[choice - 1];
           ctx.servicoId = sel.id;
@@ -414,11 +414,11 @@ class BotEngine {
     } else if (prevState === STATES.AGENDAR_PROFISSIONAL) {
       const out = await this.showProfessionals(tenantId, ctx);
       const page = pagedList(ctx.professionalOptions || [], ctx.professionalPage || 0, PAGE.profissionais);
-      if (!choice) await use(STATES.AGENDAR_PROFISSIONAL, { ...out, text: `Digite o numero da opcao.\n${out.text}` }, 'INVALID_INPUT');
+      if (!choice) await use(STATES.AGENDAR_PROFISSIONAL, { ...out, text: `Digite o número da opção.\n${out.text}` }, 'INVALID_INPUT');
       else if (choice === 9) {
           if (!page.hasMore) await use(STATES.AGENDAR_PROFISSIONAL, { ...out, text: `Não há mais itens.\n${out.text}` }, 'NO_MORE');
         else { ctx.professionalPage = (ctx.professionalPage || 0) + 1; await use(STATES.AGENDAR_PROFISSIONAL, await this.showProfessionals(tenantId, ctx), 'PAGE'); }
-      } else if (choice < 1 || choice > page.items.length) await use(STATES.AGENDAR_PROFISSIONAL, { ...out, text: `Opcao invalida.\n${out.text}` }, 'INVALID_OPTION');
+      } else if (choice < 1 || choice > page.items.length) await use(STATES.AGENDAR_PROFISSIONAL, { ...out, text: `Opção inválida.\n${out.text}` }, 'INVALID_OPTION');
       else {
         const sel = page.items[choice - 1];
         ctx.profissionalId = sel.id;
@@ -428,7 +428,7 @@ class BotEngine {
       }
     } else if (prevState === STATES.AGENDAR_DIA) {
       const out = await this.showDays(tenantId, ctx);
-      if (!choice || choice < 1 || choice > (ctx.dayOptions || []).length) await use(STATES.AGENDAR_DIA, { ...out, text: `Opcao invalida.\n${out.text}` }, 'INVALID_OPTION');
+      if (!choice || choice < 1 || choice > (ctx.dayOptions || []).length) await use(STATES.AGENDAR_DIA, { ...out, text: `Opção inválida.\n${out.text}` }, 'INVALID_OPTION');
       else {
         ctx.diaSelecionado = ctx.dayOptions[choice - 1].dateKey;
         ctx.hourPage = 0;
@@ -437,11 +437,11 @@ class BotEngine {
     } else if (prevState === STATES.AGENDAR_HORA) {
       const out = await this.showHours(tenantId, ctx);
       const page = pagedList(ctx.hourOptions || [], ctx.hourPage || 0, PAGE.horas);
-      if (!choice) await use(STATES.AGENDAR_HORA, { ...out, text: `Digite o numero da opcao.\n${out.text}` }, 'INVALID_INPUT');
+      if (!choice) await use(STATES.AGENDAR_HORA, { ...out, text: `Digite o número da opção.\n${out.text}` }, 'INVALID_INPUT');
       else if (choice === 9) {
         if (!page.hasMore) await use(STATES.AGENDAR_HORA, { ...out, text: `Não há mais itens.\n${out.text}` }, 'NO_MORE');
         else { ctx.hourPage = (ctx.hourPage || 0) + 1; await use(STATES.AGENDAR_HORA, await this.showHours(tenantId, ctx), 'PAGE'); }
-      } else if (choice < 1 || choice > page.items.length) await use(STATES.AGENDAR_HORA, { ...out, text: `Opcao invalida.\n${out.text}` }, 'INVALID_OPTION');
+      } else if (choice < 1 || choice > page.items.length) await use(STATES.AGENDAR_HORA, { ...out, text: `Opção inválida.\n${out.text}` }, 'INVALID_OPTION');
       else {
         const sel = page.items[choice - 1];
         ctx.slotSelecionado = sel.datetime;
@@ -507,11 +507,11 @@ class BotEngine {
     } else if (prevState === STATES.REMARCAR_ESCOLHER_AGENDAMENTO) {
       const out = await this.showRemarcaveis(tenantId, fromPhone, ctx);
       const page = pagedList(ctx.remarcarAppointments || [], ctx.remarcarPage || 0, PAGE.agendamentos);
-      if (!choice) await use(STATES.REMARCAR_ESCOLHER_AGENDAMENTO, { ...out, text: `Digite o numero da opcao.\n${out.text}` }, 'INVALID_INPUT');
+      if (!choice) await use(STATES.REMARCAR_ESCOLHER_AGENDAMENTO, { ...out, text: `Digite o número da opção.\n${out.text}` }, 'INVALID_INPUT');
       else if (choice === 9) {
         if (!page.hasMore) await use(STATES.REMARCAR_ESCOLHER_AGENDAMENTO, { ...out, text: `Não há mais itens.\n${out.text}` }, 'NO_MORE');
         else { ctx.remarcarPage = (ctx.remarcarPage || 0) + 1; await use(STATES.REMARCAR_ESCOLHER_AGENDAMENTO, await this.showRemarcaveis(tenantId, fromPhone, ctx), 'PAGE'); }
-      } else if (choice < 1 || choice > page.items.length) await use(STATES.REMARCAR_ESCOLHER_AGENDAMENTO, { ...out, text: `Opcao invalida.\n${out.text}` }, 'INVALID_OPTION');
+      } else if (choice < 1 || choice > page.items.length) await use(STATES.REMARCAR_ESCOLHER_AGENDAMENTO, { ...out, text: `Opção inválida.\n${out.text}` }, 'INVALID_OPTION');
       else {
         const sel = page.items[choice - 1];
         ctx.agendamentoId = sel.id;
@@ -526,7 +526,7 @@ class BotEngine {
       }
     } else if (prevState === STATES.REMARCAR_ESCOLHER_DIA) {
       const out = await this.showDays(tenantId, ctx);
-      if (!choice || choice < 1 || choice > (ctx.dayOptions || []).length) await use(STATES.REMARCAR_ESCOLHER_DIA, { ...out, text: `Opcao invalida.\n${out.text}` }, 'INVALID_OPTION');
+      if (!choice || choice < 1 || choice > (ctx.dayOptions || []).length) await use(STATES.REMARCAR_ESCOLHER_DIA, { ...out, text: `Opção inválida.\n${out.text}` }, 'INVALID_OPTION');
       else {
         ctx.diaSelecionado = ctx.dayOptions[choice - 1].dateKey;
         ctx.hourPage = 0;
@@ -535,11 +535,11 @@ class BotEngine {
     } else if (prevState === STATES.REMARCAR_ESCOLHER_HORA) {
       const out = await this.showHours(tenantId, ctx);
       const page = pagedList(ctx.hourOptions || [], ctx.hourPage || 0, PAGE.horas);
-      if (!choice) await use(STATES.REMARCAR_ESCOLHER_HORA, { ...out, text: `Digite o numero da opcao.\n${out.text}` }, 'INVALID_INPUT');
+      if (!choice) await use(STATES.REMARCAR_ESCOLHER_HORA, { ...out, text: `Digite o número da opção.\n${out.text}` }, 'INVALID_INPUT');
       else if (choice === 9) {
         if (!page.hasMore) await use(STATES.REMARCAR_ESCOLHER_HORA, { ...out, text: `Não há mais itens.\n${out.text}` }, 'NO_MORE');
         else { ctx.hourPage = (ctx.hourPage || 0) + 1; await use(STATES.REMARCAR_ESCOLHER_HORA, await this.showHours(tenantId, ctx), 'PAGE'); }
-      } else if (choice < 1 || choice > page.items.length) await use(STATES.REMARCAR_ESCOLHER_HORA, { ...out, text: `Opcao invalida.\n${out.text}` }, 'INVALID_OPTION');
+      } else if (choice < 1 || choice > page.items.length) await use(STATES.REMARCAR_ESCOLHER_HORA, { ...out, text: `Opção inválida.\n${out.text}` }, 'INVALID_OPTION');
       else {
         const sel = page.items[choice - 1];
         ctx.slotSelecionado = sel.datetime;
@@ -594,11 +594,11 @@ class BotEngine {
     } else if (prevState === STATES.CANCELAR_ESCOLHER_AGENDAMENTO) {
       const out = await this.showCancelaveis(tenantId, fromPhone, ctx);
       const page = pagedList(ctx.cancelarAppointments || [], ctx.cancelarPage || 0, PAGE.agendamentos);
-      if (!choice) await use(STATES.CANCELAR_ESCOLHER_AGENDAMENTO, { ...out, text: `Digite o numero da opcao.\n${out.text}` }, 'INVALID_INPUT');
+      if (!choice) await use(STATES.CANCELAR_ESCOLHER_AGENDAMENTO, { ...out, text: `Digite o número da opção.\n${out.text}` }, 'INVALID_INPUT');
       else if (choice === 9) {
         if (!page.hasMore) await use(STATES.CANCELAR_ESCOLHER_AGENDAMENTO, { ...out, text: `Não há mais itens.\n${out.text}` }, 'NO_MORE');
         else { ctx.cancelarPage = (ctx.cancelarPage || 0) + 1; await use(STATES.CANCELAR_ESCOLHER_AGENDAMENTO, await this.showCancelaveis(tenantId, fromPhone, ctx), 'PAGE'); }
-      } else if (choice < 1 || choice > page.items.length) await use(STATES.CANCELAR_ESCOLHER_AGENDAMENTO, { ...out, text: `Opcao invalida.\n${out.text}` }, 'INVALID_OPTION');
+      } else if (choice < 1 || choice > page.items.length) await use(STATES.CANCELAR_ESCOLHER_AGENDAMENTO, { ...out, text: `Opção inválida.\n${out.text}` }, 'INVALID_OPTION');
       else {
         const sel = page.items[choice - 1];
         ctx.agendamentoId = sel.id;

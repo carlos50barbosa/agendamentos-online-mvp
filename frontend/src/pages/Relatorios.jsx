@@ -1023,7 +1023,7 @@ export default function Relatorios() {
                     className={`report-tab ${tableTab === 'services' ? 'is-active' : ''}`}
                     onClick={() => setTableTab('services')}
                   >
-                    Por servico
+                    Por serviço
                   </button>
                   {allowAdvanced && (
                     <button

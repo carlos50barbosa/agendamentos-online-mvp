@@ -39,7 +39,7 @@ async function validateProfessionalIds(establishmentId, ids) {
   const foundIds = rows.map((row) => row.id);
   const missing = normalized.filter((id) => !foundIds.includes(id));
   if (missing.length) {
-    const err = new Error('Profissional nao encontrado para este estabelecimento.');
+    const err = new Error('Profissional não encontrado para este estabelecimento.');
     err.status = 400;
     err.code = 'profissional_invalido';
     err.details = { missing };
@@ -283,7 +283,7 @@ router.put('/:id', auth, isEstabelecimento, ensureSubscriptionOperationalAccess(
     updates.preco_centavos = Number.isFinite(updates.preco_centavos) ? Math.max(0, Math.round(updates.preco_centavos)) : 0;
 
     if (!updates.nome || !updates.duracao_min) {
-      return res.status(400).json({ error: 'invalid_payload', message: 'Informe nome e duracao.' });
+      return res.status(400).json({ error: 'invalid_payload', message: 'Informe nome e duração.' });
     }
 
     let professionalIdsToLink = null;

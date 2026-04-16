@@ -28,7 +28,7 @@ export default function LoyaltyPlanosPublicos() {
         plans: Array.isArray(response?.plans) ? response.plans : [],
       })
     } catch (requestError) {
-      setError(requestError?.data?.message || requestError?.message || 'Nao foi possivel carregar os planos.')
+      setError(requestError?.data?.message || requestError?.message || 'Não foi possível carregar os planos.')
     } finally {
       setLoading(false)
     }
@@ -57,12 +57,12 @@ export default function LoyaltyPlanosPublicos() {
     <div className="page loyalty-page">
       <div className="loyalty-page__hero">
         <div>
-          <p className="loyalty-page__eyebrow">Planos publicos</p>
+          <p className="loyalty-page__eyebrow">Planos públicos</p>
           <h1 className="loyalty-page__title">
             {data.estabelecimento?.nome || 'Planos de fidelidade do estabelecimento'}
           </h1>
           <p className="loyalty-page__subtitle">
-            Assine um plano mensal, use os servicos incluidos no ciclo e receba desconto nos extras quando o plano oferecer.
+            Assine um plano mensal, use os serviços incluídos no ciclo e receba desconto nos extras quando o plano oferecer.
           </p>
         </div>
         <div className="loyalty-page__hero-actions">
@@ -82,7 +82,7 @@ export default function LoyaltyPlanosPublicos() {
               <div>
                 <span className={`loyalty-status loyalty-status--${plan.status}`}>{plan.status}</span>
                 <h2>{plan.nome}</h2>
-                <p>{plan.descricao || 'Plano mensal de beneficios recorrentes.'}</p>
+                <p>{plan.descricao || 'Plano mensal de benefícios recorrentes.'}</p>
               </div>
               <strong>{formatCurrencyFromCents(plan.preco_centavos)}</strong>
             </div>
@@ -90,7 +90,7 @@ export default function LoyaltyPlanosPublicos() {
             <div className="loyalty-plan-card__items">
               {(plan.items || []).map((item) => (
                 <div className="loyalty-plan-card__item" key={item.id}>
-                  <span>{item.servico?.nome || `Servico #${item.servico_id}`}</span>
+                  <span>{item.servico?.nome || `Serviço #${item.servico_id}`}</span>
                   <strong>{item.quantidade_por_ciclo} por ciclo</strong>
                 </div>
               ))}

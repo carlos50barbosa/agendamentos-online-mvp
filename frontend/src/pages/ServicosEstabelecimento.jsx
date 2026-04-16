@@ -868,15 +868,15 @@ export default function ServicosEstabelecimento() {
       <section className="page-shell__hero">
         <div className="page-toolbar">
           <div className="page-toolbar__copy">
-            <span className="page-shell__eyebrow">Catalogo profissional</span>
-            <h1 className="page-shell__title">Servicos com apresentacao premium e operacao clara</h1>
+            <span className="page-shell__eyebrow">Catálogo profissional</span>
+            <h1 className="page-shell__title">Serviços com apresentação premium e operação clara</h1>
             <p className="page-shell__subtitle">
-              Organize preco, duracao, profissionais vinculados e imagem de cada servico em uma base consistente para o agendamento.
+              Organize preço, duração, profissionais vinculados e imagem de cada serviço em uma base consistente para o agendamento.
             </p>
           </div>
           <div className="page-shell__actions">
             <button className="btn btn--outline" type="button" onClick={openAdd}>
-              Novo servico
+              Novo serviço
             </button>
             <Link className="btn btn--primary" to="/profissionais">
               Ver equipe
@@ -884,7 +884,7 @@ export default function ServicosEstabelecimento() {
           </div>
         </div>
 
-        <div className="page-shell__stats" role="list" aria-label="Indicadores de servicos">
+        <div className="page-shell__stats" role="list" aria-label="Indicadores de serviços">
           <div className="page-shell__stat" role="listitem">
             <span className="page-shell__stat-label">Total cadastrado</span>
             <strong className="page-shell__stat-value">{list.length}</strong>
@@ -940,9 +940,9 @@ export default function ServicosEstabelecimento() {
 
           <div className="page-toolbar__copy">
 
-            <h2>Meus Servicos</h2>
+            <h2>Meus Serviços</h2>
 
-            <p>Filtre por status, revise o catalogo e ajuste rapidamente o que aparece para o cliente.</p>
+            <p>Filtre por status, revise o catálogo e ajuste rapidamente o que aparece para o cliente.</p>
 
           </div>
 
@@ -980,7 +980,7 @@ export default function ServicosEstabelecimento() {
 
             <button className="btn btn--primary btn--sm" type="button" onClick={openAdd}>
 
-              Adicionar servico
+              Adicionar serviço
 
             </button>
 

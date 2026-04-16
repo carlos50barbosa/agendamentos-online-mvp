@@ -318,7 +318,7 @@ export default function Login() {
 
   const headerDescription =
     effectiveTipo === 'ESTABELECIMENTO'
-      ? 'Acesse agenda, equipe, servicos e clientes em um fluxo mais profissional.'
+      ? 'Acesse agenda, equipe, serviços e clientes em um fluxo mais profissional.'
       : effectiveTipo === 'CLIENTE'
         ? 'Use seu e-mail e senha para continuar.'
         : 'Cliente ou Estabelecimento.';
@@ -682,7 +682,7 @@ export default function Login() {
 
                   <div className="login-preview__tabs" role="tablist" aria-label="Escolher perfil">
 
-                    <Tab value="CLIENTE" title="Cliente" hint="Acompanhe seus agendamentos e historico." />
+                    <Tab value="CLIENTE" title="Cliente" hint="Acompanhe seus agendamentos e histórico." />
 
                     <Tab value="ESTABELECIMENTO" title="Estabelecimento" hint="Gerencie agenda, equipe e clientes." />
 
@@ -800,7 +800,7 @@ export default function Login() {
                     />
 
                     {emailInvalid ? (
-                      <div className="login-preview__hint is-error">E-mail invalido.</div>
+                      <div className="login-preview__hint is-error">E-mail inválido.</div>
                     ) : null}
 
                   </div>

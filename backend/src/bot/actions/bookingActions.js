@@ -258,7 +258,7 @@ function mapAppointment(item, clienteId) {
   const serviceNames = Array.isArray(item?.servicos) && item.servicos.length
     ? item.servicos.map((srv) => String(srv.nome || '')).filter(Boolean)
     : [];
-  const serviceLabel = String(item?.servico_nome || serviceNames.join(' + ') || 'Servico');
+  const serviceLabel = String(item?.servico_nome || serviceNames.join(' + ') || 'Serviço');
   const serviceIds = Array.isArray(item?.servico_ids)
     ? item.servico_ids.map((id) => Number(id)).filter((id) => Number.isFinite(id) && id > 0)
     : (Number(item?.servico_id) > 0 ? [Number(item.servico_id)] : []);
@@ -426,7 +426,7 @@ async function cancelarAgendamento(tenantId, agendamentoId, options = {}) {
       endpoint: null,
       elapsedMs: null,
       botErrorCode: null,
-      data: { error: 'not_found', message: 'Agendamento nao encontrado para este estabelecimento.' },
+      data: { error: 'not_found', message: 'Agendamento não encontrado para este estabelecimento.' },
     };
   }
   const response = await requestJson(`/agendamentos/${id}/cancel`, {

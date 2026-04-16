@@ -28,7 +28,7 @@ const key = loadKey();
 const payload = String(enc).startsWith('v1:') ? String(enc).slice(3) : String(enc);
 const parts = payload.split('.');
 if (parts.length !== 3) {
-throw new Error('access_token_enc invalido');
+throw new Error('access_token_enc inválido');
 }
   const [ivB64, tagB64, dataB64] = parts;
 const iv = Buffer.from(ivB64, 'base64');

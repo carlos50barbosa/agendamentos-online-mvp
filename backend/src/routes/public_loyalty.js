@@ -27,7 +27,7 @@ router.get('/:idOrSlug/loyalty-plans', async (req, res) => {
   try {
     const estabelecimento = await resolveEstablishmentByIdOrSlug(req.params.idOrSlug)
     if (!estabelecimento) {
-      return res.status(404).json({ error: 'estabelecimento_not_found', message: 'Estabelecimento nao encontrado.' })
+      return res.status(404).json({ error: 'estabelecimento_not_found', message: 'Estabelecimento não encontrado.' })
     }
 
     const plans = await getPublicLoyaltyPlansForEstablishment(estabelecimento.id)
@@ -45,7 +45,7 @@ router.get('/:idOrSlug/loyalty-plans', async (req, res) => {
   } catch (error) {
     return res.status(Number(error?.status || 500)).json({
       error: error?.code || 'internal_error',
-      message: error?.message || 'Falha ao carregar planos publicos.',
+      message: error?.message || 'Falha ao carregar planos públicos.',
     })
   }
 })

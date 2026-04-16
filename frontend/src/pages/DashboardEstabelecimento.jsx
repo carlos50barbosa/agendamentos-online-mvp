@@ -1303,13 +1303,13 @@ export default function DashboardEstabelecimento() {
         <div className="page-toolbar">
           <div className="page-toolbar__copy">
             <span className="page-shell__eyebrow">Painel executivo</span>
-            <h1 className="page-shell__title">Operacao da agenda em tempo real</h1>
+            <h1 className="page-shell__title">Operação da agenda em tempo real</h1>
             <p className="page-shell__subtitle">
-              Veja proximos atendimentos, confirmacoes e produtividade da equipe em uma leitura unica e consistente.
+              Veja próximos atendimentos, confirmações e produtividade da equipe em uma leitura única e consistente.
             </p>
           </div>
           <div className="page-shell__actions">
-            <NavLink to="/servicos" className="btn btn--outline">Servicos</NavLink>
+            <NavLink to="/servicos" className="btn btn--outline">Serviços</NavLink>
             <NavLink to="/clientes" className="btn btn--primary">Clientes</NavLink>
           </div>
         </div>

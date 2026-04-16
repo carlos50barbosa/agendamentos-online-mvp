@@ -486,7 +486,7 @@ export default function WhatsAppBusiness() {
                 </div>
                 <div>
                   <span className={statusChipClass('pending')}>Em breve</span>
-                  <h3 style={{ margin: '8px 0 4px' }}>Integracao com WhatsApp Business</h3>
+                  <h3 style={{ margin: '8px 0 4px' }}>Integração com WhatsApp Business</h3>
                   <p className="muted" style={{ margin: 0 }}>
                     Em breve você poderá conectar o seu próprio número do WhatsApp Business diretamente ao Agendamentos Online por meio da integração oficial da Meta.
                   </p>
@@ -875,7 +875,7 @@ export default function WhatsAppBusiness() {
                 <textarea id="pix-code" readOnly value={pixCode} rows={3} className="input" />
                 <div className="pix-checkout__code-actions">
                   <button type="button" className="btn btn--outline btn--sm" onClick={() => void copyPixCode()}>
-                    Copiar codigo
+                    Copiar código
                   </button>
                 </div>
                 {pixCopyNotice ? <p className="muted pix-checkout__note">{pixCopyNotice}</p> : null}

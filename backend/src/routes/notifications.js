@@ -21,7 +21,7 @@ async function assertWhatsAppAllowed(user) {
       allowed: false,
       plan,
       status,
-      message: 'Sua assinatura está em atraso. Regularize o pagamento para continuar enviando notificacões.',
+      message: 'Sua assinatura está em atraso. Regularize o pagamento para continuar enviando notificações.',
     };
   }
 
@@ -30,7 +30,7 @@ async function assertWhatsAppAllowed(user) {
       allowed: false,
       plan,
       status,
-      message: 'Seu plano atual não inclui notificacões por WhatsApp.',
+      message: 'Seu plano atual não inclui notificações por WhatsApp.',
     };
   }
 

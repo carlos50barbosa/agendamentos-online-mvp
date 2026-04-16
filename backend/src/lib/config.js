@@ -55,6 +55,18 @@ function parseLowerString(value, fallback) {
   return normalized || fallback
 }
 
+function parseTrustProxy(value, fallback = 1) {
+  if (value === undefined || value === null) return fallback
+  const normalized = String(value).trim()
+  if (!normalized) return fallback
+  const lower = normalized.toLowerCase()
+  if (['true', 'yes', 'on'].includes(lower)) return true
+  if (['false', 'no', 'off'].includes(lower)) return false
+  const numeric = Number(normalized)
+  if (Number.isFinite(numeric) && numeric >= 0) return Math.round(numeric)
+  return normalized
+}
+
 function parseNullableIsoDate(value) {
   const normalized = String(value ?? '').trim()
   if (!normalized) return null
@@ -75,6 +87,7 @@ export const config = {
     jwtSecret: requireAny('JWT_SECRET'),
   },
   security: {
+    trustProxy: parseTrustProxy(getAny('TRUST_PROXY'), 1),
     rateLimit: {
       store: {
         driver: parseLowerString(getAny('RATE_LIMIT_STORE', 'RATE_LIMIT_DRIVER'), 'memory'),
@@ -94,6 +107,28 @@ export const config = {
       paymentStatusPublic: {
         windowMs: parsePositiveInt(getAny('PAYMENT_STATUS_RATE_LIMIT_WINDOW_MS') || 60000, 60000),
         max: parsePositiveInt(getAny('PAYMENT_STATUS_RATE_LIMIT_MAX') || 60, 60),
+      },
+      auth: {
+        login: {
+          windowMs: parsePositiveInt(getAny('AUTH_LOGIN_RATE_LIMIT_WINDOW_MS') || 600000, 600000),
+          max: parsePositiveInt(getAny('AUTH_LOGIN_RATE_LIMIT_MAX') || 10, 10),
+          accountWindowMs: parsePositiveInt(getAny('AUTH_LOGIN_ACCOUNT_RATE_LIMIT_WINDOW_MS') || 600000, 600000),
+          accountMax: parsePositiveInt(getAny('AUTH_LOGIN_ACCOUNT_RATE_LIMIT_MAX') || 5, 5),
+        },
+        forgot: {
+          windowMs: parsePositiveInt(getAny('AUTH_FORGOT_RATE_LIMIT_WINDOW_MS') || 900000, 900000),
+          max: parsePositiveInt(getAny('AUTH_FORGOT_RATE_LIMIT_MAX') || 5, 5),
+          accountWindowMs: parsePositiveInt(getAny('AUTH_FORGOT_ACCOUNT_RATE_LIMIT_WINDOW_MS') || 3600000, 3600000),
+          accountMax: parsePositiveInt(getAny('AUTH_FORGOT_ACCOUNT_RATE_LIMIT_MAX') || 3, 3),
+        },
+        reset: {
+          windowMs: parsePositiveInt(getAny('AUTH_RESET_RATE_LIMIT_WINDOW_MS') || 900000, 900000),
+          max: parsePositiveInt(getAny('AUTH_RESET_RATE_LIMIT_MAX') || 10, 10),
+        },
+      },
+      publicApi: {
+        windowMs: parsePositiveInt(getAny('PUBLIC_API_RATE_LIMIT_WINDOW_MS') || 60000, 60000),
+        max: parsePositiveInt(getAny('PUBLIC_API_RATE_LIMIT_MAX') || 240, 240),
       },
     },
     telemetry: {
@@ -182,7 +217,14 @@ export function getOperationalHardeningWarnings(env = process.env, cfg = config)
     warnings.push({
       code: 'rate_limit_memory_store',
       severity: 'warn',
-      message: '[security][rate-limit] RATE_LIMIT_STORE=memory; multiplas instancias nao compartilharao contadores de abuso.',
+      message: '[security][rate-limit] RATE_LIMIT_STORE=memory; múltiplas instâncias não compartilharão contadores de abuso.',
+    })
+  }
+  if (nodeEnv === 'production' && cfg.security?.trustProxy === false) {
+    warnings.push({
+      code: 'trust_proxy_disabled',
+      severity: 'warn',
+      message: '[security][http] TRUST_PROXY=false em producao; IP real e limites por cliente podem ficar incorretos atras de proxy reverso.',
     })
   }
   if (
@@ -209,7 +251,7 @@ export function getOperationalHardeningWarnings(env = process.env, cfg = config)
     warnings.push({
       code: 'rate_limit_redis_url_missing',
       severity: 'warn',
-      message: '[security][rate-limit] RATE_LIMIT_STORE=redis sem RATE_LIMIT_REDIS_URL; o bootstrap precisa injetar um client Redis compativel ou o store fara fallback.',
+      message: '[security][rate-limit] RATE_LIMIT_STORE=redis sem RATE_LIMIT_REDIS_URL; o bootstrap precisa injetar um client Redis compatível ou o store fará fallback.',
     })
   }
   const legacyQueryTokenSunsetAt = cfg.security?.payments?.legacyQueryToken?.sunsetAt
@@ -217,7 +259,7 @@ export function getOperationalHardeningWarnings(env = process.env, cfg = config)
     warnings.push({
       code: 'payments_legacy_query_token_disabled',
       severity: 'warn',
-      message: '[security][payments] PAYMENTS_LEGACY_QUERY_TOKEN_ENABLED=false; chamadas publicas com ?token= vao ser negadas e devem migrar para X-Deposit-Token.',
+      message: '[security][payments] PAYMENTS_LEGACY_QUERY_TOKEN_ENABLED=false; chamadas públicas com ?token= vão ser negadas e devem migrar para X-Deposit-Token.',
     })
   }
   if (legacyQueryTokenSunsetAt) {

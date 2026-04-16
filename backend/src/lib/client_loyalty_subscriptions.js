@@ -1,5 +1,6 @@
 import { pool } from './db.js'
 import { toDatabaseDateTime } from './database_datetime.js'
+import { sanitizeMercadoPagoSensitivePayload } from './mercadopago_card_tokens.js'
 
 export const CLIENT_LOYALTY_STATUSES = new Set([
   'trialing',
@@ -323,6 +324,7 @@ export async function appendClientLoyaltySubscriptionEvent(subscriptionId, { eve
     )
     if (existing?.length) return { duplicated: true, id: existing[0].id }
   }
+  const safePayload = payload == null ? null : sanitizeMercadoPagoSensitivePayload(payload)
   const [result] = await db.query(
     `INSERT INTO client_loyalty_subscription_events
       (client_loyalty_subscription_id, tipo_evento, gateway_event_id, payload_json)
@@ -331,7 +333,7 @@ export async function appendClientLoyaltySubscriptionEvent(subscriptionId, { eve
       subscriptionId,
       String(eventType),
       gatewayEventId == null ? null : String(gatewayEventId),
-      payload == null ? null : JSON.stringify(payload),
+      safePayload == null ? null : JSON.stringify(safePayload),
     ]
   )
   return { duplicated: false, id: result.insertId }
@@ -352,7 +354,7 @@ export async function listClientLoyaltySubscriptionEvents(subscriptionId, { db =
     client_loyalty_subscription_id: Number(row.client_loyalty_subscription_id),
     tipo_evento: row.tipo_evento || '',
     gateway_event_id: row.gateway_event_id || null,
-    payload_json: safeJsonParse(row.payload_json),
+    payload_json: sanitizeMercadoPagoSensitivePayload(safeJsonParse(row.payload_json)),
     created_at: row.created_at ? new Date(row.created_at).toISOString() : null,
   }))
 }

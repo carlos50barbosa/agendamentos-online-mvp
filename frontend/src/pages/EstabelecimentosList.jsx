@@ -730,7 +730,7 @@ export default function EstabelecimentosList() {
 
                     <p className="establishment-card__address">
 
-                      {address || 'Endereco nao informado'}
+                      {address || 'Endereço não informado'}
 
                     </p>
 

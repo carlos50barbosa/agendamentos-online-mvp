@@ -57,12 +57,12 @@ export function buildNavigation(user) {
 
   if (isEstab) {
     mainItems.push(
-      { key: 'my-page', label: 'Minha pagina', to: publicPagePath, icon: IconList, type: 'link' },
+      { key: 'my-page', label: 'Minha página', to: publicPagePath, icon: IconList, type: 'link' },
       { key: 'professionals', label: 'Profissionais', to: '/profissionais', icon: IconUser, type: 'link' },
-      { key: 'services', label: 'Servicos', to: '/servicos', icon: IconWrench, type: 'link' },
+      { key: 'services', label: 'Serviços', to: '/servicos', icon: IconWrench, type: 'link' },
       { key: 'loyalty', label: 'Fidelidade', to: '/fidelidade', icon: IconStar, type: 'link' },
       { key: 'clients', label: 'Clientes', to: '/clientes', icon: IconUsers, type: 'link' },
-      { key: 'reports', label: 'Relatorios', to: '/relatorios', icon: IconChart, type: 'link' },
+      { key: 'reports', label: 'Relatórios', to: '/relatorios', icon: IconChart, type: 'link' },
     )
   } else {
     mainItems.push(
@@ -72,7 +72,7 @@ export function buildNavigation(user) {
   }
 
   const accountItems = [
-    { key: 'settings', label: 'Configuracoes', to: '/configuracoes', icon: IconGear, type: 'link' },
+    { key: 'settings', label: 'Configurações', to: '/configuracoes', icon: IconGear, type: 'link' },
     ...(isEstab
       ? [
           { key: 'subscription', label: 'Assinatura', to: '/assinatura', icon: IconStar, type: 'link' },

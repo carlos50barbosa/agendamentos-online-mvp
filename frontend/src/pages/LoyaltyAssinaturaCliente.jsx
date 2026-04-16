@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { Api } from '../utils/api.js'
 import { getUser } from '../utils/auth.js'
+import { getMercadoPagoCardErrorMessage, isMercadoPagoCardTokenRefreshRequired } from '../utils/mercadoPagoCard.js'
 
 let mercadoPagoSdkPromise = null
 
@@ -30,7 +31,7 @@ function getStatusLabel(value) {
   const labels = {
     active: 'Ativo',
     pending_pix: 'PIX pendente',
-    pending_payment: 'Aguardando primeira cobranca',
+    pending_payment: 'Aguardando primeira cobrança',
     past_due: 'Pagamento falhou',
     unpaid: 'Inadimplente',
     expired: 'Expirado',
@@ -43,19 +44,19 @@ function getStatusLabel(value) {
 function getFailureFriendlyMessage(failure) {
   const detail = String(failure?.status_detail || '').toLowerCase().trim()
   const messages = {
-    cc_rejected_bad_filled_card_number: 'Numero do cartao invalido.',
-    cc_rejected_bad_filled_date: 'Data de validade invalida.',
-    cc_rejected_bad_filled_other: 'Dados do cartao invalidos.',
-    cc_rejected_bad_filled_security_code: 'Codigo de seguranca invalido.',
-    cc_rejected_blacklist: 'Pagamento recusado por regra de seguranca do gateway.',
-    cc_rejected_call_for_authorize: 'O banco nao autorizou a compra. Entre em contato com o banco ou use outro cartao.',
-    cc_rejected_card_disabled: 'Este cartao esta desabilitado. Entre em contato com o banco.',
-    cc_rejected_card_error: 'Nao foi possivel processar o cartao. Tente novamente ou use outro cartao.',
+    cc_rejected_bad_filled_card_number: 'Número do cartão inválido.',
+    cc_rejected_bad_filled_date: 'Data de validade inválida.',
+    cc_rejected_bad_filled_other: 'Dados do cartão inválidos.',
+    cc_rejected_bad_filled_security_code: 'Código de segurança inválido.',
+    cc_rejected_blacklist: 'Pagamento recusado por regra de segurança do gateway.',
+    cc_rejected_call_for_authorize: 'O banco não autorizou a compra. Entre em contato com o banco ou use outro cartão.',
+    cc_rejected_card_disabled: 'Este cartão está desabilitado. Entre em contato com o banco.',
+    cc_rejected_card_error: 'Não foi possível processar o cartão. Tente novamente ou use outro cartão.',
     cc_rejected_duplicated_payment: 'O gateway identificou uma tentativa de pagamento duplicada.',
-    cc_rejected_high_risk: 'Pagamento recusado por analise de risco do Mercado Pago. Tente outro cartao ou outro comprador.',
-    cc_rejected_insufficient_amount: 'Cartao sem limite ou saldo suficiente para esta cobranca.',
-    cc_rejected_invalid_installments: 'Configuracao de parcelas invalida para este cartao.',
-    cc_rejected_max_attempts: 'Muitas tentativas com este cartao. Aguarde um pouco antes de tentar novamente.',
+    cc_rejected_high_risk: 'Pagamento recusado por análise de risco do Mercado Pago. Tente outro cartão ou outro comprador.',
+    cc_rejected_insufficient_amount: 'Cartão sem limite ou saldo suficiente para esta cobrança.',
+    cc_rejected_invalid_installments: 'Configuração de parcelas inválida para este cartão.',
+    cc_rejected_max_attempts: 'Muitas tentativas com este cartão. Aguarde um pouco antes de tentar novamente.',
     cc_rejected_other_reason: 'O banco emissor recusou o pagamento.',
   }
   return messages[detail] || ''
@@ -101,6 +102,7 @@ export default function LoyaltyAssinaturaCliente() {
   const estabelecimentoId = searchParams.get('estabelecimento') || ''
   const planFromQuery = searchParams.get('plano') || ''
   const cardFormRef = useRef(null)
+  const cardSubmittingRef = useRef(false)
 
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
@@ -112,6 +114,7 @@ export default function LoyaltyAssinaturaCliente() {
   const [selectedPlanId, setSelectedPlanId] = useState(planFromQuery)
   const [paymentMethod, setPaymentMethod] = useState('pix')
   const [pixCheckout, setPixCheckout] = useState(null)
+  const [cardFormResetKey, setCardFormResetKey] = useState(0)
   const [cardState, setCardState] = useState({ loading: false, ready: false, error: '' })
   const currentStatus = String(currentDetails?.subscription?.status || '').toLowerCase().trim()
   const isCardPendingActivation = currentStatus === 'pending_payment' && String(currentDetails?.subscription?.payment_method || '').toLowerCase() === 'credit_card'
@@ -143,7 +146,7 @@ export default function LoyaltyAssinaturaCliente() {
     } catch (error) {
       setNotice({
         type: 'error',
-        message: error?.data?.message || error?.message || 'Nao foi possivel carregar a assinatura de fidelidade.',
+        message: error?.data?.message || error?.message || 'Não foi possível carregar a assinatura de fidelidade.',
       })
     } finally {
       setLoading(false)
@@ -180,7 +183,7 @@ export default function LoyaltyAssinaturaCliente() {
     } catch (error) {
       setNotice({
         type: 'error',
-        message: error?.data?.message || error?.message || 'Nao foi possivel gerar o PIX.',
+        message: error?.data?.message || error?.message || 'Não foi possível gerar o PIX.',
       })
     } finally {
       setSubmitting(false)
@@ -193,22 +196,38 @@ export default function LoyaltyAssinaturaCliente() {
     setNotice({ type: '', message: '' })
     try {
       await Api.clientLoyaltyCancel({ subscription_id: currentDetails.subscription.id })
-      setNotice({ type: 'success', message: 'Renovacao cancelada. Os beneficios pagos ficam ate o fim do ciclo.' })
+      setNotice({ type: 'success', message: 'Renovação cancelada. Os benefícios pagos ficam até o fim do ciclo.' })
       await loadData()
     } catch (error) {
       setNotice({
         type: 'error',
-        message: error?.data?.message || error?.message || 'Nao foi possivel cancelar a assinatura.',
+        message: error?.data?.message || error?.message || 'Não foi possível cancelar a assinatura.',
       })
     } finally {
       setSubmitting(false)
     }
   }, [currentDetails?.subscription?.id, loadData])
 
+  const resetCardFormForNewToken = useCallback(() => {
+    try {
+      cardFormRef.current?.unmount?.()
+    } catch {}
+    cardFormRef.current = null
+    cardSubmittingRef.current = false
+    setCardFormResetKey((current) => current + 1)
+    setCardState((current) => ({
+      ...current,
+      loading: true,
+      ready: false,
+    }))
+  }, [])
+
   const handleCardSubmit = useCallback(async (cardFormData) => {
-    if (!estabelecimentoId || !selectedPlanId || !cardFormData?.token) return false
+    if (!estabelecimentoId || !selectedPlanId || !cardFormData?.token || cardSubmittingRef.current) return false
+    cardSubmittingRef.current = true
     setSubmitting(true)
     setNotice({ type: '', message: '' })
+    setCardState((current) => ({ ...current, error: '' }))
     try {
       await Api.clientLoyaltyPayCard({
         estabelecimento_id: Number(estabelecimentoId),
@@ -220,19 +239,26 @@ export default function LoyaltyAssinaturaCliente() {
         identification_type: cardFormData.identificationType || null,
         identification_number: cardFormData.identificationNumber || null,
       })
-      setNotice({ type: 'success', message: 'Cartao validado. A primeira cobranca sera confirmada pelo Mercado Pago. Esse processo pode levar ate cerca de 1 hora.' })
+      setCardState((current) => ({ ...current, error: '' }))
+      setNotice({ type: 'success', message: 'Cartão validado. A primeira cobrança será confirmada pelo Mercado Pago. Esse processo pode levar até cerca de 1 hora.' })
       await loadData()
       return true
     } catch (error) {
+      const message = getMercadoPagoCardErrorMessage(error, 'Não foi possível processar o cartão.')
+      if (isMercadoPagoCardTokenRefreshRequired(error)) {
+        resetCardFormForNewToken()
+      }
+      setCardState((current) => ({ ...current, error: message }))
       setNotice({
         type: 'error',
-        message: error?.data?.message || error?.message || 'Nao foi possivel processar o cartao.',
+        message,
       })
       return false
     } finally {
+      cardSubmittingRef.current = false
       setSubmitting(false)
     }
-  }, [estabelecimentoId, loadData, selectedPlanId, user?.email])
+  }, [estabelecimentoId, loadData, resetCardFormForNewToken, selectedPlanId, user?.email])
 
   useEffect(() => {
     if (!gatewayPublicKey || paymentMethod !== 'credit_card' || !selectedPlan) {
@@ -256,21 +282,21 @@ export default function LoyaltyAssinaturaCliente() {
           iframe: true,
           form: {
             id: 'client-loyalty-card-form',
-            cardNumber: { id: 'client-loyalty-card-number', placeholder: 'Numero do cartao' },
+            cardNumber: { id: 'client-loyalty-card-number', placeholder: 'Número do cartão' },
             expirationDate: { id: 'client-loyalty-card-expiration', placeholder: 'MM/AA' },
             securityCode: { id: 'client-loyalty-card-cvv', placeholder: 'CVV' },
-            cardholderName: { id: 'client-loyalty-card-holder', placeholder: 'Titular do cartao' },
+            cardholderName: { id: 'client-loyalty-card-holder', placeholder: 'Titular do cartão' },
             issuer: { id: 'client-loyalty-card-issuer', placeholder: 'Banco emissor' },
             installments: { id: 'client-loyalty-card-installments', placeholder: 'Parcelas' },
             identificationType: { id: 'client-loyalty-card-doc-type', placeholder: 'Documento' },
-            identificationNumber: { id: 'client-loyalty-card-doc-number', placeholder: 'Numero do documento' },
+            identificationNumber: { id: 'client-loyalty-card-doc-number', placeholder: 'Número do documento' },
             cardholderEmail: { id: 'client-loyalty-card-email', placeholder: 'E-mail' },
           },
           callbacks: {
             onFormMounted: (error) => {
               if (cancelled) return
               if (error) {
-                setCardState({ loading: false, ready: false, error: 'Nao foi possivel montar o formulario do cartao.' })
+                setCardState({ loading: false, ready: false, error: 'Não foi possível montar o formulário do cartão.' })
                 return
               }
               setCardState({ loading: false, ready: true, error: '' })
@@ -285,7 +311,7 @@ export default function LoyaltyAssinaturaCliente() {
         cardFormRef.current = cardForm
       } catch {
         if (!cancelled) {
-          setCardState({ loading: false, ready: false, error: 'Nao foi possivel carregar o SDK do cartao.' })
+          setCardState({ loading: false, ready: false, error: 'Não foi possível carregar o SDK do cartão.' })
         }
       }
     }
@@ -298,7 +324,7 @@ export default function LoyaltyAssinaturaCliente() {
       } catch {}
       cardFormRef.current = null
     }
-  }, [gatewayPublicKey, handleCardSubmit, paymentMethod, selectedPlan])
+  }, [cardFormResetKey, gatewayPublicKey, handleCardSubmit, paymentMethod, selectedPlan])
 
   const activeCredits = currentDetails?.credits || []
 
@@ -311,7 +337,7 @@ export default function LoyaltyAssinaturaCliente() {
             {plansBundle.estabelecimento?.nome || 'Minha assinatura de fidelidade'}
           </h1>
           <p className="loyalty-page__subtitle">
-            Veja status, proximas cobrancas, saldo do ciclo e assine um plano quando estiver dentro de um estabelecimento.
+            Veja status, próximas cobranças, saldo do ciclo e assine um plano quando estiver dentro de um estabelecimento.
           </p>
         </div>
       </div>
@@ -333,13 +359,13 @@ export default function LoyaltyAssinaturaCliente() {
           <div className="loyalty-current__meta">
             <span>
               {isCardPendingActivation
-                ? 'Primeira cobranca: aguardando confirmacao do Mercado Pago (pode levar ate cerca de 1 hora)'
-                : `Proxima cobranca: ${formatDate(currentDetails.subscription?.next_billing_at)}`}
+                ? 'Primeira cobrança: aguardando confirmação do Mercado Pago (pode levar até cerca de 1 hora)'
+                : `Próxima cobrança: ${formatDate(currentDetails.subscription?.next_billing_at)}`}
             </span>
             <span>
               {currentDetails.subscription?.current_period_start && currentDetails.subscription?.current_period_end
-                ? `Periodo atual: ${formatDate(currentDetails.subscription?.current_period_start)} ate ${formatDate(currentDetails.subscription?.current_period_end)}`
-                : 'Periodo atual: sera liberado apos a primeira cobranca'}
+                ? `Período atual: ${formatDate(currentDetails.subscription?.current_period_start)} até ${formatDate(currentDetails.subscription?.current_period_end)}`
+                : 'Período atual: será liberado após a primeira cobrança'}
             </span>
             <span>Pagamento: {currentDetails.subscription?.payment_method || '-'}</span>
           </div>
@@ -352,7 +378,7 @@ export default function LoyaltyAssinaturaCliente() {
                 <span>Detalhe tecnico: {latestFailureText}</span>
               ) : null}
               {latestFailure.status_detail ? <span>Status do gateway: {latestFailure.status_detail}</span> : null}
-              {latestFailure.code ? <span>Codigo: {latestFailure.code}</span> : null}
+              {latestFailure.code ? <span>Código: {latestFailure.code}</span> : null}
               {latestFailure.created_at ? <span>Registrado em: {formatDate(latestFailure.created_at)}</span> : null}
             </div>
           ) : null}
@@ -365,7 +391,7 @@ export default function LoyaltyAssinaturaCliente() {
                   <span>{credit.servico_nome}</span>
                   <strong>{credit.quantidade_restante}/{credit.quantidade_total}</strong>
                 </div>
-              )) : <p className="loyalty-empty">Nenhum credito ativo no momento.</p>}
+              )) : <p className="loyalty-empty">Nenhum crédito ativo no momento.</p>}
             </div>
 
             <div className="loyalty-card loyalty-card--nested">
@@ -397,7 +423,7 @@ export default function LoyaltyAssinaturaCliente() {
             </div>
             {plansBundle.estabelecimento?.id ? (
               <Link className="btn btn--outline" to={`/planos-fidelidade/${plansBundle.estabelecimento.id}`}>
-                Ver pagina publica
+                Ver página pública
               </Link>
             ) : null}
           </div>
@@ -421,7 +447,7 @@ export default function LoyaltyAssinaturaCliente() {
               <div className="loyalty-plan-card__items">
                 {(selectedPlan.items || []).map((item) => (
                   <div className="loyalty-plan-card__item" key={item.id}>
-                    <span>{item.servico?.nome || `Servico #${item.servico_id}`}</span>
+                    <span>{item.servico?.nome || `Serviço #${item.servico_id}`}</span>
                     <strong>{item.quantidade_por_ciclo} por ciclo</strong>
                   </div>
                 ))}
@@ -440,13 +466,13 @@ export default function LoyaltyAssinaturaCliente() {
                   className={`btn ${paymentMethod === 'credit_card' ? 'btn--primary' : 'btn--outline'}`}
                   onClick={() => setPaymentMethod('credit_card')}
                 >
-                  Cartao
+                  Cartão
                 </button>
               </div>
 
               {paymentMethod === 'pix' ? (
                 <div className="loyalty-checkout-block">
-                  <p>Pagamento manual por ciclo. Ao pagar, o plano ativa e os creditos do mes sao liberados.</p>
+                  <p>Pagamento manual por ciclo. Ao pagar, o plano é ativado e os créditos do mês são liberados.</p>
                   <button type="button" className="btn btn--primary" onClick={handlePixSubscribe} disabled={submitting}>
                     Gerar PIX
                   </button>
@@ -460,21 +486,21 @@ export default function LoyaltyAssinaturaCliente() {
                 </div>
               ) : (
                 <div className="loyalty-checkout-block">
-                  <p>Cartao com primeira cobranca confirmada pelo Mercado Pago, o que pode levar ate cerca de 1 hora, e renovacao automatica mensal.</p>
+                  <p>Cartão com primeira cobrança confirmada pelo Mercado Pago, o que pode levar até cerca de 1 hora, e renovação automática mensal.</p>
                   <form id="client-loyalty-card-form" className="loyalty-card-form">
                     <div className="loyalty-card-form__grid">
                       <div id="client-loyalty-card-number" className="input loyalty-card-form__field" />
                       <div id="client-loyalty-card-expiration" className="input loyalty-card-form__field" />
                       <div id="client-loyalty-card-cvv" className="input loyalty-card-form__field" />
-                      <input id="client-loyalty-card-holder" className="input loyalty-card-form__field" placeholder="Titular do cartao" />
+                      <input id="client-loyalty-card-holder" className="input loyalty-card-form__field" placeholder="Titular do cartão" />
                       <input id="client-loyalty-card-email" className="input loyalty-card-form__field" type="email" placeholder="E-mail" defaultValue={user?.email || ''} />
                       <select id="client-loyalty-card-doc-type" className="input loyalty-card-form__field" defaultValue="" />
-                      <input id="client-loyalty-card-doc-number" className="input loyalty-card-form__field" placeholder="Numero do documento" />
+                      <input id="client-loyalty-card-doc-number" className="input loyalty-card-form__field" placeholder="Número do documento" />
                       <select id="client-loyalty-card-issuer" className="input loyalty-card-form__field" defaultValue="" />
                       <select id="client-loyalty-card-installments" className="input loyalty-card-form__field" defaultValue="" />
                     </div>
                     <button type="submit" className="btn btn--primary" disabled={submitting || !cardState.ready}>
-                      {cardState.loading ? 'Carregando...' : 'Assinar no cartao'}
+                      {cardState.loading ? 'Carregando...' : 'Assinar no cartão'}
                     </button>
                   </form>
                   {cardState.error ? <p className="loyalty-inline-error">{cardState.error}</p> : null}
@@ -490,7 +516,7 @@ export default function LoyaltyAssinaturaCliente() {
           <div className="loyalty-card__header">
             <div>
               <h2>Como assinar um plano</h2>
-              <p>Abra a pagina de um estabelecimento ou a tela publica de planos para contratar uma fidelidade.</p>
+              <p>Abra a página de um estabelecimento ou a tela pública de planos para contratar uma fidelidade.</p>
             </div>
           </div>
           <Link className="btn btn--primary" to="/novo">Explorar estabelecimentos</Link>

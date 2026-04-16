@@ -1,6 +1,14 @@
 import fetch from 'node-fetch'
 import { randomUUID } from 'node:crypto'
 import { config } from './config.js'
+import {
+  claimMercadoPagoDisposableCardToken,
+  extractMercadoPagoErrorSnapshot,
+  getMercadoPagoCredentialDiagnostics,
+  markMercadoPagoDisposableCardTokenOutcome,
+  sanitizeMercadoPagoSensitivePayload,
+  toMercadoPagoCardFlowError,
+} from './mercadopago_card_tokens.js'
 import { getBillingCycleConfig, getPlanLabel, getPlanPriceCents, normalizeBillingCycle, PLAN_TIERS } from './plans.js'
 import { normalizePaymentMethod, normalizeSubscriptionStatus } from './subscription_normalization.js'
 
@@ -27,6 +35,38 @@ function ensureAccessToken(accessTokenOverride = null) {
     throw new Error('mercadopago_access_token_missing')
   }
   return accessToken
+}
+
+function resolveCredentialDiagnostics(accessTokenOverride = null) {
+  return getMercadoPagoCredentialDiagnostics({
+    publicKey: config.billing?.mercadopago?.publicKey || null,
+    accessToken: accessTokenOverride || config.billing?.mercadopago?.accessToken || null,
+  })
+}
+
+function resolveMercadoPagoEnvironmentLabel(diagnostics = null) {
+  if (!diagnostics) return 'unknown'
+  if (diagnostics.access_token_environment && diagnostics.access_token_environment !== 'missing') {
+    return diagnostics.access_token_environment
+  }
+  if (diagnostics.public_key_environment && diagnostics.public_key_environment !== 'missing') {
+    return diagnostics.public_key_environment
+  }
+  return 'unknown'
+}
+
+function logMercadoPagoCredentialMismatch(scope, diagnostics, extra = {}) {
+  if (!diagnostics || diagnostics.consistent_environment !== false) return
+  console.warn(`[mercadopago/${scope}] credential_environment_mismatch`, {
+    ...extra,
+    public_key_environment: diagnostics.public_key_environment,
+    access_token_environment: diagnostics.access_token_environment,
+  })
+}
+
+function logMercadoPagoCardOperation(level, tag, payload) {
+  const logger = console[level] || console.info
+  logger(`[mercadopago/card-token] ${tag}`, sanitizeMercadoPagoSensitivePayload(payload))
 }
 
 function amountToGatewayValue(amountCents) {
@@ -265,6 +305,7 @@ export async function createMercadoPagoCardPreapproval({
   externalReference = null,
   startDate = null,
   accessToken = null,
+  requestContext = {},
 } = {}) {
   const normalizedCycle = normalizeBillingCycle(billingCycle || 'mensal')
   if (!cardToken) throw new Error('card_token_required')
@@ -290,20 +331,57 @@ export async function createMercadoPagoCardPreapproval({
     },
   }
 
-  validateFutureSubscriptionStartDate(payload.auto_recurring.start_date, { nowMs: Date.now() })
-  const response = await mercadoPagoRequest('/preapproval', {
-    method: 'POST',
-    body: payload,
-    accessToken,
+  const credentialDiagnostics = resolveCredentialDiagnostics(accessToken)
+  logMercadoPagoCredentialMismatch('preapproval', credentialDiagnostics, {
+    operation: requestContext?.operation || 'card_subscription_create',
+    request_id: requestContext?.requestId || null,
   })
-  return {
-    request: payload,
-    subscription: mapPreapprovalResponse(response, {
-      fallbackPlan: 'custom',
-      fallbackCycle: normalizedCycle,
-      fallbackStartDate: resolvedStartDate,
-    }),
-    raw: response,
+  const tokenClaim = claimMercadoPagoDisposableCardToken({
+    token: cardToken,
+    operation: requestContext?.operation || 'card_subscription_create',
+    endpoint: '/preapproval',
+    environment: resolveMercadoPagoEnvironmentLabel(credentialDiagnostics),
+    externalReference: payload.external_reference || null,
+    requestId: requestContext?.requestId || null,
+  })
+  logMercadoPagoCardOperation('info', 'consume', {
+    ...tokenClaim.logMeta,
+    credential_diagnostics: credentialDiagnostics,
+  })
+
+  validateFutureSubscriptionStartDate(payload.auto_recurring.start_date, { nowMs: Date.now() })
+  try {
+    const response = await mercadoPagoRequest('/preapproval', {
+      method: 'POST',
+      body: payload,
+      accessToken,
+    })
+    markMercadoPagoDisposableCardTokenOutcome(cardToken, 'success', {
+      gateway_status: response?.status || null,
+      gateway_reference: response?.id || null,
+    })
+    return {
+      request: sanitizeMercadoPagoSensitivePayload(payload),
+      subscription: mapPreapprovalResponse(response, {
+        fallbackPlan: 'custom',
+        fallbackCycle: normalizedCycle,
+        fallbackStartDate: resolvedStartDate,
+      }),
+      raw: response,
+    }
+  } catch (error) {
+    const snapshot = extractMercadoPagoErrorSnapshot(error)
+    markMercadoPagoDisposableCardTokenOutcome(cardToken, 'error', {
+      gateway_status: snapshot.status,
+      gateway_error: snapshot.gateway_error,
+      gateway_cause_code: snapshot.gateway_cause_code,
+    })
+    logMercadoPagoCardOperation('error', 'gateway_failure', {
+      ...tokenClaim.logMeta,
+      credential_diagnostics: credentialDiagnostics,
+      gateway_error: snapshot,
+    })
+    throw toMercadoPagoCardFlowError(error) || error
   }
 }
 
@@ -315,6 +393,7 @@ export async function createMercadoPagoCardSubscription({
   payer = {},
   reason = null,
   backUrl = null,
+  requestContext = {},
 } = {}) {
   if (!estabelecimento?.id) throw new Error('estabelecimento_invalido')
   const normalizedPlan = String(plan || '').toLowerCase()
@@ -339,6 +418,10 @@ export async function createMercadoPagoCardSubscription({
       backUrl,
       externalReference: buildExternalReference(estabelecimento.id, normalizedPlan, normalizedCycle),
       startDate,
+      requestContext: {
+        ...requestContext,
+        operation: requestContext?.operation || 'card_subscription_create',
+      },
     })
   } catch (error) {
     console.error('[mercadopago/subscriptions][preapproval] failed', {
@@ -347,8 +430,10 @@ export async function createMercadoPagoCardSubscription({
       billing_cycle: normalizedCycle,
       start_date: startDate,
       status: error?.status || null,
-      response: error?.responseData || null,
+      response: sanitizeMercadoPagoSensitivePayload(error?.responseData || null),
       message: error?.message || String(error),
+      request_id: requestContext?.requestId || null,
+      details: error?.details || null,
     })
     throw error
   }
@@ -371,6 +456,7 @@ export async function updateMercadoPagoCardSubscription(gatewaySubscriptionId, {
   status = null,
   startDate = null,
   accessToken = null,
+  requestContext = {},
 } = {}) {
   if (!gatewaySubscriptionId) throw new Error('gateway_subscription_id_required')
   const payload = {}
@@ -395,15 +481,62 @@ export async function updateMercadoPagoCardSubscription(gatewaySubscriptionId, {
     }
   }
 
-  const response = await mercadoPagoRequest(`/preapproval/${encodeURIComponent(String(gatewaySubscriptionId))}`, {
-    method: 'PUT',
-    body: payload,
-    accessToken,
+  const credentialDiagnostics = resolveCredentialDiagnostics(accessToken)
+  logMercadoPagoCredentialMismatch('preapproval_update', credentialDiagnostics, {
+    operation: requestContext?.operation || 'card_subscription_update',
+    request_id: requestContext?.requestId || null,
+    preapproval_id: gatewaySubscriptionId,
   })
-  return {
-    request: payload,
-    subscription: mapPreapprovalResponse(response),
-    raw: response,
+  let tokenClaim = null
+  if (cardToken) {
+    tokenClaim = claimMercadoPagoDisposableCardToken({
+      token: cardToken,
+      operation: requestContext?.operation || 'card_subscription_update',
+      endpoint: `/preapproval/${encodeURIComponent(String(gatewaySubscriptionId))}`,
+      environment: resolveMercadoPagoEnvironmentLabel(credentialDiagnostics),
+      preapprovalId: gatewaySubscriptionId,
+      requestId: requestContext?.requestId || null,
+      externalReference: requestContext?.externalReference || null,
+      subscriptionId: requestContext?.subscriptionId || null,
+    })
+    logMercadoPagoCardOperation('info', 'consume', {
+      ...tokenClaim.logMeta,
+      credential_diagnostics: credentialDiagnostics,
+    })
+  }
+
+  try {
+    const response = await mercadoPagoRequest(`/preapproval/${encodeURIComponent(String(gatewaySubscriptionId))}`, {
+      method: 'PUT',
+      body: payload,
+      accessToken,
+    })
+    if (cardToken) {
+      markMercadoPagoDisposableCardTokenOutcome(cardToken, 'success', {
+        gateway_status: response?.status || null,
+        gateway_reference: response?.id || gatewaySubscriptionId || null,
+      })
+    }
+    return {
+      request: sanitizeMercadoPagoSensitivePayload(payload),
+      subscription: mapPreapprovalResponse(response),
+      raw: response,
+    }
+  } catch (error) {
+    const snapshot = extractMercadoPagoErrorSnapshot(error)
+    if (cardToken) {
+      markMercadoPagoDisposableCardTokenOutcome(cardToken, 'error', {
+        gateway_status: snapshot.status,
+        gateway_error: snapshot.gateway_error,
+        gateway_cause_code: snapshot.gateway_cause_code,
+      })
+      logMercadoPagoCardOperation('error', 'gateway_failure', {
+        ...(tokenClaim?.logMeta || {}),
+        credential_diagnostics: credentialDiagnostics,
+        gateway_error: snapshot,
+      })
+    }
+    throw toMercadoPagoCardFlowError(error) || error
   }
 }
 
@@ -425,6 +558,7 @@ export async function createMercadoPagoCardRecoveryPayment({
   externalReference,
   idempotencyKey,
   accessToken = null,
+  requestContext = {},
 } = {}) {
   if (!subscription?.gatewaySubscriptionId) throw new Error('gateway_subscription_id_required')
   if (!cardToken) throw new Error('card_token_required')
@@ -461,6 +595,30 @@ export async function createMercadoPagoCardRecoveryPayment({
     amount_cents: amountCents,
     external_reference: externalReference || null,
     idempotency_key: idempotencyKey || null,
+    request_id: requestContext?.requestId || null,
+  })
+
+  const credentialDiagnostics = resolveCredentialDiagnostics(accessToken)
+  logMercadoPagoCredentialMismatch('recovery_payment', credentialDiagnostics, {
+    operation: requestContext?.operation || 'card_recovery_payment',
+    request_id: requestContext?.requestId || null,
+    preapproval_id: subscription.gatewaySubscriptionId || null,
+    subscription_id: subscription.id || null,
+  })
+  const tokenClaim = claimMercadoPagoDisposableCardToken({
+    token: cardToken,
+    operation: requestContext?.operation || 'card_recovery_payment',
+    endpoint: '/v1/payments',
+    environment: resolveMercadoPagoEnvironmentLabel(credentialDiagnostics),
+    externalReference: externalReference || null,
+    subscriptionId: subscription.id || null,
+    preapprovalId: subscription.gatewaySubscriptionId || null,
+    requestId: requestContext?.requestId || null,
+  })
+  logMercadoPagoCardOperation('info', 'consume', {
+    ...tokenClaim.logMeta,
+    credential_diagnostics: credentialDiagnostics,
+    idempotency_key_present: Boolean(idempotencyKey),
   })
 
   try {
@@ -470,23 +628,41 @@ export async function createMercadoPagoCardRecoveryPayment({
       headers: idempotencyKey ? { 'X-Idempotency-Key': String(idempotencyKey) } : {},
       accessToken,
     })
+    markMercadoPagoDisposableCardTokenOutcome(cardToken, 'success', {
+      gateway_status: response?.status || null,
+      gateway_reference: response?.id || null,
+    })
     return {
-      request: body,
+      request: sanitizeMercadoPagoSensitivePayload(body),
       payment: mapCardChargeResponse(response),
       raw: response,
     }
   } catch (error) {
+    const snapshot = extractMercadoPagoErrorSnapshot(error)
+    markMercadoPagoDisposableCardTokenOutcome(cardToken, 'error', {
+      gateway_status: snapshot.status,
+      gateway_error: snapshot.gateway_error,
+      gateway_cause_code: snapshot.gateway_cause_code,
+    })
     console.error('[mercadopago/subscriptions][recovery-payment] failed', {
       subscription_id: subscription.id || null,
       gateway_subscription_id: subscription.gatewaySubscriptionId || null,
       amount_cents: amountCents,
       external_reference: externalReference || null,
       idempotency_key: idempotencyKey || null,
-      status: error?.status || null,
-      response: error?.responseData || null,
+      request_id: requestContext?.requestId || null,
+      status: snapshot.status,
+      response: sanitizeMercadoPagoSensitivePayload(error?.responseData || null),
       message: error?.message || String(error),
+      details: error?.details || null,
     })
-    throw error
+    logMercadoPagoCardOperation('error', 'gateway_failure', {
+      ...tokenClaim.logMeta,
+      credential_diagnostics: credentialDiagnostics,
+      gateway_error: snapshot,
+      idempotency_key_present: Boolean(idempotencyKey),
+    })
+    throw toMercadoPagoCardFlowError(error) || error
   }
 }
 

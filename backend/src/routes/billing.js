@@ -52,6 +52,7 @@ import { config } from '../lib/config.js'
 import { BillingService } from '../lib/billing_service.js'
 import { listActiveWhatsAppPacks, findWhatsAppPack } from '../lib/addon_packs.js'
 import { verifyMercadoPagoWebhookSignature } from '../lib/mp_signature.js'
+import { getMercadoPagoCredentialDiagnostics, toMercadoPagoCardFlowError } from '../lib/mercadopago_card_tokens.js'
 import { resolveMpAccessToken } from '../services/mpAccounts.js'
 import { logBlockedRouteAccess, resolveRouteTokenAccess } from '../lib/route_access.js'
 import { loadEffectiveSubscriptionContext } from '../lib/subscription_state.js'
@@ -168,6 +169,36 @@ function buildCardRecoveryExternalReference(subscriptionId, idempotencyKey) {
     'attempt',
     String(idempotencyKey || randomUUID()),
   ].join(':')
+}
+
+function createInternalRequestId(req) {
+  return String(req.requestId || req.headers['x-request-id'] || '').trim() || randomUUID()
+}
+
+function getBillingMercadoPagoCredentialDiagnostics() {
+  return getMercadoPagoCredentialDiagnostics({
+    publicKey: getMercadoPagoPublicKey(),
+    accessToken: config.billing?.mercadopago?.accessToken || null,
+  })
+}
+
+function sendBillingCardError(res, routeLabel, error, fallbackCode, fallbackMessage, requestId) {
+  const normalized = toMercadoPagoCardFlowError(error) || error
+  const status = Number(normalized?.status || 400)
+  const code = normalized?.code || fallbackCode
+  const message = normalized?.message || fallbackMessage
+  console.error(routeLabel, {
+    request_id: requestId || null,
+    error: code,
+    message,
+    details: normalized?.details || null,
+  })
+  return res.status(status).json({
+    error: code,
+    message,
+    details: normalized?.details || null,
+    request_id: requestId || null,
+  })
 }
 
 function resolveCardPersistenceAfterSave({
@@ -334,6 +365,7 @@ async function createOrReplaceCardSubscription({
   billingCycle,
   cardToken,
   payerEmail = null,
+  requestContext = {},
 } = {}) {
   const previousContext = await loadEffectiveSubscriptionContext(estabelecimentoId)
   const gatewayResult = await createMercadoPagoCardSubscription({
@@ -342,6 +374,7 @@ async function createOrReplaceCardSubscription({
     billingCycle,
     cardToken,
     payer: { email: payerEmail || email },
+    requestContext,
   })
   const gatewaySubscription = gatewayResult.subscription
   const amountCents = gatewaySubscription?.amountCents ?? getPlanPriceCents(plan, billingCycle)
@@ -1043,6 +1076,7 @@ router.get('/config', auth, isEstabelecimento, async (_req, res) => {
     },
     mercadopago: {
       public_key: getMercadoPagoPublicKey(),
+      credentials: getBillingMercadoPagoCredentialDiagnostics(),
     },
     grace_days: Number(config.billing?.reminders?.graceDays ?? process.env.SUBSCRIPTION_GRACE_DAYS ?? 3) || 3,
   })
@@ -1128,6 +1162,7 @@ router.get('/status', auth, isEstabelecimento, async (req, res) => {
         recommended: 'credit_card',
         gateway: 'mercadopago',
         public_key: getMercadoPagoPublicKey(),
+        credentials: getBillingMercadoPagoCredentialDiagnostics(),
       },
       billing: {
         renewalRequired,
@@ -1260,16 +1295,22 @@ router.get('/subscription', auth, isEstabelecimento, async (req, res) => {
 })
 
 router.post('/card/subscribe', auth, isEstabelecimento, async (req, res) => {
+  const requestId = createInternalRequestId(req)
+  res.set('X-Request-Id', requestId)
   try {
     const { plan, billing_cycle: rawCycle, card_token, cardToken, payer_email, payerEmail } = req.body || {}
     const token = String(card_token || cardToken || '').trim()
     if (!token) {
-      return res.status(400).json({ error: 'card_token_required', message: 'Token do cartão não informado.' })
+      return res.status(400).json({
+        error: 'card_token_required',
+        message: 'Token do cartão não informado.',
+        request_id: requestId,
+      })
     }
 
     const targetPlan = String(plan || req.user.plan || 'starter').toLowerCase()
     if (!PLAN_TIERS.includes(targetPlan)) {
-      return res.status(400).json({ error: 'invalid_plan', message: 'Plano invalido.' })
+      return res.status(400).json({ error: 'invalid_plan', message: 'Plano inválido.' })
     }
     const billingCycle = normalizeBillingCycle(rawCycle || req.user.plan_cycle || 'mensal')
     const currentPlan = String(req.user.plan || 'starter').toLowerCase()
@@ -1292,6 +1333,11 @@ router.post('/card/subscribe', auth, isEstabelecimento, async (req, res) => {
       billingCycle,
       cardToken: token,
       payerEmail: payer_email || payerEmail || req.user.email,
+      requestContext: {
+        requestId,
+        route: '/billing/card/subscribe',
+        operation: 'card_subscription_create',
+      },
     })
 
     return res.json({
@@ -1306,21 +1352,31 @@ router.post('/card/subscribe', auth, isEstabelecimento, async (req, res) => {
         customer_id: result.gatewayResult?.subscription?.gatewayCustomerId || null,
         next_billing_at: result.gatewayResult?.subscription?.nextBillingAt || null,
       },
+      request_id: requestId,
     })
   } catch (error) {
-    console.error('POST /billing/card/subscribe', error)
-    return res.status(400).json({
-      error: 'card_subscription_failed',
-      message: error?.message || 'Falha ao criar assinatura recorrente no cartão.',
-    })
+    return sendBillingCardError(
+      res,
+      'POST /billing/card/subscribe',
+      error,
+      'card_subscription_failed',
+      'Falha ao criar assinatura recorrente no cartão.',
+      requestId
+    )
   }
 })
 
 router.post('/card/update', auth, isEstabelecimento, async (req, res) => {
+  const requestId = createInternalRequestId(req)
+  res.set('X-Request-Id', requestId)
   try {
     const token = String(req.body?.card_token || req.body?.cardToken || '').trim()
     if (!token) {
-      return res.status(400).json({ error: 'card_token_required', message: 'Token do cartão não informado.' })
+      return res.status(400).json({
+        error: 'card_token_required',
+        message: 'Token do cartão não informado.',
+        request_id: requestId,
+      })
     }
 
     const previousContext = await loadEffectiveSubscriptionContext(req.user.id)
@@ -1361,6 +1417,11 @@ router.post('/card/update', auth, isEstabelecimento, async (req, res) => {
         billingCycle,
         cardToken: token,
         payerEmail: req.body?.payer_email || req.body?.payerEmail || req.user.email,
+        requestContext: {
+          requestId,
+          route: '/billing/card/update',
+          operation: 'card_subscription_create',
+        },
       })
       return res.json({
         ok: true,
@@ -1369,6 +1430,7 @@ router.post('/card/update', auth, isEstabelecimento, async (req, res) => {
         plan_status: created.computedState.resolvedStatus,
         access_state: created.computedState.accessState,
         subscription: serializeSubscription(created.subscription),
+        request_id: requestId,
       })
     }
 
@@ -1379,6 +1441,13 @@ router.post('/card/update', auth, isEstabelecimento, async (req, res) => {
       amountCents,
       billingCycle,
       status: 'authorized',
+      requestContext: {
+        requestId,
+        route: '/billing/card/update',
+        operation: 'card_subscription_update',
+        subscriptionId: targetCardSubscription.id,
+        externalReference: targetCardSubscription.externalReference || null,
+      },
     })
     const persistenceState = resolveCardPersistenceAfterSave({
       gatewaySubscription: gatewayResult?.subscription || null,
@@ -1420,21 +1489,31 @@ router.post('/card/update', auth, isEstabelecimento, async (req, res) => {
       plan_status: effectiveContext.computedState.resolvedStatus,
       access_state: effectiveContext.computedState.accessState,
       subscription: serializeSubscription(updated),
+      request_id: requestId,
     })
   } catch (error) {
-    console.error('POST /billing/card/update', error)
-    return res.status(400).json({
-      error: 'card_update_failed',
-      message: error?.message || 'Falha ao atualizar o cartão.',
-    })
+    return sendBillingCardError(
+      res,
+      'POST /billing/card/update',
+      error,
+      'card_update_failed',
+      'Falha ao atualizar o cartão.',
+      requestId
+    )
   }
 })
 
 router.post('/card/recover', auth, isEstabelecimento, async (req, res) => {
+  const requestId = createInternalRequestId(req)
+  res.set('X-Request-Id', requestId)
   try {
     const token = String(req.body?.card_token || req.body?.cardToken || '').trim()
     if (!token) {
-      return res.status(400).json({ error: 'card_token_required', message: 'Token do cartão não informado.' })
+      return res.status(400).json({
+        error: 'card_token_required',
+        message: 'Token do cartão não informado.',
+        request_id: requestId,
+      })
     }
 
     const idempotencyKey = String(req.headers['idempotency-key'] || '').trim() || randomUUID()
@@ -1446,6 +1525,7 @@ router.post('/card/recover', auth, isEstabelecimento, async (req, res) => {
       return res.status(409).json({
         error: 'card_recovery_not_required',
         message: 'Não existe uma pendência elegível para regularização imediata no cartão.',
+        request_id: requestId,
       })
     }
 
@@ -1485,6 +1565,7 @@ router.post('/card/recover', auth, isEstabelecimento, async (req, res) => {
         access_state: refreshedContext.computedState.accessState,
         subscription: serializeSubscription(refreshedSubscription),
         payment: previousOutcome.payload?.payment || null,
+        request_id: requestId,
       })
     }
 
@@ -1513,6 +1594,11 @@ router.post('/card/recover', auth, isEstabelecimento, async (req, res) => {
       identificationNumber: req.body?.identification_number || req.body?.identificationNumber || null,
       externalReference,
       idempotencyKey,
+      requestContext: {
+        requestId,
+        route: '/billing/card/recover',
+        operation: 'card_recovery_payment',
+      },
     })
     const payment = paymentResult?.payment
     if (!payment) {
@@ -1529,6 +1615,13 @@ router.post('/card/recover', auth, isEstabelecimento, async (req, res) => {
           billingCycle,
           status: 'authorized',
           startDate: expectedPeriodEnd,
+          requestContext: {
+            requestId,
+            route: '/billing/card/recover',
+            operation: 'card_subscription_align_after_recovery',
+            subscriptionId: targetSubscription.id,
+            externalReference,
+          },
         })
         alignedGatewaySubscription = aligned?.subscription || null
       } catch (alignmentError) {
@@ -1581,6 +1674,7 @@ router.post('/card/recover', auth, isEstabelecimento, async (req, res) => {
         access_state: effectiveContext.computedState.accessState,
         subscription: serializeSubscription(updated),
         payment: paymentResult.raw,
+        request_id: requestId,
       })
     }
 
@@ -1612,13 +1706,17 @@ router.post('/card/recover', auth, isEstabelecimento, async (req, res) => {
       access_state: effectiveContext.computedState.accessState,
       subscription: serializeSubscription(updated),
       payment: paymentResult.raw,
+      request_id: requestId,
     })
   } catch (error) {
-    console.error('POST /billing/card/recover', error)
-    return res.status(400).json({
-      error: 'card_recovery_failed',
-      message: error?.message || 'Falha ao cobrar a pendência no cartão.',
-    })
+    return sendBillingCardError(
+      res,
+      'POST /billing/card/recover',
+      error,
+      'card_recovery_failed',
+      'Falha ao cobrar a pendência no cartão.',
+      requestId
+    )
   }
 })
 

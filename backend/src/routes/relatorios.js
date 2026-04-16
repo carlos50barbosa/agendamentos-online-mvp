@@ -215,7 +215,7 @@ async function resolveReportContext(req, { requireAdvanced = false } = {}) {
   const estId = req.user.id;
   const planContext = await getPlanContext(estId);
   if (!planContext) {
-    return { error: { status: 404, body: { error: 'not_found', message: 'Estabelecimento nao encontrado.' } } };
+    return { error: { status: 404, body: { error: 'not_found', message: 'Estabelecimento não encontrado.' } } };
   }
 
   const planStatus = planContext.status || 'trialing';
@@ -223,7 +223,7 @@ async function resolveReportContext(req, { requireAdvanced = false } = {}) {
     return {
       error: {
         status: 402,
-        body: { error: 'plan_delinquent', message: 'Sua assinatura esta em atraso. Regularize o pagamento para acessar os relatorios.' },
+        body: { error: 'plan_delinquent', message: 'Sua assinatura está em atraso. Regularize o pagamento para acessar os relatórios.' },
       },
     };
   }

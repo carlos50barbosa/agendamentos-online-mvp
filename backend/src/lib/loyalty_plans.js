@@ -115,7 +115,7 @@ export async function validateLoyaltyPlanItems(estabelecimentoId, items = [], { 
     : []
 
   if (!normalizedItems.length) {
-    const error = new Error('Adicione ao menos um servico ao plano.')
+    const error = new Error('Adicione ao menos um serviço ao plano.')
     error.status = 400
     error.code = 'loyalty_plan_items_required'
     throw error
@@ -123,7 +123,7 @@ export async function validateLoyaltyPlanItems(estabelecimentoId, items = [], { 
 
   const uniqueServiceIds = Array.from(new Set(normalizedItems.map((item) => item.servico_id)))
   if (uniqueServiceIds.length !== normalizedItems.length) {
-    const error = new Error('Nao repita o mesmo servico dentro do plano.')
+    const error = new Error('Não repita o mesmo serviço dentro do plano.')
     error.status = 400
     error.code = 'loyalty_plan_duplicate_service'
     throw error
@@ -141,7 +141,7 @@ export async function validateLoyaltyPlanItems(estabelecimentoId, items = [], { 
   const servicesById = new Map(rows.map((row) => [Number(row.id), row]))
   const missing = uniqueServiceIds.filter((id) => !servicesById.has(id))
   if (missing.length) {
-    const error = new Error('Servico invalido para este estabelecimento.')
+    const error = new Error('Serviço inválido para este estabelecimento.')
     error.status = 400
     error.code = 'loyalty_plan_invalid_service'
     error.details = { missing }
@@ -356,7 +356,7 @@ export async function createLoyaltyPlan(estabelecimentoId, payload = {}) {
 export async function updateLoyaltyPlan(estabelecimentoId, planId, payload = {}) {
   const existing = await getLoyaltyPlanForEstablishment(estabelecimentoId, planId)
   if (!existing) {
-    const error = new Error('Plano nao encontrado.')
+    const error = new Error('Plano não encontrado.')
     error.status = 404
     error.code = 'loyalty_plan_not_found'
     throw error
@@ -422,7 +422,7 @@ export async function updateLoyaltyPlan(estabelecimentoId, planId, payload = {})
 export async function updateLoyaltyPlanStatus(estabelecimentoId, planId, status) {
   const normalizedStatus = normalizeStatus(status, '')
   if (!normalizedStatus) {
-    const error = new Error('Status invalido para o plano.')
+    const error = new Error('Status inválido para o plano.')
     error.status = 400
     error.code = 'loyalty_plan_invalid_status'
     throw error
@@ -432,7 +432,7 @@ export async function updateLoyaltyPlanStatus(estabelecimentoId, planId, status)
     [normalizedStatus, planId, estabelecimentoId]
   )
   if (!result?.affectedRows) {
-    const error = new Error('Plano nao encontrado.')
+    const error = new Error('Plano não encontrado.')
     error.status = 404
     error.code = 'loyalty_plan_not_found'
     throw error

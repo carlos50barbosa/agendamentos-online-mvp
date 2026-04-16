@@ -119,12 +119,12 @@ export default function SinalAgendamentos() {
           <h3>Como funciona</h3>
           <ul className="settings-module-list">
             <li>O cliente gera o PIX durante o agendamento.</li>
-            <li>Assim que o pagamento confirma, o atendimento fica garantido.</li>
+            <li>Assim que o pagamento é confirmado, o atendimento fica garantido.</li>
             <li>Sem conta Mercado Pago conectada, o sinal fica indisponível.</li>
           </ul>
           <div className="settings-module-aside__footer">
             <Link className="btn btn--ghost btn--sm" to="/planos">
-              Ver planos elegiveis
+              Ver planos elegíveis
             </Link>
           </div>
         </aside>
@@ -139,7 +139,7 @@ export default function SinalAgendamentos() {
             </p>
           </div>
           <div className="settings-module-hero__pill settings-module-hero__pill--soft">
-            {deposit.allowed ? 'Elegivel no plano atual' : 'Recurso bloqueado no plano'}
+            {deposit.allowed ? 'Elegível no plano atual' : 'Recurso bloqueado no plano'}
           </div>
         </div>
 

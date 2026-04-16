@@ -1870,7 +1870,7 @@ const AppointmentFlowFooter = ({
         <div
           className="novo-agendamento__flow-footer-shell"
           role="region"
-          aria-label="Navegacao do agendamento"
+          aria-label="Navegação do agendamento"
         >
           <div className="novo-agendamento__flow-footer-head">
             <div className="novo-agendamento__flow-footer-copy" aria-live="polite">
@@ -2115,7 +2115,7 @@ const ServiceCard = ({ service, selected, onSelect, loyaltyHint = null }) => {
               <div className="mini-card__title">{title}</div>
             </div>
             <span className={`mini-card__state${selected ? ' is-selected' : ''}`}>
-              {selected ? 'Incluido' : 'Selecionar'}
+              {selected ? 'Incluído' : 'Selecionar'}
             </span>
           </div>
 
@@ -2137,7 +2137,7 @@ const ServiceCard = ({ service, selected, onSelect, loyaltyHint = null }) => {
         </div>
 
         <div className="mini-card__side">
-          <span className="mini-card__cta">{selected ? 'Ajustar selecao' : 'Adicionar'}</span>
+          <span className="mini-card__cta">{selected ? 'Ajustar seleção' : 'Adicionar'}</span>
         </div>
 
       </div>
@@ -2744,6 +2744,8 @@ export default function NovoAgendamento() {
   const coordsCacheRef = useRef(new Map());
 
   const estSearchInputRef = useRef(null);
+  const discoveryResultsRef = useRef(null);
+  const pendingDiscoveryResultsScrollRef = useRef(false);
 
   const servicesSectionRef = useRef(null);
   const flowFooterRef = useRef(null);
@@ -3122,7 +3124,7 @@ export default function NovoAgendamento() {
       if (credit && Number(credit.quantidade_restante || 0) > 0) {
         hints[String(service.id)] = {
           tone: 'credit',
-          label: `${credit.quantidade_restante} credito(s) disponivel(is)`,
+          label: `${credit.quantidade_restante} crédito(s) disponível(is)`,
         };
         return;
       }
@@ -3138,14 +3140,14 @@ export default function NovoAgendamento() {
   const loyaltyBannerText = useMemo(() => {
     if (!loyaltyDetails?.plan?.nome) return '';
     if (loyaltyPreview?.loyalty_credit_applied) {
-      return `Seu plano ${loyaltyDetails.plan.nome} vai consumir credito(s) neste agendamento.`;
+      return `Seu plano ${loyaltyDetails.plan.nome} vai consumir crédito(s) neste agendamento.`;
     }
     if (loyaltyPreview?.loyalty_discount_percent != null) {
-      return `Seu plano ${loyaltyDetails.plan.nome} aplica ${loyaltyPreview.loyalty_discount_percent}% de desconto nos servicos extras.`;
+      return `Seu plano ${loyaltyDetails.plan.nome} aplica ${loyaltyPreview.loyalty_discount_percent}% de desconto nos serviços extras.`;
     }
     const activeCredits = Object.values(loyaltyCreditsByService).filter((credit) => Number(credit?.quantidade_restante || 0) > 0).length;
     if (activeCredits > 0) {
-      return `Plano ${loyaltyDetails.plan.nome} ativo com ${activeCredits} servico(s) com credito neste ciclo.`;
+      return `Plano ${loyaltyDetails.plan.nome} ativo com ${activeCredits} serviço(s) com crédito neste ciclo.`;
     }
     return `Plano ${loyaltyDetails.plan.nome} ativo neste estabelecimento.`;
   }, [loyaltyCreditsByService, loyaltyDetails?.plan?.nome, loyaltyPreview]);
@@ -3290,7 +3292,7 @@ export default function NovoAgendamento() {
           setLoyaltyContext({
             loading: false,
             data: null,
-            error: error?.data?.message || error?.message || 'Nao foi possivel carregar os beneficios do plano.',
+            error: error?.data?.message || error?.message || 'Não foi possível carregar os benefícios do plano.',
           });
         }
       }
@@ -6160,15 +6162,30 @@ useEffect(() => {
 
   }, []);
 
+  const scrollDiscoveryResultsIntoView = useCallback((behavior = 'smooth') => {
+    const resultsNode = discoveryResultsRef.current;
+
+    if (typeof window === 'undefined' || !resultsNode) return;
+
+    const nextTop = window.scrollY + resultsNode.getBoundingClientRect().top - 92;
+
+    window.scrollTo({
+      top: Math.max(nextTop, 0),
+      behavior,
+    });
+  }, []);
+
   const handleSearchSubmit = useCallback((event) => {
 
     if (event?.preventDefault) event.preventDefault();
 
+    pendingDiscoveryResultsScrollRef.current = true;
+    scrollDiscoveryResultsIntoView();
     setDebouncedEstQuery(estQuery.trim());
 
     setEstablishmentsPage(1);
 
-  }, [estQuery]);
+  }, [estQuery, scrollDiscoveryResultsIntoView]);
 
   const handleUseLocation = useCallback(() => {
 
@@ -6226,6 +6243,7 @@ useEffect(() => {
 
   const handleDiscoverySortChange = useCallback((nextValue) => {
 
+    pendingDiscoveryResultsScrollRef.current = true;
     setDiscoverySort(nextValue);
 
     if (nextValue === 'proximity' && !userLocation && !locating) {
@@ -6238,7 +6256,15 @@ useEffect(() => {
 
   const handleDiscoveryCategoryToggle = useCallback((nextValue) => {
 
+    pendingDiscoveryResultsScrollRef.current = true;
     setDiscoveryCategory((current) => (current === nextValue ? 'all' : nextValue));
+
+  }, []);
+
+  const handleFavoritesToggle = useCallback(() => {
+
+    pendingDiscoveryResultsScrollRef.current = true;
+    setFavoritesOnly((prev) => !prev);
 
   }, []);
 
@@ -7168,6 +7194,30 @@ useEffect(() => {
 
   useEffect(() => {
 
+    if (step !== 1 || !pendingDiscoveryResultsScrollRef.current || typeof window === 'undefined') return undefined;
+
+    const frameId = window.requestAnimationFrame(() => {
+
+      scrollDiscoveryResultsIntoView();
+      pendingDiscoveryResultsScrollRef.current = false;
+
+    });
+
+    return () => window.cancelAnimationFrame(frameId);
+
+  }, [
+    step,
+    debouncedEstQuery,
+    discoverySort,
+    discoveryCategory,
+    favoritesOnly,
+    userLocation,
+    establishmentsLoading,
+    scrollDiscoveryResultsIntoView,
+  ]);
+
+  useEffect(() => {
+
     setServiceSearch("");
 
   }, [establishmentId]);
@@ -7367,7 +7417,7 @@ useEffect(() => {
 
       return geocoding
 
-        ? 'Atualizando distancias...'
+        ? 'Atualizando distâncias...'
 
         : 'Ordenado por proximidade.';
 
@@ -7376,6 +7426,14 @@ useEffect(() => {
     return 'Escolha um estabelecimento para continuar.';
 
   })();
+
+  const discoveryHasActiveContext = Boolean(
+    normalizedQuery ||
+    favoritesOnly ||
+    discoveryCategory !== 'all' ||
+    discoverySort !== 'relevance' ||
+    userLocation
+  );
 
   const discoveryHeroMeta = geoError ? (
 
@@ -7389,7 +7447,7 @@ useEffect(() => {
 
     <span className="appointment-discovery-hero__meta-text">
 
-      {geocoding ? 'Atualizando distancias...' : 'Localizacao ativa.'}
+      {geocoding ? 'Atualizando distâncias...' : 'Localização ativa.'}
 
     </span>
 
@@ -7397,7 +7455,7 @@ useEffect(() => {
 
     <span className="appointment-discovery-hero__meta-text">
 
-      Use sua localizacao para ver o que esta perto.
+      Use sua localização para ver o que está perto.
 
     </span>
 
@@ -8179,7 +8237,7 @@ useEffect(() => {
   return (
 
     <div
-      className={`novo-agendamento${hasPublicPageTheme ? ' novo-agendamento--brand' : ''}${isFlowFooterStep ? ' novo-agendamento--flow-docked' : ''}${step === 2 ? ' novo-agendamento--service-step' : ''}`}
+      className={`novo-agendamento${hasPublicPageTheme ? ' novo-agendamento--brand' : ''}${isFlowFooterStep ? ' novo-agendamento--flow-docked' : ''}${step === 2 ? ' novo-agendamento--service-step' : ''}${step === 1 && discoveryHasActiveContext ? ' novo-agendamento--discovery-focused' : ''}`}
       style={appointmentPageStyle}
     >
 
@@ -8200,6 +8258,7 @@ useEffect(() => {
           <>
 
             <AppointmentDiscoveryHero
+              className={discoveryHasActiveContext ? 'appointment-discovery-hero--compact' : ''}
 
               eyebrow={BOOKING_BRAND.heroEyebrow}
               brandName={BOOKING_BRAND.name}
@@ -8232,14 +8291,17 @@ useEffect(() => {
 
                 className="appointment-search-panel__secondary-btn"
 
-                onClick={handleUseLocation}
+                onClick={() => {
+                  scrollDiscoveryResultsIntoView();
+                  handleUseLocation();
+                }}
 
                 disabled={locating}
 
               >
 
                 <IconMapPin style={{ width: 16, height: 16 }} aria-hidden />
-                <span>{locating ? 'Localizando...' : userLocation ? 'Localizacao ativa' : 'Usar localizacao'}</span>
+                <span>{locating ? 'Localizando...' : userLocation ? 'Localização ativa' : 'Usar localização'}</span>
 
               </button>
 
@@ -8249,7 +8311,7 @@ useEffect(() => {
 
                 className={`appointment-search-panel__icon-btn${favoritesOnly ? ' is-active' : ''}`}
 
-                onClick={() => setFavoritesOnly((prev) => !prev)}
+                onClick={handleFavoritesToggle}
 
                 aria-pressed={favoritesOnly}
 
@@ -8277,7 +8339,7 @@ useEffect(() => {
 
                 </div>
 
-                <div className="novo-agendamento__quick-filters" role="group" aria-label="Filtros rapidos">
+                <div className="novo-agendamento__quick-filters" role="group" aria-label="Filtros rápidos">
 
                   <DiscoveryFilterChip
 
@@ -8287,7 +8349,7 @@ useEffect(() => {
 
                   >
 
-                    Mais proximos
+                    Mais próximos
 
                   </DiscoveryFilterChip>
 
@@ -8341,7 +8403,7 @@ useEffect(() => {
 
               </div>
 
-              <div className="novo-agendamento__results-shell">
+              <div ref={discoveryResultsRef} className="novo-agendamento__results-shell">
 
                 <div className="novo-agendamento__results-toolbar">
 
@@ -8710,31 +8772,33 @@ useEffect(() => {
 
         )}
 
-        <div className="establishments__results novo-agendamento__results">
+        {step !== 1 && (
 
-          {step === 1 && renderEstablishmentResults()}
+          <div className="establishments__results novo-agendamento__results">
 
-          {step === 2 && (
+            {step === 2 && (
 
-            <div className="card novo-agendamento__panel novo-agendamento__panel--services">
+              <div className="card novo-agendamento__panel novo-agendamento__panel--services">
 
-              {renderServiceStep()}
+                {renderServiceStep()}
 
-            </div>
+              </div>
 
-          )}
+            )}
 
-          {step === 3 && (
+            {step === 3 && (
 
-            <div className="card novo-agendamento__panel">
+              <div className="card novo-agendamento__panel">
 
-              {renderScheduleContent()}
+                {renderScheduleContent()}
 
-            </div>
+              </div>
 
-          )}
+            )}
 
-        </div>
+          </div>
+
+        )}
 
         {isFlowFooterStep && (
 

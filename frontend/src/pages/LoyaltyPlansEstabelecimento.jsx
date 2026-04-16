@@ -49,7 +49,7 @@ export default function LoyaltyPlansEstabelecimento() {
   const serviceOptions = useMemo(
     () => (Array.isArray(services) ? services.map((service) => ({
       id: String(service.id),
-      nome: service.nome || 'Servico',
+      nome: service.nome || 'Serviço',
       preco_centavos: Number(service.preco_centavos || 0),
     })) : []),
     [services]
@@ -70,7 +70,7 @@ export default function LoyaltyPlansEstabelecimento() {
     } catch (error) {
       setNotice({
         type: 'error',
-        message: error?.data?.message || error?.message || 'Nao foi possivel carregar os planos de fidelidade.',
+        message: error?.data?.message || error?.message || 'Não foi possível carregar os planos de fidelidade.',
       })
     } finally {
       setLoading(false)
@@ -141,7 +141,7 @@ export default function LoyaltyPlansEstabelecimento() {
       }))
       .filter((item) => item.servico_id > 0 && item.quantidade_por_ciclo > 0)
     if (!items.length) {
-      throw new Error('Adicione ao menos um servico ao plano.')
+      throw new Error('Adicione ao menos um serviço ao plano.')
     }
     return {
       nome: form.nome.trim(),
@@ -172,7 +172,7 @@ export default function LoyaltyPlansEstabelecimento() {
     } catch (error) {
       setNotice({
         type: 'error',
-        message: error?.data?.message || error?.message || 'Nao foi possivel salvar o plano.',
+        message: error?.data?.message || error?.message || 'Não foi possível salvar o plano.',
       })
     } finally {
       setSaving(false)
@@ -186,7 +186,7 @@ export default function LoyaltyPlansEstabelecimento() {
     } catch (error) {
       setNotice({
         type: 'error',
-        message: error?.data?.message || error?.message || 'Nao foi possivel atualizar o status do plano.',
+        message: error?.data?.message || error?.message || 'Não foi possível atualizar o status do plano.',
       })
     }
   }, [loadData])
@@ -198,7 +198,7 @@ export default function LoyaltyPlansEstabelecimento() {
     } catch (error) {
       setNotice({
         type: 'error',
-        message: error?.data?.message || error?.message || 'Nao foi possivel arquivar o plano.',
+        message: error?.data?.message || error?.message || 'Não foi possível arquivar o plano.',
       })
     }
   }, [loadData])
@@ -210,7 +210,7 @@ export default function LoyaltyPlansEstabelecimento() {
           <p className="loyalty-page__eyebrow">Modulo Fidelidade</p>
           <h1 className="loyalty-page__title">Planos mensais do estabelecimento</h1>
           <p className="loyalty-page__subtitle">
-            Crie planos, vincule servicos inclusos e acompanhe uso, assinantes e receita recorrente estimada.
+            Crie planos, vincule serviços inclusos e acompanhe uso, assinantes e receita recorrente estimada.
           </p>
         </div>
       </div>
@@ -224,7 +224,7 @@ export default function LoyaltyPlansEstabelecimento() {
           <div className="loyalty-card__header">
             <div>
               <h2>{form.id ? 'Editar plano' : 'Novo plano'}</h2>
-              <p>Configure nome, valor, servicos incluidos e desconto extra.</p>
+              <p>Configure nome, valor, serviços incluídos e desconto extra.</p>
             </div>
             {form.id ? (
               <button type="button" className="btn btn--outline" onClick={resetForm}>Novo plano</button>
@@ -258,13 +258,13 @@ export default function LoyaltyPlansEstabelecimento() {
 
             <div className="loyalty-form__items">
               <div className="loyalty-form__items-header">
-                <strong>Beneficios por ciclo</strong>
-                <button type="button" className="btn btn--outline btn--sm" onClick={handleAddItem}>Adicionar servico</button>
+                <strong>Benefícios por ciclo</strong>
+                <button type="button" className="btn btn--outline btn--sm" onClick={handleAddItem}>Adicionar serviço</button>
               </div>
               {form.items.map((item, index) => (
                 <div className="loyalty-form__item-row" key={`plan-item-${index}`}>
                   <label>
-                    <span>Servico</span>
+                    <span>Serviço</span>
                     <select className="input" value={item.servico_id} onChange={(event) => handleItemChange(index, 'servico_id', event.target.value)}>
                       <option value="">Selecione</option>
                       {serviceOptions.map((service) => (
@@ -287,7 +287,7 @@ export default function LoyaltyPlansEstabelecimento() {
 
             <div className="loyalty-form__actions">
               <button type="submit" className="btn btn--primary" disabled={saving}>
-                {saving ? 'Salvando...' : form.id ? 'Salvar alteracoes' : 'Criar plano'}
+                {saving ? 'Salvando...' : form.id ? 'Salvar alterações' : 'Criar plano'}
               </button>
             </div>
           </form>
@@ -337,13 +337,13 @@ export default function LoyaltyPlansEstabelecimento() {
               <div className="loyalty-plan-card__metrics">
                 <span>Ativos: {plan.metrics?.active_subscribers || 0}</span>
                 <span>Receita estimada: {formatCurrencyFromCents(plan.metrics?.estimated_monthly_revenue_cents || 0)}</span>
-                <span>Beneficios consumidos: {plan.metrics?.consumed_benefits || 0}</span>
+                <span>Benefícios consumidos: {plan.metrics?.consumed_benefits || 0}</span>
               </div>
 
               <div className="loyalty-plan-card__items">
                 {(plan.items || []).map((item) => (
                   <div key={item.id} className="loyalty-plan-card__item">
-                    <span>{item.servico?.nome || `Servico #${item.servico_id}`}</span>
+                    <span>{item.servico?.nome || `Serviço #${item.servico_id}`}</span>
                     <strong>{item.quantidade_por_ciclo} por ciclo</strong>
                   </div>
                 ))}

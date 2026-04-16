@@ -1206,7 +1206,7 @@ router.get('/:id/images', async (req, res) => {
 
     if (!Number.isFinite(estabelecimentoId)) {
 
-      return res.status(400).json({ error: 'invalid_estabelecimento', message: 'Identificador invalido.' });
+      return res.status(400).json({ error: 'invalid_estabelecimento', message: 'Identificador inválido.' });
 
     }
 
@@ -1234,7 +1234,7 @@ router.get('/:id/reviews', async (req, res) => {
   try {
     const estabelecimentoId = Number(req.params.id);
     if (!Number.isFinite(estabelecimentoId)) {
-      return res.status(400).json({ error: 'invalid_estabelecimento', message: 'Identificador invalido.' });
+      return res.status(400).json({ error: 'invalid_estabelecimento', message: 'Identificador inválido.' });
     }
 
     const est = await ensureEstabelecimento(estabelecimentoId);
@@ -2381,7 +2381,7 @@ router.put('/:id/plan', auth, isEstabelecimento, async (req, res) => {
 
     if (!PLAN_TIERS.includes(rawPlan)) {
 
-      return res.status(400).json({ error: 'invalid_plan', message: 'Plano invalido.' });
+      return res.status(400).json({ error: 'invalid_plan', message: 'Plano inválido.' });
 
     }
 
@@ -2456,7 +2456,7 @@ router.put('/:id/plan', auth, isEstabelecimento, async (req, res) => {
     if (Object.prototype.hasOwnProperty.call(req.body || {}, 'status')) {
       const nextStatus = String(req.body.status || '').toLowerCase();
       if (!PLAN_STATUS.includes(nextStatus)) {
-        return res.status(400).json({ error: 'invalid_status', message: 'Status de plano invalido.' });
+        return res.status(400).json({ error: 'invalid_status', message: 'Status de plano inválido.' });
       }
       planStatus = nextStatus;
     }
@@ -2469,7 +2469,7 @@ router.put('/:id/plan', auth, isEstabelecimento, async (req, res) => {
       Object.prototype.hasOwnProperty.call(req.body || {}, 'trialEndsAt');
 
     if (trialEver && !trialActive && wantsTrial) {
-      return res.status(400).json({ error: 'trial_already_used', message: 'O teste gratis ja foi usado nesta conta.' });
+      return res.status(400).json({ error: 'trial_already_used', message: 'O teste grátis já foi usado nesta conta.' });
     }
 
     let planTrialEndsAt = context.trialEndsAt;
@@ -2481,7 +2481,7 @@ router.put('/:id/plan', auth, isEstabelecimento, async (req, res) => {
     } else if (req.body?.trialEndsAt) {
       const parsed = new Date(req.body.trialEndsAt);
       if (Number.isNaN(parsed.getTime())) {
-        return res.status(400).json({ error: 'invalid_trial', message: 'trialEndsAt invalido.' });
+        return res.status(400).json({ error: 'invalid_trial', message: 'Valor inválido para trialEndsAt.' });
       }
       planTrialEndsAt = parsed;
     } else if (req.body?.trialDays) {
@@ -2509,7 +2509,7 @@ router.put('/:id/plan', auth, isEstabelecimento, async (req, res) => {
 
       if (Number.isNaN(parsed.getTime())) {
 
-        return res.status(400).json({ error: 'invalid_active_until', message: 'activeUntil invalido.' });
+        return res.status(400).json({ error: 'invalid_active_until', message: 'Valor inválido para activeUntil.' });
 
       }
 
@@ -2597,7 +2597,7 @@ router.put('/:id/review', auth, isCliente, async (req, res) => {
 
     if (!Number.isFinite(estabelecimentoId)) {
 
-      return res.status(400).json({ error: 'invalid_estabelecimento', message: 'Identificador invalido.' });
+      return res.status(400).json({ error: 'invalid_estabelecimento', message: 'Identificador inválido.' });
 
     }
 
@@ -2683,7 +2683,7 @@ router.delete('/:id/review', auth, isCliente, async (req, res) => {
 
     if (!Number.isFinite(estabelecimentoId)) {
 
-      return res.status(400).json({ error: 'invalid_estabelecimento', message: 'Identificador invalido.' });
+      return res.status(400).json({ error: 'invalid_estabelecimento', message: 'Identificador inválido.' });
 
     }
 
@@ -2727,7 +2727,7 @@ router.post('/:id/favorite', auth, isCliente, async (req, res) => {
 
     if (!Number.isFinite(estabelecimentoId)) {
 
-      return res.status(400).json({ error: 'invalid_estabelecimento', message: 'Identificador invalido.' });
+      return res.status(400).json({ error: 'invalid_estabelecimento', message: 'Identificador inválido.' });
 
     }
 
@@ -2769,7 +2769,7 @@ router.delete('/:id/favorite', auth, isCliente, async (req, res) => {
 
     if (!Number.isFinite(estabelecimentoId)) {
 
-      return res.status(400).json({ error: 'invalid_estabelecimento', message: 'Identificador invalido.' });
+      return res.status(400).json({ error: 'invalid_estabelecimento', message: 'Identificador inválido.' });
 
     }
 

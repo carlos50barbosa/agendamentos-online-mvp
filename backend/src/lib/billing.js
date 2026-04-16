@@ -207,12 +207,12 @@ export async function createMercadoPagoPixCheckout({
   plan,
   billingCycle,
 }) {
-  if (!estabelecimento?.id) throw new Error('Estabelecimento invalido')
+  if (!estabelecimento?.id) throw new Error('Estabelecimento inválido')
   const normalizedPlan = String(plan || '').toLowerCase()
-  if (!PLAN_TIERS.includes(normalizedPlan)) throw new Error('Plano invalido')
+  if (!PLAN_TIERS.includes(normalizedPlan)) throw new Error('Plano inválido')
   const normalizedCycle = normalizeBillingCycle(billingCycle)
   const priceCents = getPlanPriceCents(normalizedPlan, normalizedCycle)
-  if (!priceCents) throw new Error('Preco do plano nao configurado')
+  if (!priceCents) throw new Error('Preço do plano não configurado')
 
   const amountNum = Number((Number(priceCents || 0) / 100).toFixed(2))
   const paymentClient = ensureMercadoPagoPayment()
@@ -288,9 +288,9 @@ export async function createMercadoPagoPixTopupCheckout({
   pack = null,
   availablePacks = null,
 }) {
-  if (!estabelecimento?.id) throw new Error('Estabelecimento invalido')
+  if (!estabelecimento?.id) throw new Error('Estabelecimento inválido')
   const pkg = normalizeTopupPackage(pack) || resolveTopupPackage(messages, { availablePacks })
-  if (!pkg) throw new Error('Pacote de mensagens invalido')
+  if (!pkg) throw new Error('Pacote de mensagens inválido')
 
   const amountNum = Number((Number(pkg.priceCents || 0) / 100).toFixed(2))
   const paymentClient = ensureMercadoPagoPayment()
@@ -472,7 +472,7 @@ export async function syncMercadoPagoPayment(paymentId, eventPayload = null) {
 
   payment = await client.get({ id: String(paymentId) })
   logPaymentSnapshot(payment)
-  if (!payment?.id) throw new Error('Pagamento nao encontrado')
+  if (!payment?.id) throw new Error('Pagamento não encontrado')
 
   const status = String(payment.status || '').toLowerCase()
   const externalRef = String(payment.external_reference || '')

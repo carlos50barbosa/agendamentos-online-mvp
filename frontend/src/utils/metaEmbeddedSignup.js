@@ -17,7 +17,7 @@ function initSdk({ appId, apiVersion }) {
   if (typeof window === 'undefined' || !window.FB?.init) {
     throw createLaunchError(
       'wa_embedded_signup_sdk_unavailable',
-      'O SDK da Meta nao esta disponivel neste navegador.'
+      'O SDK da Meta não está disponível neste navegador.'
     );
   }
 
@@ -140,7 +140,7 @@ export async function launchWhatsAppEmbeddedSignup(config) {
   if (!appId || !configId) {
     throw createLaunchError(
       'wa_embedded_signup_config_missing',
-      'A configuracao publica da Meta esta incompleta para iniciar o WhatsApp Business.'
+      'A configuração pública da Meta está incompleta para iniciar o WhatsApp Business.'
     );
   }
 
@@ -216,7 +216,7 @@ export async function launchWhatsAppEmbeddedSignup(config) {
             cancelled ? 'wa_embedded_signup_cancelled' : 'wa_embedded_signup_no_code',
             cancelled
               ? 'Conexão cancelada antes da conclusão.'
-              : 'A Meta nao retornou o codigo de autorizacao do WhatsApp.',
+              : 'A Meta não retornou o código de autorização do WhatsApp.',
             {
               sessionInfo: latestSession,
               response,

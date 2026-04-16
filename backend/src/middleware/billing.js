@@ -63,7 +63,7 @@ function buildSubscriptionBlockMessage(context, fallbackMessage) {
   if (status === 'canceled') {
     return 'Sua assinatura foi cancelada. Reative o plano para continuar usando este recurso.'
   }
-  return 'Sua assinatura nao permite usar este recurso agora. Regularize o pagamento na area de assinatura.'
+  return 'Sua assinatura não permite usar este recurso agora. Regularize o pagamento na área de assinatura.'
 }
 
 export function ensureSubscriptionOperationalAccess({

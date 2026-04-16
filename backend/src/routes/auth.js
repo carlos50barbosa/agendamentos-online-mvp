@@ -10,10 +10,72 @@ import crypto from 'crypto';
 import { consumeLinkToken } from '../lib/wa_store.js';
 import { saveAvatarFromDataUrl, removeAvatarFile } from '../lib/avatar.js';
 import { MAX_TRIAL_DAYS } from '../lib/plans.js';
+import { config } from '../lib/config.js';
+import { buildRateLimitClientKey, consumeRateLimit, setRateLimitHeaders } from '../lib/request_rate_limit.js';
+import { logSecurityEvent } from '../lib/route_access.js';
 
 const router = Router();
 const DAY_MS = 86400000;
 const TRIAL_PLANS = new Set(['starter', 'pro']);
+
+function fingerprintAuthSubject(value, fallback = 'missing') {
+  const normalized = String(value ?? '').trim().toLowerCase();
+  if (!normalized) return fallback;
+  return crypto.createHash('sha256').update(normalized).digest('hex').slice(0, 24);
+}
+
+async function enforceAuthRateLimit(req, res, {
+  routeKey,
+  ipWindowMs,
+  ipMax,
+  subjectWindowMs = null,
+  subjectMax = null,
+  subjectValue = '',
+  subjectLabel = 'subject_hash',
+} = {}) {
+  const checks = [
+    {
+      scope: 'ip',
+      bucketKey: `${routeKey}:ip:${buildRateLimitClientKey(req)}`,
+      windowMs: ipWindowMs,
+      max: ipMax,
+      extraDetails: {},
+    },
+  ];
+
+  if (subjectWindowMs && subjectMax) {
+    const subjectHash = fingerprintAuthSubject(subjectValue);
+    checks.push({
+      scope: 'subject',
+      bucketKey: `${routeKey}:subject:${subjectHash}`,
+      windowMs: subjectWindowMs,
+      max: subjectMax,
+      extraDetails: { [subjectLabel]: subjectHash },
+    });
+  }
+
+  for (const check of checks) {
+    const result = await consumeRateLimit({
+      bucketKey: check.bucketKey,
+      windowMs: check.windowMs,
+      max: check.max,
+    });
+    setRateLimitHeaders(res, result);
+    if (!result.limited) continue;
+
+    logSecurityEvent(`${routeKey}:rate-limit`, req, {
+      scope: check.scope,
+      limit: result.limit,
+      retry_after_sec: result.retryAfterSec,
+      store_driver: result.storeDriver || null,
+      ...check.extraDetails,
+    }, { level: 'warn' });
+    res.status(429).json({ error: 'rate_limited' });
+    return true;
+  }
+
+  return false;
+}
 
 const toBool = (value) => {
   if (value === true || value === false) return Boolean(value);
@@ -108,7 +170,7 @@ router.post('/register', async (req, res) => {
     const cpfCnpjRaw = req.body?.cpf_cnpj ?? req.body?.cpfCnpj;
     const { digits: cpfCnpjDigits } = normalizeCpfCnpj(cpfCnpjRaw);
     if (cpfCnpjDigits && ![11, 14].includes(cpfCnpjDigits.length)) {
-      return res.status(400).json({ error: 'cpf_cnpj_invalido', message: 'Informe um CPF ou CNPJ valido.' });
+      return res.status(400).json({ error: 'cpf_cnpj_invalido', message: 'Informe um CPF ou CNPJ válido.' });
     }
     const cpfCnpjValue = cpfCnpjDigits ? cpfCnpjDigits : null;
 
@@ -305,6 +367,17 @@ router.post('/login', async (req, res) => {
       return res.status(400).json({ error: 'missing_fields', message: 'Informe email e senha.' });
     }
     const email = String(emailRaw).trim().toLowerCase();
+    if (await enforceAuthRateLimit(req, res, {
+      routeKey: 'auth:login',
+      ipWindowMs: config.security?.rateLimit?.auth?.login?.windowMs,
+      ipMax: config.security?.rateLimit?.auth?.login?.max,
+      subjectWindowMs: config.security?.rateLimit?.auth?.login?.accountWindowMs,
+      subjectMax: config.security?.rateLimit?.auth?.login?.accountMax,
+      subjectValue: email,
+      subjectLabel: 'email_hash',
+    })) {
+      return;
+    }
 
     const [rows] = await pool.query(
       'SELECT id, nome, email, telefone, data_nascimento, cpf_cnpj, cep, endereco, numero, complemento, bairro, cidade, estado, avatar_url, senha_hash, tipo, notify_email_estab, notify_whatsapp_estab, plan, plan_status, plan_trial_ends_at, plan_active_until, plan_subscription_id FROM usuarios WHERE LOWER(email)=? LIMIT 1',
@@ -417,7 +490,7 @@ router.put('/me', auth, async (req, res) => {
     const cpfCnpjRaw = req.body?.cpf_cnpj ?? req.body?.cpfCnpj;
     const cpfCnpjInfo = normalizeCpfCnpj(cpfCnpjRaw);
     if (cpfCnpjInfo.provided && cpfCnpjInfo.digits && ![11, 14].includes(cpfCnpjInfo.digits.length)) {
-      return res.status(400).json({ error: 'cpf_cnpj_invalido', message: 'Informe um CPF ou CNPJ valido.' });
+      return res.status(400).json({ error: 'cpf_cnpj_invalido', message: 'Informe um CPF ou CNPJ válido.' });
     }
     const cpfCnpjNext = cpfCnpjInfo.provided
       ? (cpfCnpjInfo.digits || null)
@@ -434,21 +507,21 @@ router.put('/me', auth, async (req, res) => {
     const emailNorm = email.toLowerCase();
     const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRe.test(emailNorm)) {
-      return res.status(400).json({ error: 'email_invalido', message: 'Email invalido.' });
+      return res.status(400).json({ error: 'email_invalido', message: 'E-mail inválido.' });
     }
 
     if (addressRequired) {
       if (cepDigitsRaw.length !== 8) {
-        return res.status(400).json({ error: 'cep_invalido', message: 'Informe um CEP valido com 8 digitos.' });
+        return res.status(400).json({ error: 'cep_invalido', message: 'Informe um CEP válido com 8 dígitos.' });
       }
       if (!enderecoTrim) {
-        return res.status(400).json({ error: 'endereco_obrigatorio', message: 'Informe o endereco do estabelecimento.' });
+        return res.status(400).json({ error: 'endereco_obrigatorio', message: 'Informe o endereço do estabelecimento.' });
       }
       if (!numeroTrim) {
-        return res.status(400).json({ error: 'numero_obrigatorio', message: 'Informe o numero do endereco.' });
+        return res.status(400).json({ error: 'numero_obrigatorio', message: 'Informe o número do endereço.' });
       }
       if (!bairroTrim) {
-        return res.status(400).json({ error: 'bairro_obrigatorio', message: 'Informe o bairro do endereco.' });
+        return res.status(400).json({ error: 'bairro_obrigatorio', message: 'Informe o bairro do endereço.' });
       }
       if (!cidadeTrim) {
         return res.status(400).json({ error: 'cidade_obrigatoria', message: 'Informe a cidade.' });
@@ -458,7 +531,7 @@ router.put('/me', auth, async (req, res) => {
       }
     } else {
       if (cepDigitsRaw.length && cepDigitsRaw.length !== 8) {
-        return res.status(400).json({ error: 'cep_invalido', message: 'Informe um CEP valido com 8 digitos.' });
+        return res.status(400).json({ error: 'cep_invalido', message: 'Informe um CEP válido com 8 dígitos.' });
       }
       if (estadoTrim && !/^[A-Z]{2}$/.test(estadoTrim)) {
         return res.status(400).json({ error: 'estado_invalido', message: 'Informe a UF com 2 letras.' });
@@ -467,7 +540,7 @@ router.put('/me', auth, async (req, res) => {
 
     const phoneClean = telefone ? telefone.replace(/[^\d+]/g, '') : null;
     if (phoneClean && phoneClean.length > 25) {
-      return res.status(400).json({ error: 'telefone_invalido', message: 'Telefone invalido.' });
+      return res.status(400).json({ error: 'telefone_invalido', message: 'Telefone inválido.' });
     }
 
     const isEstabUser = req.user?.tipo === 'estabelecimento';
@@ -583,7 +656,7 @@ router.put('/me', auth, async (req, res) => {
 
       const [[userRow]] = await pool.query("SELECT id, nome, email, telefone, data_nascimento, cpf_cnpj, cep, endereco, numero, complemento, bairro, cidade, estado, avatar_url, tipo, notify_email_estab, notify_whatsapp_estab, plan, plan_status, plan_trial_ends_at, plan_active_until, plan_subscription_id FROM usuarios WHERE id=? LIMIT 1", [userId]);
       if (!userRow) {
-        return res.status(404).json({ error: 'not_found', message: 'Usuario nao encontrado.' });
+        return res.status(404).json({ error: 'not_found', message: 'Usuário não encontrado.' });
       }
 
       const mergedUser = {
@@ -619,7 +692,7 @@ router.put('/me', auth, async (req, res) => {
 
     const [[userRow]] = await pool.query("SELECT id, nome, email, telefone, data_nascimento, cpf_cnpj, cep, endereco, numero, complemento, bairro, cidade, estado, avatar_url, tipo, notify_email_estab, notify_whatsapp_estab, plan, plan_status, plan_trial_ends_at, plan_active_until, plan_subscription_id FROM usuarios WHERE id=? LIMIT 1", [userId]);
     if (!userRow) {
-      return res.status(404).json({ error: 'not_found', message: 'Usuario nao encontrado.' });
+      return res.status(404).json({ error: 'not_found', message: 'Usuário não encontrado.' });
     }
 
     const normalizedUser = {
@@ -646,28 +719,28 @@ router.post('/me/email-confirm', auth, async (req, res) => {
     const userId = req.user.id;
     const code = String(req.body?.code || '').trim();
     if (!/^[0-9]{6}$/.test(code)) {
-      return res.status(400).json({ error: 'codigo_invalido', message: 'Informe o codigo de 6 digitos.' });
+      return res.status(400).json({ error: 'codigo_invalido', message: 'Informe o código de 6 dígitos.' });
     }
 
     const [rows] = await pool.query('SELECT id, new_email, code_hash, expires_at FROM email_change_tokens WHERE user_id=? LIMIT 1', [userId]);
     const token = rows?.[0];
     if (!token) {
-      return res.status(404).json({ error: 'codigo_expirado', message: 'Nenhum pedido de troca de email encontrado.' });
+      return res.status(404).json({ error: 'codigo_expirado', message: 'Nenhum pedido de troca de e-mail encontrado.' });
     }
     if (new Date(token.expires_at).getTime() < Date.now()) {
       await pool.query('DELETE FROM email_change_tokens WHERE id=?', [token.id]);
-      return res.status(400).json({ error: 'codigo_expirado', message: 'Codigo expirado. Solicite novamente.' });
+      return res.status(400).json({ error: 'codigo_expirado', message: 'Código expirado. Solicite novamente.' });
     }
 
     const ok = await bcrypt.compare(code, token.code_hash);
     if (!ok) {
-      return res.status(400).json({ error: 'codigo_invalido', message: 'Codigo invalido.' });
+      return res.status(400).json({ error: 'codigo_invalido', message: 'Código inválido.' });
     }
 
     const newEmail = String(token.new_email || '').trim();
     if (!newEmail) {
       await pool.query('DELETE FROM email_change_tokens WHERE id=?', [token.id]);
-      return res.status(400).json({ error: 'codigo_invalido', message: 'Codigo invalido.' });
+      return res.status(400).json({ error: 'codigo_invalido', message: 'Código inválido.' });
     }
 
     await pool.query('UPDATE usuarios SET email=? WHERE id=?', [newEmail, userId]);
@@ -675,7 +748,7 @@ router.post('/me/email-confirm', auth, async (req, res) => {
 
     const [[userRow]] = await pool.query("SELECT id, nome, email, telefone, data_nascimento, cpf_cnpj, cep, endereco, numero, complemento, bairro, cidade, estado, avatar_url, tipo, notify_email_estab, notify_whatsapp_estab, plan, plan_status, plan_trial_ends_at, plan_active_until, plan_subscription_id FROM usuarios WHERE id=? LIMIT 1", [userId]);
     if (!userRow) {
-      return res.status(404).json({ error: 'not_found', message: 'Usuario nao encontrado.' });
+      return res.status(404).json({ error: 'not_found', message: 'Usuário não encontrado.' });
     }
 
     const normalized = {
@@ -699,6 +772,17 @@ router.post('/forgot', async (req, res) => {
     const emailRaw = req.body?.email;
     if (!emailRaw) return res.status(400).json({ error: 'missing_email' });
     const email = String(emailRaw).trim().toLowerCase();
+    if (await enforceAuthRateLimit(req, res, {
+      routeKey: 'auth:forgot',
+      ipWindowMs: config.security?.rateLimit?.auth?.forgot?.windowMs,
+      ipMax: config.security?.rateLimit?.auth?.forgot?.max,
+      subjectWindowMs: config.security?.rateLimit?.auth?.forgot?.accountWindowMs,
+      subjectMax: config.security?.rateLimit?.auth?.forgot?.accountMax,
+      subjectValue: email,
+      subjectLabel: 'email_hash',
+    })) {
+      return;
+    }
 
     // Busca usuário — mas SEM revelar se existe ou não
     let user = null;
@@ -767,6 +851,13 @@ router.post('/reset', async (req, res) => {
     const token = req.body?.token;
     const senha = req.body?.senha;
     if (!token || !senha) return res.status(400).json({ error: 'missing_fields' });
+    if (await enforceAuthRateLimit(req, res, {
+      routeKey: 'auth:reset',
+      ipWindowMs: config.security?.rateLimit?.auth?.reset?.windowMs,
+      ipMax: config.security?.rateLimit?.auth?.reset?.max,
+    })) {
+      return;
+    }
 
     const secret = process.env.JWT_SECRET;
     if (!secret) return res.status(500).json({ error: 'server_config', message: 'JWT_SECRET ausente.' });

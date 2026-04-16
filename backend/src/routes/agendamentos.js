@@ -1640,7 +1640,7 @@ router.post('/estabelecimento', authRequired, isEstabelecimento, ensureSubscript
       }
       txStarted = false;
       if (conn) conn.release();
-      return res.status(400).json({ error: 'invalid_total', message: 'ServiÃ§o sem preÃ§o configurado' });
+      return res.status(400).json({ error: 'invalid_total', message: 'Serviço sem preço configurado.' });
     }
     await conn.query('UPDATE agendamentos SET total_centavos=? WHERE id=?', [totalCentavosFinal, ins.insertId]);
 

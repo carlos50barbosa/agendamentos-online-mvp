@@ -320,7 +320,7 @@ function BillingStatusBanner({ status, user, planInfo }) {
 
     title = `Pagamento ${timeLabel}`;
 
-    body = dueLabel ? `Regularize ate ${dueLabel} para manter o acesso.` : 'Regularize para manter o acesso.';
+    body = dueLabel ? `Regularize até ${dueLabel} para manter o acesso.` : 'Regularize para manter o acesso.';
 
   } else if (state === 'overdue') {
 
@@ -345,7 +345,7 @@ function BillingStatusBanner({ status, user, planInfo }) {
 
     title = 'Pagamento pendente';
 
-    body = 'Existe uma cobranca pendente na assinatura. Atualize cartao ou gere um PIX para regularizar.';
+    body = 'Existe uma cobrança pendente na assinatura. Atualize o cartão ou gere um PIX para regularizar.';
 
     ctaLabel = 'Abrir assinatura';
 
@@ -1172,7 +1172,7 @@ const topbarAlert = useMemo(() => {
 
         variant: 'warning',
 
-        message: 'Existe uma cobranca pendente na assinatura. Atualize o cartao ou gere um PIX para regularizar.',
+        message: 'Existe uma cobrança pendente na assinatura. Atualize o cartão ou gere um PIX para regularizar.',
 
       };
 
@@ -1389,7 +1389,7 @@ const topbarAlert = useMemo(() => {
 
                   <strong>Agendamentos Online</strong>
 
-                  <small>Agenda, clientes e operacao em um so lugar</small>
+                  <small>Agenda, clientes e operação em um só lugar</small>
 
                 </span>
 
@@ -1437,7 +1437,7 @@ const topbarAlert = useMemo(() => {
                         aria-label="Menu principal"
                         ref={topbarMenuPanelRef}
                       >
-                        <nav className="app-topbar__menu-nav" aria-label="Navegacao principal">
+                        <nav className="app-topbar__menu-nav" aria-label="Navegação principal">
                           <div className="sidelist">
                             {topbarNavigation.sections.map((section) => (
                               <div key={section.key} className="sidelist__section">

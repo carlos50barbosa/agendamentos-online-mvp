@@ -136,7 +136,7 @@ function describeGraphFailure(err, phase) {
     return {
       status: 401,
       code: 'wa_manual_token_invalid',
-      message: 'O access token informado e invalido ou expirou. Gere um token valido na Meta e tente novamente.',
+      message: 'O access token informado é inválido ou expirou. Gere um token válido na Meta e tente novamente.',
       graph,
     };
   }
@@ -145,7 +145,7 @@ function describeGraphFailure(err, phase) {
     return {
       status: 403,
       code: 'wa_manual_permission_missing',
-      message: 'O token informado nao possui permissoes suficientes para acessar a WhatsApp Cloud API.',
+      message: 'O token informado não possui permissões suficientes para acessar a WhatsApp Cloud API.',
       graph,
     };
   }
@@ -154,7 +154,7 @@ function describeGraphFailure(err, phase) {
     return {
       status: 422,
       code: 'wa_manual_phone_not_found',
-      message: 'O phone_number_id informado nao foi encontrado ou nao pertence a esse token.',
+      message: 'O phone_number_id informado não foi encontrado ou não pertence a esse token.',
       graph,
     };
   }
@@ -163,7 +163,7 @@ function describeGraphFailure(err, phase) {
     return {
       status: 422,
       code: 'wa_manual_waba_not_found',
-      message: 'O WABA ID informado nao foi encontrado ou nao pertence a esse token.',
+      message: 'O WABA ID informado não foi encontrado ou não pertence a esse token.',
       graph,
     };
   }
@@ -172,7 +172,7 @@ function describeGraphFailure(err, phase) {
     return {
       status: 422,
       code: 'wa_manual_business_not_found',
-      message: 'O Business Account ID informado nao foi encontrado ou nao pertence a esse token.',
+      message: 'O Business Account ID informado não foi encontrado ou não pertence a esse token.',
       graph,
     };
   }
@@ -215,7 +215,7 @@ function assertManualInput(input) {
     throw createHttpError(
       400,
       'wa_manual_missing_fields',
-      `Preencha ${missing.join(', ')} antes de validar a conexao.`,
+      `Preencha ${missing.join(', ')} antes de validar a conexão.`,
       { missing_fields: missing }
     );
   }
@@ -271,7 +271,7 @@ async function validateBusinessOwnership(accessToken, businessAccountId, wabaId,
     throw createHttpError(
       422,
       'wa_manual_business_mismatch',
-      'O Business Account ID informado nao possui o WABA ID fornecido.',
+      'O Business Account ID informado não possui o WABA ID fornecido.',
       { business_account_id: businessAccountId, waba_id: wabaId }
     );
   }
@@ -424,7 +424,7 @@ async function runManualValidation({ estabelecimentoId, payload }, deps = {}) {
     throw createHttpError(
       422,
       'wa_manual_waba_phone_mismatch',
-      'O phone_number_id informado nao pertence ao WABA ID fornecido.',
+      'O phone_number_id informado não pertence ao WABA ID fornecido.',
       {
         waba_id: input.wabaId,
         phone_number_id: input.phoneNumberId,
@@ -542,7 +542,7 @@ export async function validateManualWhatsAppAccount({ estabelecimentoId, payload
 export async function connectManualWhatsAppAccount({ estabelecimentoId, payload }, deps = {}) {
   const tenantId = Number(estabelecimentoId || 0) || null;
   if (!tenantId) {
-    throw createHttpError(401, 'wa_manual_unauthorized', 'Tenant nao autenticado.');
+    throw createHttpError(401, 'wa_manual_unauthorized', 'Tenant não autenticado.');
   }
 
   let validation = null;
@@ -553,7 +553,7 @@ export async function connectManualWhatsAppAccount({ estabelecimentoId, payload 
       estabelecimentoId: tenantId,
       payload,
       code: err?.code || 'wa_manual_validation_failed',
-      message: err?.message || 'Falha na validacao manual do WhatsApp.',
+      message: err?.message || 'Falha na validação manual do WhatsApp.',
     }, deps).catch(() => null);
     throw err;
   }
@@ -582,7 +582,7 @@ export async function connectManualWhatsAppAccount({ estabelecimentoId, payload 
       throw createHttpError(
         409,
         'wa_manual_phone_in_use',
-        'Esse numero ja esta conectado a outro estabelecimento no Agendamentos Online.'
+        'Esse número já está conectado a outro estabelecimento no Agendamentos Online.'
       );
     }
     await releasePhone(conflictingAccount.estabelecimento_id).catch(() => null);

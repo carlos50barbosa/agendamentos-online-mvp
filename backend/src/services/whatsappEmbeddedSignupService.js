@@ -124,7 +124,7 @@ function ensureEmbeddedSignupConfigured() {
     throw createHttpError(
       500,
       'wa_embedded_signup_config_missing',
-      'A configuracao do Embedded Signup da Meta esta incompleta no backend.',
+      'A configuração do Embedded Signup da Meta está incompleta no backend.',
       {
         app_id: Boolean(APP_ID),
         app_secret: Boolean(APP_SECRET),
@@ -188,7 +188,7 @@ function describeEmbeddedSignupError(err) {
     return {
       status: 401,
       code: 'wa_embedded_signup_token_invalid',
-      message: 'A Meta retornou um token invalido para o WhatsApp. Tente conectar novamente.',
+      message: 'A Meta retornou um token inválido para o WhatsApp. Tente conectar novamente.',
       graph,
     };
   }
@@ -197,7 +197,7 @@ function describeEmbeddedSignupError(err) {
     return {
       status: 403,
       code: 'wa_embedded_signup_permission_missing',
-      message: 'A conexao foi autorizada, mas faltam permissoes da Meta para concluir o WhatsApp.',
+      message: 'A conexão foi autorizada, mas faltam permissões da Meta para concluir o WhatsApp.',
       graph,
     };
   }
@@ -206,7 +206,7 @@ function describeEmbeddedSignupError(err) {
     return {
       status: 400,
       code: 'wa_embedded_signup_code_expired',
-      message: 'O codigo do Embedded Signup expirou antes da troca. Inicie a conexao novamente.',
+      message: 'O código do Embedded Signup expirou antes da troca. Inicie a conexão novamente.',
       graph,
     };
   }
@@ -309,10 +309,10 @@ export async function completeEmbeddedSignup({
   const tenantId = Number(estabelecimentoId || 0);
   const signupCode = String(code || '').trim();
   if (!tenantId) {
-    throw createHttpError(401, 'wa_embedded_signup_unauthorized', 'Tenant nao autenticado.');
+    throw createHttpError(401, 'wa_embedded_signup_unauthorized', 'Tenant não autenticado.');
   }
   if (!signupCode) {
-    throw createHttpError(400, 'wa_embedded_signup_code_missing', 'Codigo do Embedded Signup ausente.');
+    throw createHttpError(400, 'wa_embedded_signup_code_missing', 'Código do Embedded Signup ausente.');
   }
 
   const normalizedSession = normalizeEmbeddedSignupSessionInfo(sessionInfo);
@@ -370,7 +370,7 @@ export async function completeEmbeddedSignup({
     throw createHttpError(
       502,
       'wa_embedded_signup_missing_access_token',
-      'A Meta nao retornou um access token valido para o WhatsApp.'
+      'A Meta não retornou um access token válido para o WhatsApp.'
     );
   }
 
@@ -440,7 +440,7 @@ export async function completeEmbeddedSignup({
     throw createHttpError(
       422,
       'wa_embedded_signup_missing_assets',
-      `A Meta concluiu a autorizacao, mas nao retornou ${missingAssets.join(', ')}. Reconecte o WhatsApp e tente novamente.`,
+      `A Meta concluiu a autorização, mas não retornou ${missingAssets.join(', ')}. Reconecte o WhatsApp e tente novamente.`,
       { missing_assets: missingAssets }
     );
   }
@@ -471,7 +471,7 @@ export async function completeEmbeddedSignup({
       throw createHttpError(
         409,
         'wa_embedded_signup_phone_in_use',
-        'Esse numero ja esta conectado a outro estabelecimento no Agendamentos Online.'
+        'Esse número já está conectado a outro estabelecimento no Agendamentos Online.'
       );
     }
 

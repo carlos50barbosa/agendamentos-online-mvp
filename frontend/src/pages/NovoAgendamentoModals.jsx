@@ -1621,7 +1621,7 @@ export default function NovoAgendamentoModals(props) {
 
                         <label className="booking-modal__field">
 
-                          <span className="booking-modal__label">Endereco (opcional)</span>
+                          <span className="booking-modal__label">Endereço (opcional)</span>
 
                           <input
 
@@ -1641,7 +1641,7 @@ export default function NovoAgendamentoModals(props) {
 
                         <label className="booking-modal__field">
 
-                          <span className="booking-modal__label">Numero (opcional)</span>
+                          <span className="booking-modal__label">Número (opcional)</span>
 
                           <input
 
@@ -1886,7 +1886,7 @@ export default function NovoAgendamentoModals(props) {
                       </svg>
                     </div>
                     <p style={{ marginTop: 0 }}>
-                      O sinal foi confirmado e o agendamento ja esta reservado.
+                      O sinal foi confirmado e o agendamento já está reservado.
                     </p>
                     <div className="confirmation-card">
                       <dl className="confirmation-details">
