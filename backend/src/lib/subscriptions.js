@@ -306,6 +306,43 @@ export async function listSubscriptionEventsForEstabelecimento(estabelecimentoId
   }))
 }
 
+export async function listSubscriptionEventsBySubscriptionId(subscriptionId, { limit = 20 } = {}) {
+  if (!subscriptionId) return []
+  const safeLimit = Math.max(1, Math.min(Number(limit || 20) || 20, 100))
+  const [rows] = await pool.query(
+    `SELECT se.id,
+            se.subscription_id,
+            se.event_type,
+            se.gateway_event_id,
+            se.payload,
+            se.created_at,
+            s.plan,
+            s.status,
+            s.payment_method,
+            s.gateway,
+            s.billing_cycle
+       FROM subscription_events se
+       JOIN subscriptions s ON s.id = se.subscription_id
+      WHERE se.subscription_id=?
+      ORDER BY se.created_at DESC, se.id DESC
+      LIMIT ${safeLimit}`,
+    [subscriptionId]
+  )
+  return rows.map((row) => ({
+    id: row.id,
+    subscription_id: row.subscription_id,
+    event_type: row.event_type,
+    gateway_event_id: row.gateway_event_id || null,
+    payload: row.payload ? sanitizeMercadoPagoSensitivePayload(safeJsonParse(row.payload)) : null,
+    created_at: row.created_at ? new Date(row.created_at).toISOString() : null,
+    plan: row.plan || null,
+    status: normalizeSubscriptionStatus(row.status, { paymentMethod: row.payment_method }),
+    payment_method: normalizePaymentMethod(row.payment_method),
+    gateway: row.gateway || null,
+    billing_cycle: row.billing_cycle || 'mensal',
+  }))
+}
+
 export function serializeSubscription(subscription) {
   if (!subscription) return null
   return {

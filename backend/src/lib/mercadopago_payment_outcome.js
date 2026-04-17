@@ -500,7 +500,13 @@ export function enrichMercadoPagoSubscriptionEvent(event, options = {}) {
 export function findLatestMercadoPagoPaymentResult(events = [], { includePending = true, onlyFailures = false } = {}) {
   const list = Array.isArray(events) ? events : []
   for (const event of list) {
-    const paymentResult = event?.payment_result || extractMercadoPagoPaymentResultFromPayload(event?.payload, { includePending })
+    const storedPaymentResult =
+      normalizeStoredPaymentResult(event?.payment_result) ||
+      normalizeStoredPaymentResult(event?.payload?.payment_result)
+    if (storedPaymentResult?.status_group === 'approved') {
+      return null
+    }
+    const paymentResult = storedPaymentResult || extractMercadoPagoPaymentResultFromPayload(event?.payload, { includePending })
     if (!paymentResult) continue
     if (onlyFailures && paymentResult.status_group !== 'rejected') continue
     if (!includePending && paymentResult.status_group === 'pending') continue

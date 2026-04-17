@@ -40,6 +40,7 @@ import {
   getSubscriptionById,
   getSubscriptionByGatewayId,
   getSubscriptionEventByGatewayEventId,
+  listSubscriptionEventsBySubscriptionId,
   listSubscriptionsForEstabelecimento,
   listSubscriptionEventsForEstabelecimento,
   serializeSubscription,
@@ -62,6 +63,11 @@ import {
   findLatestMercadoPagoPaymentResult,
   summarizeMercadoPagoGatewayResult,
 } from '../lib/mercadopago_payment_outcome.js'
+import {
+  buildRecoveryChargeFingerprint,
+  canCreateSubscription,
+  canRunRecoveryCharge,
+} from '../lib/subscription_charge_policy.js'
 import {
   syncClientLoyaltyAuthorizedPaymentFromGateway,
   syncClientLoyaltyCardSubscriptionFromGateway,
@@ -312,6 +318,98 @@ function logMercadoPagoPaymentDecision(tag, {
   })
 }
 
+function enrichSubscriptionEvents(events = []) {
+  return (Array.isArray(events) ? events : [])
+    .map((event) => enrichMercadoPagoSubscriptionEvent(event, { includePending: true }))
+}
+
+async function listRecentSubscriptionEvents(subscriptionId, { limit = 20 } = {}) {
+  if (!subscriptionId) return []
+  return enrichSubscriptionEvents(
+    await listSubscriptionEventsBySubscriptionId(subscriptionId, { limit })
+  )
+}
+
+function serializeRecoveryGuard(guard = null) {
+  if (!guard || typeof guard !== 'object') return null
+  return {
+    can_run: guard.can_run === true,
+    allowed: guard.allowed === true,
+    should_defer: guard.should_defer === true,
+    duplicate_risk: guard.duplicate_risk === true,
+    recent_similar_attempt_found: guard.recent_similar_attempt_found === true,
+    cooldown_active: guard.cooldown_active === true,
+    decision: guard.decision || null,
+    normalized_reason: guard.normalized_reason || null,
+    status: guard.status || null,
+    status_detail: guard.status_detail || null,
+    action_recommendation: guard.action_recommendation || null,
+    user_message: guard.user_message || null,
+    support_message: guard.support_message || null,
+    matched_event_type: guard.matched_event_type || null,
+    matched_event_at: guard.matched_event_at || null,
+    cooldown_remaining_ms:
+      Number.isFinite(Number(guard.cooldown_remaining_ms)) && Number(guard.cooldown_remaining_ms) >= 0
+        ? Number(guard.cooldown_remaining_ms)
+        : null,
+  }
+}
+
+function logRecoveryChargeGuard(tag, {
+  guard = null,
+  subscription = null,
+  amountCents = null,
+  externalReference = null,
+  requestId = null,
+  userId = null,
+  paymentMethodId = null,
+} = {}) {
+  const logger = guard?.can_run ? console.info : (guard?.decision === 'defer' ? console.info : console.warn)
+  logger(`[billing][${tag}]`, {
+    operation: guard?.can_run ? 'run_recovery_charge' : 'block_recovery_charge',
+    request_id: requestId || null,
+    subscription_id: subscription?.id || null,
+    preapproval_id: subscription?.gatewaySubscriptionId || null,
+    external_reference: externalReference || null,
+    amount: amountCents != null ? Number(amountCents) / 100 : null,
+    user_id: userId || null,
+    estabelecimento_id: subscription?.estabelecimentoId || userId || null,
+    payment_method_id: paymentMethodId || null,
+    status: guard?.status || null,
+    status_detail: guard?.status_detail || null,
+    normalized_reason: guard?.normalized_reason || null,
+    duplicate_risk: guard?.duplicate_risk === true,
+    recent_similar_attempt_found: guard?.recent_similar_attempt_found === true,
+    cooldown_active: guard?.cooldown_active === true,
+    decision: guard?.decision || null,
+    matched_event_type: guard?.matched_event_type || null,
+    matched_event_at: guard?.matched_event_at || null,
+  })
+}
+
+async function getRecoveryChargeGuard({
+  subscription = null,
+  currentStatus = null,
+  amountCents = null,
+  payerEmail = null,
+  paymentMethodId = null,
+  plan = null,
+  billingCycle = null,
+} = {}) {
+  if (!subscription?.id) return null
+  const recentEvents = await listRecentSubscriptionEvents(subscription.id, { limit: 20 })
+  return canRunRecoveryCharge({
+    subscription,
+    currentStatus,
+    recentEvents,
+    amountCents,
+    payerEmail,
+    paymentMethodId,
+    plan,
+    billingCycle,
+  })
+}
+
 function createInternalRequestId(req) {
   return String(req.requestId || req.headers['x-request-id'] || '').trim() || randomUUID()
 }
@@ -546,6 +644,9 @@ async function createOrReplaceCardSubscription({
     eventType: 'subscription_created',
     gatewayEventId: gatewaySubscription?.gatewaySubscriptionId || null,
     payload: {
+      plan,
+      billing_cycle: billingCycle,
+      amount_cents: amountCents,
       request: gatewayResult.request,
       response: gatewayResult.raw,
     },
@@ -566,6 +667,9 @@ async function createOrReplaceCardSubscription({
       payload: {
         previous_payment_method: previousContext.subscription.paymentMethod,
         next_payment_method: 'credit_card',
+        plan,
+        billing_cycle: billingCycle,
+        amount_cents: amountCents,
       },
     })
   }
@@ -1687,13 +1791,34 @@ router.get('/subscription', auth, isEstabelecimento, async (req, res) => {
       console.warn('[billing/subscription][packs]', err?.message || err)
     }
 
-    const events = (await listSubscriptionEventsForEstabelecimento(req.user.id, { limit: 30 }))
-      .map((event) => enrichMercadoPagoSubscriptionEvent(event, { includePending: true }))
+    const events = enrichSubscriptionEvents(
+      await listSubscriptionEventsForEstabelecimento(req.user.id, { limit: 30 })
+    )
     const latestPaymentResult = findLatestMercadoPagoPaymentResult(events, { includePending: true })
     const latestFailure = findLatestMercadoPagoPaymentResult(events, {
       includePending: false,
       onlyFailures: true,
     })
+    const recoverySubscription = pickRecoverableCardSubscription({
+      planContext,
+      subscriptions: fullHistory,
+      subscription: effective,
+      computedState,
+    })
+    const recoveryGuard = recoverySubscription
+      ? serializeRecoveryGuard(await getRecoveryChargeGuard({
+          subscription: recoverySubscription,
+          currentStatus:
+            recoverySubscription.id === effective?.id
+              ? computedState.resolvedStatus
+              : recoverySubscription.status,
+          amountCents:
+            Number(recoverySubscription.amountCents || 0) ||
+            getPlanPriceCents(recoverySubscription.plan, recoverySubscription.billingCycle),
+          plan: recoverySubscription.plan,
+          billingCycle: recoverySubscription.billingCycle,
+        }))
+      : null
 
     return res.json({
       plan: serializedPlan,
@@ -1711,6 +1836,7 @@ router.get('/subscription', auth, isEstabelecimento, async (req, res) => {
       events,
       latest_payment_result: latestPaymentResult,
       latest_failure: latestFailure,
+      recovery_guard: recoveryGuard,
       current_plan: billingPlan
         ? {
             code: billingPlan.code,
@@ -1778,6 +1904,35 @@ router.post('/card/subscribe', auth, isEstabelecimento, async (req, res) => {
       }
     }
 
+    const recentEvents = await listSubscriptionEventsForEstabelecimento(req.user.id, { limit: 20 })
+    const createGuard = canCreateSubscription({
+      currentSubscription: currentContext?.subscription || null,
+      recentEvents,
+      targetPlan,
+      billingCycle,
+    })
+    if (!createGuard.allowed) {
+      console.warn('[billing][create_subscription]', {
+        operation: 'create_subscription',
+        request_id: requestId,
+        user_id: req.user.id,
+        estabelecimento_id: req.user.id,
+        plan: targetPlan,
+        billing_cycle: billingCycle,
+        normalized_reason: createGuard.normalized_reason || null,
+        cooldown_active: createGuard.cooldown_active === true,
+        decision: createGuard.decision || 'block',
+        matched_event_type: createGuard.matched_event_type || null,
+        matched_event_at: createGuard.matched_event_at || null,
+      })
+      return res.status(409).json({
+        error: 'subscription_create_blocked',
+        message: createGuard.user_message || 'Ja existe uma configuracao recente de assinatura no cartao. Aguarde antes de tentar novamente.',
+        details: createGuard,
+        request_id: requestId,
+      })
+    }
+
     const result = await createOrReplaceCardSubscription({
       estabelecimentoId: req.user.id,
       email: req.user.email,
@@ -1791,11 +1946,37 @@ router.post('/card/subscribe', auth, isEstabelecimento, async (req, res) => {
         operation: 'card_subscription_create',
       },
     })
+    const recoveryGuard = result.recoveryRequired
+      ? serializeRecoveryGuard(await getRecoveryChargeGuard({
+          subscription: result.subscription,
+          currentStatus: result.computedState.resolvedStatus,
+          amountCents:
+            Number(result.subscription?.amountCents || 0) ||
+            getPlanPriceCents(targetPlan, billingCycle),
+          payerEmail: payer_email || payerEmail || req.user.email,
+          plan: targetPlan,
+          billingCycle,
+        }))
+      : null
+    console.info('[billing][create_subscription]', {
+      operation: 'create_subscription',
+      request_id: requestId,
+      user_id: req.user.id,
+      estabelecimento_id: req.user.id,
+      subscription_id: result.subscription?.id || null,
+      preapproval_id: result.gatewayResult?.subscription?.gatewaySubscriptionId || null,
+      plan: targetPlan,
+      billing_cycle: billingCycle,
+      recovery_required: result.recoveryRequired === true,
+      recovery_decision: recoveryGuard?.decision || null,
+      decision: 'created',
+    })
 
     return res.json({
       ok: true,
       automatic_renewal: true,
       recovery_required: !!result.recoveryRequired,
+      recovery_guard: recoveryGuard,
       plan_status: result.computedState.resolvedStatus,
       access_state: result.computedState.accessState,
       subscription: serializeSubscription(result.subscription),
@@ -1864,6 +2045,34 @@ router.post('/card/update', auth, isEstabelecimento, async (req, res) => {
     ).toLowerCase()
 
     if (!targetCardSubscription?.gatewaySubscriptionId) {
+      const recentEvents = await listSubscriptionEventsForEstabelecimento(req.user.id, { limit: 20 })
+      const createGuard = canCreateSubscription({
+        currentSubscription: effective || null,
+        recentEvents,
+        targetPlan,
+        billingCycle,
+      })
+      if (!createGuard.allowed) {
+        console.warn('[billing][update_subscription_card]', {
+          operation: 'update_subscription_card',
+          request_id: requestId,
+          user_id: req.user.id,
+          estabelecimento_id: req.user.id,
+          plan: targetPlan,
+          billing_cycle: billingCycle,
+          normalized_reason: createGuard.normalized_reason || null,
+          cooldown_active: createGuard.cooldown_active === true,
+          decision: createGuard.decision || 'block',
+          matched_event_type: createGuard.matched_event_type || null,
+          matched_event_at: createGuard.matched_event_at || null,
+        })
+        return res.status(409).json({
+          error: 'subscription_create_blocked',
+          message: createGuard.user_message || 'Ja existe uma configuracao recente de assinatura no cartao. Aguarde antes de tentar novamente.',
+          details: createGuard,
+          request_id: requestId,
+        })
+      }
       const created = await createOrReplaceCardSubscription({
         estabelecimentoId: req.user.id,
         email: req.user.email,
@@ -1877,10 +2086,37 @@ router.post('/card/update', auth, isEstabelecimento, async (req, res) => {
           operation: 'card_subscription_create',
         },
       })
+      const recoveryGuard = created.recoveryRequired
+        ? serializeRecoveryGuard(await getRecoveryChargeGuard({
+            subscription: created.subscription,
+            currentStatus: created.computedState.resolvedStatus,
+            amountCents:
+              Number(created.subscription?.amountCents || 0) ||
+              getPlanPriceCents(targetPlan, billingCycle),
+            payerEmail: req.body?.payer_email || req.body?.payerEmail || req.user.email,
+            plan: targetPlan,
+            billingCycle,
+          }))
+        : null
+      console.info('[billing][update_subscription_card]', {
+        operation: 'update_subscription_card',
+        request_id: requestId,
+        user_id: req.user.id,
+        estabelecimento_id: req.user.id,
+        subscription_id: created.subscription?.id || null,
+        preapproval_id: created.subscription?.gatewaySubscriptionId || null,
+        plan: targetPlan,
+        billing_cycle: billingCycle,
+        created: true,
+        recovery_required: created.recoveryRequired === true,
+        recovery_decision: recoveryGuard?.decision || null,
+        decision: 'created',
+      })
       return res.json({
         ok: true,
         created: true,
         recovery_required: !!created.recoveryRequired,
+        recovery_guard: recoveryGuard,
         plan_status: created.computedState.resolvedStatus,
         access_state: created.computedState.accessState,
         subscription: serializeSubscription(created.subscription),
@@ -1929,17 +2165,45 @@ router.post('/card/update', auth, isEstabelecimento, async (req, res) => {
       eventType: 'payment_method_changed',
       gatewayEventId: updated.gatewaySubscriptionId || null,
       payload: {
+        plan: targetPlan,
+        billing_cycle: billingCycle,
+        amount_cents: gatewayResult?.subscription?.amountCents || amountCents,
         request: gatewayResult.request,
         response: gatewayResult.raw,
       },
     })
 
     const effectiveContext = await loadEffectiveSubscriptionContext(req.user.id)
+    const recoveryGuard = persistenceState.recoveryRequired
+      ? serializeRecoveryGuard(await getRecoveryChargeGuard({
+          subscription: updated,
+          currentStatus: effectiveContext.computedState.resolvedStatus,
+          amountCents: gatewayResult?.subscription?.amountCents || amountCents,
+          payerEmail: req.body?.payer_email || req.body?.payerEmail || req.user.email,
+          plan: targetPlan,
+          billingCycle,
+        }))
+      : null
+    console.info('[billing][update_subscription_card]', {
+      operation: 'update_subscription_card',
+      request_id: requestId,
+      user_id: req.user.id,
+      estabelecimento_id: req.user.id,
+      subscription_id: updated.id || null,
+      preapproval_id: updated.gatewaySubscriptionId || null,
+      plan: targetPlan,
+      billing_cycle: billingCycle,
+      created: false,
+      recovery_required: persistenceState.recoveryRequired === true,
+      recovery_decision: recoveryGuard?.decision || null,
+      decision: 'updated',
+    })
 
     return res.json({
       ok: true,
       created: false,
       recovery_required: !!persistenceState.recoveryRequired,
+      recovery_guard: recoveryGuard,
       plan_status: effectiveContext.computedState.resolvedStatus,
       access_state: effectiveContext.computedState.accessState,
       subscription: serializeSubscription(updated),
@@ -1996,7 +2260,17 @@ router.post('/card/recover', auth, isEstabelecimento, async (req, res) => {
       'mensal'
     )
     const amountCents = Number(targetSubscription.amountCents || 0) || getPlanPriceCents(plan, billingCycle)
+    const payerEmail = req.body?.payer_email || req.body?.payerEmail || req.user.email
+    const paymentMethodId = req.body?.payment_method_id || req.body?.paymentMethodId || null
     const externalReference = buildCardRecoveryExternalReference(targetSubscription.id, idempotencyKey)
+    const chargeFingerprint = buildRecoveryChargeFingerprint({
+      subscriptionId: targetSubscription.id,
+      plan,
+      billingCycle,
+      amountCents,
+      payerEmail,
+      paymentMethodId,
+    })
 
     const previousOutcome = await getSubscriptionEventByGatewayEventId(targetSubscription.id, externalReference, {
       eventTypes: ['payment_recovered', 'payment_failed', 'payment_pending'],
@@ -2031,6 +2305,42 @@ router.post('/card/recover', auth, isEstabelecimento, async (req, res) => {
       })
     }
 
+    const recoveryGuard = await getRecoveryChargeGuard({
+      subscription: targetSubscription,
+      currentStatus,
+      amountCents,
+      payerEmail,
+      paymentMethodId,
+      plan,
+      billingCycle,
+    })
+    if (!recoveryGuard?.can_run) {
+      logRecoveryChargeGuard('recovery_policy', {
+        guard: recoveryGuard,
+        subscription: targetSubscription,
+        amountCents,
+        externalReference,
+        requestId,
+        userId: req.user.id,
+        paymentMethodId,
+      })
+      return res.status(409).json({
+        error: recoveryGuard?.decision === 'defer' ? 'recovery_charge_deferred' : 'recovery_charge_blocked',
+        message: recoveryGuard?.user_message || 'Nao foi possivel iniciar a cobranca agora.',
+        recovery_guard: serializeRecoveryGuard(recoveryGuard),
+        request_id: requestId,
+      })
+    }
+    logRecoveryChargeGuard('recovery_policy', {
+      guard: recoveryGuard,
+      subscription: targetSubscription,
+      amountCents,
+      externalReference,
+      requestId,
+      userId: req.user.id,
+      paymentMethodId,
+    })
+
     await appendSubscriptionEvent(targetSubscription.id, {
       eventType: 'payment_recovery_attempt',
       gatewayEventId: externalReference,
@@ -2040,6 +2350,11 @@ router.post('/card/recover', auth, isEstabelecimento, async (req, res) => {
         external_reference: externalReference,
         previous_status: currentStatus,
         payment_method: 'credit_card',
+        payment_method_id: paymentMethodId,
+        payer_email: payerEmail,
+        plan,
+        billing_cycle: billingCycle,
+        duplicate_fingerprint: chargeFingerprint,
       },
     })
 
@@ -2049,9 +2364,9 @@ router.post('/card/recover', auth, isEstabelecimento, async (req, res) => {
       amountCents,
       description: `Regularizacao de assinatura Agendamentos Online - ${plan} (${billingCycle})`,
       cardToken: token,
-      payerEmail: req.body?.payer_email || req.body?.payerEmail || req.user.email,
+      payerEmail,
       payerProfile: buildBillingPayerProfile(req.user, req.body),
-      paymentMethodId: req.body?.payment_method_id || req.body?.paymentMethodId || null,
+      paymentMethodId,
       issuerId: req.body?.issuer_id || req.body?.issuerId || null,
       identificationType: req.body?.identification_type || req.body?.identificationType || null,
       identificationNumber: req.body?.identification_number || req.body?.identificationNumber || null,
