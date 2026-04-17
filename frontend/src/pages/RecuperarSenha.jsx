@@ -1,98 +1,177 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Api } from '../utils/api';
+
+import {
+  IconArrowUpRight,
+  IconKey,
+  IconMail,
+  IconPhone,
+  IconShield,
+  IconSpark,
+} from '../components/AuthIcons.jsx';
 import LogoAO from '../components/LogoAO.jsx';
+import { Api } from '../utils/api';
 
 const WHATSAPP_SUPPORT_URL =
   'https://wa.me/5511915155349?text=Ol%C3%A1%20Time%20Agendamentos%20Online!%20Esqueci%20meu%20e-mail%20de%20login%20e%20preciso%20recuperar%20o%20acesso.';
 
-export default function RecuperarSenha(){
+export default function RecuperarSenha() {
   const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
   const [sent, setSent] = useState(false);
   const [err, setErr] = useState('');
 
-  async function submit(e){
-    e.preventDefault();
+  async function submit(event) {
+    event.preventDefault();
     setErr('');
     setLoading(true);
-    try{
+
+    try {
       await Api.requestPasswordReset(String(email).trim());
       setSent(true);
-    }catch(e){
-      // Mesmo que o backend não exista ainda, ofereça resposta neutra
-      // para evitar enumeração de emails
-      if (e?.status === 404) {
-        // Backend ainda não implementado; simula sucesso
+    } catch (error) {
+      if (error?.status === 404) {
         setSent(true);
       } else {
-        setErr(e?.message || 'Não foi possível enviar o email agora.');
+        setErr(error?.message || 'Nao foi possivel enviar o email agora.');
       }
-    }finally{
+    } finally {
       setLoading(false);
     }
   }
 
   return (
-    <div className="auth">
-      <div className="auth-wrap">
-        <div className="card auth-card">
-          <div className="auth-illus" aria-hidden>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M22 12h-4l-3 9L9 3l-3 9H2"/>
-            </svg>
-          </div>
-          <div className="auth-hero">
-            <LogoAO size={48} />
-            <div>
-              <h2 style={{ margin: 0 }}>Recuperar senha</h2>
-              <small>Enviaremos um link para redefinir</small>
-            </div>
-          </div>
+    <div className="login-preview auth-portal auth-portal--recover">
+      <div className="login-preview__bg" aria-hidden="true" />
+      <div className="login-preview__pattern" aria-hidden="true" />
 
-          {sent ? (
-            <div className="box" role="status" style={{ marginTop: 10, borderColor: 'var(--success-border)', color: 'var(--success-text)', background: 'var(--success-bg)' }}>
-              Se existir uma conta para <strong>{email}</strong>, você receberá um e-mail com instruções.
-            </div>
-          ) : (
-            <>
-              <form onSubmit={submit} className="row" style={{ gap: 10, flexWrap: 'wrap', marginTop: 10 }}>
-                <input
-                  className="input"
-                  type="email"
-                  placeholder="Seu e-mail"
-                  value={email}
-                  onChange={e=>setEmail(e.target.value)}
-                  autoComplete="email"
-                  required
-                />
-                <button className="btn btn--primary" disabled={!email || loading}>
-                  {loading ? <span className="spinner" /> : 'Enviar link'}
-                </button>
-              </form>
-              <div className="muted" style={{ marginTop: 6, fontSize: 12, lineHeight: 1.35 }}>
-                Esqueceu qual e-mail usou <Link to="/ajuda">Fale com o suporte</Link> ou{' '}
-                <a href={WHATSAPP_SUPPORT_URL} target="_blank" rel="noreferrer">
-                  chame no WhatsApp
-                </a>
-                .
+      <main className="login-preview__main">
+        <section className="login-preview__card">
+          <div className="login-preview__grid">
+            <aside className="login-preview__aside" aria-label="Informacoes sobre recuperacao">
+              <div className="auth-portal__brand">
+                <LogoAO size={40} className="login-preview__logo-mark" />
+                <div className="auth-portal__brand-copy">
+                  <div className="auth-portal__brand-title">Agendamentos Online</div>
+                  <div className="auth-portal__brand-subtitle">Recuperacao de acesso com clareza</div>
+                </div>
               </div>
-            </>
-          )}
 
-          {err && (
-            <div className="box" role="alert" aria-live="polite" style={{ marginTop: 10, borderColor: 'var(--danger-border)', color: 'var(--danger-text)', background: 'var(--danger-bg)' }}>
-              Erro: {err}
+              <span className="auth-portal__aside-badge">Recuperacao segura</span>
+
+              <div>
+                <h2 className="auth-portal__aside-title">Recupere sua conta sem perder o contexto do proximo acesso.</h2>
+                <p className="auth-portal__aside-copy">
+                  Informe o e-mail usado na plataforma. Se houver uma conta vinculada, enviaremos um link para redefinir a senha com seguranca.
+                </p>
+              </div>
+
+              <ul className="auth-portal__list">
+                <li className="auth-portal__list-item">
+                  <IconShield className="auth-portal__list-icon" />
+                  <span>Resposta neutra para nao expor a existencia de contas.</span>
+                </li>
+                <li className="auth-portal__list-item">
+                  <IconKey className="auth-portal__list-icon" />
+                  <span>Fluxo alinhado com login e redefinicao de senha.</span>
+                </li>
+                <li className="auth-portal__list-item">
+                  <IconSpark className="auth-portal__list-icon" />
+                  <span>Experiencia consistente em desktop e mobile.</span>
+                </li>
+              </ul>
+
+              <div className="auth-portal__aside-footer">
+                Se voce nao lembrar o e-mail usado, o suporte pode ajudar a retomar o acesso com mais contexto.
+              </div>
+            </aside>
+
+            <div className="login-preview__panel">
+              <span className="auth-portal__panel-badge">Recupere seu acesso</span>
+
+              <header className="login-preview__header">
+                <h1>Recupere seu acesso</h1>
+                <p>Enviaremos um link para redefinir sua senha de forma segura.</p>
+              </header>
+
+              {sent ? (
+                <div className="login-preview__alert login-preview__alert--success" role="status">
+                  <span className="login-preview__alert-dot" aria-hidden="true" />
+                  <div>
+                    <div className="login-preview__alert-title">Solicitacao enviada</div>
+                    <div className="login-preview__alert-text">
+                      Se existir uma conta para <strong>{email}</strong>, voce recebera um e-mail com instrucoes.
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+
+              {err ? (
+                <div className="login-preview__alert login-preview__alert--error" role="alert">
+                  <span className="login-preview__alert-dot" aria-hidden="true" />
+                  <div>
+                    <div className="login-preview__alert-title">Nao foi possivel concluir</div>
+                    <div className="login-preview__alert-text">{err}</div>
+                  </div>
+                </div>
+              ) : null}
+
+              {!sent ? (
+                <form onSubmit={submit} className="login-preview__form">
+                  <div className="login-preview__field">
+                    <label className="login-preview__label" htmlFor="recover-email">E-mail</label>
+                    <div className="auth-portal__field-shell">
+                      <IconMail className="auth-portal__field-icon" />
+                      <input
+                        id="recover-email"
+                        className="login-preview__input auth-portal__input-control"
+                        type="email"
+                        placeholder="voce@exemplo.com"
+                        value={email}
+                        onChange={(event) => setEmail(event.target.value)}
+                        autoComplete="email"
+                        required
+                      />
+                    </div>
+                    <div className="login-preview__hint">Use o mesmo e-mail do login.</div>
+                  </div>
+
+                  <button className={`login-preview__submit${email && !loading ? ' is-ready' : ''}`} disabled={!email || loading}>
+                    {loading ? (
+                      <span className="login-preview__submit-content">
+                        <span className="login-preview__spinner" aria-hidden="true" />
+                        Enviando...
+                      </span>
+                    ) : (
+                      'Enviar link'
+                    )}
+                  </button>
+
+                  <div className="auth-portal__support-links">
+                    <Link to="/ajuda" className="auth-portal__support-link">
+                      <IconArrowUpRight />
+                      <span>Falar com o suporte</span>
+                    </Link>
+                    <a href={WHATSAPP_SUPPORT_URL} target="_blank" rel="noreferrer" className="auth-portal__support-link">
+                      <IconPhone />
+                      <span>Suporte no WhatsApp</span>
+                    </a>
+                  </div>
+                </form>
+              ) : null}
+
+              <div className="login-preview__actions">
+                <Link to="/login" className="login-preview__ghost">
+                  Voltar ao login
+                </Link>
+                <Link to="/" className="login-preview__ghost">
+                  Voltar ao site
+                </Link>
+              </div>
             </div>
-          )}
-
-          <div className="divider"><span>ou</span></div>
-          <div className="auth-alt">
-            Lembrou a senha <Link to="/login">Voltar ao login</Link>
           </div>
-        </div>
-      </div>
+        </section>
+      </main>
     </div>
   );
 }
-

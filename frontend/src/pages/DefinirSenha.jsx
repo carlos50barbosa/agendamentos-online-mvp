@@ -1,214 +1,232 @@
 import React, { useMemo, useState } from 'react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 
-import { useLocation, useNavigate, Link } from 'react-router-dom';
-
+import {
+  IconCheck,
+  IconEye,
+  IconEyeOff,
+  IconKey,
+  IconLock,
+  IconShield,
+  IconSpark,
+} from '../components/AuthIcons.jsx';
+import LogoAO from '../components/LogoAO.jsx';
 import { Api } from '../utils/api';
 
-
-
-export default function DefinirSenha(){
-
+export default function DefinirSenha() {
   const location = useLocation();
-
   const nav = useNavigate();
 
   const token = useMemo(() => new URLSearchParams(location.search).get('token') || '', [location.search]);
 
   const [senha, setSenha] = useState('');
-
   const [confirm, setConfirm] = useState('');
-
   const [show, setShow] = useState(false);
-
+  const [showConfirm, setShowConfirm] = useState(false);
   const [loading, setLoading] = useState(false);
-
   const [err, setErr] = useState('');
 
+  const valid = Boolean(token) && senha.length >= 6 && senha === confirm && !loading;
+  const confirmMismatch = Boolean(confirm) && senha !== confirm;
 
-
-  const valid = !!token && senha.length >= 6 && senha === confirm && !loading;
-
-
-
-  async function submit(e){
-
-    e.preventDefault();
-
+  async function submit(event) {
+    event.preventDefault();
     if (!valid) return;
 
     setErr('');
-
     setLoading(true);
 
-    try{
-
+    try {
       await Api.resetPassword(token, senha);
-
-      try { localStorage.setItem('session_message', 'Senha redefinida com sucesso. Faça login.'); } catch {}
-
+      try {
+        localStorage.setItem('session_message', 'Senha redefinida com sucesso. Faca login.');
+      } catch {}
       nav('/login', { replace: true });
-
-    }catch(e){
-
-      setErr(e?.message || 'Não foi possível redefinir sua senha.');
-
-    }finally{
-
+    } catch (error) {
+      setErr(error?.message || 'Nao foi possivel redefinir sua senha.');
+    } finally {
       setLoading(false);
-
     }
-
   }
 
-
-
   return (
+    <div className="login-preview auth-portal auth-portal--reset">
+      <div className="login-preview__bg" aria-hidden="true" />
+      <div className="login-preview__pattern" aria-hidden="true" />
 
-    <div className="auth">
-
-      <div className="auth-wrap">
-
-        <div className="card auth-card">
-
-          <div className="auth-illus" aria-hidden>
-
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-
-              <path d="M12 17a5 5 0 100-10 5 5 0 000 10z" />
-
-              <path d="M12 22v-3" />
-
-            </svg>
-
-          </div>
-
-          <div className="auth-hero">
-
-            <div className="brand__logo" aria-hidden>AO</div>
-
-            <div>
-
-              <h2 style={{ margin: 0 }}>Definir nova senha</h2>
-
-              <small>Mínimo de 6 caracteres</small>
-
-            </div>
-
-          </div>
-
-
-
-          {!token && (
-
-            <div className="box" role="alert" style={{ marginTop: 10 }}>
-
-              Link inválido. Solicite novamente em <Link to="/recuperar-senha">Recuperar senha</Link>.
-
-            </div>
-
-          )}
-
-
-
-          {token && (
-
-            <form onSubmit={submit} className="row" style={{ gap: 10, flexWrap: 'wrap', marginTop: 10 }}>
-
-              <div className="row" style={{ gap: 6 }}>
-
-                <input
-
-                  className="input"
-
-                  type={show ? 'text' : 'password'}
-
-                  placeholder="Nova senha"
-
-                  value={senha}
-
-                  onChange={e=>setSenha(e.target.value)}
-
-                  autoComplete="new-password"
-
-                  minLength={6}
-
-                  required
-
-                  style={{ minWidth: 220 }}
-
-                />
-
-                <button type="button" className="btn btn--outline btn--sm" onClick={()=>setShow(v=>!v)} aria-pressed={show}>
-
-                  {show ? 'Ocultar' : 'Mostrar'}
-
-                </button>
-
+      <main className="login-preview__main">
+        <section className="login-preview__card">
+          <div className="login-preview__grid">
+            <aside className="login-preview__aside" aria-label="Informacoes da redefinicao">
+              <div className="auth-portal__brand">
+                <LogoAO size={40} className="login-preview__logo-mark" />
+                <div className="auth-portal__brand-copy">
+                  <div className="auth-portal__brand-title">Agendamentos Online</div>
+                  <div className="auth-portal__brand-subtitle">Nova senha com o mesmo padrao premium</div>
+                </div>
               </div>
 
-              <input
+              <span className="auth-portal__aside-badge">Redefinicao protegida</span>
 
-                className="input"
+              <div>
+                <h2 className="auth-portal__aside-title">Finalize a recuperacao com uma senha nova e segura.</h2>
+                <p className="auth-portal__aside-copy">
+                  Defina uma senha forte para voltar ao login com continuidade. O fluxo foi desenhado para ser simples e legivel em qualquer tela.
+                </p>
+              </div>
 
-                type="password"
+              <ul className="auth-portal__list">
+                <li className="auth-portal__list-item">
+                  <IconShield className="auth-portal__list-icon" />
+                  <span>Link de redefinicao validado antes do envio da nova senha.</span>
+                </li>
+                <li className="auth-portal__list-item">
+                  <IconKey className="auth-portal__list-icon" />
+                  <span>Senha nova pronta para o proximo acesso com o perfil correto.</span>
+                </li>
+                <li className="auth-portal__list-item">
+                  <IconSpark className="auth-portal__list-icon" />
+                  <span>Experiencia consistente com login, cadastro e recuperacao.</span>
+                </li>
+              </ul>
 
-                placeholder="Confirmar senha"
+              <div className="auth-portal__aside-footer">
+                Escolha uma senha exclusiva e com no minimo 6 caracteres para reforcar a seguranca do acesso.
+              </div>
+            </aside>
 
-                value={confirm}
+            <div className="login-preview__panel">
+              <span className="auth-portal__panel-badge">Defina uma nova senha</span>
 
-                onChange={e=>setConfirm(e.target.value)}
+              <header className="login-preview__header">
+                <h1>Defina uma nova senha</h1>
+                <p>Crie uma senha segura para voltar ao login com confianca.</p>
+              </header>
 
-                autoComplete="new-password"
+              {!token ? (
+                <div className="login-preview__alert login-preview__alert--error" role="alert">
+                  <span className="login-preview__alert-dot" aria-hidden="true" />
+                  <div>
+                    <div className="login-preview__alert-title">Link invalido</div>
+                    <div className="login-preview__alert-text">
+                      Solicite um novo link em <Link to="/recuperar-senha">Recuperar senha</Link>.
+                    </div>
+                  </div>
+                </div>
+              ) : null}
 
-                minLength={6}
+              {err ? (
+                <div className="login-preview__alert login-preview__alert--error" role="alert">
+                  <span className="login-preview__alert-dot" aria-hidden="true" />
+                  <div>
+                    <div className="login-preview__alert-title">Nao foi possivel salvar</div>
+                    <div className="login-preview__alert-text">{err}</div>
+                  </div>
+                </div>
+              ) : null}
 
-                required
+              {token ? (
+                <form onSubmit={submit} className="login-preview__form">
+                  <div className="login-preview__field">
+                    <label className="login-preview__label" htmlFor="reset-password">Nova senha</label>
+                    <div className="login-preview__pass-row">
+                      <div className={`auth-portal__field-shell${senha && senha.length < 6 ? ' is-error' : ''}`}>
+                        <IconLock className="auth-portal__field-icon" />
+                        <input
+                          id="reset-password"
+                          className="login-preview__input auth-portal__input-control"
+                          type={show ? 'text' : 'password'}
+                          placeholder="********"
+                          value={senha}
+                          onChange={(event) => setSenha(event.target.value)}
+                          autoComplete="new-password"
+                          minLength={6}
+                          required
+                        />
+                      </div>
 
-              />
+                      <button
+                        type="button"
+                        className="login-preview__toggle"
+                        onClick={() => setShow((value) => !value)}
+                        aria-label={show ? 'Ocultar senha' : 'Mostrar senha'}
+                      >
+                        {show ? <IconEyeOff /> : <IconEye />}
+                        <span className="auth-portal__toggle-label">{show ? 'Ocultar' : 'Mostrar'}</span>
+                      </button>
+                    </div>
+                    <div className={`login-preview__hint${senha && senha.length < 6 ? ' is-error' : ''}`}>
+                      {senha && senha.length < 6 ? 'Use pelo menos 6 caracteres.' : 'Combine comprimento e memorabilidade.'}
+                    </div>
+                  </div>
 
+                  <div className="login-preview__field">
+                    <label className="login-preview__label" htmlFor="reset-password-confirm">Confirmar senha</label>
+                    <div className="login-preview__pass-row">
+                      <div className={`auth-portal__field-shell${confirmMismatch ? ' is-error' : ''}`}>
+                        <IconLock className="auth-portal__field-icon" />
+                        <input
+                          id="reset-password-confirm"
+                          className="login-preview__input auth-portal__input-control"
+                          type={showConfirm ? 'text' : 'password'}
+                          placeholder="Repita a nova senha"
+                          value={confirm}
+                          onChange={(event) => setConfirm(event.target.value)}
+                          autoComplete="new-password"
+                          minLength={6}
+                          required
+                        />
+                      </div>
 
+                      <button
+                        type="button"
+                        className="login-preview__toggle"
+                        onClick={() => setShowConfirm((value) => !value)}
+                        aria-label={showConfirm ? 'Ocultar confirmacao' : 'Mostrar confirmacao'}
+                      >
+                        {showConfirm ? <IconEyeOff /> : <IconEye />}
+                        <span className="auth-portal__toggle-label">{showConfirm ? 'Ocultar' : 'Mostrar'}</span>
+                      </button>
+                    </div>
+                    {confirmMismatch ? (
+                      <div className="login-preview__hint is-error">As senhas precisam ser iguais.</div>
+                    ) : (
+                      <div className="login-preview__hint">Repita a senha para confirmar.</div>
+                    )}
+                  </div>
 
-              <button className="btn btn--primary" disabled={!valid}>
+                  <button className={`login-preview__submit${valid ? ' is-ready' : ''}`} disabled={!valid}>
+                    {loading ? (
+                      <span className="login-preview__submit-content">
+                        <span className="login-preview__spinner" aria-hidden="true" />
+                        Salvando...
+                      </span>
+                    ) : (
+                      'Salvar senha'
+                    )}
+                  </button>
+                </form>
+              ) : null}
 
-                {loading ? <span className="spinner" /> : 'Salvar senha'}
+              <div className="login-preview__actions">
+                <Link to="/login" className="login-preview__ghost">
+                  Voltar ao login
+                </Link>
+                <Link to="/recuperar-senha" className="login-preview__ghost">
+                  Solicitar novo link
+                </Link>
+              </div>
 
-              </button>
-
-            </form>
-
-          )}
-
-
-
-          {err && (
-
-            <div className="box" role="alert" aria-live="polite" style={{ marginTop: 10, borderColor: 'var(--danger-border)', color: 'var(--danger-text)', background: 'var(--danger-bg)' }}>
-
-              Erro: {err}
-
+              <div className="auth-portal__support-links auth-portal__support-links--inline">
+                <span className="auth-portal__support-link is-static">
+                  <IconCheck />
+                  <span>Fluxo de redefinicao concluido no mesmo shell visual do login.</span>
+                </span>
+              </div>
             </div>
-
-          )}
-
-
-
-          <div className="divider"><span>ou</span></div>
-
-          <div className="auth-alt">
-
-            Lembrou <Link to="/login">Voltar ao login</Link>
-
           </div>
-
-        </div>
-
-      </div>
-
+        </section>
+      </main>
     </div>
-
   );
-
 }
-
-
-

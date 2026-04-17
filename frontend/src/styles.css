@@ -4049,6 +4049,15 @@ button.danger:disabled,
   border-radius:14px; padding:10px;
   box-shadow:var(--topbar-shadow);
   display:flex; flex-direction:column; gap:10px;
+  max-height:calc(100dvh - var(--topbar-current-h, var(--topbar-h, 60px)) - 20px - env(safe-area-inset-bottom, 0px));
+  overflow:hidden;
+}
+.app-topbar__menu-nav{
+  flex:1 1 auto;
+  min-height:0;
+  overflow-y:auto;
+  overscroll-behavior:contain;
+  -webkit-overflow-scrolling:touch;
 }
 .app-topbar__menu-overlay{
   position: fixed;

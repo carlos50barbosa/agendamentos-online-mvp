@@ -4,6 +4,15 @@ import React, { useState, useMemo, useEffect, useCallback } from 'react';
 
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 
+import {
+  IconBuilding,
+  IconEye,
+  IconEyeOff,
+  IconLock,
+  IconMail,
+  IconPhone,
+  IconUser,
+} from '../components/AuthIcons.jsx';
 import LogoAO from '../components/LogoAO.jsx';
 
 import { Api } from '../utils/api';
@@ -199,6 +208,10 @@ export default function Cadastro() {
   const isCliente = form.tipo === 'cliente';
 
   const showForm = Boolean(form.tipo) && hasChosen;
+  const emailFormatValid = useMemo(() => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim()), [form.email]);
+  const confirmEmailMismatch = Boolean(
+    confirmEmail && form.email && form.email.trim().toLowerCase() !== confirmEmail.trim().toLowerCase()
+  );
 
 
 
@@ -601,21 +614,19 @@ export default function Cadastro() {
 
   };
 
+  const ProfileGlyph = ({ isCliente = false }) => (
+    isCliente ? <IconUser /> : <IconBuilding />
+  );
+
 
 
   return (
 
-    <div className="login-preview">
+    <div className="login-preview auth-portal auth-portal--signup">
 
       <div className="login-preview__bg" aria-hidden="true" />
 
       <div className="login-preview__pattern" aria-hidden="true" />
-
-      <div className="login-preview__orb login-preview__orb--violet" aria-hidden="true" />
-
-      <div className="login-preview__orb login-preview__orb--green" aria-hidden="true" />
-
-
 
       <main className="login-preview__main">
 
@@ -625,21 +636,23 @@ export default function Cadastro() {
 
             <aside className="login-preview__aside">
 
-              <div className="login-preview__brand">
+              <div className="auth-portal__brand">
 
-                <LogoAO size={44} className="login-preview__logo-mark" />
+                <LogoAO size={40} className="login-preview__logo-mark" />
 
-                <div>
+                <div className="auth-portal__brand-copy">
 
-                  <div className="login-preview__brand-title">Agendamentos Online</div>
+                  <div className="auth-portal__brand-title">Agendamentos Online</div>
 
-                  <div className="login-preview__brand-subtitle">Crie sua conta em poucos passos</div>
+                  <div className="auth-portal__brand-subtitle">Cadastro premium para clientes e operacoes</div>
 
                 </div>
 
               </div>
 
 
+
+              <span className="auth-portal__aside-badge">Criacao de conta segura</span>
 
               <div className="login-preview__aside-card">
 
@@ -670,6 +683,8 @@ export default function Cadastro() {
 
 
             <div className="login-preview__panel">
+
+              <span className="auth-portal__panel-badge">Crie sua conta</span>
 
               <header className="login-preview__header">
 
@@ -749,9 +764,14 @@ export default function Cadastro() {
 
                   >
 
-                    <div className="login-preview__tab-title">Sou Cliente</div>
+                    <div className="login-preview__tab-icon" aria-hidden="true">
+                      <ProfileGlyph isCliente />
+                    </div>
 
-                    <div className="login-preview__tab-hint">Acesse seus agendamentos e histórico</div>
+                    <div className="login-preview__tab-body">
+                      <div className="login-preview__tab-title">Sou Cliente</div>
+                      <div className="login-preview__tab-hint">Acesse seus agendamentos e historico</div>
+                    </div>
 
                   </button>
 
@@ -771,9 +791,14 @@ export default function Cadastro() {
 
                   >
 
-                    <div className="login-preview__tab-title">Sou Estabelecimento</div>
+                    <div className="login-preview__tab-icon" aria-hidden="true">
+                      <ProfileGlyph />
+                    </div>
 
-                    <div className="login-preview__tab-hint">Gerencie agenda, serviços e clientes</div>
+                    <div className="login-preview__tab-body">
+                      <div className="login-preview__tab-title">Sou Estabelecimento</div>
+                      <div className="login-preview__tab-hint">Gerencie agenda, servicos e clientes</div>
+                    </div>
 
                   </button>
 
@@ -797,21 +822,17 @@ export default function Cadastro() {
 
                     <label className="login-preview__label" htmlFor="cadastro-nome">Nome</label>
 
-                    <input
-
-                      className="login-preview__input"
-
-                      id="cadastro-nome"
-
-                      placeholder="Seu nome ou Estabelecimento"
-
-                      value={form.nome}
-
-                      onChange={(e) => updateField('nome', e.target.value)}
-
-                      required
-
-                    />
+                    <div className={`auth-portal__field-shell${form.nome && !nomeOk ? ' is-error' : ''}`}>
+                      {isEstab ? <IconBuilding className="auth-portal__field-icon" /> : <IconUser className="auth-portal__field-icon" />}
+                      <input
+                        className="login-preview__input auth-portal__input-control"
+                        id="cadastro-nome"
+                        placeholder="Seu nome ou Estabelecimento"
+                        value={form.nome}
+                        onChange={(e) => updateField('nome', e.target.value)}
+                        required
+                      />
+                    </div>
 
                     {form.nome && !nomeOk ? (
 
@@ -827,31 +848,24 @@ export default function Cadastro() {
 
                     <label className="login-preview__label" htmlFor="cadastro-email">E-mail</label>
 
-                    <input
+                    <div className={`auth-portal__field-shell${form.email && !emailFormatValid ? ' is-error' : ''}`}>
+                      <IconMail className="auth-portal__field-icon" />
+                      <input
+                        className="login-preview__input auth-portal__input-control"
+                        id="cadastro-email"
+                        type="email"
+                        placeholder="voce@exemplo.com"
+                        value={form.email}
+                        onChange={(e) => updateField('email', e.target.value)}
+                        autoComplete="email"
+                        onPaste={(e) => e.preventDefault()}
+                        required
+                      />
+                    </div>
 
-                      className="login-preview__input"
+                    <div className={`login-preview__hint${form.email && !emailFormatValid ? ' is-error' : ''}`}>
 
-                      id="cadastro-email"
-
-                      type="email"
-
-                      placeholder="voce@exemplo.com"
-
-                      value={form.email}
-
-                      onChange={(e) => updateField('email', e.target.value)}
-
-                      autoComplete="email"
-
-                      onPaste={(e) => e.preventDefault()}
-
-                      required
-
-                    />
-
-                    <div className={`login-preview__hint${form.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim()) ? ' is-error' : ''}`}>
-
-                      {form.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())
+                      {form.email && !emailFormatValid
 
                          ? 'Informe um e-mail válido.'
 
@@ -867,29 +881,22 @@ export default function Cadastro() {
 
                     <label className="login-preview__label" htmlFor="cadastro-email-confirm">Confirmar e-mail</label>
 
-                    <input
+                    <div className={`auth-portal__field-shell${confirmEmailMismatch ? ' is-error' : ''}`}>
+                      <IconMail className="auth-portal__field-icon" />
+                      <input
+                        className="login-preview__input auth-portal__input-control"
+                        id="cadastro-email-confirm"
+                        type="email"
+                        placeholder="Repita seu e-mail"
+                        value={confirmEmail}
+                        onChange={(e) => setConfirmEmail(e.target.value)}
+                        autoComplete="off"
+                        onPaste={(e) => e.preventDefault()}
+                        required
+                      />
+                    </div>
 
-                      className="login-preview__input"
-
-                      id="cadastro-email-confirm"
-
-                      type="email"
-
-                      placeholder="Repita seu e-mail"
-
-                      value={confirmEmail}
-
-                      onChange={(e) => setConfirmEmail(e.target.value)}
-
-                      autoComplete="off"
-
-                      onPaste={(e) => e.preventDefault()}
-
-                      required
-
-                    />
-
-                    {!!confirmEmail && form.email && form.email.trim().toLowerCase() !== confirmEmail.trim().toLowerCase() ? (
+                    {confirmEmailMismatch ? (
 
                       <div className="login-preview__hint is-error">O e-mail precisa ser igual ao campo anterior.</div>
 
@@ -907,33 +914,23 @@ export default function Cadastro() {
 
                     <label className="login-preview__label" htmlFor="cadastro-telefone">Telefone WhatsApp</label>
 
-                    <input
-
-                      className="login-preview__input"
-
-                      id="cadastro-telefone"
-
-                      type="tel"
-
-                      inputMode="tel"
-
-                      placeholder="WhatsApp com DDD (11) 99999-9999"
-
-                      value={formatBRPhone(form.telefone)}
-
-                      onChange={(e) => {
-
-                        const digits = e.target.value.replace(/\D/g, '').slice(0, 13);
-
-                        updateField('telefone', digits);
-
-                      }}
-
-                      autoComplete="tel"
-
-                      required
-
-                    />
+                    <div className={`auth-portal__field-shell${!phoneOk && phoneDigits ? ' is-error' : ''}`}>
+                      <IconPhone className="auth-portal__field-icon" />
+                      <input
+                        className="login-preview__input auth-portal__input-control"
+                        id="cadastro-telefone"
+                        type="tel"
+                        inputMode="tel"
+                        placeholder="WhatsApp com DDD (11) 99999-9999"
+                        value={formatBRPhone(form.telefone)}
+                        onChange={(e) => {
+                          const digits = e.target.value.replace(/\D/g, '').slice(0, 13);
+                          updateField('telefone', digits);
+                        }}
+                        autoComplete="tel"
+                        required
+                      />
+                    </div>
 
                     <div className={`login-preview__hint${!phoneOk && phoneDigits ? ' is-error' : ''}`}>
 
@@ -955,25 +952,19 @@ export default function Cadastro() {
 
                     <div className="login-preview__pass-row">
 
-                      <input
-
-                        className="login-preview__input"
-
-                        id="cadastro-senha"
-
-                        type={showPass ? 'text' : 'password'}
-
-                        placeholder="********"
-
-                        value={form.senha}
-
-                        onChange={(e) => updateField('senha', e.target.value)}
-
-                        autoComplete="new-password"
-
-                        required
-
-                      />
+                      <div className={`auth-portal__field-shell${form.senha && !senhaOk ? ' is-error' : ''}`}>
+                        <IconLock className="auth-portal__field-icon" />
+                        <input
+                          className="login-preview__input auth-portal__input-control"
+                          id="cadastro-senha"
+                          type={showPass ? 'text' : 'password'}
+                          placeholder="********"
+                          value={form.senha}
+                          onChange={(e) => updateField('senha', e.target.value)}
+                          autoComplete="new-password"
+                          required
+                        />
+                      </div>
 
                       <button
 
@@ -987,7 +978,8 @@ export default function Cadastro() {
 
                       >
 
-                        {showPass ? 'Ocultar' : 'Mostrar'}
+                        {showPass ? <IconEyeOff /> : <IconEye />}
+                        <span className="auth-portal__toggle-label">{showPass ? 'Ocultar' : 'Mostrar'}</span>
 
                       </button>
 
@@ -1023,25 +1015,19 @@ export default function Cadastro() {
 
                     <div className="login-preview__pass-row">
 
-                      <input
-
-                        className="login-preview__input"
-
-                        id="cadastro-confirmar-senha"
-
-                        type={showConfirm ? 'text' : 'password'}
-
-                        placeholder="Repita a senha"
-
-                        value={confirm}
-
-                        onChange={(e) => setConfirm(e.target.value)}
-
-                        autoComplete="new-password"
-
-                        required
-
-                      />
+                      <div className={`auth-portal__field-shell${confirm && !matchOk ? ' is-error' : ''}`}>
+                        <IconLock className="auth-portal__field-icon" />
+                        <input
+                          className="login-preview__input auth-portal__input-control"
+                          id="cadastro-confirmar-senha"
+                          type={showConfirm ? 'text' : 'password'}
+                          placeholder="Repita a senha"
+                          value={confirm}
+                          onChange={(e) => setConfirm(e.target.value)}
+                          autoComplete="new-password"
+                          required
+                        />
+                      </div>
 
                       <button
 
@@ -1055,7 +1041,8 @@ export default function Cadastro() {
 
                       >
 
-                        {showConfirm ? 'Ocultar' : 'Mostrar'}
+                        {showConfirm ? <IconEyeOff /> : <IconEye />}
+                        <span className="auth-portal__toggle-label">{showConfirm ? 'Ocultar' : 'Mostrar'}</span>
 
                       </button>
 
