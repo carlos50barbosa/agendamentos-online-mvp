@@ -4087,6 +4087,14 @@ button.danger:disabled,
     box-shadow .16s ease,
     border-color .16s ease,
     filter .16s ease;
+  opacity:1;
+}
+.app-topbar__login,
+.app-topbar__login:visited,
+.app-topbar__login:hover,
+.app-topbar__login:active,
+.app-topbar__login.active{
+  color:var(--text-on-brand, #fff);
 }
 .app-topbar__login:hover{
   transform:translateY(-1px);

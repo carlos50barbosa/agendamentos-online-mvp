@@ -2539,3 +2539,20 @@ textarea.input:focus {
     grid-template-columns: 1fr;
   }
 }
+
+.btn--primary,
+.btn--primary:visited,
+.config-page .btn.btn--primary,
+.config-page .btn.btn--primary:visited,
+.novo-agendamento .btn--primary,
+.novo-agendamento .btn--primary:visited,
+.auth-portal .login-preview__submit,
+.auth-portal .login-preview__submit:visited,
+.login-preview__submit,
+.login-preview__submit:visited,
+.app-topbar__login,
+.app-topbar__login:visited,
+.plan-card__pix-button,
+.plan-card__pix-button:visited {
+  color: var(--text-on-brand, #fff);
+}
