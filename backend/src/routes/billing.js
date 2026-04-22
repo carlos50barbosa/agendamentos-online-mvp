@@ -426,15 +426,20 @@ function sendBillingCardError(res, routeLabel, error, fallbackCode, fallbackMess
   const status = Number(normalized?.status || 400)
   const code = normalized?.code || fallbackCode
   const message = normalized?.message || fallbackMessage
+  const retryWithNewToken =
+    normalized?.retry_with_new_token === true ||
+    normalized?.details?.retry_with_new_token === true
   console.error(routeLabel, {
     request_id: requestId || null,
     error: code,
     message,
+    retry_with_new_token: retryWithNewToken,
     details: normalized?.details || null,
   })
   return res.status(status).json({
     error: code,
     message,
+    retry_with_new_token: retryWithNewToken,
     details: normalized?.details || null,
     request_id: requestId || null,
   })

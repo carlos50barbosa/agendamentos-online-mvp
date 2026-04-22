@@ -121,11 +121,20 @@ export function buildMercadoPagoCardOperationLog({
     timestamp: nowIso(),
     card_token_already_used_in_process: Boolean(alreadyUsedInProcess),
     first_token_operation: firstUsage?.operation || null,
+    first_token_endpoint: firstUsage?.endpoint || null,
+    first_token_environment: firstUsage?.environment || null,
     first_token_request_id: firstUsage?.requestId || null,
+    first_token_subscription_id: firstUsage?.subscriptionId || null,
+    first_token_preapproval_id: firstUsage?.preapprovalId || null,
     first_token_external_reference: firstUsage?.externalReference || null,
+    first_token_outcome: firstUsage?.outcome || null,
     first_token_claimed_at: firstUsage?.claimedAt || null,
     ...buildMercadoPagoCardTokenMeta(token),
   }
+}
+
+export function resetMercadoPagoDisposableCardTokenRegistryForTests() {
+  disposableCardTokenRegistry.clear()
 }
 
 export function claimMercadoPagoDisposableCardToken({

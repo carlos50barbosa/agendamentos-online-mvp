@@ -3,7 +3,10 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import Modal from '../components/Modal.jsx';
 import { Api } from '../utils/api.js';
 import { getUser } from '../utils/auth.js';
-import { isMercadoPagoCardTokenRefreshRequired } from '../utils/mercadoPagoCard.js';
+import {
+  getMercadoPagoCardErrorMessage,
+  isMercadoPagoCardTokenRefreshRequired,
+} from '../utils/mercadoPagoCard.js';
 
 const PLAN_META = {
   starter: {
@@ -319,6 +322,7 @@ export default function Assinatura() {
   const [renewalLoading, setRenewalLoading] = useState(false);
   const [cardState, setCardState] = useState({ ready: false, loading: false, submitting: false, error: '' });
   const [cardRecoveryReady, setCardRecoveryReady] = useState(false);
+  const [cardRecoveryNeedsNewToken, setCardRecoveryNeedsNewToken] = useState(false);
   const [cardFormResetKey, setCardFormResetKey] = useState(0);
   const [pixModal, setPixModal] = useState({ open: false, data: null });
   const [pixConfirmed, setPixConfirmed] = useState(false);
@@ -357,6 +361,7 @@ export default function Assinatura() {
     } catch {}
     cardFormRef.current = null;
     cardSubmittingRef.current = false;
+    cardSubmitIntentRef.current = 'save';
     setCardFormResetKey((current) => current + 1);
     setCardState((current) => ({
       ...current,
@@ -495,6 +500,18 @@ export default function Assinatura() {
     if (currentPaymentMethod === 'credit_card' && (hasDelinquentStatus || planStatusKey === 'pending_payment')) {
       return {
         mode: 'update',
+        label: hasDelinquentStatus ? 'Atualizar cartao da assinatura' : 'Atualizar cartao',
+      };
+    }
+    if (currentPaymentMethod === 'credit_card') {
+      return { mode: 'update', label: 'Trocar cartao' };
+    }
+    if (hasDelinquentStatus) {
+      return { mode: 'subscribe', label: 'Atualizar cartao da assinatura' };
+    }
+    if (currentPaymentMethod === 'credit_card' && (hasDelinquentStatus || planStatusKey === 'pending_payment')) {
+      return {
+        mode: 'update',
         label: hasDelinquentStatus ? 'Salvar cartão para regularizar' : 'Atualizar cartão',
       };
     }
@@ -581,7 +598,12 @@ export default function Assinatura() {
   const isCheckoutPix = pixModal.data?.kind === 'checkout';
 
   useEffect(() => {
-    if (!hasDelinquentStatus || recoveryBlocked) {
+    if (!hasDelinquentStatus) {
+      setCardRecoveryNeedsNewToken(false);
+      setCardRecoveryReady(false);
+      return;
+    }
+    if (recoveryBlocked) {
       setCardRecoveryReady(false);
     }
   }, [hasDelinquentStatus, recoveryBlocked]);
@@ -790,6 +812,127 @@ export default function Assinatura() {
     }
   }, [cardAction.mode, checkoutCycle, checkoutPlanKey, currentCycle, establishmentId, planKey, refreshData, resetCardFormForNewToken, user?.email]);
 
+  const handleCardSubmitSecure = useCallback(async (cardFormData) => {
+    if (!establishmentId || cardSubmittingRef.current) return false;
+    const submitIntent = cardSubmitIntentRef.current === 'recover' ? 'recover' : 'save';
+    cardSubmitIntentRef.current = 'save';
+    cardSubmittingRef.current = true;
+    setCardState((current) => ({ ...current, submitting: true, error: '' }));
+    setNotice({ type: '', message: '' });
+
+    try {
+      const cardTargetPlan = cardAction.mode === 'update' ? planKey : checkoutPlanKey;
+      const cardTargetCycle = cardAction.mode === 'update' ? currentCycle : checkoutCycle;
+      const payload = {
+        plan: cardTargetPlan,
+        billing_cycle: cardTargetCycle,
+        card_token: cardFormData?.token,
+        payer_email: cardFormData?.cardholderEmail || user?.email || '',
+        payment_method_id: cardFormData?.paymentMethodId || null,
+        issuer_id: cardFormData?.issuerId || null,
+        identification_type: cardFormData?.identificationType || null,
+        identification_number: cardFormData?.identificationNumber || null,
+      };
+
+      if (!payload.card_token) {
+        throw new Error('Nao foi possivel tokenizar o cartao.');
+      }
+
+      if (submitIntent === 'recover') {
+        const idempotencyKey = generateIdempotencyKey();
+        const response = await Api.billingCardRecover(payload, { idempotencyKey });
+        await refreshData({ silent: true });
+
+        if (response?.paid) {
+          setCardRecoveryReady(false);
+          setCardRecoveryNeedsNewToken(false);
+          resetCardFormForNewToken();
+          setNotice({
+            type: 'success',
+            message: 'Pagamento aprovado. A assinatura foi reativada e a renovacao automatica segue no cartao.',
+          });
+          return true;
+        }
+
+        resetCardFormForNewToken();
+
+        if (response?.pending) {
+          setCardRecoveryReady(false);
+          setCardRecoveryNeedsNewToken(false);
+          setCardState((current) => ({ ...current, error: '' }));
+          setNotice({
+            type: 'warning',
+            message: getPaymentResultMessage(
+              response,
+              'O pagamento esta em analise pelo Mercado Pago. Aguarde a confirmacao antes de tentar novamente.',
+            ),
+          });
+          return false;
+        }
+
+        const manualRetryAllowed = response?.payment_result?.manual_retry_allowed !== false;
+        setCardRecoveryReady(manualRetryAllowed);
+        setCardRecoveryNeedsNewToken(manualRetryAllowed);
+        const message = getPaymentResultMessage(
+          response,
+          'Nao foi possivel concluir a cobranca agora. Tente novamente em instantes.',
+        );
+        setCardState((current) => ({ ...current, error: message }));
+        setNotice({ type: 'error', message });
+        return false;
+      }
+
+      const response = cardAction.mode === 'update'
+        ? await Api.billingCardUpdate(payload)
+        : await Api.billingCardSubscribe(payload);
+
+      await refreshData({ silent: true });
+      resetCardFormForNewToken();
+
+      if (response?.recovery_required) {
+        const recoveryAllowed = response?.recovery_guard?.can_run !== false;
+        setCardRecoveryReady(recoveryAllowed);
+        setCardRecoveryNeedsNewToken(true);
+        setNotice({
+          type: 'warning',
+          message: recoveryAllowed
+            ? 'Cartao da assinatura atualizado. Para cobrar a pendencia agora, confirme novamente os dados do cartao para gerar um novo token de seguranca.'
+            : 'Cartao da assinatura atualizado. A pendencia continua em aberto e sera necessario confirmar novamente os dados do cartao quando a cobranca manual estiver disponivel.',
+        });
+      } else {
+        setCardRecoveryReady(false);
+        setCardRecoveryNeedsNewToken(false);
+        setNotice({
+          type: 'success',
+          message: cardAction.mode === 'update'
+            ? 'Cartao atualizado. Vamos sincronizar a cobranca recorrente automaticamente.'
+            : `Assinatura do plano ${PLAN_META[normalizePlanKey(cardTargetPlan)]?.label || 'selecionado'} enviada no cartao. A renovacao automatica passa a ser o fluxo principal.`,
+        });
+      }
+      return true;
+    } catch (requestError) {
+      const requiresNewToken = isMercadoPagoCardTokenRefreshRequired(requestError);
+      const message = getMercadoPagoCardErrorMessage(requestError, 'Falha ao processar o cartao agora.');
+
+      if (requiresNewToken) {
+        resetCardFormForNewToken();
+        if (submitIntent === 'recover' || hasDelinquentStatus) {
+          setCardRecoveryNeedsNewToken(true);
+        }
+      }
+
+      setCardState((current) => ({ ...current, error: message }));
+      if (submitIntent === 'recover' && requestError?.data?.recovery_guard) {
+        setCardRecoveryReady(requestError?.data?.recovery_guard?.can_run === true);
+      }
+      setNotice({ type: 'error', message });
+      return false;
+    } finally {
+      cardSubmittingRef.current = false;
+      setCardState((current) => ({ ...current, submitting: false }));
+    }
+  }, [cardAction.mode, checkoutCycle, checkoutPlanKey, currentCycle, establishmentId, hasDelinquentStatus, planKey, refreshData, resetCardFormForNewToken, user?.email]);
+
   const handleRecoverNowWithCard = useCallback(() => {
     const form = document.getElementById('subscription-card-form');
     if (!form) return;
@@ -852,7 +995,7 @@ export default function Assinatura() {
             onSubmit: async (event) => {
               event.preventDefault();
               const data = cardForm.getCardFormData();
-              await handleSubmitCard(data);
+              await handleCardSubmitSecure(data);
             },
           },
         });
@@ -878,7 +1021,7 @@ export default function Assinatura() {
       } catch {}
       cardFormRef.current = null;
     };
-  }, [cardFormResetKey, cardGatewayPublicKey, handleSubmitCard, isEstablishment, selectedPlanPriceCents]);
+  }, [cardFormResetKey, cardGatewayPublicKey, handleCardSubmitSecure, isEstablishment, selectedPlanPriceCents]);
 
   const refreshRenewalPixStatus = useCallback(async ({ silent = true } = {}) => {
     if (!isRenewalPix || !pixPaymentId || pixBusyRef.current) return null;
@@ -1343,6 +1486,11 @@ export default function Assinatura() {
             </form>
             {cardState.loading ? <span className="muted">Carregando formulário seguro do gateway...</span> : null}
             {cardState.error ? <span className="muted" style={{ color: '#b91c1c' }}>{cardState.error}</span> : null}
+            {cardRecoveryNeedsNewToken && hasDelinquentStatus ? (
+              <p className="muted">
+                Os dados do cartao precisam ser confirmados novamente para gerar um novo token de seguranca antes da cobranca manual.
+              </p>
+            ) : null}
             {recoveryBlocked ? (
               <div className="subscription-page__callout">
                 <strong>Regularizacao temporariamente indisponivel no cartao.</strong>

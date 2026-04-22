@@ -9,6 +9,15 @@ function normalizeErrorText(value) {
     .toLowerCase()
 }
 
+function getStatusDetail(error) {
+  return String(
+    error?.data?.payment_result?.status_detail ||
+    error?.data?.details?.status_detail ||
+    error?.data?.details?.gateway_cause_code ||
+    ''
+  ).trim().toLowerCase()
+}
+
 export function isMercadoPagoCardTokenRefreshRequired(error) {
   const code = getErrorCode(error)
   if ([
@@ -20,6 +29,7 @@ export function isMercadoPagoCardTokenRefreshRequired(error) {
     return true
   }
 
+  if (error?.data?.retry_with_new_token === true) return true
   if (error?.data?.details?.retry_with_new_token === true) return true
 
   const message = normalizeErrorText(
@@ -39,9 +49,14 @@ export function isMercadoPagoCardTokenRefreshRequired(error) {
   )
 }
 
-export function getMercadoPagoCardErrorMessage(error, fallback = 'Não foi possível processar o cartão.') {
+export function getMercadoPagoCardErrorMessage(error, fallback = 'Nao foi possivel processar o cartao.') {
   if (isMercadoPagoCardTokenRefreshRequired(error)) {
-    return 'Os dados do cartão precisam ser informados novamente para gerar um novo token.'
+    return 'Os dados do cartao precisam ser confirmados novamente para gerar um novo token de seguranca.'
   }
+
+  if (getStatusDetail(error) === 'cc_rejected_high_risk') {
+    return 'Nao foi possivel aprovar este cartao no momento. Revise os dados do titular ou tente outro cartao.'
+  }
+
   return error?.data?.message || error?.message || fallback
 }
