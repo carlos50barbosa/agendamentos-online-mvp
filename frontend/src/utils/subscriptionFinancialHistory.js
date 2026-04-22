@@ -19,6 +19,7 @@ const FALLBACK_EVENT_TITLES = {
   pix_generated: 'PIX em aberto',
   pix_paid: 'PIX pago',
   pix_expired: 'PIX expirado',
+  pix_obsolete: 'PIX substituido',
   subscription_renewed: 'Assinatura renovada',
   subscription_canceled: 'Assinatura cancelada',
   subscription_blocked: 'Assinatura bloqueada',
@@ -42,6 +43,7 @@ const FINANCIAL_EVENT_TYPES = new Set([
   'pix_generated',
   'pix_paid',
   'pix_expired',
+  'pix_obsolete',
   'subscription_renewed',
   'subscription_canceled',
   'subscription_blocked',
@@ -155,6 +157,9 @@ function resolveStatusMeta(event, paymentMethod) {
   if (eventType === 'pix_expired') {
     return { payment_status: 'expired', status_group: 'expired', label: 'Expirado', tone: 'danger' }
   }
+  if (eventType === 'pix_obsolete') {
+    return { payment_status: 'obsolete', status_group: 'obsolete', label: 'Substituido', tone: 'neutral' }
+  }
   if (eventType === 'payment_recovery_attempt') {
     return { payment_status: 'started', status_group: 'started', label: 'Tentativa iniciada', tone: 'info' }
   }
@@ -221,9 +226,16 @@ function getReferenceData(event, paymentMethod) {
     ''
   ).trim()
   const paymentId = String(paymentResult?.payment_id || rawPayment?.id || '').trim()
+  const payloadPaymentId = String(
+    event?.payload?.payment_id ||
+    event?.payload?.obsolete_payment_id ||
+    event?.payload?.approved_payment_id ||
+    ''
+  ).trim()
 
   if (paymentMethod === 'pix') {
     if (paymentId) return { label: 'ID PIX', value: paymentId, key: `pix:${paymentId}` }
+    if (payloadPaymentId) return { label: 'ID PIX', value: payloadPaymentId, key: `pix:${payloadPaymentId}` }
     if (gatewayEventId) return { label: 'ID PIX', value: gatewayEventId, key: `pix:${gatewayEventId}` }
   }
 
@@ -285,6 +297,14 @@ function buildDisplayCopy(event, paymentMethod, statusMeta, reasonMessage) {
       display_title: 'Credito liberado',
       display_subtitle: 'Reserva cancelada e saldo devolvido para uso futuro.',
       display_message: reasonMessage || 'O credito voltou a ficar disponivel para a proxima cobranca.',
+    }
+  }
+
+  if (eventType === 'pix_obsolete') {
+    return {
+      display_title: 'PIX anterior substituido',
+      display_subtitle: 'Esta cobranca deixou de valer porque outra conciliacao resolveu a assinatura.',
+      display_message: reasonMessage || 'O PIX anterior foi mantido no historico, mas nao compete mais com o pagamento confirmado.',
     }
   }
 
@@ -462,11 +482,23 @@ export function buildSubscriptionFinancialHistory(events = [], { subscriptionSta
     return !resolvedAttemptKeys.has(item.reference_key)
   })
 
-  const openPixEvent = timeline.find((item) =>
+  const resolvedPixKeys = new Set(
+    timeline
+      .filter((item) => ['pix_paid', 'pix_expired', 'pix_obsolete'].includes(item.event_type) && item.reference_key)
+      .map((item) => item.reference_key)
+  )
+
+  const pixAwareTimeline = timeline.filter((item) => {
+    if (item.event_type !== 'pix_generated') return true
+    if (!item.reference_key) return true
+    return !resolvedPixKeys.has(item.reference_key)
+  })
+
+  const openPixEvent = pixAwareTimeline.find((item) =>
     item.payment_method === 'pix' && item.status_group === 'pending'
   ) || null
 
-  const latestCardAttempt = timeline.find((item) => item.is_card_attempt) || null
+  const latestCardAttempt = pixAwareTimeline.find((item) => item.is_card_attempt) || null
   const hasOpenPixAndRejectedCard = Boolean(
     openPixEvent &&
     latestCardAttempt &&
@@ -474,7 +506,7 @@ export function buildSubscriptionFinancialHistory(events = [], { subscriptionSta
   )
 
   return {
-    timeline,
+    timeline: pixAwareTimeline,
     open_pix_event: openPixEvent,
     latest_card_attempt: latestCardAttempt,
     has_open_pix_and_rejected_card: hasOpenPixAndRejectedCard,

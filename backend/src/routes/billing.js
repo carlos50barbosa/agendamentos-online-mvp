@@ -3191,25 +3191,34 @@ router.post('/webhook', async (req, res) => {
   }
 
   const resourceId = verification.id
+  const requestId = String(req.headers['x-request-id'] || '').trim() || null
+  const syncEvent = {
+    ...event,
+    _webhook: {
+      request_id: requestId,
+      topic: topic || null,
+    },
+  }
 
   try {
     if (topic === 'payment') {
       const normalizedUserId = bodyUserId != null ? Number(bodyUserId) : null
-      const isPlatformUser = Number.isFinite(normalizedUserId) && normalizedUserId === MP_COLLECTOR_ID
+      const hasExplicitForeignUser = Number.isFinite(normalizedUserId) && normalizedUserId !== MP_COLLECTOR_ID
 
-      if (!isPlatformUser) {
-        const depositResult = await handleDepositPaymentWebhook({
-          resourceId,
-          event,
-          bodyUserId: normalizedUserId,
-        })
-        if (depositResult?.handled) {
-          console.log('[billing:webhook][deposit] handled', resourceId, depositResult.status || 'ok')
-          return res.status(200).json({ ok: true, processed: true, deposit: true, status: depositResult.status || null })
-        }
-        if (depositResult?.ok && depositResult?.status) {
-          return res.status(200).json({ ok: true, processed: false, deposit: true, status: depositResult.status })
-        }
+      const depositResult = await handleDepositPaymentWebhook({
+        resourceId,
+        event: syncEvent,
+        bodyUserId: Number.isFinite(normalizedUserId) ? normalizedUserId : null,
+      })
+      if (depositResult?.handled) {
+        console.log('[billing:webhook][deposit] handled', resourceId, depositResult.status || 'ok')
+        return res.status(200).json({ ok: true, processed: true, deposit: true, status: depositResult.status || null })
+      }
+      if (depositResult?.ok && depositResult?.status) {
+        return res.status(200).json({ ok: true, processed: false, deposit: true, status: depositResult.status })
+      }
+
+      if (hasExplicitForeignUser) {
         const loyaltyResult = await syncClientLoyaltyPixPaymentFromGateway(resourceId, {
           bodyUserId: normalizedUserId,
           gatewayEventId: resourceId,
@@ -3260,9 +3269,20 @@ router.post('/webhook', async (req, res) => {
         })
       }
 
-      const r = await syncMercadoPagoPayment(resourceId, event)
-      console.log('[billing:webhook] payment', resourceId, r?.ok ? 'approved' : 'ignored', { ok: !!r?.ok })
-      return res.status(200).json({ ok: true, processed: !!r?.ok })
+      const r = await syncMercadoPagoPayment(resourceId, syncEvent)
+      console.log('[billing:webhook] payment', resourceId, r?.ok ? 'approved' : 'ignored', {
+        ok: !!r?.ok,
+        reason: r?.reason || null,
+        already_processed: r?.already_processed === true,
+        stale: r?.stale === true,
+      })
+      return res.status(200).json({
+        ok: true,
+        processed: !!r?.ok,
+        reason: r?.reason || null,
+        already_processed: r?.already_processed === true,
+        stale: r?.stale === true,
+      })
     }
 
     if (topic === 'subscription_authorized_payment') {

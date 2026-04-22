@@ -21,6 +21,12 @@ import {
   updateSubscription,
   appendSubscriptionEvent,
   getSubscriptionById,
+  getSubscriptionByExternalReference,
+  getSubscriptionByGatewayId,
+  getSubscriptionByGatewayPaymentId,
+  getSubscriptionByPlanId,
+  listSubscriptionEventsBySubscriptionId,
+  listSubscriptionsForEstabelecimento,
 } from './subscriptions.js'
 import { pool } from './db.js'
 import { findWhatsAppPack } from './addon_packs.js'
@@ -32,6 +38,13 @@ import {
   findUpgradeSourceSubscription,
   releaseScheduledSubscriptionCreditApplicationsTx,
 } from './subscription_credits.js'
+import {
+  buildPixLogicalContext,
+  buildPixPaymentContext,
+  isSamePixLogicalContext,
+  resolvePixPaymentDisposition,
+  selectPixSubscriptionCandidate,
+} from './pix_reconciliation.js'
 
 const BILLING_CURRENCY = (config.billing?.currency || 'BRL').toUpperCase()
 const BILLING_DEBUG = (() => {
@@ -246,6 +259,7 @@ export async function createMercadoPagoPixCheckout({
     cycle: normalizedCycle,
     estabelecimento_id: String(estabelecimento.id),
     nominal_amount_cents: nominalPriceCents,
+    subscription_id: existingSubscriptionId ? String(existingSubscriptionId) : undefined,
     ...(metadataExtras && typeof metadataExtras === 'object' ? metadataExtras : {}),
   }
 
@@ -423,6 +437,134 @@ function addCycle(date, cycle) {
   return d
 }
 
+async function findPixObsoleteMarker(subscriptionId, { db = pool } = {}) {
+  if (!subscriptionId) return null
+  const events = await listSubscriptionEventsBySubscriptionId(subscriptionId, { limit: 10, db })
+  return events.find((event) => String(event?.event_type || '').toLowerCase() === 'pix_obsolete') || null
+}
+
+async function findMatchingPixSubscription(payment, { db = pool } = {}) {
+  const paymentContext = buildPixPaymentContext(payment)
+  const paymentId = String(paymentContext.payment_id || '').trim()
+  let subscription = null
+  let matchedBy = null
+  let matchScore = 0
+  let matchReasons = []
+
+  if (paymentId) {
+    subscription = await getSubscriptionByGatewayPaymentId(paymentId, { db })
+    if (subscription?.id) {
+      matchedBy = 'gateway_payment_id'
+      matchScore = 240
+      matchReasons = ['gateway_payment_id']
+    }
+  }
+
+  if (!subscription?.id && paymentId) {
+    subscription = await getSubscriptionByPlanId(paymentId, { db })
+    if (subscription?.id) {
+      matchedBy = 'gateway_preference_id'
+      matchScore = 220
+      matchReasons = ['gateway_preference_id']
+    }
+  }
+
+  if (!subscription?.id && paymentContext.subscription_id) {
+    subscription = await getSubscriptionById(paymentContext.subscription_id, { db })
+    if (subscription?.id) {
+      matchedBy = 'metadata_subscription_id'
+      matchScore = 200
+      matchReasons = ['metadata_subscription_id']
+    }
+  }
+
+  if (!subscription?.id && paymentContext.gateway_subscription_id) {
+    subscription = await getSubscriptionByGatewayId(paymentContext.gateway_subscription_id, { db })
+    if (subscription?.id) {
+      matchedBy = 'gateway_subscription_id'
+      matchScore = 180
+      matchReasons = ['gateway_subscription_id']
+    }
+  }
+
+  if (!subscription?.id && paymentContext.external_reference) {
+    subscription = await getSubscriptionByExternalReference(paymentContext.external_reference, { db })
+    if (subscription?.id) {
+      matchedBy = 'external_reference'
+      matchScore = 170
+      matchReasons = ['external_reference']
+    }
+  }
+
+  if (!subscription?.id && paymentContext.establishment_id) {
+    const subscriptions = await listSubscriptionsForEstabelecimento(paymentContext.establishment_id, { db })
+    const selected = selectPixSubscriptionCandidate(subscriptions, paymentContext)
+    if (selected?.candidate?.id) {
+      subscription = selected.candidate
+      matchedBy = 'context_fallback'
+      matchScore = selected.score || 0
+      matchReasons = selected.reasons || []
+    }
+  }
+
+  return {
+    paymentContext,
+    subscription: subscription?.id ? subscription : null,
+    matchedBy,
+    matchScore,
+    matchReasons,
+  }
+}
+
+async function markRelatedPendingPixSubscriptionsObsoleteTx(targetSubscription, payment, paymentContext, { db = pool } = {}) {
+  if (!targetSubscription?.id || !targetSubscription?.estabelecimentoId) {
+    return { count: 0, subscriptions: [] }
+  }
+
+  const siblings = await listSubscriptionsForEstabelecimento(targetSubscription.estabelecimentoId, { db })
+  const logicalTarget = buildPixLogicalContext({
+    estabelecimentoId: targetSubscription.estabelecimentoId,
+    plan: targetSubscription.plan,
+    billingCycle: targetSubscription.billingCycle,
+    paymentMethod: 'pix',
+    chargeKind: paymentContext?.charge_kind || null,
+    externalReference: targetSubscription.externalReference,
+  })
+  const staleSubscriptions = siblings.filter((item) => {
+    if (!item?.id || Number(item.id) === Number(targetSubscription.id)) return false
+    if (String(item.paymentMethod || '').toLowerCase() !== 'pix') return false
+    if (String(item.status || '').toLowerCase() !== 'pending_pix') return false
+    return isSamePixLogicalContext(item, logicalTarget)
+  })
+
+  for (const staleSubscription of staleSubscriptions) {
+    await updateSubscription(staleSubscription.id, {
+      status: 'canceled',
+      canceledAt: new Date(),
+      cancelAt: new Date(),
+      nextBillingAt: null,
+      graceUntil: null,
+    }, { db })
+    await appendSubscriptionEvent(staleSubscription.id, {
+      eventType: 'pix_obsolete',
+      gatewayEventId: `pix-obsolete:${payment?.id || Date.now()}:${staleSubscription.id}`,
+      payload: {
+        payment_method: 'pix',
+        payment_id: staleSubscription.gatewayPreferenceId || staleSubscription.gatewayPaymentId || null,
+        approved_payment_id: payment?.id != null ? String(payment.id) : null,
+        approved_external_reference: payment?.external_reference || null,
+        approved_subscription_id: targetSubscription.id,
+        reason: 'superseded_by_approved_pix',
+      },
+    }, { db })
+  }
+
+  return {
+    count: staleSubscriptions.length,
+    subscriptions: staleSubscriptions,
+  }
+}
+
 async function finalizeApprovedPixSubscriptionTx(subscriptionId, {
   payment,
   eventPayload = null,
@@ -500,6 +642,8 @@ async function finalizeApprovedPixSubscriptionTx(subscriptionId, {
     }, { db })
   }
 
+  const obsoleteSiblings = await markRelatedPendingPixSubscriptionsObsoleteTx(updated, payment, buildPixPaymentContext(payment), { db })
+
   const paymentEventPayload = {
     event: eventPayload,
     payment,
@@ -508,6 +652,7 @@ async function finalizeApprovedPixSubscriptionTx(subscriptionId, {
     credit_generated_cents: creditResult?.credit?.generated_credit_cents || 0,
     source_plan: sourceSubscription?.plan || null,
     target_plan: updated.plan,
+    stale_pix_marked_obsolete: obsoleteSiblings.count || 0,
   }
 
   if (appliedScheduledDiscount?.applied_credit_cents > 0) {
@@ -550,12 +695,16 @@ async function finalizeApprovedPixSubscriptionTx(subscriptionId, {
     sourceSubscription,
     credit: creditResult?.credit || null,
     activeUntil,
+    obsoleteSiblingCount: obsoleteSiblings.count || 0,
   }
 }
 
 export async function syncMercadoPagoPayment(paymentId, eventPayload = null) {
   if (!paymentId) throw new Error('paymentId ausente')
   const client = ensureMercadoPagoPayment()
+  const webhookMeta = eventPayload?._webhook && typeof eventPayload._webhook === 'object'
+    ? eventPayload._webhook
+    : {}
   const truncateText = (value, maxLen = 160) => {
     if (value === null || value === undefined) return null
     const text = String(value).trim()
@@ -620,95 +769,57 @@ export async function syncMercadoPagoPayment(paymentId, eventPayload = null) {
     console.info('[billing:sync] payment_snapshot', snapshot)
   }
   let payment = null
-  const ignore = (reason, extra = null, resultExtra = null) => {
-    const payload = {
-      reason: String(reason || 'unknown'),
+  const logSyncAction = (actionTaken, extra = {}) => {
+    const paymentContext = buildPixPaymentContext(payment)
+    console.info('[billing:sync][pix]', {
+      request_id: webhookMeta.request_id || null,
+      topic: webhookMeta.topic || null,
       payment_id: payment?.id ? String(payment.id) : String(paymentId),
       status: payment?.status || null,
       status_detail: payment?.status_detail || null,
+      payment_type_id: payment?.payment_type_id || null,
+      payment_method_id: payment?.payment_method_id || null,
       external_reference: truncateText(payment?.external_reference, 200),
+      metadata: summarizeMetadata(payment?.metadata),
+      establishment_id: paymentContext.establishment_id || null,
+      action_taken: actionTaken || null,
+      ...extra,
+    })
+  }
+  const ignore = (reason, extra = null, resultExtra = null) => {
+    const payload = {
+      ignored_reason: String(reason || 'unknown'),
     }
     if (extra && typeof extra === 'object') {
       for (const [key, value] of Object.entries(extra)) {
         payload[key] = value
       }
     }
-    console.info('[billing:sync] payment_ignored', payload)
-    return { ok: false, payment, ...(resultExtra || {}) }
+    logSyncAction('payment_ignored', payload)
+    return { ok: false, payment, reason: String(reason || 'unknown'), ...(resultExtra || {}) }
   }
 
   payment = await client.get({ id: String(paymentId) })
   logPaymentSnapshot(payment)
   if (!payment?.id) throw new Error('Pagamento não encontrado')
 
-  const status = String(payment.status || '').toLowerCase()
-  const externalRef = String(payment.external_reference || '')
-  const metadataKind = String(payment?.metadata?.kind || '').toLowerCase()
-  // Tenta extrair tokens do external_reference
-  const tokens = {}
-  const parts = externalRef.split(':')
-  for (let i = 0; i < parts.length - 1; i += 2) {
-    tokens[parts[i]] = parts[i + 1]
-  }
-  const planToken = String(tokens.plan || '').toLowerCase()
-  const cycleToken = normalizeBillingCycle(tokens.cycle)
-  const estabId = Number(tokens.est || 0)
-  const topupMessagesToken = Number(tokens.msgs || 0) || 0
-  const packCodeToken = tokens.pack || null
-  const isTopup = metadataKind === 'whatsapp_topup' || String(tokens.wallet || '').toLowerCase() === 'whatsapp_topup'
+  const paymentContext = buildPixPaymentContext(payment)
+  const status = String(paymentContext.status || '')
+  const externalRef = String(paymentContext.external_reference || '')
+  const planToken = String(paymentContext.plan || '').toLowerCase()
+  const cycleToken = normalizeBillingCycle(paymentContext.billing_cycle)
+  const estabId = Number(paymentContext.establishment_id || 0) || 0
+  const topupMessagesToken = Number(paymentContext.tokens?.msgs || 0) || 0
+  const packCodeToken = paymentContext.tokens?.pack || null
+  const isTopup = paymentContext.is_topup === true
   let topupMessages = Number(payment?.metadata?.messages || 0) || topupMessagesToken
   const packCode = payment?.metadata?.pack_code || packCodeToken || null
   const packIdRaw = payment?.metadata?.pack_id
   const packId = Number.isFinite(Number(packIdRaw)) ? Number(packIdRaw) : null
   const packName = payment?.metadata?.pack_name || null
 
-  // Recupera (se existir) a subscription criada ao gerar a preferência
-  let subscription = null
-  if (payment.order?.id) {
-    // às vezes, o order.id não corresponde à preference, então mantemos fallback por external_reference
-  }
-  // fallback: tente localizar pelo external_reference (se já tivermos salvo)
-  if (!subscription) {
-    try {
-      const [rows] = await pool.query(
-        'SELECT * FROM subscriptions WHERE gateway_preference_id=? ORDER BY id DESC LIMIT 1',
-        [String(payment.id)]
-      )
-      subscription = rows?.[0]
-        ? {
-            id: rows[0].id,
-            estabelecimentoId: rows[0].estabelecimento_id,
-            plan: rows[0].plan,
-            amountCents: rows[0].amount_cents,
-            currency: rows[0].currency,
-            billingCycle: rows[0].billing_cycle,
-            gateway: rows[0].gateway,
-            gatewaySubscriptionId: rows[0].gateway_subscription_id,
-            gatewayPreferenceId: rows[0].gateway_preference_id,
-            status: rows[0].status,
-            lastEventId: rows[0].last_event_id,
-          }
-        : null
-    } catch {}
-  }
-  if (!subscription && externalRef) {
-    try {
-      const [rows] = await pool.query('SELECT * FROM subscriptions WHERE external_reference=? ORDER BY id DESC LIMIT 1', [externalRef])
-      subscription = rows?.[0] ? {
-        id: rows[0].id,
-        estabelecimentoId: rows[0].estabelecimento_id,
-        plan: rows[0].plan,
-        amountCents: rows[0].amount_cents,
-        currency: rows[0].currency,
-        billingCycle: rows[0].billing_cycle,
-        gateway: rows[0].gateway,
-        gatewaySubscriptionId: rows[0].gateway_subscription_id,
-        gatewayPreferenceId: rows[0].gateway_preference_id,
-        status: rows[0].status,
-        lastEventId: rows[0].last_event_id,
-      } : null
-    } catch {}
-  }
+  let matchResult = await findMatchingPixSubscription(payment, { db: pool })
+  let subscription = matchResult.subscription || null
 
   // Se não conseguimos inferir, mas temos tokens válidos, crie um registro minimamente coerente
   if (!subscription && estabId && (PLAN_TIERS.includes(planToken) || isTopup)) {
@@ -725,13 +836,60 @@ export async function syncMercadoPagoPayment(paymentId, eventPayload = null) {
       externalReference: externalRef || null,
       billingCycle: cycleToken || 'mensal',
     })
+    matchResult = {
+      ...matchResult,
+      subscription,
+      matchedBy: 'created_from_payment_context',
+      matchScore: 0,
+      matchReasons: ['created_from_payment_context'],
+    }
   }
 
-  if (subscription?.lastEventId && String(subscription.lastEventId) === String(payment.id)) {
+  if (subscription?.id) {
+    logSyncAction('payment_matched', {
+      matched_entity_type: 'subscription',
+      matched_entity_id: subscription.id,
+      subscription_id: subscription.id,
+      establishment_id: subscription.estabelecimentoId || estabId || null,
+      match_strategy: matchResult?.matchedBy || null,
+      match_score: matchResult?.matchScore || 0,
+      match_reasons: matchResult?.matchReasons || [],
+    })
+  }
+
+  const obsoleteMarker = subscription?.id
+    ? await findPixObsoleteMarker(subscription.id, { db: pool })
+    : null
+  const paymentDisposition = resolvePixPaymentDisposition({
+    status,
+    paymentId: payment?.id ? String(payment.id) : null,
+    subscriptionLastEventId: subscription?.lastEventId || null,
+    hasObsoleteMarker: Boolean(obsoleteMarker),
+  })
+
+  if (paymentDisposition === 'already_processed') {
     if (status === 'approved') {
+      logSyncAction('payment_already_processed', {
+        matched_entity_type: 'subscription',
+        matched_entity_id: subscription?.id || null,
+        subscription_id: subscription?.id || null,
+        establishment_id: subscription?.estabelecimentoId || estabId || null,
+      })
       return { ok: true, payment, already_processed: true }
     }
     return ignore('already_processed', null, { already_processed: true })
+  }
+
+  if (paymentDisposition === 'stale_superseded') {
+    return ignore('stale_pix_superseded', {
+      matched_entity_type: 'subscription',
+      matched_entity_id: subscription?.id || null,
+      subscription_id: subscription?.id || null,
+      establishment_id: subscription?.estabelecimentoId || estabId || null,
+    }, {
+      stale: true,
+      obsolete_event_id: obsoleteMarker?.id || null,
+    })
   }
 
   if (status !== 'approved') {
@@ -763,9 +921,21 @@ export async function syncMercadoPagoPayment(paymentId, eventPayload = null) {
         gatewayEventId: String(payment.id),
         payload: { event: eventPayload, payment },
       })
+      logSyncAction(nextStatus === 'pending_pix' ? 'payment_pending' : 'payment_not_approved', {
+        matched_entity_type: 'subscription',
+        matched_entity_id: subscription.id,
+        subscription_id: subscription.id,
+        establishment_id: subscription.estabelecimentoId || estabId || null,
+        next_status: nextStatus,
+      })
     }
     const reason = `unsupported_status:${status || 'unknown'}`
-    return ignore(reason)
+    return ignore(reason, {
+      matched_entity_type: subscription?.id ? 'subscription' : null,
+      matched_entity_id: subscription?.id || null,
+      subscription_id: subscription?.id || null,
+      establishment_id: subscription?.estabelecimentoId || estabId || null,
+    })
   }
 
   if (isTopup) {
@@ -828,10 +998,27 @@ export async function syncMercadoPagoPayment(paymentId, eventPayload = null) {
       }
     }
 
+    logSyncAction('pix_topup_applied', {
+      matched_entity_type: 'subscription',
+      matched_entity_id: subscription?.id || null,
+      subscription_id: subscription?.id || null,
+      establishment_id: estabelecimentoId || null,
+      topup_messages: topupMessages || 0,
+    })
+
     return { ok: true, payment, topup: true, messages: topupMessages, pack: packForCredit }
   }
 
   // status approved: ativa plano por 1 ciclo a partir de hoje (PIX fallback)
+  if (!subscription?.id) {
+    return ignore('subscription_not_found', {
+      matched_entity_type: null,
+      matched_entity_id: null,
+      subscription_id: null,
+      establishment_id: estabId || null,
+    })
+  }
+
   const effectivePlan = (PLAN_TIERS.includes(planToken) ? planToken : (subscription?.plan || 'pro'))
   const effectiveCycle = cycleToken || subscription?.billingCycle || 'mensal'
   let activationResult = {
@@ -888,6 +1075,39 @@ export async function syncMercadoPagoPayment(paymentId, eventPayload = null) {
     })
     try { await getWhatsAppWalletSnapshot(estabelecimentoId) } catch {}
   }
+
+  if ((activationResult?.obsoleteSiblingCount || 0) > 0) {
+    logSyncAction('stale_pix_marked_obsolete', {
+      matched_entity_type: 'subscription',
+      matched_entity_id: activationResult?.subscription?.id || subscription?.id || null,
+      subscription_id: activationResult?.subscription?.id || subscription?.id || null,
+      establishment_id:
+        activationResult?.subscription?.estabelecimentoId ||
+        subscription?.estabelecimentoId ||
+        estabId ||
+        null,
+      stale_pix_marked_obsolete: activationResult?.obsoleteSiblingCount || 0,
+    })
+  }
+
+  logSyncAction(
+    activationResult?.credit
+      ? 'plan_upgraded'
+      : 'pix_payment_applied',
+    {
+      matched_entity_type: 'subscription',
+      matched_entity_id: activationResult?.subscription?.id || subscription?.id || null,
+      subscription_id: activationResult?.subscription?.id || subscription?.id || null,
+      establishment_id:
+        activationResult?.subscription?.estabelecimentoId ||
+        subscription?.estabelecimentoId ||
+        estabId ||
+        null,
+      upgrade_credit_cents: activationResult?.credit?.generated_credit_cents || 0,
+      stale_pix_marked_obsolete: activationResult?.obsoleteSiblingCount || 0,
+      source_subscription_id: activationResult?.sourceSubscription?.id || null,
+    }
+  )
 
   return {
     ok: true,
