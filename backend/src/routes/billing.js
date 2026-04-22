@@ -59,6 +59,19 @@ import { logBlockedRouteAccess, resolveRouteTokenAccess } from '../lib/route_acc
 import { loadEffectiveSubscriptionContext } from '../lib/subscription_state.js'
 import { normalizeSubscriptionStatus } from '../lib/subscription_normalization.js'
 import {
+  appendUpgradeCreditEventsTx,
+  applyReservedSubscriptionCreditApplicationsTx,
+  applyScheduledDiscountForSubscriptionPaymentTx,
+  createUpgradeProrationCreditTx,
+  findUpgradeSourceSubscription,
+  getAvailableSubscriptionCreditTotals,
+  getSubscriptionCreditOverview,
+  releaseReservedSubscriptionCreditApplicationsTx,
+  releaseScheduledSubscriptionCreditApplicationsTx,
+  reserveSubscriptionCreditApplicationsTx,
+  scheduleSubscriptionCreditsForCardTx,
+} from '../lib/subscription_credits.js'
+import {
   enrichMercadoPagoSubscriptionEvent,
   findLatestMercadoPagoPaymentResult,
   summarizeMercadoPagoGatewayResult,
@@ -476,6 +489,167 @@ function resolveCardPersistenceAfterSave({
   }
 }
 
+async function processUpgradeCreditAfterActivationTx(targetSubscriptionId, {
+  paymentMethod = null,
+  paymentId = null,
+  externalReference = null,
+  rawPayload = null,
+  db = pool,
+} = {}) {
+  const targetSubscription = await getSubscriptionById(targetSubscriptionId, { db })
+  if (!targetSubscription?.id) {
+    return {
+      subscription: null,
+      sourceSubscription: null,
+      credit: null,
+      schedulePlan: null,
+      applied: false,
+    }
+  }
+
+  const paidAt = targetSubscription.currentPeriodStart || targetSubscription.lastPaymentAt || new Date()
+  const sourceSubscription = await findUpgradeSourceSubscription(targetSubscription.estabelecimentoId, {
+    targetSubscriptionId: targetSubscription.id,
+    targetPlan: targetSubscription.plan,
+    changedAt: paidAt,
+    db,
+  })
+  let creditResult = { credit: null, created: false }
+
+  if (sourceSubscription?.id) {
+    await releaseScheduledSubscriptionCreditApplicationsTx(sourceSubscription.id, {
+      db,
+      reason: 'source_subscription_upgraded',
+      externalReference,
+    })
+
+    creditResult = await createUpgradeProrationCreditTx({
+      sourceSubscription,
+      targetSubscription,
+      changedAt: paidAt,
+      paymentMethod,
+      paymentId,
+      externalReference,
+      rawPayload,
+      db,
+    })
+
+    if (sourceSubscription.id !== targetSubscription.id) {
+      await updateSubscription(sourceSubscription.id, {
+        status: 'canceled',
+        canceledAt: paidAt,
+        cancelAt: paidAt,
+        nextBillingAt: null,
+        graceUntil: null,
+      }, { db })
+    }
+
+    if (creditResult?.credit) {
+      await appendUpgradeCreditEventsTx(sourceSubscription, targetSubscription, {
+        credit: creditResult.credit,
+        paymentMethod,
+        paymentId,
+        externalReference,
+        db,
+      })
+    }
+  }
+
+  const refreshedTargetSubscription = await getSubscriptionById(targetSubscription.id, { db })
+  const schedulePlan =
+    refreshedTargetSubscription?.gatewaySubscriptionId &&
+    String(refreshedTargetSubscription.paymentMethod || '').toLowerCase() === 'credit_card'
+      ? await scheduleSubscriptionCreditsForCardTx(refreshedTargetSubscription, {
+          externalReference,
+          db,
+        })
+      : null
+
+  if (schedulePlan?.reserved_credit_cents > 0) {
+    await appendSubscriptionEvent(refreshedTargetSubscription.id, {
+      eventType: 'subscription_credit_reserved',
+      gatewayEventId: `credit-reserved:${refreshedTargetSubscription.id}:${paymentId || externalReference || Date.now()}`,
+      payload: {
+        payment_method: paymentMethod,
+        payment_id: paymentId || null,
+        external_reference: externalReference || null,
+        nominal_amount_cents: schedulePlan.nominal_amount_cents,
+        next_charge_amount_cents: schedulePlan.next_charge_amount_cents,
+        next_charge_credit_cents: schedulePlan.scheduled_discount_cents,
+        next_payable_at: schedulePlan.next_payable_at,
+        scheduled_full_cycles: schedulePlan.scheduled_full_cycles,
+        reserved_credit_cents: schedulePlan.reserved_credit_cents,
+      },
+    }, { db })
+  }
+
+  return {
+    subscription: refreshedTargetSubscription,
+    sourceSubscription,
+    credit: creditResult?.credit || null,
+    schedulePlan,
+    applied: Boolean(creditResult?.credit),
+  }
+}
+
+async function syncCardCreditScheduleWithGateway(targetSubscription, schedulePlan, {
+  requestId = null,
+  operation = 'subscription_credit_schedule_sync',
+} = {}) {
+  if (!targetSubscription?.gatewaySubscriptionId || !schedulePlan) return null
+  const nextPayableAt = schedulePlan.next_payable_at ? new Date(schedulePlan.next_payable_at) : null
+  return updateMercadoPagoCardSubscription(targetSubscription.gatewaySubscriptionId, {
+    amountCents: schedulePlan.next_charge_amount_cents || schedulePlan.nominal_amount_cents,
+    billingCycle: targetSubscription.billingCycle,
+    status: 'authorized',
+    startDate: nextPayableAt,
+    requestContext: {
+      requestId,
+      route: '/billing/webhook',
+      operation,
+      subscriptionId: targetSubscription.id,
+      externalReference: targetSubscription.externalReference || null,
+    },
+  })
+}
+
+async function releaseCardCreditScheduleOnFailure(targetSubscriptionId, {
+  reason,
+  externalReference = null,
+} = {}) {
+  if (!targetSubscriptionId) return
+  const conn = await pool.getConnection()
+  try {
+    await conn.beginTransaction()
+    const released = await releaseScheduledSubscriptionCreditApplicationsTx(targetSubscriptionId, {
+      db: conn,
+      reason,
+      externalReference,
+    })
+    if (released?.released_amount_cents > 0) {
+      await appendSubscriptionEvent(targetSubscriptionId, {
+        eventType: 'subscription_credit_released',
+        gatewayEventId: `credit-release:${targetSubscriptionId}:${reason}`,
+        payload: {
+          reason,
+          external_reference: externalReference || null,
+          released_credit_cents: released.released_amount_cents,
+        },
+      }, { db: conn })
+    }
+    await conn.commit()
+  } catch (error) {
+    try { await conn.rollback() } catch {}
+    console.warn('[billing][credit_schedule][release_failed]', {
+      subscription_id: targetSubscriptionId,
+      reason,
+      message: error?.message || error,
+    })
+  } finally {
+    conn.release()
+  }
+}
+
 async function findPendingPixSubscription(estabelecimentoId, { plan, billingCycle } = {}) {
   const targetPlan = normalizePlanKey(plan)
   const targetCycle = billingCycle ? normalizeBillingCycle(billingCycle) : null
@@ -570,6 +744,265 @@ function isOpenPaymentExpired(payment) {
   const expiresAt = new Date(payment.expiresAt)
   if (!Number.isFinite(expiresAt.getTime())) return false
   return expiresAt.getTime() <= Date.now()
+}
+
+function sumReservedCreditApplications(applications = []) {
+  return (Array.isArray(applications) ? applications : []).reduce((total, item) => (
+    total + Math.max(0, Math.trunc(Number(item?.amount_cents || 0) || 0))
+  ), 0)
+}
+
+async function tryApplyFullCreditRenewal({
+  estabelecimentoId,
+  subscriptionId,
+  plan,
+  billingCycle,
+  nominalAmountCents,
+} = {}) {
+  if (!estabelecimentoId || !subscriptionId || nominalAmountCents <= 0) {
+    return { covered: false, subscription: null, appliedAmountCents: 0 }
+  }
+
+  const conn = await pool.getConnection()
+  let rolledBack = false
+  try {
+    await conn.beginTransaction()
+    const locked = await getSubscriptionById(subscriptionId, { db: conn })
+    if (!locked?.id) {
+      await conn.rollback()
+      rolledBack = true
+      return { covered: false, subscription: null, appliedAmountCents: 0 }
+    }
+
+    const groupKey = `manual-renewal-credit:${locked.id}:${Date.now()}`
+    const applications = await reserveSubscriptionCreditApplicationsTx({
+      estabelecimentoId,
+      targetSubscriptionId: locked.id,
+      amountCents: nominalAmountCents,
+      paymentMethod: 'pix',
+      applicationType: 'manual_renewal_credit',
+      applicationGroupKey: groupKey,
+      scheduledFor: new Date(),
+      externalReference: groupKey,
+      payload: {
+        plan,
+        billing_cycle: billingCycle,
+        nominal_amount_cents: nominalAmountCents,
+      },
+      db: conn,
+    })
+    const reservedAmountCents = sumReservedCreditApplications(applications)
+    if (reservedAmountCents < nominalAmountCents) {
+      if (applications.length) {
+        await releaseReservedSubscriptionCreditApplicationsTx(applications, {
+          externalReference: groupKey,
+          payloadPatch: { reason: 'insufficient_manual_renewal_credit' },
+          db: conn,
+        })
+      }
+      await conn.rollback()
+      rolledBack = true
+      return { covered: false, subscription: null, appliedAmountCents: 0 }
+    }
+
+    const appliedAmountCents = await applyReservedSubscriptionCreditApplicationsTx(applications, {
+      paymentId: groupKey,
+      externalReference: groupKey,
+      payloadPatch: {
+        applied_reason: 'manual_renewal_fully_covered',
+        payment_method: 'credit_balance',
+      },
+      db: conn,
+    })
+    if (appliedAmountCents < nominalAmountCents) {
+      throw new Error('manual_renewal_credit_application_incomplete')
+    }
+
+    const now = new Date()
+    const currentPeriodEnd = locked.currentPeriodEnd instanceof Date ? locked.currentPeriodEnd : (locked.currentPeriodEnd ? new Date(locked.currentPeriodEnd) : null)
+    const anchorEnd =
+      currentPeriodEnd && Number.isFinite(currentPeriodEnd.getTime()) && currentPeriodEnd.getTime() > now.getTime()
+        ? currentPeriodEnd
+        : now
+    const nextEnd = addBillingCycleDate(anchorEnd, billingCycle)
+    const updated = await updateSubscription(locked.id, {
+      status: 'active',
+      paymentMethod: 'pix',
+      amountCents: nominalAmountCents,
+      billingCycle,
+      currentPeriodStart:
+        currentPeriodEnd && Number.isFinite(currentPeriodEnd.getTime()) && currentPeriodEnd.getTime() > now.getTime()
+          ? locked.currentPeriodStart || now
+          : now,
+      currentPeriodEnd: nextEnd,
+      nextBillingAt: nextEnd,
+      graceUntil: null,
+      lastPaymentAt: now,
+    }, { db: conn })
+
+    await appendSubscriptionEvent(updated.id, {
+      eventType: 'subscription_credit_applied',
+      gatewayEventId: `manual-renewal-credit:${updated.id}:${groupKey}`,
+      payload: {
+        payment_method: 'credit_balance',
+        application_type: 'manual_renewal_credit',
+        amount_cents: appliedAmountCents,
+        plan,
+        billing_cycle: billingCycle,
+      },
+    }, { db: conn })
+    await appendSubscriptionEvent(updated.id, {
+      eventType: 'subscription_renewed',
+      gatewayEventId: `manual-renewal-covered:${updated.id}:${groupKey}`,
+      payload: {
+        payment_method: 'credit_balance',
+        covered_by_credit: true,
+        credit_applied_cents: appliedAmountCents,
+        plan,
+        billing_cycle: billingCycle,
+        cycle_end: nextEnd ? nextEnd.toISOString() : null,
+      },
+    }, { db: conn })
+
+    await conn.commit()
+    return { covered: true, subscription: updated, appliedAmountCents }
+  } catch (error) {
+    if (!rolledBack) {
+      try { await conn.rollback() } catch {}
+    }
+    throw error
+  } finally {
+    conn.release()
+  }
+}
+
+async function reservePendingPixCreditDiscount({
+  estabelecimentoId,
+  plan,
+  billingCycle,
+  nominalAmountCents,
+} = {}) {
+  if (!estabelecimentoId || nominalAmountCents <= 0) {
+    return { placeholderSubscription: null, reservedAmountCents: 0, shouldRetryFullCredit: false }
+  }
+
+  const conn = await pool.getConnection()
+  let rolledBack = false
+  try {
+    await conn.beginTransaction()
+    const totals = await getAvailableSubscriptionCreditTotals(estabelecimentoId, { db: conn })
+    const availableAmountCents = Math.max(0, Math.trunc(Number(totals?.remaining_credit_cents || 0) || 0))
+    if (availableAmountCents <= 0) {
+      await conn.rollback()
+      rolledBack = true
+      return { placeholderSubscription: null, reservedAmountCents: 0, shouldRetryFullCredit: false }
+    }
+    if (availableAmountCents >= nominalAmountCents) {
+      await conn.rollback()
+      rolledBack = true
+      return { placeholderSubscription: null, reservedAmountCents: 0, shouldRetryFullCredit: true }
+    }
+
+    const placeholderSubscription = await createSubscription({
+      estabelecimentoId,
+      plan,
+      amountCents: nominalAmountCents,
+      currency: (config.billing?.currency || 'BRL').toUpperCase(),
+      paymentMethod: 'pix',
+      status: 'canceled',
+      gatewaySubscriptionId: null,
+      gatewayPaymentId: null,
+      gatewayPreferenceId: null,
+      externalReference: null,
+      billingCycle,
+    }, { db: conn })
+
+    const groupKey = `pending-pix-discount:${placeholderSubscription.id}:${Date.now()}`
+    const applications = await reserveSubscriptionCreditApplicationsTx({
+      estabelecimentoId,
+      targetSubscriptionId: placeholderSubscription.id,
+      amountCents: availableAmountCents,
+      paymentMethod: 'pix',
+      applicationType: 'pending_pix_discount',
+      applicationGroupKey: groupKey,
+      scheduledFor: new Date(),
+      externalReference: groupKey,
+      payload: {
+        plan,
+        billing_cycle: billingCycle,
+        nominal_amount_cents: nominalAmountCents,
+        requested_discount_cents: availableAmountCents,
+      },
+      db: conn,
+    })
+    const reservedAmountCents = sumReservedCreditApplications(applications)
+    if (reservedAmountCents <= 0) {
+      await conn.rollback()
+      rolledBack = true
+      return { placeholderSubscription: null, reservedAmountCents: 0, shouldRetryFullCredit: false }
+    }
+
+    await conn.commit()
+    return {
+      placeholderSubscription,
+      reservedAmountCents,
+      shouldRetryFullCredit: false,
+    }
+  } catch (error) {
+    if (!rolledBack) {
+      try { await conn.rollback() } catch {}
+    }
+    throw error
+  } finally {
+    conn.release()
+  }
+}
+
+async function cleanupPendingPixCreditDiscount(subscriptionId, {
+  reason = 'pending_pix_creation_failed',
+  externalReference = null,
+} = {}) {
+  if (!subscriptionId) return { released_amount_cents: 0 }
+  const conn = await pool.getConnection()
+  try {
+    await conn.beginTransaction()
+    const released = await releaseScheduledSubscriptionCreditApplicationsTx(subscriptionId, {
+      db: conn,
+      reason,
+      externalReference,
+    })
+    await updateSubscription(subscriptionId, {
+      status: 'canceled',
+      gatewayPaymentId: null,
+      gatewayPreferenceId: null,
+      externalReference: null,
+      nextBillingAt: null,
+      graceUntil: null,
+    }, { db: conn })
+    if (released?.released_amount_cents > 0) {
+      await appendSubscriptionEvent(subscriptionId, {
+        eventType: 'subscription_credit_released',
+        gatewayEventId: `credit-release:${subscriptionId}:${reason}`,
+        payload: {
+          reason,
+          external_reference: externalReference || null,
+          released_credit_cents: released.released_amount_cents,
+        },
+      }, { db: conn })
+    }
+    await conn.commit()
+    return released
+  } catch (error) {
+    try { await conn.rollback() } catch {}
+    console.warn('[billing][renew_pix][credit_cleanup_failed]', {
+      subscription_id: subscriptionId,
+      reason,
+      message: error?.message || error,
+    })
+    return { released_amount_cents: 0, failed: true }
+  } finally {
+    conn.release()
+  }
 }
 
 async function cancelPreviousCardSubscriptions(estabelecimentoId, { keepSubscriptionId = null, keepGatewaySubscriptionId = null } = {}) {
@@ -939,58 +1372,128 @@ async function syncAuthorizedPaymentFromGateway(authorizedPaymentId, {
     ? new Date(Date.now() + graceDays * DAY_MS)
     : null
 
-  const updated = await updateSubscription(localSubscription.id, {
-    paymentMethod: 'credit_card',
-    gatewayPaymentId: authorizedPayment.id || null,
-    gatewayCustomerId: preapprovalResult?.subscription?.gatewayCustomerId || localSubscription.gatewayCustomerId || null,
-    status: authorizedPayment.status || localSubscription.status,
-    amountCents: authorizedPayment.amountCents || localSubscription.amountCents,
-    currency: authorizedPayment.currency || localSubscription.currency,
-    currentPeriodStart: authorizedPayment.status === 'active' ? paymentDate : localSubscription.currentPeriodStart || null,
-    currentPeriodEnd: authorizedPayment.status === 'active'
-      ? (preapprovalResult?.subscription?.nextBillingAt || fallbackCurrentPeriodEnd || null)
-      : localSubscription.currentPeriodEnd || null,
-    nextBillingAt: preapprovalResult?.subscription?.nextBillingAt || localSubscription.nextBillingAt || null,
-    graceUntil,
-    lastPaymentAt: authorizedPayment.status === 'active' ? paymentDate : localSubscription.lastPaymentAt || null,
+  const conn = await pool.getConnection()
+  let updated = null
+  let upgradeProcessing = {
+    applied: false,
+    credit: null,
+    sourceSubscription: null,
+    schedulePlan: null,
+    subscription: null,
+  }
+  const eventPayload = buildMercadoPagoPaymentEventPayload({
+    payment: paymentResult.raw,
+    paymentResult: paymentOutcome,
+    gatewaySubscription: preapprovalResult.raw,
+    operation: 'subscription_authorized_payment',
+    source: 'webhook',
+    previousStatus: localSubscription.status,
+    nextStatus: authorizedPayment.status || localSubscription.status,
+    externalReference: preapprovalResult?.subscription?.externalReference || localSubscription.externalReference || null,
+    decision: paymentOutcome?.decision || null,
   })
 
-  const normalizedEventType = authorizedPayment.status === 'active'
-    ? 'payment_approved'
-    : authorizedPayment.status === 'past_due'
-      ? 'payment_failed'
-      : 'payment_pending'
-  await appendSubscriptionEvent(updated.id, {
-    eventType: normalizedEventType,
-    gatewayEventId: gatewayEventId || authorizedPayment.id,
-    payload: buildMercadoPagoPaymentEventPayload({
-      payment: paymentResult.raw,
-      paymentResult: paymentOutcome,
-      gatewaySubscription: preapprovalResult.raw,
-      operation: 'subscription_authorized_payment',
-      source: 'webhook',
-      previousStatus: localSubscription.status,
-      nextStatus: updated.status,
-      externalReference: preapprovalResult?.subscription?.externalReference || localSubscription.externalReference || null,
-      decision: paymentOutcome?.decision || null,
-    }),
-  })
-  if (authorizedPayment.status === 'active') {
+  try {
+    await conn.beginTransaction()
+    updated = await updateSubscription(localSubscription.id, {
+      paymentMethod: 'credit_card',
+      gatewayPaymentId: authorizedPayment.id || null,
+      gatewayCustomerId: preapprovalResult?.subscription?.gatewayCustomerId || localSubscription.gatewayCustomerId || null,
+      status: authorizedPayment.status || localSubscription.status,
+      amountCents: authorizedPayment.amountCents || localSubscription.amountCents,
+      currency: authorizedPayment.currency || localSubscription.currency,
+      currentPeriodStart: authorizedPayment.status === 'active' ? paymentDate : localSubscription.currentPeriodStart || null,
+      currentPeriodEnd: authorizedPayment.status === 'active'
+        ? (preapprovalResult?.subscription?.nextBillingAt || fallbackCurrentPeriodEnd || null)
+        : localSubscription.currentPeriodEnd || null,
+      nextBillingAt: preapprovalResult?.subscription?.nextBillingAt || localSubscription.nextBillingAt || null,
+      graceUntil,
+      lastPaymentAt: authorizedPayment.status === 'active' ? paymentDate : localSubscription.lastPaymentAt || null,
+    }, { db: conn })
+
+    const normalizedEventType = authorizedPayment.status === 'active'
+      ? 'payment_approved'
+      : authorizedPayment.status === 'past_due'
+        ? 'payment_failed'
+        : 'payment_pending'
     await appendSubscriptionEvent(updated.id, {
-      eventType: 'subscription_renewed',
-      gatewayEventId: `renewal:${authorizedPayment.id}`,
-      payload: buildMercadoPagoPaymentEventPayload({
-        payment: paymentResult.raw,
-        paymentResult: paymentOutcome,
-        gatewaySubscription: preapprovalResult.raw,
-        operation: 'subscription_authorized_payment',
-        source: 'webhook',
-        previousStatus: localSubscription.status,
-        nextStatus: updated.status,
+      eventType: normalizedEventType,
+      gatewayEventId: gatewayEventId || authorizedPayment.id,
+      payload: {
+        ...eventPayload,
+        next_status: updated.status,
+      },
+    }, { db: conn })
+    if (authorizedPayment.status === 'active') {
+      const appliedScheduledDiscount = await applyScheduledDiscountForSubscriptionPaymentTx(updated.id, {
+        paymentId: authorizedPayment.id || gatewayEventId || authorizedPaymentId,
         externalReference: preapprovalResult?.subscription?.externalReference || localSubscription.externalReference || null,
-        decision: paymentOutcome?.decision || null,
-      }),
-    })
+        paymentDate,
+        db: conn,
+      })
+
+      if (appliedScheduledDiscount?.applied_credit_cents > 0) {
+        await appendSubscriptionEvent(updated.id, {
+          eventType: 'subscription_credit_applied',
+          gatewayEventId: `credit-discount:${authorizedPayment.id || gatewayEventId || authorizedPaymentId}`,
+          payload: {
+            payment_method: 'credit_card',
+            payment_id: authorizedPayment.id || null,
+            external_reference: preapprovalResult?.subscription?.externalReference || localSubscription.externalReference || null,
+            application_type: 'scheduled_discount',
+            amount_cents: appliedScheduledDiscount.applied_credit_cents,
+            scheduled_for: appliedScheduledDiscount.group?.scheduled_for || null,
+          },
+        }, { db: conn })
+      }
+
+      await appendSubscriptionEvent(updated.id, {
+        eventType: 'subscription_renewed',
+        gatewayEventId: `renewal:${authorizedPayment.id}`,
+        payload: {
+          ...eventPayload,
+          next_status: updated.status,
+          credit_applied_cents: appliedScheduledDiscount?.applied_credit_cents || 0,
+        },
+      }, { db: conn })
+      upgradeProcessing = await processUpgradeCreditAfterActivationTx(updated.id, {
+        paymentMethod: 'credit_card',
+        paymentId: authorizedPayment.id || gatewayEventId || authorizedPaymentId,
+        externalReference: preapprovalResult?.subscription?.externalReference || localSubscription.externalReference || null,
+        rawPayload: {
+          payment: paymentResult.raw,
+          gateway_subscription: preapprovalResult.raw,
+        },
+        db: conn,
+      })
+      updated = upgradeProcessing.subscription || updated
+    }
+
+    await conn.commit()
+  } catch (error) {
+    try { await conn.rollback() } catch {}
+    throw error
+  } finally {
+    conn.release()
+  }
+
+  if (upgradeProcessing?.schedulePlan?.reserved_credit_cents > 0) {
+    try {
+      await syncCardCreditScheduleWithGateway(updated, upgradeProcessing.schedulePlan, {
+        requestId: gatewayEventId || authorizedPayment.id || authorizedPaymentId,
+        operation: 'subscription_credit_schedule_sync',
+      })
+    } catch (error) {
+      await releaseCardCreditScheduleOnFailure(updated?.id, {
+        reason: 'gateway_schedule_sync_failed',
+        externalReference: preapprovalResult?.subscription?.externalReference || localSubscription.externalReference || null,
+      })
+      console.warn('[billing][authorized_payment][credit_schedule_sync_failed]', {
+        subscription_id: updated?.id || null,
+        gateway_subscription_id: updated?.gatewaySubscriptionId || null,
+        message: error?.message || error,
+      })
+    }
   }
 
   logMercadoPagoPaymentDecision('authorized_payment_sync', {
@@ -1011,6 +1514,7 @@ async function syncAuthorizedPaymentFromGateway(authorizedPaymentId, {
     authorizedPayment: paymentResult.raw,
     gatewaySubscription: preapprovalResult.raw,
     paymentResult: paymentOutcome,
+    upgrade_credit: upgradeProcessing?.credit || null,
   }
 }
 
@@ -1824,6 +2328,9 @@ router.get('/subscription', auth, isEstabelecimento, async (req, res) => {
           billingCycle: recoverySubscription.billingCycle,
         }))
       : null
+    const creditOverview = await getSubscriptionCreditOverview(req.user.id, {
+      subscription: effective,
+    })
 
     return res.json({
       plan: serializedPlan,
@@ -1839,6 +2346,7 @@ router.get('/subscription', auth, isEstabelecimento, async (req, res) => {
       history: history.map(serializeSubscription),
       topups: topups.map(serializeSubscription),
       events,
+      credits: creditOverview,
       latest_payment_result: latestPaymentResult,
       latest_failure: latestFailure,
       recovery_guard: recoveryGuard,
@@ -3039,12 +3547,20 @@ router.post('/pix', auth, isEstabelecimento, async (req, res) => {
 
 router.post('/renew/pix', auth, isEstabelecimento, async (req, res) => {
   try {
-    const planContext = await getPlanContext(req.user.id)
+    const currentContext = await loadEffectiveSubscriptionContext(req.user.id)
+    const planContext = currentContext.planContext
     if (!planContext) {
       return res.status(404).json({ error: 'plan_context_not_found' })
     }
     const targetPlan = normalizePlanKey(planContext.plan || req.user.plan || 'starter') || 'starter'
     const targetCycle = normalizeBillingCycle(planContext.cycle || req.user.plan_cycle || 'mensal')
+    const effectiveSubscription = currentContext.subscription || null
+    const nominalAmountCents = getPlanPriceCents(targetPlan, targetCycle)
+
+    const canApplyRenewalCredit =
+      effectiveSubscription?.id &&
+      normalizePlanKey(effectiveSubscription.plan) === targetPlan &&
+      normalizeBillingCycle(effectiveSubscription.billingCycle) === targetCycle
 
     const pending = await findPendingPixSubscription(req.user.id, { plan: targetPlan, billingCycle: targetCycle })
     if (pending) {
@@ -3064,13 +3580,143 @@ router.post('/renew/pix', auth, isEstabelecimento, async (req, res) => {
           subscription: serializeSubscription(pending),
         })
       }
+      await releaseScheduledSubscriptionCreditApplicationsTx(pending.id, {
+        reason: 'pending_pix_replaced',
+        externalReference: pending.externalReference || null,
+      })
     }
 
-    const result = await createMercadoPagoPixCheckout({
-      estabelecimento: { id: req.user.id, email: req.user.email },
-      plan: targetPlan,
-      billingCycle: targetCycle,
-    })
+    if (canApplyRenewalCredit) {
+      const fullCreditRenewal = await tryApplyFullCreditRenewal({
+        estabelecimentoId: req.user.id,
+        subscriptionId: effectiveSubscription.id,
+        plan: targetPlan,
+        billingCycle: targetCycle,
+        nominalAmountCents,
+      })
+      if (fullCreditRenewal.covered && fullCreditRenewal.subscription) {
+        await syncUserPlanContextFromSubscription(req.user.id, {
+          plan: targetPlan,
+          status: 'active',
+          billingCycle: targetCycle,
+          trialEndsAt: null,
+          activeUntil: fullCreditRenewal.subscription.currentPeriodEnd || null,
+          subscriptionId: fullCreditRenewal.subscription.id || null,
+        })
+
+        return res.json({
+          ok: true,
+          renewal: {
+            hasOpenPayment: false,
+            coveredByCredit: true,
+            credit_applied_cents: fullCreditRenewal.appliedAmountCents,
+          },
+          subscription: serializeSubscription(fullCreditRenewal.subscription),
+          credits: await getSubscriptionCreditOverview(req.user.id, {
+            subscription: fullCreditRenewal.subscription,
+          }),
+        })
+      }
+    }
+
+    let partialCreditCents = 0
+    let placeholderSubscription = null
+    if (canApplyRenewalCredit) {
+      const reservation = await reservePendingPixCreditDiscount({
+        estabelecimentoId: req.user.id,
+        plan: targetPlan,
+        billingCycle: targetCycle,
+        nominalAmountCents,
+      })
+      if (reservation.shouldRetryFullCredit) {
+        const fullCreditRenewal = await tryApplyFullCreditRenewal({
+          estabelecimentoId: req.user.id,
+          subscriptionId: effectiveSubscription.id,
+          plan: targetPlan,
+          billingCycle: targetCycle,
+          nominalAmountCents,
+        })
+        if (fullCreditRenewal.covered && fullCreditRenewal.subscription) {
+          await syncUserPlanContextFromSubscription(req.user.id, {
+            plan: targetPlan,
+            status: 'active',
+            billingCycle: targetCycle,
+            trialEndsAt: null,
+            activeUntil: fullCreditRenewal.subscription.currentPeriodEnd || null,
+            subscriptionId: fullCreditRenewal.subscription.id || null,
+          })
+
+          return res.json({
+            ok: true,
+            renewal: {
+              hasOpenPayment: false,
+              coveredByCredit: true,
+              credit_applied_cents: fullCreditRenewal.appliedAmountCents,
+            },
+            subscription: serializeSubscription(fullCreditRenewal.subscription),
+            credits: await getSubscriptionCreditOverview(req.user.id, {
+              subscription: fullCreditRenewal.subscription,
+            }),
+          })
+        }
+      }
+      partialCreditCents = reservation.reservedAmountCents || 0
+      placeholderSubscription = reservation.placeholderSubscription || null
+    }
+
+    let result = null
+    try {
+      result = await createMercadoPagoPixCheckout({
+        estabelecimento: { id: req.user.id, email: req.user.email },
+        plan: targetPlan,
+        billingCycle: targetCycle,
+        amountCentsOverride: partialCreditCents > 0 ? nominalAmountCents - partialCreditCents : null,
+        metadataExtras: partialCreditCents > 0
+          ? {
+              charge_kind: 'renewal',
+              credit_reserved_cents: partialCreditCents,
+            }
+          : { charge_kind: 'renewal' },
+        existingSubscriptionId: placeholderSubscription?.id || null,
+      })
+    } catch (error) {
+      if (placeholderSubscription?.id) {
+        await cleanupPendingPixCreditDiscount(placeholderSubscription.id, {
+          reason: 'pending_pix_checkout_failed',
+        })
+      }
+      throw error
+    }
+
+    if (partialCreditCents > 0 && result?.subscription?.id) {
+      const conn = await pool.getConnection()
+      try {
+        await conn.beginTransaction()
+        await appendSubscriptionEvent(result.subscription.id, {
+          eventType: 'subscription_credit_reserved',
+          gatewayEventId: `pending-pix-credit:${result.subscription.id}`,
+          payload: {
+            payment_method: 'pix',
+            application_type: 'pending_pix_discount',
+            amount_cents: partialCreditCents,
+            nominal_amount_cents: nominalAmountCents,
+            discounted_amount_cents: nominalAmountCents - partialCreditCents,
+            plan: targetPlan,
+            billing_cycle: targetCycle,
+          },
+        }, { db: conn })
+        await conn.commit()
+      } catch (error) {
+        try { await conn.rollback() } catch {}
+        await cleanupPendingPixCreditDiscount(result.subscription.id, {
+          reason: 'pending_pix_credit_event_failed',
+          externalReference: result.subscription.externalReference || null,
+        })
+        throw error
+      } finally {
+        conn.release()
+      }
+    }
     const newOpenPayment = formatOpenPaymentPayload({
       paymentId: result.pix?.payment_id || result.subscription?.gatewayPreferenceId || null,
       status: result.payment?.status || result.subscription?.status || 'pending',
@@ -3095,7 +3741,12 @@ router.post('/renew/pix', auth, isEstabelecimento, async (req, res) => {
 
     return res.json({
       ok: true,
-      renewal: { hasOpenPayment: true, openPayment: newOpenPayment },
+      renewal: {
+        hasOpenPayment: true,
+        openPayment: newOpenPayment,
+        nominal_amount_cents: nominalAmountCents,
+        credit_reserved_cents: partialCreditCents,
+      },
       subscription: serializeSubscription(result.subscription),
     })
   } catch (error) {

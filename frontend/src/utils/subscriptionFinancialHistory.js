@@ -1,6 +1,7 @@
 const PAYMENT_METHOD_LABELS = {
   credit_card: 'Cartao de credito',
   pix: 'PIX',
+  credit_balance: 'Credito da assinatura',
 }
 
 const STATUS_DETAIL_MESSAGES = {
@@ -24,6 +25,11 @@ const FALLBACK_EVENT_TITLES = {
   payment_method_changed: 'Forma de pagamento alterada',
   subscription_updated: 'Assinatura atualizada',
   subscription_state_corrected: 'Estado sincronizado',
+  upgrade_credit_generated: 'Upgrade com credito proporcional',
+  subscription_credit_reserved: 'Credito reservado',
+  subscription_credit_applied: 'Credito aplicado',
+  subscription_credit_released: 'Credito liberado',
+  subscription_upgraded: 'Plano substituido',
 }
 
 const FINANCIAL_EVENT_TYPES = new Set([
@@ -39,7 +45,20 @@ const FINANCIAL_EVENT_TYPES = new Set([
   'subscription_renewed',
   'subscription_canceled',
   'subscription_blocked',
+  'upgrade_credit_generated',
+  'subscription_credit_reserved',
+  'subscription_credit_applied',
+  'subscription_credit_released',
 ])
+
+function formatCurrencyFromCents(value) {
+  const amount = Number(value)
+  if (!Number.isFinite(amount)) return null
+  return (amount / 100).toLocaleString('pt-BR', {
+    style: 'currency',
+    currency: 'BRL',
+  })
+}
 
 function normalizeKey(value) {
   return String(value || '').trim().toLowerCase()
@@ -109,6 +128,15 @@ function inferPaymentMethod(event) {
     return 'credit_card'
   }
 
+  if ([
+    'upgrade_credit_generated',
+    'subscription_credit_reserved',
+    'subscription_credit_applied',
+    'subscription_credit_released',
+  ].includes(eventType)) {
+    return payloadMethod || 'credit_balance'
+  }
+
   return null
 }
 
@@ -129,6 +157,18 @@ function resolveStatusMeta(event, paymentMethod) {
   }
   if (eventType === 'payment_recovery_attempt') {
     return { payment_status: 'started', status_group: 'started', label: 'Tentativa iniciada', tone: 'info' }
+  }
+  if (eventType === 'upgrade_credit_generated') {
+    return { payment_status: 'generated', status_group: 'generated', label: 'Credito gerado', tone: 'success' }
+  }
+  if (eventType === 'subscription_credit_reserved') {
+    return { payment_status: 'reserved', status_group: 'reserved', label: 'Abatimento agendado', tone: 'info' }
+  }
+  if (eventType === 'subscription_credit_applied') {
+    return { payment_status: 'applied', status_group: 'approved', label: 'Credito aplicado', tone: 'success' }
+  }
+  if (eventType === 'subscription_credit_released') {
+    return { payment_status: 'released', status_group: 'released', label: 'Credito liberado', tone: 'neutral' }
   }
 
   if (statusGroup === 'approved' || ['approved', 'paid', 'active'].includes(status)) {
@@ -195,6 +235,58 @@ function getReferenceData(event, paymentMethod) {
 
 function buildDisplayCopy(event, paymentMethod, statusMeta, reasonMessage) {
   const eventType = normalizeKey(event?.event_type)
+  const sourcePlan = normalizeKey(event?.payload?.source_plan)
+  const targetPlan = normalizeKey(event?.payload?.target_plan)
+  const sourceNominal = formatCurrencyFromCents(event?.payload?.original_plan_amount_cents)
+  const targetNominal = formatCurrencyFromCents(event?.payload?.target_plan_amount_cents)
+  const generatedCredit = formatCurrencyFromCents(event?.payload?.generated_credit_cents)
+  const appliedCredit = formatCurrencyFromCents(event?.payload?.amount_cents || event?.payload?.credit_applied_cents)
+  const nextChargeCredit = formatCurrencyFromCents(event?.payload?.next_charge_credit_cents)
+  const nextChargeAmount = formatCurrencyFromCents(event?.payload?.next_charge_amount_cents)
+
+  if (eventType === 'upgrade_credit_generated') {
+    return {
+      display_title: 'Upgrade realizado',
+      display_subtitle:
+        sourcePlan && targetPlan
+          ? `${sourcePlan.charAt(0).toUpperCase() + sourcePlan.slice(1)} -> ${targetPlan.charAt(0).toUpperCase() + targetPlan.slice(1)}`
+          : 'Credito proporcional gerado',
+      display_message:
+        generatedCredit
+          ? `Credito proporcional gerado: ${generatedCredit}.${sourceNominal && targetNominal ? ` Plano anterior ${sourceNominal} e novo plano ${targetNominal}.` : ''} O abatimento entrara automaticamente nas proximas cobrancas.`
+          : (reasonMessage || 'Credito proporcional gerado no upgrade do plano.'),
+    }
+  }
+
+  if (eventType === 'subscription_credit_reserved') {
+    return {
+      display_title: 'Credito reservado',
+      display_subtitle: 'Abatimento programado para a proxima cobranca.',
+      display_message:
+        nextChargeCredit && nextChargeAmount
+          ? `Abatimento previsto: ${nextChargeCredit}. Proxima cobranca estimada: ${nextChargeAmount}.`
+          : (reasonMessage || 'O credito disponivel sera abatido automaticamente na proxima renovacao.'),
+    }
+  }
+
+  if (eventType === 'subscription_credit_applied') {
+    return {
+      display_title: 'Credito aplicado',
+      display_subtitle: 'Abatimento registrado na renovacao.',
+      display_message:
+        appliedCredit
+          ? `Valor abatido: ${appliedCredit}.`
+          : (reasonMessage || 'O credito proporcional foi consumido na renovacao da assinatura.'),
+    }
+  }
+
+  if (eventType === 'subscription_credit_released') {
+    return {
+      display_title: 'Credito liberado',
+      display_subtitle: 'Reserva cancelada e saldo devolvido para uso futuro.',
+      display_message: reasonMessage || 'O credito voltou a ficar disponivel para a proxima cobranca.',
+    }
+  }
 
   if (paymentMethod === 'pix') {
     if (statusMeta.status_group === 'pending') {

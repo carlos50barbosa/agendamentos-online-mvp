@@ -82,64 +82,64 @@ function mapRow(row) {
   }
 }
 
-export async function getSubscriptionById(id) {
-  const [rows] = await pool.query('SELECT * FROM subscriptions WHERE id=? LIMIT 1', [id])
+export async function getSubscriptionById(id, { db = pool } = {}) {
+  const [rows] = await db.query('SELECT * FROM subscriptions WHERE id=? LIMIT 1', [id])
   return mapRow(rows?.[0])
 }
 
-export async function getSubscriptionByGatewayId(gatewaySubscriptionId) {
+export async function getSubscriptionByGatewayId(gatewaySubscriptionId, { db = pool } = {}) {
   if (!gatewaySubscriptionId) return null
-  const [rows] = await pool.query(
+  const [rows] = await db.query(
     'SELECT * FROM subscriptions WHERE gateway_subscription_id=? LIMIT 1',
     [gatewaySubscriptionId]
   )
   return mapRow(rows?.[0])
 }
 
-export async function getSubscriptionByGatewayPaymentId(gatewayPaymentId) {
+export async function getSubscriptionByGatewayPaymentId(gatewayPaymentId, { db = pool } = {}) {
   if (!gatewayPaymentId) return null
-  const [rows] = await pool.query(
+  const [rows] = await db.query(
     'SELECT * FROM subscriptions WHERE gateway_payment_id=? ORDER BY id DESC LIMIT 1',
     [String(gatewayPaymentId)]
   )
   return mapRow(rows?.[0])
 }
 
-export async function getSubscriptionByPlanId(gatewayPreferenceId) {
+export async function getSubscriptionByPlanId(gatewayPreferenceId, { db = pool } = {}) {
   if (!gatewayPreferenceId) return null
-  const [rows] = await pool.query(
+  const [rows] = await db.query(
     'SELECT * FROM subscriptions WHERE gateway_preference_id=? LIMIT 1',
     [gatewayPreferenceId]
   )
   return mapRow(rows?.[0])
 }
 
-export async function getSubscriptionByExternalReference(externalReference) {
+export async function getSubscriptionByExternalReference(externalReference, { db = pool } = {}) {
   if (!externalReference) return null
-  const [rows] = await pool.query(
+  const [rows] = await db.query(
     'SELECT * FROM subscriptions WHERE external_reference=? ORDER BY id DESC LIMIT 1',
     [String(externalReference)]
   )
   return mapRow(rows?.[0])
 }
 
-export async function getLatestSubscriptionForEstabelecimento(estabelecimentoId) {
-  const [rows] = await pool.query(
+export async function getLatestSubscriptionForEstabelecimento(estabelecimentoId, { db = pool } = {}) {
+  const [rows] = await db.query(
     'SELECT * FROM subscriptions WHERE estabelecimento_id=? ORDER BY created_at DESC LIMIT 1',
     [estabelecimentoId]
   )
   return mapRow(rows?.[0])
 }
 
-export async function listSubscriptionsForEstabelecimento(estabelecimentoId) {
-  const [rows] = await pool.query(
+export async function listSubscriptionsForEstabelecimento(estabelecimentoId, { db = pool } = {}) {
+  const [rows] = await db.query(
     'SELECT * FROM subscriptions WHERE estabelecimento_id=? ORDER BY created_at DESC',
     [estabelecimentoId]
   )
   return rows.map(mapRow)
 }
 
-export async function createSubscription(data) {
+export async function createSubscription(data, { db = pool } = {}) {
   const columns = []
   const placeholders = []
   const values = []
@@ -181,11 +181,11 @@ export async function createSubscription(data) {
   }
 
   const sql = `INSERT INTO subscriptions (${columns.join(', ')}) VALUES (${placeholders.join(', ')})`
-  const [result] = await pool.query(sql, values)
-  return getSubscriptionById(result.insertId)
+  const [result] = await db.query(sql, values)
+  return getSubscriptionById(result.insertId, { db })
 }
 
-export async function updateSubscription(id, fields = {}) {
+export async function updateSubscription(id, fields = {}, { db = pool } = {}) {
   const sets = []
   const values = []
   for (const [key, value] of Object.entries(fields)) {
@@ -196,19 +196,19 @@ export async function updateSubscription(id, fields = {}) {
     values.push(nextValue)
   }
 
-  if (!sets.length) return getSubscriptionById(id)
+  if (!sets.length) return getSubscriptionById(id, { db })
 
   sets.push('updated_at=CURRENT_TIMESTAMP')
   values.push(id)
 
   const sql = `UPDATE subscriptions SET ${sets.join(', ')} WHERE id=? LIMIT 1`
-  await pool.query(sql, values)
-  return getSubscriptionById(id)
+  await db.query(sql, values)
+  return getSubscriptionById(id, { db })
 }
 
-export async function appendSubscriptionEvent(subscriptionId, { eventType, gatewayEventId, payload }) {
+export async function appendSubscriptionEvent(subscriptionId, { eventType, gatewayEventId, payload }, { db = pool } = {}) {
   if (gatewayEventId) {
-    const [existing] = await pool.query(
+    const [existing] = await db.query(
       `SELECT id
          FROM subscription_events
         WHERE subscription_id=?
@@ -226,11 +226,11 @@ export async function appendSubscriptionEvent(subscriptionId, { eventType, gatew
   `
   const safePayload = payload == null ? null : sanitizeMercadoPagoSensitivePayload(payload)
   const stringPayload = safePayload == null ? null : JSON.stringify(safePayload)
-  const [result] = await pool.query(sql, [subscriptionId, eventType, gatewayEventId || null, stringPayload])
+  const [result] = await db.query(sql, [subscriptionId, eventType, gatewayEventId || null, stringPayload])
   return { duplicated: false, id: result.insertId }
 }
 
-export async function getSubscriptionEventByGatewayEventId(subscriptionId, gatewayEventId, { eventTypes = [] } = {}) {
+export async function getSubscriptionEventByGatewayEventId(subscriptionId, gatewayEventId, { eventTypes = [], db = pool } = {}) {
   if (!subscriptionId || !gatewayEventId) return null
 
   const filters = [
@@ -250,7 +250,7 @@ export async function getSubscriptionEventByGatewayEventId(subscriptionId, gatew
     values.push(...normalizedTypes)
   }
 
-  const [rows] = await pool.query(
+  const [rows] = await db.query(
     `SELECT id, subscription_id, event_type, gateway_event_id, payload, created_at
        FROM subscription_events
       WHERE ${filters.join(' AND ')}
@@ -270,9 +270,9 @@ export async function getSubscriptionEventByGatewayEventId(subscriptionId, gatew
   }
 }
 
-export async function listSubscriptionEventsForEstabelecimento(estabelecimentoId, { limit = 30 } = {}) {
+export async function listSubscriptionEventsForEstabelecimento(estabelecimentoId, { limit = 30, db = pool } = {}) {
   const safeLimit = Math.max(1, Math.min(Number(limit || 30) || 30, 100))
-  const [rows] = await pool.query(
+  const [rows] = await db.query(
     `SELECT se.id,
             se.subscription_id,
             se.event_type,
@@ -306,10 +306,10 @@ export async function listSubscriptionEventsForEstabelecimento(estabelecimentoId
   }))
 }
 
-export async function listSubscriptionEventsBySubscriptionId(subscriptionId, { limit = 20 } = {}) {
+export async function listSubscriptionEventsBySubscriptionId(subscriptionId, { limit = 20, db = pool } = {}) {
   if (!subscriptionId) return []
   const safeLimit = Math.max(1, Math.min(Number(limit || 20) || 20, 100))
-  const [rows] = await pool.query(
+  const [rows] = await db.query(
     `SELECT se.id,
             se.subscription_id,
             se.event_type,

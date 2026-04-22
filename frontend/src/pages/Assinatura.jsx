@@ -335,6 +335,46 @@ function FinancialOverviewCard({ eyebrow, title, statusLabel, statusTone = 'neut
   );
 }
 
+function CreditEntryRow({ item }) {
+  const sourceLabel = PLAN_META[normalizePlanKey(item?.source_plan)]?.label || 'Plano anterior';
+  const targetLabel = PLAN_META[normalizePlanKey(item?.target_plan)]?.label || 'Plano novo';
+  const confirmationMethodLabel = PAYMENT_METHOD_LABELS[String(item?.payment_method || '').toLowerCase()] || null;
+  const statusMap = {
+    available: { label: 'Disponivel', tone: 'success' },
+    partially_reserved: { label: 'Parcialmente reservado', tone: 'info' },
+    reserved: { label: 'Reservado', tone: 'info' },
+    partially_consumed: { label: 'Parcialmente consumido', tone: 'warning' },
+    consumed: { label: 'Consumido', tone: 'neutral' },
+  };
+  const statusMeta = statusMap[String(item?.status || '').toLowerCase()] || { label: 'Registrado', tone: 'neutral' };
+  return (
+    <li className="subscription-page__history-item">
+      <div>
+        <span className="subscription-page__history-eyebrow">{`Upgrade realizado: ${sourceLabel} -> ${targetLabel}`}</span>
+        <strong>{`Credito proporcional gerado: ${formatCurrencyFromCents(item?.generated_credit_cents)}`}</strong>
+        <span className="muted">
+          {`Disponivel: ${formatCurrencyFromCents(item?.remaining_credit_cents)} • Consumido: ${formatCurrencyFromCents(item?.consumed_credit_cents)}`}
+        </span>
+        <span className="muted">
+          {`Nominal: ${sourceLabel} ${formatCurrencyFromCents(item?.original_plan_amount_cents)} -> ${targetLabel} ${formatCurrencyFromCents(item?.target_plan_amount_cents)}`}
+        </span>
+        <span className="muted">
+          {`Ciclo original: ${formatDateLong(item?.source_cycle_started_at)} ate ${formatDateLong(item?.source_cycle_ends_at)}`}
+        </span>
+        {confirmationMethodLabel ? (
+          <span className="muted">{`Confirmado via ${confirmationMethodLabel}`}</span>
+        ) : null}
+      </div>
+      <div>
+        <span className={`subscription-page__status-chip subscription-page__status-chip--${statusMeta.tone}`}>
+          {statusMeta.label}
+        </span>
+        <span className="muted">{formatDateTime(item?.changed_at)}</span>
+      </div>
+    </li>
+  );
+}
+
 export default function Assinatura() {
   const user = useMemo(() => getUser(), []);
   const navigate = useNavigate();
@@ -622,6 +662,30 @@ export default function Assinatura() {
   const openPixEvent = financialHistory.open_pix_event;
   const recoveryGuard = subscriptionData?.recovery_guard || null;
   const recoveryBlocked = hasDelinquentStatus && recoveryGuard?.can_run === false;
+  const creditSummary = subscriptionData?.credits?.summary || {};
+  const creditPreview = subscriptionData?.credits?.preview || null;
+  const creditEntries = useMemo(() => {
+    const list = Array.isArray(subscriptionData?.credits?.entries) ? subscriptionData.credits.entries : [];
+    return list.slice(0, 6);
+  }, [subscriptionData?.credits?.entries]);
+  const availableCreditCents = Number(creditSummary?.remaining_credit_cents || 0) || 0;
+  const reservedCreditCents = Number(creditSummary?.reserved_credit_cents || 0) || 0;
+  const consumedCreditCents = Number(creditSummary?.consumed_credit_cents || 0) || 0;
+  const hasCreditData = availableCreditCents > 0 || reservedCreditCents > 0 || creditEntries.length > 0;
+  const creditPreviewMessage = useMemo(() => {
+    if (!creditPreview) return 'Quando existir saldo de credito, o abatimento aparecera aqui automaticamente.';
+    if (creditPreview.next_renewal_covered_fully) {
+      const fullCycles = Number(creditPreview.scheduled_full_cycles || 0) || 0;
+      if (fullCycles === 1) {
+        return 'A proxima renovacao esta coberta pelo credito. A proxima cobranca paga sera recalculada automaticamente.';
+      }
+      return `As proximas ${fullCycles} renovacoes estao cobertas pelo credito. A proxima cobranca paga sera recalculada automaticamente.`;
+    }
+    if (Number(creditPreview.next_charge_credit_cents || 0) > 0) {
+      return `Na proxima cobranca prevista, ${formatCurrencyFromCents(creditPreview.next_charge_credit_cents)} sera abatido automaticamente.`;
+    }
+    return 'O saldo disponivel sera abatido automaticamente nas proximas cobrancas.';
+  }, [creditPreview]);
 
   const nextDueLabel = renewalRequired
     ? formatDateLong(billingStatus?.due_at || activeUntil)
@@ -1333,6 +1397,61 @@ export default function Assinatura() {
           </p>
         </div>
       </div>
+
+      {hasCreditData ? (
+        <section className="settings-module-card subscription-page__history-card">
+          <div className="subscription-page__section-head">
+            <div>
+              <h3>Credito proporcional</h3>
+              <p className="muted">Saldo financeiro gerado por upgrades antecipados e abatimento previsto nas proximas cobrancas.</p>
+            </div>
+            <div className="subscription-page__status-chip subscription-page__status-chip--success">
+              {formatCurrencyFromCents(availableCreditCents)}
+            </div>
+          </div>
+          <div className="subscription-page__financial-overview">
+            <FinancialOverviewCard
+              eyebrow="Saldo"
+              title={`Credito disponivel: ${formatCurrencyFromCents(availableCreditCents)}`}
+              statusLabel={reservedCreditCents > 0 ? 'Agendado' : 'Disponivel'}
+              statusTone={reservedCreditCents > 0 ? 'info' : 'success'}
+              message={
+                reservedCreditCents > 0
+                  ? `${formatCurrencyFromCents(reservedCreditCents)} ja estao reservados para abatimentos futuros.`
+                  : 'Esse saldo sera abatido automaticamente nas proximas cobrancas elegiveis.'
+              }
+            />
+            {creditPreview ? (
+              <FinancialOverviewCard
+                eyebrow="Proxima cobranca"
+                title={creditPreview.next_renewal_covered_fully
+                  ? 'A proxima renovacao sera coberta pelo credito'
+                  : `Proxima cobranca prevista: ${formatCurrencyFromCents(creditPreview.next_charge_amount_cents)}`}
+                statusLabel={creditPreview.next_renewal_covered_fully ? 'Coberta' : 'Com abatimento'}
+                statusTone={creditPreview.next_renewal_covered_fully ? 'success' : 'info'}
+                message={creditPreviewMessage}
+                createdAt={creditPreview.next_charge_at}
+              />
+            ) : null}
+            {consumedCreditCents > 0 ? (
+              <FinancialOverviewCard
+                eyebrow="Historico"
+                title={`Credito consumido: ${formatCurrencyFromCents(consumedCreditCents)}`}
+                statusLabel="Auditavel"
+                statusTone="neutral"
+                message="Cada geracao, reserva e consumo fica registrado no historico financeiro da assinatura."
+              />
+            ) : null}
+          </div>
+          {creditEntries.length ? (
+            <ul className="subscription-page__history-list">
+              {creditEntries.map((item) => (
+                <CreditEntryRow key={item?.id || `${item?.source_plan}-${item?.changed_at || 'credit'}`} item={item} />
+              ))}
+            </ul>
+          ) : null}
+        </section>
+      ) : null}
 
       <div className="subscription-page__content-grid">
         <section className="settings-module-card subscription-page__primary-card">

@@ -9,6 +9,7 @@ import {
   normalizeBillingCycle,
   getBillingCycleConfig,
 } from './plans.js'
+import { cancelMercadoPagoCardSubscription } from './mercadopago_subscriptions.js'
 import {
   creditWhatsAppTopup,
   getWhatsAppWalletSnapshot,
@@ -19,10 +20,18 @@ import {
   createSubscription,
   updateSubscription,
   appendSubscriptionEvent,
+  getSubscriptionById,
 } from './subscriptions.js'
 import { pool } from './db.js'
 import { findWhatsAppPack } from './addon_packs.js'
 import { syncUserPlanContextFromSubscription } from './subscription_state.js'
+import {
+  appendUpgradeCreditEventsTx,
+  applyScheduledDiscountForSubscriptionPaymentTx,
+  createUpgradeProrationCreditTx,
+  findUpgradeSourceSubscription,
+  releaseScheduledSubscriptionCreditApplicationsTx,
+} from './subscription_credits.js'
 
 const BILLING_CURRENCY = (config.billing?.currency || 'BRL').toUpperCase()
 const BILLING_DEBUG = (() => {
@@ -206,12 +215,20 @@ export async function createMercadoPagoPixCheckout({
   estabelecimento,
   plan,
   billingCycle,
+  amountCentsOverride = null,
+  metadataExtras = null,
+  existingSubscriptionId = null,
+  externalReferenceOverride = null,
 }) {
   if (!estabelecimento?.id) throw new Error('Estabelecimento inválido')
   const normalizedPlan = String(plan || '').toLowerCase()
   if (!PLAN_TIERS.includes(normalizedPlan)) throw new Error('Plano inválido')
   const normalizedCycle = normalizeBillingCycle(billingCycle)
-  const priceCents = getPlanPriceCents(normalizedPlan, normalizedCycle)
+  const nominalPriceCents = getPlanPriceCents(normalizedPlan, normalizedCycle)
+  const priceCents =
+    amountCentsOverride == null
+      ? nominalPriceCents
+      : Math.max(0, Math.trunc(Number(amountCentsOverride || 0) || 0))
   if (!priceCents) throw new Error('Preço do plano não configurado')
 
   const amountNum = Number((Number(priceCents || 0) / 100).toFixed(2))
@@ -222,8 +239,15 @@ export async function createMercadoPagoPixCheckout({
   const DEFAULT_API_BASE = isDevFront ? 'http://localhost:3002' : `${FRONT_BASE}/api`
   const API_BASE = String(process.env.API_BASE_URL || process.env.BACKEND_BASE_URL || DEFAULT_API_BASE).replace(/\/$/, '')
 
-  const externalReference = buildExternalReference(estabelecimento.id, normalizedPlan, normalizedCycle)
-  const metadata = { kind: 'pix_payment', plan: normalizedPlan, cycle: normalizedCycle, estabelecimento_id: String(estabelecimento.id) }
+  const externalReference = externalReferenceOverride || buildExternalReference(estabelecimento.id, normalizedPlan, normalizedCycle)
+  const metadata = {
+    kind: 'pix_payment',
+    plan: normalizedPlan,
+    cycle: normalizedCycle,
+    estabelecimento_id: String(estabelecimento.id),
+    nominal_amount_cents: nominalPriceCents,
+    ...(metadataExtras && typeof metadataExtras === 'object' ? metadataExtras : {}),
+  }
 
   const paymentBody = {
     transaction_amount: amountNum,
@@ -256,19 +280,32 @@ export async function createMercadoPagoPixCheckout({
     amount_cents: priceCents,
   }
 
-  const subscription = await createSubscription({
-    estabelecimentoId: estabelecimento.id,
-    plan: normalizedPlan,
-    amountCents: priceCents,
-    currency: BILLING_CURRENCY,
-    paymentMethod: 'pix',
-    status: 'pending_pix',
-    gatewaySubscriptionId: null,
-    gatewayPaymentId: String(payment.id),
-    gatewayPreferenceId: String(payment.id),
-    externalReference,
-    billingCycle: normalizedCycle,
-  })
+  const subscription = existingSubscriptionId
+    ? await updateSubscription(existingSubscriptionId, {
+        plan: normalizedPlan,
+        amountCents: priceCents,
+        currency: BILLING_CURRENCY,
+        paymentMethod: 'pix',
+        status: 'pending_pix',
+        gatewaySubscriptionId: null,
+        gatewayPaymentId: String(payment.id),
+        gatewayPreferenceId: String(payment.id),
+        externalReference,
+        billingCycle: normalizedCycle,
+      })
+    : await createSubscription({
+        estabelecimentoId: estabelecimento.id,
+        plan: normalizedPlan,
+        amountCents: priceCents,
+        currency: BILLING_CURRENCY,
+        paymentMethod: 'pix',
+        status: 'pending_pix',
+        gatewaySubscriptionId: null,
+        gatewayPaymentId: String(payment.id),
+        gatewayPreferenceId: String(payment.id),
+        externalReference,
+        billingCycle: normalizedCycle,
+      })
   await appendSubscriptionEvent(subscription.id, {
     eventType: 'pix_generated',
     gatewayEventId: String(payment.id),
@@ -384,6 +421,136 @@ function addCycle(date, cycle) {
   if (c === 'anual') d.setFullYear(d.getFullYear() + 1)
   else d.setMonth(d.getMonth() + 1)
   return d
+}
+
+async function finalizeApprovedPixSubscriptionTx(subscriptionId, {
+  payment,
+  eventPayload = null,
+  effectivePlan,
+  effectiveCycle,
+}, { db }) {
+  const paidAt = payment?.date_approved ? new Date(payment.date_approved) : new Date()
+  const current = await getSubscriptionById(subscriptionId, { db })
+  if (!current?.id) {
+    throw new Error('subscription_not_found')
+  }
+
+  const sourceSubscription = await findUpgradeSourceSubscription(current.estabelecimentoId, {
+    targetSubscriptionId: current.id,
+    targetPlan: effectivePlan,
+    changedAt: paidAt,
+    db,
+  })
+
+  if (sourceSubscription?.id) {
+    await releaseScheduledSubscriptionCreditApplicationsTx(sourceSubscription.id, {
+      db,
+      reason: 'source_subscription_upgraded',
+      externalReference: payment?.external_reference || null,
+    })
+  }
+
+  const activeUntil = addCycle(paidAt, effectiveCycle)
+  const amountCents = Math.round(Number(payment.transaction_amount || current.amountCents / 100 || 0) * 100)
+  const updated = await updateSubscription(current.id, {
+    status: 'active',
+    paymentMethod: 'pix',
+    gatewayPaymentId: String(payment.id),
+    amountCents,
+    currency: (payment.currency_id || BILLING_CURRENCY).toUpperCase(),
+    currentPeriodStart: paidAt,
+    currentPeriodEnd: activeUntil,
+    nextBillingAt: activeUntil,
+    graceUntil: null,
+    lastPaymentAt: paidAt,
+    lastEventId: String(payment.id),
+    billingCycle: effectiveCycle,
+  }, { db })
+
+  const appliedScheduledDiscount = await applyScheduledDiscountForSubscriptionPaymentTx(updated.id, {
+    paymentId: payment?.id ? String(payment.id) : null,
+    externalReference: payment?.external_reference || null,
+    paymentDate: paidAt,
+    db,
+  })
+
+  const creditResult = sourceSubscription?.id
+    ? await createUpgradeProrationCreditTx({
+        sourceSubscription,
+        targetSubscription: updated,
+        changedAt: paidAt,
+        paymentMethod: 'pix',
+        paymentId: payment?.id ? String(payment.id) : null,
+        externalReference: payment?.external_reference || null,
+        rawPayload: {
+          event: eventPayload,
+          payment,
+        },
+        db,
+      })
+    : { created: false, credit: null, reason: 'no_source_subscription' }
+
+  if (sourceSubscription?.id && sourceSubscription.id !== updated.id) {
+    await updateSubscription(sourceSubscription.id, {
+      status: 'canceled',
+      canceledAt: paidAt,
+      cancelAt: paidAt,
+      nextBillingAt: null,
+      graceUntil: null,
+    }, { db })
+  }
+
+  const paymentEventPayload = {
+    event: eventPayload,
+    payment,
+    payment_method: 'pix',
+    credit_applied_cents: appliedScheduledDiscount?.applied_credit_cents || 0,
+    credit_generated_cents: creditResult?.credit?.generated_credit_cents || 0,
+    source_plan: sourceSubscription?.plan || null,
+    target_plan: updated.plan,
+  }
+
+  if (appliedScheduledDiscount?.applied_credit_cents > 0) {
+    await appendSubscriptionEvent(updated.id, {
+      eventType: 'subscription_credit_applied',
+      gatewayEventId: `pix-credit:${payment.id}`,
+      payload: {
+        payment_method: 'pix',
+        payment_id: payment?.id ? String(payment.id) : null,
+        external_reference: payment?.external_reference || null,
+        application_type: 'pending_pix_discount',
+        amount_cents: appliedScheduledDiscount.applied_credit_cents,
+      },
+    }, { db })
+  }
+
+  await appendSubscriptionEvent(updated.id, {
+    eventType: 'pix_paid',
+    gatewayEventId: String(payment.id),
+    payload: paymentEventPayload,
+  }, { db })
+  await appendSubscriptionEvent(updated.id, {
+    eventType: 'subscription_renewed',
+    gatewayEventId: `renewal:${payment.id}`,
+    payload: paymentEventPayload,
+  }, { db })
+
+  if (creditResult?.credit) {
+    await appendUpgradeCreditEventsTx(sourceSubscription, updated, {
+      credit: creditResult.credit,
+      paymentMethod: 'pix',
+      paymentId: payment?.id ? String(payment.id) : null,
+      externalReference: payment?.external_reference || null,
+      db,
+    })
+  }
+
+  return {
+    subscription: updated,
+    sourceSubscription,
+    credit: creditResult?.credit || null,
+    activeUntil,
+  }
 }
 
 export async function syncMercadoPagoPayment(paymentId, eventPayload = null) {
@@ -574,6 +741,13 @@ export async function syncMercadoPagoPayment(paymentId, eventPayload = null) {
         : ['cancelled', 'canceled', 'expired'].includes(status)
           ? 'expired'
           : 'unpaid'
+      if (nextStatus !== 'pending_pix') {
+        await releaseScheduledSubscriptionCreditApplicationsTx(subscription.id, {
+          db: pool,
+          reason: `payment_${nextStatus}`,
+          externalReference: externalRef || null,
+        })
+      }
       await updateSubscription(subscription.id, {
         paymentMethod: 'pix',
         gatewayPaymentId: String(payment.id),
@@ -660,48 +834,68 @@ export async function syncMercadoPagoPayment(paymentId, eventPayload = null) {
   // status approved: ativa plano por 1 ciclo a partir de hoje (PIX fallback)
   const effectivePlan = (PLAN_TIERS.includes(planToken) ? planToken : (subscription?.plan || 'pro'))
   const effectiveCycle = cycleToken || subscription?.billingCycle || 'mensal'
-  const activeUntil = addCycle(new Date(), effectiveCycle)
+  let activationResult = {
+    subscription,
+    sourceSubscription: null,
+    credit: null,
+    activeUntil: addCycle(new Date(), effectiveCycle),
+  }
 
   if (subscription?.id) {
-    await updateSubscription(subscription.id, {
-      status: 'active',
-      paymentMethod: 'pix',
-      gatewayPaymentId: String(payment.id),
-      amountCents: Math.round(Number(payment.transaction_amount || subscription.amountCents / 100) * 100),
-      currency: (payment.currency_id || BILLING_CURRENCY).toUpperCase(),
-      currentPeriodStart: new Date(),
-      currentPeriodEnd: activeUntil,
-      nextBillingAt: activeUntil,
-      graceUntil: null,
-      lastPaymentAt: payment.date_approved || new Date(),
-      lastEventId: String(payment.id),
-      billingCycle: effectiveCycle,
-    })
-    await appendSubscriptionEvent(subscription.id, {
-      eventType: 'pix_paid',
-      gatewayEventId: String(payment.id),
-      payload: { event: eventPayload, payment },
-    })
-    await appendSubscriptionEvent(subscription.id, {
-      eventType: 'subscription_renewed',
-      gatewayEventId: `renewal:${payment.id}`,
-      payload: { event: eventPayload, payment },
-    })
+    const conn = await pool.getConnection()
+    try {
+      await conn.beginTransaction()
+      activationResult = await finalizeApprovedPixSubscriptionTx(subscription.id, {
+        payment,
+        eventPayload,
+        effectivePlan,
+        effectiveCycle,
+      }, { db: conn })
+      await conn.commit()
+    } catch (error) {
+      try { await conn.rollback() } catch {}
+      throw error
+    } finally {
+      conn.release()
+    }
+
+    if (
+      activationResult?.sourceSubscription?.gatewaySubscriptionId &&
+      String(activationResult.sourceSubscription.paymentMethod || '').toLowerCase() === 'credit_card'
+    ) {
+      try {
+        await cancelMercadoPagoCardSubscription(activationResult.sourceSubscription.gatewaySubscriptionId)
+      } catch (error) {
+        console.warn('[billing][upgrade][cancel_source_gateway_subscription]', {
+          source_subscription_id: activationResult.sourceSubscription.id,
+          gateway_subscription_id: activationResult.sourceSubscription.gatewaySubscriptionId,
+          message: error?.message || error,
+        })
+      }
+    }
   }
 
   // Atualiza o usuário
   if (subscription?.estabelecimentoId || estabId) {
-    const estabelecimentoId = subscription?.estabelecimentoId || estabId
+    const estabelecimentoId = activationResult?.subscription?.estabelecimentoId || subscription?.estabelecimentoId || estabId
     await syncUserPlanContextFromSubscription(estabelecimentoId, {
       plan: effectivePlan,
       status: 'active',
       billingCycle: effectiveCycle,
       trialEndsAt: null,
-      activeUntil,
-      subscriptionId: subscription?.id || null,
+      activeUntil: activationResult?.activeUntil || null,
+      subscriptionId: activationResult?.subscription?.id || subscription?.id || null,
     })
     try { await getWhatsAppWalletSnapshot(estabelecimentoId) } catch {}
   }
 
-  return { ok: true, payment, plan: effectivePlan, cycle: effectiveCycle, active_until: activeUntil }
+  return {
+    ok: true,
+    payment,
+    plan: effectivePlan,
+    cycle: effectiveCycle,
+    active_until: activationResult?.activeUntil || null,
+    subscription: activationResult?.subscription || subscription || null,
+    upgrade_credit: activationResult?.credit || null,
+  }
 }

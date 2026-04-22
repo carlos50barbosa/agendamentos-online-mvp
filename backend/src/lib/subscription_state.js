@@ -7,6 +7,7 @@ import {
   listSubscriptionsForEstabelecimento,
   updateSubscription,
 } from './subscriptions.js'
+import { applyDueSubscriptionCreditRenewals } from './subscription_credits.js'
 import {
   BILLING_ACTIVE_STATUSES,
   BILLING_BLOCKED_STATUSES,
@@ -265,8 +266,17 @@ function shouldSyncUserPlanContext(planContext, subscription, computedState) {
 
 export async function loadEffectiveSubscriptionContext(estabelecimentoId, { refresh = true } = {}) {
   let planContext = await getPlanContext(estabelecimentoId)
-  const subscriptions = await listSubscriptionsForEstabelecimento(estabelecimentoId)
+  let subscriptions = await listSubscriptionsForEstabelecimento(estabelecimentoId)
   let subscription = pickEffectiveSubscription(subscriptions)
+
+  if (refresh && subscription?.id) {
+    const dueCreditRenewal = await applyDueSubscriptionCreditRenewals(subscription.id)
+    if (dueCreditRenewal?.applied_count) {
+      subscriptions = await listSubscriptionsForEstabelecimento(estabelecimentoId)
+      subscription = pickEffectiveSubscription(subscriptions)
+    }
+  }
+
   let computedState = computeSubscriptionState({ subscription, planContext })
 
   if (refresh && subscription?.id && computedState.resolvedStatus !== normalizeSubscriptionStatus(subscription.status, { paymentMethod: computedState.paymentMethod })) {
