@@ -253,6 +253,24 @@ function formatBillingDate(value) {
 
 
 
+function isBillingWarningWindowOpen(status) {
+
+  const state = String(status?.state || '').toLowerCase();
+
+  if (!['due_soon', 'pending'].includes(state)) return true;
+
+  const daysRaw = Number(status?.days_to_due);
+  const warnRaw = Number(status?.warn_days ?? 3);
+  const daysToDue = Number.isNaN(daysRaw) ? null : Math.max(0, daysRaw);
+  const warnDays = Number.isNaN(warnRaw) ? 3 : Math.max(0, warnRaw);
+
+  if (daysToDue == null) return state === 'pending';
+
+  return daysToDue <= warnDays;
+}
+
+
+
 function BillingStatusBanner({ status, user, planInfo }) {
 
   if (!user || user?.tipo !== 'estabelecimento') return null;
@@ -282,7 +300,7 @@ function BillingStatusBanner({ status, user, planInfo }) {
 
 
 
-  const shouldShowBilling = status && BILLING_ALERT_STATES.has(status.state);
+  const shouldShowBilling = status && BILLING_ALERT_STATES.has(status.state) && isBillingWarningWindowOpen(status);
 
   if (!shouldShowBilling && !trialExpired) return null;
 
@@ -1133,6 +1151,8 @@ const topbarAlert = useMemo(() => {
     // Atraso de mensalidade: alerta rápido na topbar
 
     const billingState = String(billingStatus?.state || '').toLowerCase();
+
+    if (!isBillingWarningWindowOpen(billingStatus)) return null;
 
     if (billingState === 'blocked') {
 

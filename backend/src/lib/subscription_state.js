@@ -164,9 +164,14 @@ export function computeSubscriptionState({
   } else if (resolvedStatus === 'pending_payment' || resolvedStatus === 'pending_pix' || resolvedStatus === 'past_due') {
     const withinDueWindow = currentPeriodEnd && currentPeriodEnd.getTime() > now.getTime()
     const withinGraceWindow = graceUntil && graceUntil.getTime() > now.getTime()
+    const daysUntilDue = withinDueWindow ? calcDayDiff(currentPeriodEnd, now) : null
     coreFeaturesAllowed = Boolean(withinDueWindow || withinGraceWindow)
     accessState = 'partial'
-    state = withinDueWindow ? 'due_soon' : withinGraceWindow ? 'overdue' : 'blocked'
+    state = withinDueWindow
+      ? (daysUntilDue != null && daysUntilDue <= warnDays ? 'due_soon' : 'pending')
+      : withinGraceWindow
+        ? 'overdue'
+        : 'blocked'
 
     if (!coreFeaturesAllowed) {
       resolvedStatus = resolvedStatus === 'pending_pix' ? 'expired' : 'unpaid'

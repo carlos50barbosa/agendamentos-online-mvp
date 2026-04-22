@@ -112,6 +112,13 @@ function normalizePlanKey(value) {
   return PLAN_META[key] ? key : 'starter';
 }
 
+function getPlanTier(value) {
+  const key = normalizePlanKey(value);
+  if (key === 'premium') return 2;
+  if (key === 'pro') return 1;
+  return 0;
+}
+
 function normalizeStatusKey(value) {
   return String(value || '').toLowerCase().trim();
 }
@@ -459,6 +466,7 @@ export default function Assinatura() {
         ? Math.max(0, Math.floor((new Date(trialEndsAt).getTime() - Date.now()) / 86400000))
         : null;
   const trialAvailable = planKey === 'starter' && !trialInfo?.wasUsed;
+  const canOfferProCheckout = !trialAvailable && getPlanTier(planKey) < getPlanTier('pro');
   const renewalInfo = billingStatus?.billing || {};
   const renewalRequired = Boolean(renewalInfo.renewalRequired);
   const openRenewalPayment = renewalInfo.hasOpenPayment ? renewalInfo.openPayment || null : null;
@@ -973,7 +981,11 @@ export default function Assinatura() {
           if (trialAvailable) {
             await handleStartTrial();
           } else {
-            setNotice({ type: 'info', message: 'Teste grátis indisponível para a situação atual da conta.' });
+            const targetPlan = PLAN_META[normalizePlanKey(intentPlan || 'pro')]?.label || 'Pro';
+            setNotice({
+              type: 'warn',
+              message: `O teste grátis desta conta já foi usado. Para continuar, gere um PIX do plano ${targetPlan}.`,
+            });
           }
         } else if (intentPlan) {
             await handleStartCheckout(intentPlan, intentCycle || checkoutCycle);
@@ -1085,7 +1097,9 @@ export default function Assinatura() {
               ? `Válido até ${formatDateLong(trialEndsAt)}.`
               : trialAvailable
                 ? 'Ative 7 dias do plano Pro sem cartão.'
-                : 'O período de teste já foi consumido nesta conta.'}
+                : canOfferProCheckout
+                  ? 'O período de teste já foi consumido. Você ainda pode seguir direto com a contratação do Pro via PIX.'
+                  : 'O período de teste já foi consumido nesta conta.'}
           </p>
         </div>
 
@@ -1177,6 +1191,11 @@ export default function Assinatura() {
             {trialAvailable ? (
               <button type="button" className="btn btn--outline btn--outline-brand" onClick={() => void handleStartTrial()} disabled={trialLoading}>
                 {trialLoading ? <span className="spinner" /> : 'Ativar 7 dias grátis do Pro'}
+              </button>
+            ) : null}
+            {canOfferProCheckout ? (
+              <button type="button" className="btn btn--primary" onClick={() => void handleStartCheckout('pro', checkoutCycle)} disabled={checkoutLoading}>
+                {checkoutLoading ? <span className="spinner" /> : 'Contratar Pro via PIX'}
               </button>
             ) : null}
 

@@ -130,7 +130,7 @@ export function resolveBillingState({ planStatus, planActiveUntil, planTrialEnds
   if (msDiff >= 0) {
     const daysToDue = Math.ceil(msDiff / DAY_MS)
     const state = ['pending_payment', 'pending_pix', 'past_due'].includes(normalizedStatus)
-      ? 'due_soon'
+      ? (daysToDue <= warnDays ? 'due_soon' : 'pending')
       : daysToDue <= warnDays
         ? 'due_soon'
         : 'ok'

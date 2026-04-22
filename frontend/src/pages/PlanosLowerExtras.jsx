@@ -37,7 +37,12 @@ const FAQS = [
   },
 ];
 
-export default function PlanosLowerExtras({ onStartTrial = () => {}, onTalkSpecialist = () => {} }) {
+export default function PlanosLowerExtras({
+  primaryCtaLabel = 'Testar Pro por 7 dias',
+  primaryCtaDescription = 'O Pro tem 7 dias grátis para contas elegíveis.',
+  onPrimaryCta = () => {},
+  onTalkSpecialist = () => {},
+}) {
   return (
     <>
       <section className="faq">
@@ -58,10 +63,10 @@ export default function PlanosLowerExtras({ onStartTrial = () => {}, onTalkSpeci
         <div className="section-shell cta-final__inner">
           <div>
             <h2>Pronto para escolher o plano?</h2>
-            <p>Starter e Pro têm 7 dias grátis.</p>
+            <p>{primaryCtaDescription}</p>
           </div>
           <div className="cta-final__actions">
-            <button className="btn btn--primary btn--lg" onClick={onStartTrial}>Testar Pro por 7 dias</button>
+            <button className="btn btn--primary btn--lg" onClick={onPrimaryCta}>{primaryCtaLabel}</button>
             <button className="btn btn--outline btn--lg" onClick={onTalkSpecialist}>Falar com especialista</button>
           </div>
         </div>

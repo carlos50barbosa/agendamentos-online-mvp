@@ -1,5 +1,5 @@
 // src/pages/Planos.jsx
-import React, { Suspense, useEffect, useMemo, useState } from 'react';
+import React, { Suspense, useEffect, useState } from 'react';
 import { useNavigate, Link, useLocation } from 'react-router-dom';
 import { getUser } from '../utils/auth';
 import { Api } from '../utils/api';
@@ -72,8 +72,8 @@ const PRICING_PLANS = [
     footnote: WHATSAPP_LIMIT_FOOTNOTE,
     annualNote: 'Economize o equivalente a 2 meses no plano anual.',
     ctaVariant: 'btn',
-    ctaLabel: 'Testar grátis por 7 dias',
-    ctaKind: 'trial',
+    ctaLabel: 'Assinar Starter',
+    ctaKind: 'checkout',
   },
   {
     key: 'pro',
@@ -211,13 +211,18 @@ export default function Planos() {
     nav('/assinatura');
   };
 
-  const goTrial = (plano) => () => {
+  const goTrial = (plano, ciclo = 'mensal') => () => {
+    const u = getUser();
     try {
-      localStorage.removeItem('intent_plano');
-      localStorage.removeItem('intent_plano_ciclo');
+      if (u && u.tipo === 'estabelecimento') {
+        localStorage.setItem('intent_plano', plano);
+        localStorage.setItem('intent_plano_ciclo', ciclo);
+      } else {
+        localStorage.removeItem('intent_plano');
+        localStorage.removeItem('intent_plano_ciclo');
+      }
       localStorage.setItem('intent_kind', 'trial');
     } catch {}
-    const u = getUser();
     if (u && u.tipo === 'estabelecimento') {
       nav('/assinatura');
     } else {
@@ -238,13 +243,20 @@ export default function Planos() {
   const hasPlanContext = Boolean(currentPlanKey);
   const currentPlan = PRICING_PLANS.find((item) => item.key === currentPlanKey) || null;
   const currentPlanLabel = currentPlan?.title || (currentPlanKey ? currentPlanKey : 'Starter');
-  const showStarterTrial =
+  const proTrialAvailable =
     user?.tipo !== 'estabelecimento' || (!trialInfo.wasUsed && !trialInfo.isExpired);
+  const proPrimaryLabel =
+    user?.tipo === 'estabelecimento' && currentPlanKey === 'starter' && !proTrialAvailable
+      ? 'Migrar para Pro'
+      : proTrialAvailable
+        ? 'Testar Pro por 7 dias'
+        : 'Assinar Pro';
+  const proPrimaryAction = proTrialAvailable ? goTrial('pro', billingCycle) : goCheckout('pro', billingCycle);
 
   const handlePlanCta = (plan, ciclo, kind) => (event) => {
     if (event?.preventDefault) event.preventDefault();
     if (kind === 'trial') {
-      goTrial(plan)();
+      goTrial(plan, ciclo)();
       return;
     }
     goCheckout(plan, ciclo)();
@@ -263,10 +275,13 @@ export default function Planos() {
             <span className="hero__badge hero__badge--outline">Mensal ou anual</span>
           </div>
           <div className="hero__actions">
-            <button className="btn btn--primary btn--lg" onClick={goTrial('pro')}>Testar Pro por 7 dias</button>
+            <button className="btn btn--primary btn--lg" onClick={proPrimaryAction}>{proPrimaryLabel}</button>
             <button className="btn btn--outline btn--lg" onClick={scrollToPlans}>Ver detalhes dos planos</button>
           </div>
           <div className="planos-highlight">Cartão evita interrupções. Se optar por PIX, a renovação continua manual.</div>
+          {user?.tipo === 'estabelecimento' && !proTrialAvailable && (
+            <div className="alert-inline" role="status">O teste grátis desta conta já foi usado. Você pode seguir direto com a assinatura do Pro.</div>
+          )}
           {user?.tipo !== 'estabelecimento' && (
             <div className="alert-inline" role="status">*Para estabelecimentos e profissionais.</div>
           )}
@@ -370,22 +385,31 @@ export default function Planos() {
           </div>
           <div className="pricing-grid">
             {PRICING_PLANS.map((plan) => {
-          const price = plan.prices[billingCycle];
-          const periodLabel = BILLING_CYCLES[billingCycle].periodLabel;
-          const isCurrentPlan = hasActivePlan && plan.key === currentPlanKey;
-          const cardClass = `pricing-card${plan.featured ? ' is-featured' : ''}${isCurrentPlan ? ' pricing-card--current' : ''}`;
-          const isSales = plan.ctaKind === 'sales';
-          const showAnnualEquivalent = billingCycle === 'anual' && plan.annualEquivalent;
-          const isStarterPlan = plan.key === 'starter';
-          const ctaKind = isStarterPlan && !showStarterTrial ? 'checkout' : plan.ctaKind;
-          const ctaLabel = isStarterPlan && !showStarterTrial ? 'Assinar Starter' : plan.ctaLabel || 'Saiba mais';
-          const ctaClass = plan.ctaVariant || 'btn';
-          const ctaLink = (() => {
-            if (!isSales) return null;
-            const base = plan.ctaHref || `/contato?plano=${plan.key}`;
-            const separator = base.includes('?') ? '&' : '?';
-            return `${base}${separator}ciclo=${billingCycle}`;
-          })();
+              const price = plan.prices[billingCycle];
+              const periodLabel = BILLING_CYCLES[billingCycle].periodLabel;
+              const isCurrentPlan = hasActivePlan && plan.key === currentPlanKey;
+              const cardClass = `pricing-card${plan.featured ? ' is-featured' : ''}${isCurrentPlan ? ' pricing-card--current' : ''}`;
+              const showAnnualEquivalent = billingCycle === 'anual' && plan.annualEquivalent;
+              const effectiveCta = (() => {
+                if (plan.key === 'pro' && !proTrialAvailable) {
+                  return {
+                    kind: 'checkout',
+                    label: user?.tipo === 'estabelecimento' && currentPlanKey === 'starter' ? 'Migrar para Pro' : 'Assinar Pro',
+                  };
+                }
+                return {
+                  kind: plan.ctaKind,
+                  label: plan.ctaLabel || 'Saiba mais',
+                };
+              })();
+              const isSales = effectiveCta.kind === 'sales';
+              const ctaClass = plan.ctaVariant || 'btn';
+              const ctaLink = (() => {
+                if (!isSales) return null;
+                const base = plan.ctaHref || `/contato?plano=${plan.key}`;
+                const separator = base.includes('?') ? '&' : '?';
+                return `${base}${separator}ciclo=${billingCycle}`;
+              })();
               return (
                 <div key={plan.key} className={cardClass}>
                   {plan.badge && <span className="pricing-badge">{plan.badge}</span>}
@@ -443,15 +467,15 @@ export default function Planos() {
                   )}
                   {isSales ? (
                     <Link className={ctaClass} to={ctaLink}>
-                      {ctaLabel}
+                      {effectiveCta.label}
                     </Link>
                   ) : (
                     <button
                       type="button"
                       className={ctaClass}
-                      onClick={handlePlanCta(plan.key, billingCycle, ctaKind)}
+                      onClick={handlePlanCta(plan.key, billingCycle, effectiveCta.kind)}
                     >
-                      {ctaLabel}
+                      {effectiveCta.label}
                     </button>
                   )}
                 </div>
@@ -470,7 +494,13 @@ export default function Planos() {
       </section>
       <Suspense fallback={null}>
         <PlanosLowerExtras
-          onStartTrial={goTrial('pro')}
+          primaryCtaLabel={proPrimaryLabel}
+          primaryCtaDescription={
+            proTrialAvailable
+              ? 'O Pro tem 7 dias grátis para contas elegíveis.'
+              : 'Esta conta já usou o teste grátis. Continue com a assinatura do Pro.'
+          }
+          onPrimaryCta={proPrimaryAction}
           onTalkSpecialist={() => nav('/contato')}
         />
       </Suspense>

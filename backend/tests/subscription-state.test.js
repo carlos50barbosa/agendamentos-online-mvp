@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { pickEffectiveSubscription } from '../src/lib/subscription_state.js';
+import { computeSubscriptionState, pickEffectiveSubscription } from '../src/lib/subscription_state.js';
 
 test('pickEffectiveSubscription prefers the most recent billing anchor when statuses tie', () => {
   const stalePremium = {
@@ -50,4 +50,38 @@ test('pickEffectiveSubscription still prefers stronger statuses before recency',
 
   assert.equal(effective?.id, 301);
   assert.equal(effective?.status, 'active');
+});
+
+test('computeSubscriptionState keeps pending PIX outside the warning window out of due_soon', () => {
+  const now = new Date('2026-04-21T12:00:00.000Z');
+  const state = computeSubscriptionState({
+    subscription: {
+      status: 'pending_pix',
+      paymentMethod: 'pix',
+      currentPeriodEnd: new Date('2026-05-15T12:00:00.000Z'),
+    },
+    warnDays: 3,
+    now,
+  });
+
+  assert.equal(state.state, 'pending');
+  assert.equal(state.daysToDue, 24);
+  assert.equal(state.accessState, 'partial');
+  assert.equal(state.coreFeaturesAllowed, true);
+});
+
+test('computeSubscriptionState promotes pending PIX to due_soon inside the warning window', () => {
+  const now = new Date('2026-05-12T12:00:00.000Z');
+  const state = computeSubscriptionState({
+    subscription: {
+      status: 'pending_pix',
+      paymentMethod: 'pix',
+      currentPeriodEnd: new Date('2026-05-15T12:00:00.000Z'),
+    },
+    warnDays: 3,
+    now,
+  });
+
+  assert.equal(state.state, 'due_soon');
+  assert.equal(state.daysToDue, 3);
 });
