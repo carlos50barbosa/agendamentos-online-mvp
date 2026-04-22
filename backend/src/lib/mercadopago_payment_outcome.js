@@ -485,14 +485,31 @@ export function extractMercadoPagoPaymentResultFromPayload(payload, { includePen
 export function enrichMercadoPagoSubscriptionEvent(event, options = {}) {
   if (!event || typeof event !== 'object') return event
   const paymentResult = extractMercadoPagoPaymentResultFromPayload(event.payload, options)
-  if (!paymentResult) return event
+  if (!paymentResult) {
+    return {
+      ...event,
+      external_reference:
+        event?.payload?.external_reference ||
+        event?.payload?.raw?.payment?.external_reference ||
+        null,
+      event_payment_method:
+        event?.payload?.payment_method ||
+        null,
+    }
+  }
   return {
     ...event,
     status: paymentResult.status,
     status_detail: paymentResult.status_detail,
+    status_group: paymentResult.status_group,
     normalized_reason: paymentResult.normalized_reason,
     action_recommendation: paymentResult.action_recommendation,
     decision: paymentResult.decision,
+    user_message: paymentResult.user_message,
+    payment_method_id: paymentResult.payment_method_id,
+    payment_type_id: paymentResult.payment_type_id,
+    external_reference: paymentResult.external_reference || event?.payload?.external_reference || null,
+    transaction_amount: paymentResult.transaction_amount ?? null,
     payment_result: paymentResult,
   }
 }

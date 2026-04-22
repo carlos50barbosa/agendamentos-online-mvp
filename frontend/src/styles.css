@@ -3035,6 +3035,30 @@ a:hover { opacity: 1; text-decoration: underline; }
   display:grid;
   gap:10px;
 }
+.subscription-page__financial-overview{
+  display:grid;
+  grid-template-columns:repeat(auto-fit, minmax(220px, 1fr));
+  gap:10px;
+  margin:0 0 14px;
+}
+.subscription-page__financial-card{
+  display:grid;
+  gap:8px;
+  padding:14px;
+  border-radius:16px;
+  border:1px solid rgba(148,163,184,.22);
+  background:#fff;
+}
+.subscription-page__financial-card p{
+  margin:0;
+}
+.subscription-page__financial-card-head{
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:10px;
+  flex-wrap:wrap;
+}
 .subscription-page__history-item{
   display:flex;
   align-items:flex-start;
@@ -3048,6 +3072,35 @@ a:hover { opacity: 1; text-decoration: underline; }
 .subscription-page__history-item > div{
   display:grid;
   gap:6px;
+}
+.subscription-page__history-eyebrow{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  font-size:11px;
+  font-weight:800;
+  letter-spacing:.04em;
+  text-transform:uppercase;
+  color:#0f766e;
+}
+.subscription-page__history-meta{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  flex-wrap:wrap;
+}
+.subscription-page__history-method{
+  display:inline-flex;
+  align-items:center;
+  min-height:24px;
+  padding:0 8px;
+  border-radius:999px;
+  border:1px solid rgba(148,163,184,.26);
+  background:#f8fafc;
+  color:#334155;
+  font-size:11px;
+  font-weight:700;
+  text-transform:uppercase;
 }
 .subscription-page__empty{
   padding:14px;
@@ -3189,6 +3242,11 @@ a:hover { opacity: 1; text-decoration: underline; }
   }
   .subscription-page__history-item{
     flex-direction:column;
+  }
+  .subscription-page__financial-card-head,
+  .subscription-page__history-meta{
+    flex-direction:column;
+    align-items:flex-start;
   }
   .settings-module-field--sm{
     width:100%;
@@ -3420,6 +3478,7 @@ a:hover { opacity: 1; text-decoration: underline; }
   color:#94a3b8;
 }
 [data-theme='dark'] .subscription-page__usage-card,
+[data-theme='dark'] .subscription-page__financial-card,
 [data-theme='dark'] .subscription-page__history-item,
 [data-theme='dark'] .subscription-page__payment-panel{
   background:rgba(15,23,42,.66);
@@ -3451,6 +3510,14 @@ a:hover { opacity: 1; text-decoration: underline; }
 }
 [data-theme='dark'] .subscription-page__empty{
   border-color:rgba(148,163,184,.3);
+}
+[data-theme='dark'] .subscription-page__history-eyebrow{
+  color:#5eead4;
+}
+[data-theme='dark'] .subscription-page__history-method{
+  background:rgba(15,23,42,.72);
+  border-color:rgba(148,163,184,.26);
+  color:#e2e8f0;
 }
 [data-theme='dark'] .subscription-page__status-chip--success{
   background:rgba(34,197,94,.18);

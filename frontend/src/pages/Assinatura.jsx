@@ -7,6 +7,7 @@ import {
   getMercadoPagoCardErrorMessage,
   isMercadoPagoCardTokenRefreshRequired,
 } from '../utils/mercadoPagoCard.js';
+import { buildSubscriptionFinancialHistory } from '../utils/subscriptionFinancialHistory.js';
 
 const PLAN_META = {
   starter: {
@@ -39,23 +40,7 @@ const PAYMENT_METHOD_LABELS = {
   pix: 'PIX',
 };
 
-const FINANCIAL_EVENT_LABELS = {
-  subscription_created: 'Assinatura criada',
-  payment_approved: 'Pagamento aprovado',
-  payment_failed: 'Pagamento falhou',
-  payment_recovery_attempt: 'Tentativa de regularizacao',
-  payment_recovered: 'Pagamento recuperado',
-  payment_pending: 'Pagamento pendente',
-  pix_generated: 'PIX gerado',
-  pix_paid: 'PIX pago',
-  pix_expired: 'PIX expirado',
-  subscription_renewed: 'Assinatura renovada',
-  subscription_canceled: 'Assinatura cancelada',
-  subscription_blocked: 'Assinatura bloqueada',
-  payment_method_changed: 'Forma de pagamento alterada',
-  subscription_updated: 'Assinatura atualizada',
-  subscription_state_corrected: 'Estado sincronizado',
-};
+const FINANCIAL_EVENT_LABELS = {};
 
 const PIX_POLL_INTERVAL_MS = 2000;
 const PIX_POLL_MAX_ATTEMPTS = 60;
@@ -302,6 +287,54 @@ function FinancialEventRow({ item }) {
   );
 }
 
+function MappedFinancialEventRow({ item }) {
+  return (
+    <li className="subscription-page__history-item">
+      <div>
+        <span className="subscription-page__history-eyebrow">{item?.display_title || 'Evento financeiro'}</span>
+        <strong>{item?.display_subtitle || 'Movimentacao financeira registrada.'}</strong>
+        {item?.display_message ? <span className="muted">{item.display_message}</span> : null}
+        <div className="subscription-page__history-meta">
+          <span className="subscription-page__history-method">{item?.payment_method_label || 'Nao definido'}</span>
+          {item?.reference_value ? (
+            <span className="muted">{item?.reference_label || 'Ref'}: {item.reference_value}</span>
+          ) : null}
+        </div>
+      </div>
+      <div>
+        <span className={`subscription-page__status-chip subscription-page__status-chip--${item?.display_badge?.tone || 'neutral'}`}>
+          {item?.display_badge?.label || 'Sem status'}
+        </span>
+        <span className="muted">{formatDateTime(item?.created_at)}</span>
+      </div>
+    </li>
+  );
+}
+
+function FinancialOverviewCard({ eyebrow, title, statusLabel, statusTone = 'neutral', methodLabel, message, createdAt, referenceLabel, referenceValue }) {
+  return (
+    <div className="subscription-page__financial-card">
+      <div className="subscription-page__financial-card-head">
+        <span className="subscription-page__history-eyebrow">{eyebrow}</span>
+        {statusLabel ? (
+          <span className={`subscription-page__status-chip subscription-page__status-chip--${statusTone}`}>
+            {statusLabel}
+          </span>
+        ) : null}
+      </div>
+      <strong>{title}</strong>
+      {methodLabel ? <span className="muted">Meio: {methodLabel}</span> : null}
+      {message ? <p className="muted">{message}</p> : null}
+      <div className="subscription-page__history-meta">
+        {createdAt ? <span className="muted">Data: {formatDateTime(createdAt)}</span> : null}
+        {referenceValue ? (
+          <span className="muted">{referenceLabel || 'Ref'}: {referenceValue}</span>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 export default function Assinatura() {
   const user = useMemo(() => getUser(), []);
   const navigate = useNavigate();
@@ -445,6 +478,9 @@ export default function Assinatura() {
   );
   const planStatusLabel = getStatusLabel(planStatusKey);
   const planStatusTone = getStatusTone(planStatusKey);
+  const subscriptionStatusCardLabel = ['pending_payment', 'pending_pix', 'past_due', 'unpaid', 'expired'].includes(planStatusKey)
+    ? 'Regularizacao pendente'
+    : planStatusLabel;
   const currentCycle =
     String(
       subscriptionData?.subscription?.billing_cycle ||
@@ -574,11 +610,16 @@ export default function Assinatura() {
     return list.slice(0, 6);
   }, [subscriptionData?.history]);
 
-  const financialEvents = useMemo(() => {
+  const rawFinancialEvents = useMemo(() => {
     const list = Array.isArray(subscriptionData?.events) ? subscriptionData.events : [];
-    return list.slice(0, 10);
+    return list.slice(0, 20);
   }, [subscriptionData?.events]);
-  const latestPaymentResult = subscriptionData?.latest_payment_result || null;
+  const financialHistory = useMemo(() => (
+    buildSubscriptionFinancialHistory(rawFinancialEvents, { subscriptionStatus: planStatusKey })
+  ), [planStatusKey, rawFinancialEvents]);
+  const financialEvents = financialHistory.timeline.slice(0, 10);
+  const latestCardAttempt = financialHistory.latest_card_attempt;
+  const openPixEvent = financialHistory.open_pix_event;
   const recoveryGuard = subscriptionData?.recovery_guard || null;
   const recoveryBlocked = hasDelinquentStatus && recoveryGuard?.can_run === false;
 
@@ -1444,15 +1485,15 @@ export default function Assinatura() {
                 Regularização do plano {planMeta.label} ({BILLING_CYCLE_LABELS[currentCycle] || 'Mensal'}). Esse envio mantém o plano atual.
               </p>
             ) : null}
-            {latestPaymentResult && planStatusKey !== 'active' && ['rejected', 'pending'].includes(String(latestPaymentResult.status_group || '').toLowerCase()) ? (
+            {latestCardAttempt && planStatusKey !== 'active' && ['rejected', 'pending'].includes(String(latestCardAttempt.status_group || '').toLowerCase()) ? (
               <div className="subscription-page__callout">
                 <strong>
-                  {String(latestPaymentResult.status_group || '').toLowerCase() === 'pending'
-                    ? 'Existe uma cobranca em analise.'
-                    : 'A ultima cobranca no cartao nao foi aprovada.'}
+                  {String(latestCardAttempt.status_group || '').toLowerCase() === 'pending'
+                    ? 'Existe uma tentativa com cartao em analise.'
+                    : 'A ultima tentativa com cartao nao foi aprovada.'}
                 </strong>
                 <p className="muted">
-                  {latestPaymentResult.user_message || 'Revise os dados do cartao ou tente outra forma de pagamento.'}
+                  {latestCardAttempt.display_message || 'Revise os dados do cartao ou tente outra forma de pagamento.'}
                 </p>
               </div>
             ) : null}
@@ -1583,14 +1624,55 @@ export default function Assinatura() {
             <h3>Histórico financeiro</h3>
             <p className="muted">Eventos recentes de assinatura, cobrança, PIX e regularização.</p>
           </div>
-          <div className={`subscription-page__status-chip subscription-page__status-chip--${getStatusTone(billingStatus?.state)}`}>
-            {getStatusLabel(billingStatus?.state)}
+          <div className={`subscription-page__status-chip subscription-page__status-chip--${planStatusTone}`}>
+            {planStatusLabel}
           </div>
+        </div>
+        {financialHistory.has_open_pix_and_rejected_card ? (
+          <div className="subscription-page__callout">
+            <strong>Ha um PIX em aberto aguardando pagamento.</strong>
+            <p className="muted">A ultima tentativa com cartao de credito nao foi aprovada.</p>
+          </div>
+        ) : null}
+        <div className="subscription-page__financial-overview">
+          <FinancialOverviewCard
+            eyebrow="Assinatura"
+            title={financialHistory.summary?.title || 'Status da assinatura'}
+            statusLabel={subscriptionStatusCardLabel}
+            statusTone={planStatusTone}
+            message={financialHistory.summary?.message || 'Acompanhe abaixo os eventos financeiros recentes.'}
+          />
+          {openPixEvent ? (
+            <FinancialOverviewCard
+              eyebrow="PIX em aberto"
+              title={openPixEvent.display_subtitle || openPixEvent.display_title}
+              statusLabel={openPixEvent.display_badge?.label}
+              statusTone={openPixEvent.display_badge?.tone}
+              methodLabel={openPixEvent.payment_method_label}
+              message={openPixEvent.display_message}
+              createdAt={openPixEvent.created_at}
+              referenceLabel={openPixEvent.reference_label}
+              referenceValue={openPixEvent.reference_value}
+            />
+          ) : null}
+          {latestCardAttempt ? (
+            <FinancialOverviewCard
+              eyebrow="Ultima tentativa com cartao"
+              title={latestCardAttempt.display_title}
+              statusLabel={latestCardAttempt.display_badge?.label}
+              statusTone={latestCardAttempt.display_badge?.tone}
+              methodLabel={latestCardAttempt.payment_method_label}
+              message={latestCardAttempt.display_message}
+              createdAt={latestCardAttempt.created_at}
+              referenceLabel={latestCardAttempt.reference_label}
+              referenceValue={latestCardAttempt.reference_value}
+            />
+          ) : null}
         </div>
         {financialEvents.length ? (
           <ul className="subscription-page__history-list">
             {financialEvents.map((item) => (
-              <FinancialEventRow key={item?.id || `${item?.event_type}-${item?.created_at || 'row'}`} item={item} />
+              <MappedFinancialEventRow key={item?.id || `${item?.event_type}-${item?.created_at || 'row'}`} item={item} />
             ))}
           </ul>
         ) : (
