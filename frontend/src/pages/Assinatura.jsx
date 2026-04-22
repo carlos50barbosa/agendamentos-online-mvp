@@ -312,6 +312,7 @@ export default function Assinatura() {
   const [subscriptionData, setSubscriptionData] = useState(null);
   const [billingStatus, setBillingStatus] = useState(null);
   const [stats, setStats] = useState(null);
+  const [selectedPlan, setSelectedPlan] = useState('');
   const [selectedCycle, setSelectedCycle] = useState('');
   const [trialLoading, setTrialLoading] = useState(false);
   const [checkoutLoading, setCheckoutLoading] = useState(false);
@@ -331,6 +332,7 @@ export default function Assinatura() {
   const pixAttemptsRef = useRef(0);
   const pixBusyRef = useRef(false);
   const intentHandledRef = useRef('');
+  const paymentSectionRef = useRef(null);
 
   const clearPixPolling = useCallback(() => {
     if (pixIntervalRef.current) {
@@ -470,12 +472,26 @@ export default function Assinatura() {
   const renewalInfo = billingStatus?.billing || {};
   const renewalRequired = Boolean(renewalInfo.renewalRequired);
   const openRenewalPayment = renewalInfo.hasOpenPayment ? renewalInfo.openPayment || null : null;
+  const checkoutPlanKey = normalizePlanKey(selectedPlan || planKey);
+  const checkoutPlanMeta = PLAN_META[checkoutPlanKey] || PLAN_META.starter;
   const currentPlanPriceCents = currentCycle === 'anual' ? planMeta.annualPriceCents : planMeta.priceCents;
   const checkoutCycle = selectedCycle || currentCycle || 'mensal';
-  const selectedPlanPriceCents = checkoutCycle === 'anual' ? planMeta.annualPriceCents : planMeta.priceCents;
+  const selectedPlanPriceCents = checkoutCycle === 'anual' ? checkoutPlanMeta.annualPriceCents : checkoutPlanMeta.priceCents;
+  const hasCheckoutSelection = checkoutPlanKey !== planKey || checkoutCycle !== currentCycle;
   const paymentMethodLabel = getPaymentMethodLabel(currentPaymentMethod);
   const hasDelinquentStatus = ['past_due', 'unpaid', 'expired'].includes(planStatusKey);
   const cardAction = useMemo(() => {
+    if (hasCheckoutSelection && !hasDelinquentStatus) {
+      const planChanged = checkoutPlanKey !== planKey;
+      return {
+        mode: 'subscribe',
+        label: planChanged
+          ? (currentPaymentMethod === 'credit_card'
+            ? `Migrar para ${checkoutPlanMeta.label} com cartão`
+            : `Assinar ${checkoutPlanMeta.label} com cartão`)
+          : `Assinar ${checkoutPlanMeta.label} ${BILLING_CYCLE_LABELS[checkoutCycle] || 'Mensal'} no cartão`,
+      };
+    }
     if (currentPaymentMethod === 'credit_card' && (hasDelinquentStatus || planStatusKey === 'pending_payment')) {
       return {
         mode: 'update',
@@ -489,7 +505,7 @@ export default function Assinatura() {
       mode: 'subscribe',
       label: hasDelinquentStatus ? 'Salvar cartão para reativar' : 'Assinar com cartão',
     };
-  }, [currentPaymentMethod, hasDelinquentStatus, planStatusKey]);
+  }, [checkoutCycle, checkoutPlanKey, checkoutPlanMeta.label, currentPaymentMethod, hasCheckoutSelection, hasDelinquentStatus, planKey, planStatusKey]);
 
   const appointmentUsage = useMemo(() => {
     const data = planContext?.usage?.appointments || {};
@@ -679,9 +695,11 @@ export default function Assinatura() {
     setNotice({ type: '', message: '' });
 
     try {
+      const cardTargetPlan = cardAction.mode === 'update' ? planKey : checkoutPlanKey;
+      const cardTargetCycle = cardAction.mode === 'update' ? currentCycle : checkoutCycle;
       const payload = {
-        plan: planKey,
-        billing_cycle: cardAction.mode === 'update' ? currentCycle : checkoutCycle,
+        plan: cardTargetPlan,
+        billing_cycle: cardTargetCycle,
         card_token: cardFormData?.token,
         payer_email: cardFormData?.cardholderEmail || user?.email || '',
         payment_method_id: cardFormData?.paymentMethodId || null,
@@ -751,7 +769,7 @@ export default function Assinatura() {
           type: 'success',
           message: cardAction.mode === 'update'
             ? 'Cartão atualizado. Vamos sincronizar a cobrança recorrente automaticamente.'
-            : 'Assinatura enviada no cartão. A renovação automática passa a ser o fluxo principal.',
+            : `Assinatura do plano ${PLAN_META[normalizePlanKey(cardTargetPlan)]?.label || 'selecionado'} enviada no cartão. A renovação automática passa a ser o fluxo principal.`,
         });
       }
       return true;
@@ -770,7 +788,7 @@ export default function Assinatura() {
       cardSubmittingRef.current = false;
       setCardState((current) => ({ ...current, submitting: false }));
     }
-  }, [cardAction.mode, checkoutCycle, currentCycle, establishmentId, planKey, refreshData, resetCardFormForNewToken, user?.email]);
+  }, [cardAction.mode, checkoutCycle, checkoutPlanKey, currentCycle, establishmentId, planKey, refreshData, resetCardFormForNewToken, user?.email]);
 
   const handleRecoverNowWithCard = useCallback(() => {
     const form = document.getElementById('subscription-card-form');
@@ -928,6 +946,13 @@ export default function Assinatura() {
     }
   }, [pixCode]);
 
+  const openCardChoice = useCallback(() => {
+    if (typeof window === 'undefined') return;
+    window.requestAnimationFrame(() => {
+      paymentSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  }, []);
+
   useEffect(() => {
     if (!isEstablishment || loading) return;
 
@@ -984,11 +1009,21 @@ export default function Assinatura() {
             const targetPlan = PLAN_META[normalizePlanKey(intentPlan || 'pro')]?.label || 'Pro';
             setNotice({
               type: 'warn',
-              message: `O teste grátis desta conta já foi usado. Para continuar, gere um PIX do plano ${targetPlan}.`,
+              message: `O teste grátis desta conta já foi usado. Escolha abaixo como deseja pagar o plano ${targetPlan}: cartão ou PIX.`,
             });
+            setSelectedPlan(normalizePlanKey(intentPlan || 'pro'));
+            setSelectedCycle(intentCycle || checkoutCycle);
+            openCardChoice();
           }
         } else if (intentPlan) {
-            await handleStartCheckout(intentPlan, intentCycle || checkoutCycle);
+          const targetPlan = normalizePlanKey(intentPlan);
+          setSelectedPlan(targetPlan);
+          setSelectedCycle(intentCycle || checkoutCycle);
+          setNotice({
+            type: 'info',
+            message: `Escolha como deseja pagar o plano ${PLAN_META[targetPlan]?.label || 'selecionado'}: cartão com renovação automática ou PIX manual.`,
+          });
+          openCardChoice();
         }
       } finally {
         clearIntentStorage();
@@ -1007,6 +1042,7 @@ export default function Assinatura() {
     location.pathname,
     location.search,
     navigate,
+    openCardChoice,
     openRenewalPayment,
     planKey,
     renewalRequired,
@@ -1109,7 +1145,7 @@ export default function Assinatura() {
           <p className="muted">
             {currentPaymentMethod === 'credit_card'
               ? 'Renovação automática habilitada no cartão.'
-              : `PIX manual ativo. Referência atual: ${formatCurrencyFromCents(selectedPlanPriceCents)}.`}
+              : `PIX manual ativo. Referência atual: ${formatCurrencyFromCents(selectedPlanPriceCents)} para ${checkoutPlanMeta.label}.`}
           </p>
         </div>
       </div>
@@ -1179,6 +1215,15 @@ export default function Assinatura() {
             </div>
           </div>
 
+          {hasCheckoutSelection ? (
+            <div className="subscription-page__callout">
+              <strong>Plano selecionado: {checkoutPlanMeta.label}</strong>
+              <p className="muted">
+                Escolha como deseja concluir a contratação: cartão com renovação automática ou PIX manual no ciclo {BILLING_CYCLE_LABELS[checkoutCycle] || 'Mensal'}.
+              </p>
+            </div>
+          ) : null}
+
           <label className="label subscription-page__cycle-field">
             <span>Ciclo para PIX</span>
             <select className="input" value={checkoutCycle} onChange={(event) => setSelectedCycle(event.target.value)}>
@@ -1193,9 +1238,22 @@ export default function Assinatura() {
                 {trialLoading ? <span className="spinner" /> : 'Ativar 7 dias grátis do Pro'}
               </button>
             ) : null}
-            {canOfferProCheckout ? (
-              <button type="button" className="btn btn--primary" onClick={() => void handleStartCheckout('pro', checkoutCycle)} disabled={checkoutLoading}>
-                {checkoutLoading ? <span className="spinner" /> : 'Contratar Pro via PIX'}
+            {hasCheckoutSelection && !hasDelinquentStatus ? (
+              <button type="button" className="btn btn--outline" onClick={openCardChoice}>
+                Pagar {checkoutPlanMeta.label} com cartão
+              </button>
+            ) : null}
+            {canOfferProCheckout && !hasCheckoutSelection ? (
+              <button type="button" className="btn btn--primary" onClick={() => {
+                setSelectedPlan('pro');
+                openCardChoice();
+              }}>
+                Escolher pagamento do Pro
+              </button>
+            ) : null}
+            {hasCheckoutSelection ? (
+              <button type="button" className="btn btn--primary" onClick={() => void handleStartCheckout(checkoutPlanKey, checkoutCycle)} disabled={checkoutLoading}>
+                {checkoutLoading ? <span className="spinner" /> : `Gerar PIX do ${checkoutPlanMeta.label}`}
               </button>
             ) : null}
 
@@ -1213,11 +1271,15 @@ export default function Assinatura() {
         </aside>
       </div>
 
-      <section className="settings-module-card subscription-page__payments-card">
+      <section ref={paymentSectionRef} className="settings-module-card subscription-page__payments-card">
         <div className="subscription-page__section-head">
           <div>
             <h3>Forma de pagamento</h3>
-            <p className="muted">Cartão de crédito é o método principal com renovação automática. PIX continua como alternativa manual.</p>
+            <p className="muted">
+              {hasCheckoutSelection
+                ? `Plano selecionado: ${checkoutPlanMeta.label}. Escolha entre cartão com renovação automática ou PIX manual.`
+                : 'Cartão de crédito é o método principal com renovação automática. PIX continua como alternativa manual.'}
+            </p>
           </div>
           <div className={`subscription-page__status-chip subscription-page__status-chip--${currentPaymentMethod === 'credit_card' ? 'success' : 'warning'}`}>
             {paymentMethodLabel}
@@ -1229,6 +1291,11 @@ export default function Assinatura() {
             <span className="subscription-page__payment-tag">Recomendado</span>
             <h4>Cartão de crédito</h4>
             <p className="muted">Renovação automática, sem interrupções enquanto as cobranças forem aprovadas.</p>
+            {hasCheckoutSelection && !hasDelinquentStatus ? (
+              <p className="muted">
+                Contratação do plano {checkoutPlanMeta.label} ({BILLING_CYCLE_LABELS[checkoutCycle] || 'Mensal'}) com cobrança recorrente no cartão.
+              </p>
+            ) : null}
             {['past_due', 'unpaid', 'expired', 'pending_payment'].includes(planStatusKey) ? (
               <p className="muted">
                 Regularização do plano {planMeta.label} ({BILLING_CYCLE_LABELS[currentCycle] || 'Mensal'}). Esse envio mantém o plano atual.
@@ -1352,10 +1419,10 @@ export default function Assinatura() {
               <button
                 type="button"
                 className="btn btn--outline"
-                onClick={() => void handleStartCheckout(planKey, checkoutCycle)}
+                onClick={() => void handleStartCheckout(checkoutPlanKey, checkoutCycle)}
                 disabled={checkoutLoading}
               >
-                {checkoutLoading ? <span className="spinner" /> : `Gerar PIX do ${planMeta.label}`}
+                {checkoutLoading ? <span className="spinner" /> : `Gerar PIX do ${checkoutPlanMeta.label}`}
               </button>
             </div>
           </div>
