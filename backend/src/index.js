@@ -22,6 +22,7 @@ import whatsappWebhookRouter from './routes/whatsapp_webhook.js';
 import waConnectRouter from './routes/waConnect.js';
 import waTenantWebhookRouter from './routes/waWebhook.js';
 import mercadoPagoRouter from './routes/mercadopago.js';
+import mercadoPagoSellersWebhookRouter from './routes/mercadopago_sellers_webhooks.js';
 import publicAgendamentosRouter from './routes/agendamentos_public.js';
 import otpPublicRouter from './routes/otp_public.js';
 import profissionaisRouter from './routes/profissionais.js';
@@ -123,6 +124,12 @@ app.use(whatsappWebhookPaths, express.json({
     req.rawBody = Buffer.from(buf);
   },
 }));
+app.use(['/webhooks/mercadopago/sellers', '/api/webhooks/mercadopago/sellers'], express.json({
+  limit: '5mb',
+  verify: (req, _res, buf) => {
+    req.rawBody = Buffer.from(buf);
+  },
+}));
 app.use(express.json({ limit: '5mb' }));
 app.use((req, res, next) => {
   const json = res.json.bind(res);
@@ -153,6 +160,8 @@ app.use((req, res, next) => {
     path.startsWith('/api/webhooks/whatsapp') ||
     path.startsWith('/billing/webhook') ||
     path.startsWith('/api/billing/webhook') ||
+    path.startsWith('/webhooks/mercadopago/sellers') ||
+    path.startsWith('/api/webhooks/mercadopago/sellers') ||
     path.startsWith('/webhook/mercadopago') ||
     path.startsWith('/api/webhook/mercadopago');
   const isExcluded =
@@ -246,7 +255,9 @@ if (BILLING_ROUTES_ENABLED) {
 app.use('/payments', paymentsRouter);
 app.use('/wa', waConnectRouter);
 app.use('/whatsapp', waConnectRouter);
+app.use('/marketplace/mp', mercadoPagoRouter);
 app.use('/mercadopago', mercadoPagoRouter);
+app.use('/webhooks/mercadopago/sellers', mercadoPagoSellersWebhookRouter);
 app.use('/wa/webhook', waTenantWebhookRouter);
 app.use('/webhooks/whatsapp', whatsappWebhookRouter);
 
@@ -274,7 +285,9 @@ if (BILLING_ROUTES_ENABLED) {
 app.use('/api/payments', paymentsRouter);
 app.use('/api/wa', waConnectRouter);
 app.use('/api/whatsapp', waConnectRouter);
+app.use('/api/marketplace/mp', mercadoPagoRouter);
 app.use('/api/mercadopago', mercadoPagoRouter);
+app.use('/api/webhooks/mercadopago/sellers', mercadoPagoSellersWebhookRouter);
 app.use('/api/wa/webhook', waTenantWebhookRouter);
 app.use('/api/webhooks/whatsapp', whatsappWebhookRouter);
 

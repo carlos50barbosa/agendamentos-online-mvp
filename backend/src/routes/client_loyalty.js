@@ -2,15 +2,14 @@ import { Router } from 'express'
 import { randomUUID } from 'node:crypto'
 import { auth, isCliente } from '../middleware/auth.js'
 import { pool } from '../lib/db.js'
-import { getMercadoPagoPublicKey } from '../lib/mercadopago_subscriptions.js'
-import { getMercadoPagoCredentialDiagnostics, toMercadoPagoCardFlowError } from '../lib/mercadopago_card_tokens.js'
-import { config } from '../lib/config.js'
+import { toMercadoPagoCardFlowError } from '../lib/mercadopago_card_tokens.js'
 import {
   cancelClientLoyaltySubscriptionForClient,
   createClientLoyaltyPixCheckout,
   loadClientLoyaltySubscriptionDetails,
   startClientLoyaltyCardSubscription,
-} from '../lib/client_loyalty_billing.js'
+} from '../services/loyaltySubscriptions.js'
+import { getMpAccountByEstabelecimentoId, getMpPublicKey, summarizeMpAccount } from '../services/mpAccounts.js'
 import {
   getPreferredClientLoyaltySubscription,
   listClientLoyaltySubscriptionsForClient,
@@ -78,17 +77,36 @@ async function fetchPreviewServices(estabelecimentoId, serviceIds) {
     }))
 }
 
-router.get('/config', auth, isCliente, async (_req, res) => {
-  return res.json({
-    gateway: 'mercadopago',
-    mercadopago: {
-      public_key: getMercadoPagoPublicKey(),
-      credentials: getMercadoPagoCredentialDiagnostics({
-        publicKey: getMercadoPagoPublicKey(),
-        accessToken: config.billing?.mercadopago?.accessToken || null,
-      }),
-    },
-  })
+router.get('/config', auth, isCliente, async (req, res) => {
+  try {
+    const estabelecimentoId = normalizeId(req.query?.estabelecimento_id || req.query?.establishment_id)
+    const account = estabelecimentoId ? await getMpAccountByEstabelecimentoId(estabelecimentoId) : null
+    const publicKey = estabelecimentoId
+      ? await getMpPublicKey(estabelecimentoId, { fallbackToApp: true })
+      : await getMpPublicKey(null, { fallbackToApp: true })
+    const accountSummary = summarizeMpAccount(account)
+
+    return res.json({
+      gateway: 'mercadopago',
+      mercadopago: {
+        public_key: publicKey || null,
+        owner_type: 'establishment',
+        account: {
+          ...accountSummary,
+          estabelecimento_id: estabelecimentoId || accountSummary?.estabelecimento_id || null,
+        },
+        credentials: {
+          owner_type: 'establishment',
+          token_source: 'seller_oauth',
+          connected: accountSummary.connected === true,
+          status: accountSummary.status || 'disconnected',
+          public_key_source: account?.public_key ? 'seller_account' : 'application',
+        },
+      },
+    })
+  } catch (error) {
+    return handleRouteError(res, error)
+  }
 })
 
 router.get('/subscription', auth, isCliente, async (req, res) => {

@@ -40,10 +40,12 @@ export default function LoyaltyPlansEstabelecimento() {
   const user = getUser()
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [mpBusy, setMpBusy] = useState(false)
   const [notice, setNotice] = useState({ type: '', message: '' })
   const [plans, setPlans] = useState([])
   const [services, setServices] = useState([])
   const [subscribers, setSubscribers] = useState([])
+  const [mpAccount, setMpAccount] = useState(null)
   const [form, setForm] = useState(() => planToForm())
 
   const serviceOptions = useMemo(
@@ -59,14 +61,16 @@ export default function LoyaltyPlansEstabelecimento() {
     if (!user?.id) return
     setLoading(true)
     try {
-      const [plansResponse, servicesResponse, subscribersResponse] = await Promise.all([
+      const [plansResponse, servicesResponse, subscribersResponse, mpAccountResponse] = await Promise.all([
         Api.loyaltyPlansList({ include_archived: true }),
         Api.listServices(user.id),
         Api.loyaltySubscribers(),
+        Api.marketplaceMpAccount(),
       ])
       setPlans(Array.isArray(plansResponse?.plans) ? plansResponse.plans : [])
       setServices(Array.isArray(servicesResponse) ? servicesResponse : [])
       setSubscribers(Array.isArray(subscribersResponse?.subscribers) ? subscribersResponse.subscribers : [])
+      setMpAccount(mpAccountResponse?.account || null)
     } catch (error) {
       setNotice({
         type: 'error',
@@ -76,6 +80,48 @@ export default function LoyaltyPlansEstabelecimento() {
       setLoading(false)
     }
   }, [user?.id])
+
+  const mpConnected = mpAccount?.connected === true || mpAccount?.status === 'connected'
+
+  const handleMpConnect = useCallback(async () => {
+    setMpBusy(true)
+    setNotice({ type: '', message: '' })
+    try {
+      const response = await Api.marketplaceMpConnectStart({
+        capability: 'loyalty',
+        return_to: '/fidelidade',
+      })
+      if (response?.url) {
+        window.location.assign(response.url)
+        return
+      }
+      throw new Error('Nao foi possivel iniciar a conexao com o Mercado Pago.')
+    } catch (error) {
+      setNotice({
+        type: 'error',
+        message: error?.data?.message || error?.message || 'Nao foi possivel iniciar a conexao com o Mercado Pago.',
+      })
+    } finally {
+      setMpBusy(false)
+    }
+  }, [])
+
+  const handleMpDisconnect = useCallback(async () => {
+    setMpBusy(true)
+    setNotice({ type: '', message: '' })
+    try {
+      await Api.marketplaceMpDisconnect()
+      setNotice({ type: 'success', message: 'Conta Mercado Pago desconectada.' })
+      await loadData()
+    } catch (error) {
+      setNotice({
+        type: 'error',
+        message: error?.data?.message || error?.message || 'Nao foi possivel desconectar a conta Mercado Pago.',
+      })
+    } finally {
+      setMpBusy(false)
+    }
+  }, [loadData])
 
   useEffect(() => {
     void loadData()
@@ -218,6 +264,39 @@ export default function LoyaltyPlansEstabelecimento() {
       {notice.message ? (
         <div className={`loyalty-alert loyalty-alert--${notice.type || 'info'}`}>{notice.message}</div>
       ) : null}
+
+      <section className="card loyalty-card" style={{ marginBottom: 24 }}>
+        <div className="loyalty-card__header">
+          <div>
+            <h2>Conta Mercado Pago do estabelecimento</h2>
+            <p>
+              A fidelidade mensal usa a conta conectada do estabelecimento. O dinheiro nao passa pela conta da plataforma.
+            </p>
+          </div>
+          <span className={`loyalty-status loyalty-status--${mpConnected ? 'active' : 'inactive'}`}>
+            {mpConnected ? 'Conectada' : 'Desconectada'}
+          </span>
+        </div>
+        <div className="loyalty-current__meta">
+          <span>{mpAccount?.mp_user_id ? `mp_user_id: ${mpAccount.mp_user_id}` : 'Nenhuma conta seller conectada.'}</span>
+          <span>{mpAccount?.token_expires_at ? `Expira em: ${new Date(mpAccount.token_expires_at).toLocaleString('pt-BR')}` : 'Token sem expiracao informada.'}</span>
+        </div>
+        {!mpConnected ? (
+          <div className="loyalty-alert loyalty-alert--warn" style={{ marginTop: 16 }}>
+            Este estabelecimento ainda nao conectou uma conta Mercado Pago. Sem essa conexao a fidelidade mensal nao pode ser vendida.
+          </div>
+        ) : null}
+        <div className="loyalty-form__actions" style={{ marginTop: 16 }}>
+          <button type="button" className="btn btn--primary" onClick={handleMpConnect} disabled={mpBusy}>
+            {mpBusy ? 'Conectando...' : (mpConnected ? 'Reconectar Mercado Pago' : 'Conectar Mercado Pago')}
+          </button>
+          {mpConnected ? (
+            <button type="button" className="btn btn--outline" onClick={handleMpDisconnect} disabled={mpBusy}>
+              Desconectar
+            </button>
+          ) : null}
+        </div>
+      </section>
 
       <div className="loyalty-grid loyalty-grid--two">
         <section className="card loyalty-card">

@@ -77,42 +77,62 @@ function resolveBillingWebhookUrl(apiBase = resolveApiBaseUrl()) {
   return base.endsWith('/api') ? `${base}/billing/webhook` : `${base}/api/billing/webhook`
 }
 
+function resolveSellerWebhookUrl(apiBase = resolveApiBaseUrl()) {
+  const base = String(apiBase || '').replace(/\/$/, '')
+  return base.endsWith('/api')
+    ? `${base}/webhooks/mercadopago/sellers`
+    : `${base}/api/webhooks/mercadopago/sellers`
+}
+
 function buildClientBackUrl(estabelecimentoId) {
   return `${FRONTEND_BASE}/cliente/fidelidade?estabelecimento=${encodeURIComponent(String(estabelecimentoId || ''))}`
 }
 
-function buildCardExternalReference({ estabelecimentoId, clienteId, loyaltyPlanId }) {
+function buildLoyaltyExternalReference({ subscriptionId, estabelecimentoId, clienteId, loyaltyPlanId, cycleRef = null }) {
   return [
     'loyalty',
-    'card',
+    'sub',
+    String(subscriptionId || ''),
     'est',
     String(estabelecimentoId || ''),
-    'cliente',
+    'cli',
     String(clienteId || ''),
     'plan',
     String(loyaltyPlanId || ''),
+    ...(cycleRef ? ['cycle', String(cycleRef || '')] : []),
     'uuid',
     randomUUID(),
   ].join(':')
 }
 
+function buildCardExternalReference({ subscriptionId, estabelecimentoId, clienteId, loyaltyPlanId }) {
+  return buildLoyaltyExternalReference({
+    subscriptionId,
+    estabelecimentoId,
+    clienteId,
+    loyaltyPlanId,
+  })
+}
+
 function buildPixExternalReference({ subscriptionId, estabelecimentoId, clienteId, loyaltyPlanId, cycleRef }) {
-  return [
-    'loyalty',
-    'pix',
-    'sub',
-    String(subscriptionId || ''),
-    'est',
-    String(estabelecimentoId || ''),
-    'cliente',
-    String(clienteId || ''),
-    'plan',
-    String(loyaltyPlanId || ''),
-    'cycle',
-    String(cycleRef || ''),
-    'uuid',
-    randomUUID(),
-  ].join(':')
+  return buildLoyaltyExternalReference({
+    subscriptionId,
+    estabelecimentoId,
+    clienteId,
+    loyaltyPlanId,
+    cycleRef,
+  })
+}
+
+function buildSellerEventContext(account, estabelecimentoId, extra = {}) {
+  return {
+    ownerType: 'establishment',
+    ownerId: Number(estabelecimentoId || account?.estabelecimento_id || account?.estabelecimentoId || 0) || null,
+    estabelecimentoId: Number(estabelecimentoId || account?.estabelecimento_id || account?.estabelecimentoId || 0) || null,
+    mpUserId: account?.mp_user_id || account?.mpUserId || null,
+    mpCollectorId: account?.mp_collector_id || account?.mpCollectorId || account?.mp_user_id || account?.mpUserId || null,
+    ...extra,
+  }
 }
 
 function normalizeGatewayPaymentStatus(value) {
@@ -314,6 +334,28 @@ async function resolveLoyaltyMpContext(estabelecimentoId) {
   return mpAccess
 }
 
+async function resolveActiveLoyaltyMpContext(estabelecimentoId) {
+  const mpAccess = await resolveMpAccessToken(estabelecimentoId, { allowFallback: false })
+  if (!mpAccess?.accessToken) {
+    const reason = String(mpAccess?.reason || '').trim().toLowerCase()
+    if (['expired', 'refresh_failed', 'refresh_token_missing', 'refresh_token_decrypt_failed', 'decrypt_failed', 'oauth_client_missing'].includes(reason)) {
+      throw createError(
+        'Conta Mercado Pago desconectada ou sem permissao valida.',
+        409,
+        'mp_account_invalid',
+        { reason }
+      )
+    }
+    throw createError(
+      'Este estabelecimento ainda nao conectou uma conta Mercado Pago.',
+      409,
+      'mp_not_connected',
+      { reason: reason || 'not_connected' }
+    )
+  }
+  return mpAccess
+}
+
 async function lockSubscriptionRow(subscriptionId, { db = pool } = {}) {
   const [rows] = await db.query(
     'SELECT id, status, payment_method, gateway_payment_id, gateway_subscription_id, current_period_start, current_period_end FROM client_loyalty_subscriptions WHERE id=? LIMIT 1 FOR UPDATE',
@@ -331,7 +373,7 @@ async function retireReplaceableClientLoyaltySubscription(subscription, {
   let gatewayCanceled = false
   if (subscription.paymentMethod === 'credit_card' && subscription.gatewaySubscriptionId) {
     try {
-      const mpAccess = await resolveLoyaltyMpContext(subscription.estabelecimentoId)
+      const mpAccess = await resolveActiveLoyaltyMpContext(subscription.estabelecimentoId)
       await cancelMercadoPagoCardSubscription(subscription.gatewaySubscriptionId, {
         accessToken: mpAccess.accessToken,
       })
@@ -375,6 +417,10 @@ async function activateSubscriptionCycleTx(subscriptionId, {
   paymentMethod = null,
   rawPayload = null,
   gatewayEventId = null,
+  mpTopic = null,
+  eventContext = null,
+  paymentType = null,
+  amountCents = null,
 }, { db = pool } = {}) {
   await lockSubscriptionRow(subscriptionId, { db })
   const current = await getClientLoyaltySubscriptionById(subscriptionId, { db })
@@ -386,12 +432,17 @@ async function activateSubscriptionCycleTx(subscriptionId, {
   const cycleEnd = addMonths(cycleStart, 1)
   const nextBillingAt = cycleEnd
   const updated = await updateClientLoyaltySubscription(subscriptionId, {
+    ownerType: current.ownerType || 'establishment',
+    sellerMpAccountId: current.sellerMpAccountId || null,
     status: 'active',
     paymentMethod: paymentMethod || current.paymentMethod,
     gatewayPaymentId: gatewayPaymentId || current.gatewayPaymentId || null,
     gatewaySubscriptionId: gatewaySubscriptionId || current.gatewaySubscriptionId || null,
+    mpPreapprovalId: gatewaySubscriptionId || current.mpPreapprovalId || current.gatewaySubscriptionId || null,
     gatewayCustomerId: gatewayCustomerId || current.gatewayCustomerId || null,
+    mpPayerId: gatewayCustomerId || current.mpPayerId || current.gatewayCustomerId || null,
     externalReference: externalReference || current.externalReference || null,
+    startedAt: current.startedAt || cycleStart,
     currentPeriodStart: cycleStart,
     currentPeriodEnd: cycleEnd,
     nextBillingAt,
@@ -403,11 +454,22 @@ async function activateSubscriptionCycleTx(subscriptionId, {
   await appendClientLoyaltySubscriptionEvent(subscriptionId, {
     eventType: 'payment_approved',
     gatewayEventId: gatewayEventId || gatewayPaymentId || gatewaySubscriptionId || null,
+    mpTopic,
+    ...(eventContext || buildSellerEventContext(null, current.estabelecimentoId, {})),
+    mpPaymentId: gatewayPaymentId || null,
+    paymentStatus: 'approved',
+    paymentMethod: paymentMethod || current.paymentMethod || null,
+    paymentType,
+    amountCents,
+    actionTaken: 'activated',
     payload: rawPayload,
   }, { db })
   await appendClientLoyaltySubscriptionEvent(subscriptionId, {
     eventType: 'cycle_credits_generated',
     gatewayEventId: `credits:${formatCycleRef(cycleStart) || randomUUID()}`,
+    mpTopic,
+    ...(eventContext || buildSellerEventContext(null, current.estabelecimentoId, {})),
+    actionTaken: 'credits_generated',
     payload: {
       cycle_start: cycleStart ? cycleStart.toISOString() : null,
       cycle_end: cycleEnd ? cycleEnd.toISOString() : null,
@@ -426,6 +488,10 @@ async function markSubscriptionPastDueTx(subscriptionId, {
   externalReference = null,
   rawPayload = null,
   gatewayEventId = null,
+  mpTopic = null,
+  eventContext = null,
+  paymentType = null,
+  amountCents = null,
 }, { db = pool } = {}) {
   await lockSubscriptionRow(subscriptionId, { db })
   const current = await getClientLoyaltySubscriptionById(subscriptionId, { db })
@@ -440,10 +506,14 @@ async function markSubscriptionPastDueTx(subscriptionId, {
     : null
 
   const updated = await updateClientLoyaltySubscription(subscriptionId, {
+    ownerType: current.ownerType || 'establishment',
+    sellerMpAccountId: current.sellerMpAccountId || null,
     status: nextStatus,
     gatewayPaymentId: gatewayPaymentId || current.gatewayPaymentId || null,
     gatewaySubscriptionId: gatewaySubscriptionId || current.gatewaySubscriptionId || null,
+    mpPreapprovalId: gatewaySubscriptionId || current.mpPreapprovalId || current.gatewaySubscriptionId || null,
     gatewayCustomerId: gatewayCustomerId || current.gatewayCustomerId || null,
+    mpPayerId: gatewayCustomerId || current.mpPayerId || current.gatewayCustomerId || null,
     externalReference: externalReference || current.externalReference || null,
     graceUntil,
   }, { db })
@@ -453,6 +523,14 @@ async function markSubscriptionPastDueTx(subscriptionId, {
   await appendClientLoyaltySubscriptionEvent(subscriptionId, {
     eventType: nextStatus === 'past_due' ? 'payment_failed' : 'payment_expired',
     gatewayEventId: gatewayEventId || gatewayPaymentId || gatewaySubscriptionId || null,
+    mpTopic,
+    ...(eventContext || buildSellerEventContext(null, current.estabelecimentoId, {})),
+    mpPaymentId: gatewayPaymentId || null,
+    paymentStatus: paymentStatus || null,
+    paymentMethod: current.paymentMethod || null,
+    paymentType,
+    amountCents,
+    actionTaken: nextStatus === 'past_due' ? 'past_due' : 'expired',
     payload: {
       payment_status: paymentStatus || null,
       payment_status_detail: failureDetails?.status_detail || null,
@@ -514,35 +592,79 @@ export async function startClientLoyaltyCardSubscription({
     }
   }
 
-  const mpAccess = await resolveLoyaltyMpContext(estabelecimentoId)
+  const mpAccess = await resolveActiveLoyaltyMpContext(estabelecimentoId)
   const recurringStartDate = buildInitialCardChargeStartDate()
-  const gatewayResult = await createMercadoPagoCardPreapproval({
-    amountCents: Number(plan.preco_centavos || 0),
-    billingCycle: 'mensal',
-    cardToken,
-    payer: { email: payerEmail || cliente.email || null },
-    reason: `${plan.nome} - ${estabelecimento.nome}`,
-    backUrl: buildClientBackUrl(estabelecimentoId),
-    externalReference: buildCardExternalReference({ estabelecimentoId, clienteId, loyaltyPlanId }),
-    startDate: recurringStartDate,
-    accessToken: mpAccess.accessToken,
-    requestContext: {
-      ...requestContext,
-      operation: requestContext?.operation || 'client_loyalty_card_subscription_create',
-    },
-  })
-
-  const subscription = await createClientLoyaltySubscription({
+  const provisionalSubscription = await createClientLoyaltySubscription({
     clienteId,
     estabelecimentoId,
     loyaltyPlanId,
+    ownerType: 'establishment',
+    sellerMpAccountId: mpAccess.account?.id || null,
+    status: 'pending_payment',
+    paymentMethod: 'credit_card',
+    gateway: 'mercadopago',
+    nextBillingAt: recurringStartDate,
+    autoRenew: true,
+  }, { db })
+  const externalReference = buildCardExternalReference({
+    subscriptionId: provisionalSubscription.id,
+    estabelecimentoId,
+    clienteId,
+    loyaltyPlanId,
+  })
+
+  let gatewayResult = null
+  try {
+    gatewayResult = await createMercadoPagoCardPreapproval({
+      amountCents: Number(plan.preco_centavos || 0),
+      billingCycle: 'mensal',
+      cardToken,
+      payer: { email: payerEmail || cliente.email || null },
+      reason: `${plan.nome} - ${estabelecimento.nome}`,
+      backUrl: buildClientBackUrl(estabelecimentoId),
+      externalReference,
+      startDate: recurringStartDate,
+      accessToken: mpAccess.accessToken,
+      requestContext: {
+        ...requestContext,
+        operation: requestContext?.operation || 'client_loyalty_card_subscription_create',
+      },
+    })
+  } catch (error) {
+    await updateClientLoyaltySubscription(provisionalSubscription.id, {
+      status: 'expired',
+      externalReference,
+      autoRenew: false,
+      nextBillingAt: null,
+    }, { db })
+    await appendClientLoyaltySubscriptionEvent(provisionalSubscription.id, {
+      eventType: 'card_subscription_create_failed',
+      gatewayEventId: externalReference,
+      mpTopic: 'subscription',
+      ...buildSellerEventContext(mpAccess.account, estabelecimentoId, {
+        actionTaken: 'create_failed',
+        ignoredReason: error?.code || error?.message || 'gateway_error',
+      }),
+      payload: {
+        message: error?.message || String(error),
+        code: error?.code || null,
+      },
+    }, { db })
+    throw error
+  }
+
+  const subscription = await updateClientLoyaltySubscription(provisionalSubscription.id, {
+    ownerType: 'establishment',
+    sellerMpAccountId: mpAccess.account?.id || null,
     status: gatewayResult?.subscription?.status || 'pending_payment',
     paymentMethod: 'credit_card',
     gateway: 'mercadopago',
     gatewayCustomerId: gatewayResult?.subscription?.gatewayCustomerId || null,
+    mpPayerId: gatewayResult?.subscription?.gatewayCustomerId || null,
     gatewaySubscriptionId: gatewayResult?.subscription?.gatewaySubscriptionId || null,
+    mpPreapprovalId: gatewayResult?.subscription?.gatewaySubscriptionId || null,
     gatewayPaymentId: null,
-    externalReference: gatewayResult?.subscription?.externalReference || gatewayResult?.request?.external_reference || null,
+    externalReference: gatewayResult?.subscription?.externalReference || gatewayResult?.request?.external_reference || externalReference,
     currentPeriodStart: null,
     currentPeriodEnd: null,
     nextBillingAt: gatewayResult?.subscription?.nextBillingAt || recurringStartDate || null,
@@ -552,6 +674,13 @@ export async function startClientLoyaltyCardSubscription({
   await appendClientLoyaltySubscriptionEvent(subscription.id, {
     eventType: 'card_subscription_created',
     gatewayEventId: gatewayResult?.subscription?.gatewaySubscriptionId || null,
+    mpTopic: 'subscription',
+    ...buildSellerEventContext(mpAccess.account, estabelecimentoId, {
+      mpPaymentId: null,
+      paymentStatus: gatewayResult?.subscription?.status || 'pending_payment',
+      paymentMethod: 'credit_card',
+      actionTaken: 'created',
+    }),
     payload: gatewayResult.raw,
   }, { db })
 
@@ -586,6 +715,8 @@ export async function createClientLoyaltyPixCheckout({
     clienteId,
     estabelecimentoId,
     loyaltyPlanId,
+    ownerType: 'establishment',
+    sellerMpAccountId: null,
     status: 'pending_pix',
     paymentMethod: 'pix',
     gateway: 'mercadopago',
@@ -601,7 +732,8 @@ export async function createClientLoyaltyPixCheckout({
     cycleRef,
   })
 
-  const mpAccess = await resolveLoyaltyMpContext(estabelecimentoId)
+  const mpAccess = await resolveActiveLoyaltyMpContext(estabelecimentoId)
+  const sellerEventContext = buildSellerEventContext(mpAccess.account, estabelecimentoId)
   const paymentResult = await createMercadoPagoPixPayment({
     amountCents: Number(plan.preco_centavos || 0),
     description: `${plan.nome} - ${estabelecimento.nome}`,
@@ -614,12 +746,14 @@ export async function createClientLoyaltyPixCheckout({
       estabelecimento_id: String(estabelecimentoId),
       cycle_ref: cycleRef,
     },
-    notificationUrl: resolveBillingWebhookUrl(),
+    notificationUrl: resolveSellerWebhookUrl(),
     payerEmail: cliente.email || null,
     accessToken: mpAccess.accessToken,
   })
 
   const updated = await updateClientLoyaltySubscription(subscription.id, {
+    ownerType: 'establishment',
+    sellerMpAccountId: mpAccess.account?.id || null,
     status: 'pending_pix',
     gatewayPaymentId: paymentResult?.payment?.id ? String(paymentResult.payment.id) : null,
     externalReference,
@@ -630,6 +764,14 @@ export async function createClientLoyaltyPixCheckout({
   await appendClientLoyaltySubscriptionEvent(updated.id, {
     eventType: 'pix_generated',
     gatewayEventId: paymentResult?.payment?.id ? String(paymentResult.payment.id) : null,
+    mpTopic: 'payment',
+    ...sellerEventContext,
+    mpPaymentId: paymentResult?.payment?.id ? String(paymentResult.payment.id) : null,
+    paymentStatus: paymentResult?.payment?.status || null,
+    paymentMethod: 'pix',
+    paymentType: paymentResult?.payment?.payment_type_id || paymentResult?.payment?.payment_method_id || 'pix',
+    amountCents: plan.preco_centavos || 0,
+    actionTaken: 'generated',
     payload: paymentResult.payment,
   }, { db })
 
@@ -662,15 +804,18 @@ export async function syncClientLoyaltyPixPaymentFromGateway(paymentId, {
   const existing = await getClientLoyaltySubscriptionByGatewayPaymentId(paymentId)
   let estabelecimentoId = existing?.estabelecimentoId || null
   let accessToken = null
+  let sellerAccount = null
 
   if (estabelecimentoId) {
     const mpAccess = await resolveMpAccessToken(estabelecimentoId, { allowFallback: false })
     accessToken = mpAccess?.accessToken || null
+    sellerAccount = mpAccess?.account || sellerAccount
   }
   if (!accessToken) {
     const gatewayContext = await resolveGatewayContextFromUserId(bodyUserId)
     estabelecimentoId = gatewayContext?.estabelecimentoId || estabelecimentoId || null
     accessToken = gatewayContext?.accessToken || null
+    sellerAccount = gatewayContext?.account || sellerAccount
   }
   if (!accessToken) {
     return { ok: false, reason: 'mp_token_missing' }
@@ -691,6 +836,15 @@ export async function syncClientLoyaltyPixPaymentFromGateway(paymentId, {
   if (!localSubscription) {
     return { ok: false, reason: 'subscription_not_found' }
   }
+  const sellerEventContext = buildSellerEventContext(
+    sellerAccount,
+    localSubscription.estabelecimentoId || estabelecimentoId,
+    {}
+  )
+  const amountCents = Number.isFinite(Number(payment?.transaction_amount))
+    ? Math.round(Number(payment.transaction_amount) * 100)
+    : null
+  const paymentType = payment?.payment_type_id || payment?.payment_method_id || 'pix'
 
   const conn = await pool.getConnection()
   try {
@@ -716,6 +870,10 @@ export async function syncClientLoyaltyPixPaymentFromGateway(paymentId, {
         paymentMethod: 'pix',
         rawPayload: payment,
         gatewayEventId: gatewayEventId || payment?.id || null,
+        mpTopic: 'payment',
+        eventContext: sellerEventContext,
+        paymentType,
+        amountCents,
       }, { db: conn })
       await conn.commit()
       return { ok: true, handled: true, status: 'active', subscription: activated }
@@ -728,12 +886,18 @@ export async function syncClientLoyaltyPixPaymentFromGateway(paymentId, {
         externalReference: payment?.external_reference || localSubscription.externalReference || null,
         rawPayload: payment,
         gatewayEventId: gatewayEventId || payment?.id || null,
+        mpTopic: 'payment',
+        eventContext: sellerEventContext,
+        paymentType,
+        amountCents,
       }, { db: conn })
       await conn.commit()
       return { ok: true, handled: true, status: updated.status, subscription: updated }
     }
 
     await updateClientLoyaltySubscription(localSubscription.id, {
+      ownerType: 'establishment',
+      sellerMpAccountId: sellerAccount?.id || localSubscription.sellerMpAccountId || null,
       status: 'pending_pix',
       gatewayPaymentId: payment?.id ? String(payment.id) : null,
       externalReference: payment?.external_reference || localSubscription.externalReference || null,
@@ -741,6 +905,14 @@ export async function syncClientLoyaltyPixPaymentFromGateway(paymentId, {
     await appendClientLoyaltySubscriptionEvent(localSubscription.id, {
       eventType: 'pix_pending',
       gatewayEventId: gatewayEventId || payment?.id || null,
+      mpTopic: 'payment',
+      ...sellerEventContext,
+      mpPaymentId: payment?.id ? String(payment.id) : null,
+      paymentStatus: paymentStatus || null,
+      paymentMethod: 'pix',
+      paymentType,
+      amountCents,
+      actionTaken: 'pending',
       payload: payment,
     }, { db: conn })
     await conn.commit()
@@ -763,13 +935,16 @@ export async function syncClientLoyaltyCardSubscriptionFromGateway(gatewaySubscr
   }
 
   let accessToken = null
+  let sellerAccount = null
   if (localSubscription.estabelecimentoId) {
     const mpAccess = await resolveMpAccessToken(localSubscription.estabelecimentoId, { allowFallback: false })
     accessToken = mpAccess?.accessToken || null
+    sellerAccount = mpAccess?.account || sellerAccount
   }
   if (!accessToken) {
     const gatewayContext = await resolveGatewayContextFromUserId(bodyUserId)
     accessToken = gatewayContext?.accessToken || null
+    sellerAccount = gatewayContext?.account || sellerAccount
   }
   if (!accessToken) {
     return { ok: false, reason: 'mp_token_missing' }
@@ -780,6 +955,7 @@ export async function syncClientLoyaltyCardSubscriptionFromGateway(gatewaySubscr
     accessToken,
   })
   const gatewaySubscription = gatewayResult.subscription
+  const sellerEventContext = buildSellerEventContext(sellerAccount, localSubscription.estabelecimentoId, {})
   const conn = await pool.getConnection()
   try {
     await conn.beginTransaction()
@@ -792,9 +968,13 @@ export async function syncClientLoyaltyCardSubscriptionFromGateway(gatewaySubscr
       ? current?.status || localSubscription.status
       : gatewaySubscription?.status || localSubscription.status
     const updated = await updateClientLoyaltySubscription(localSubscription.id, {
+      ownerType: 'establishment',
+      sellerMpAccountId: sellerAccount?.id || localSubscription.sellerMpAccountId || null,
       paymentMethod: 'credit_card',
       gatewayCustomerId: gatewaySubscription?.gatewayCustomerId || localSubscription.gatewayCustomerId || null,
+      mpPayerId: gatewaySubscription?.gatewayCustomerId || localSubscription.mpPayerId || localSubscription.gatewayCustomerId || null,
       gatewaySubscriptionId: gatewaySubscription?.gatewaySubscriptionId || localSubscription.gatewaySubscriptionId || null,
+      mpPreapprovalId: gatewaySubscription?.gatewaySubscriptionId || localSubscription.mpPreapprovalId || localSubscription.gatewaySubscriptionId || null,
       externalReference: gatewaySubscription?.externalReference || localSubscription.externalReference || null,
       nextBillingAt: gatewaySubscription?.nextBillingAt || localSubscription.nextBillingAt || null,
       status: nextStatus,
@@ -811,6 +991,11 @@ export async function syncClientLoyaltyCardSubscriptionFromGateway(gatewaySubscr
               ? 'subscription_updated'
               : 'subscription_pending',
       gatewayEventId: gatewayEventId || gatewaySubscriptionId,
+      mpTopic: 'subscription',
+      ...sellerEventContext,
+      paymentStatus: gatewaySubscription?.status || null,
+      paymentMethod: 'credit_card',
+      actionTaken: preserveCurrentCycle ? 'updated_without_cycle_change' : 'synced',
       payload: gatewayResult.raw,
     }, { db: conn })
 
@@ -823,6 +1008,9 @@ export async function syncClientLoyaltyCardSubscriptionFromGateway(gatewaySubscr
         paymentMethod: 'credit_card',
         rawPayload: gatewayResult.raw,
         gatewayEventId: gatewayEventId || gatewaySubscriptionId,
+        mpTopic: 'subscription',
+        eventContext: sellerEventContext,
+        paymentType: 'subscription',
       }, { db: conn })
     }
 
@@ -841,14 +1029,17 @@ export async function syncClientLoyaltyAuthorizedPaymentFromGateway(authorizedPa
   gatewayEventId = null,
 } = {}) {
   let accessToken = null
+  let sellerAccount = null
   const existingByPayment = await getClientLoyaltySubscriptionByGatewayPaymentId(authorizedPaymentId)
   if (existingByPayment?.estabelecimentoId) {
     const mpAccess = await resolveMpAccessToken(existingByPayment.estabelecimentoId, { allowFallback: false })
     accessToken = mpAccess?.accessToken || null
+    sellerAccount = mpAccess?.account || sellerAccount
   }
   if (!accessToken) {
     const gatewayContext = await resolveGatewayContextFromUserId(bodyUserId)
     accessToken = gatewayContext?.accessToken || null
+    sellerAccount = gatewayContext?.account || sellerAccount
   }
   if (!accessToken) {
     return { ok: false, reason: 'mp_token_missing' }
@@ -872,6 +1063,10 @@ export async function syncClientLoyaltyAuthorizedPaymentFromGateway(authorizedPa
   const conn = await pool.getConnection()
   try {
     await conn.beginTransaction()
+    const sellerEventContext = buildSellerEventContext(sellerAccount, localSubscription.estabelecimentoId, {})
+    const amountCents = authorizedPayment.amountCents != null
+      ? Number(authorizedPayment.amountCents || 0)
+      : null
     if (authorizedPayment.status === 'active') {
       const activated = await activateSubscriptionCycleTx(localSubscription.id, {
         paymentDate: authorizedPayment.paidAt || new Date(),
@@ -885,10 +1080,22 @@ export async function syncClientLoyaltyAuthorizedPaymentFromGateway(authorizedPa
           subscription: gatewayResult.raw,
         },
         gatewayEventId: gatewayEventId || authorizedPayment.id || authorizedPaymentId,
+        mpTopic: 'automatic-payments',
+        eventContext: sellerEventContext,
+        paymentType: 'subscription_authorized_payment',
+        amountCents,
       }, { db: conn })
       await appendClientLoyaltySubscriptionEvent(localSubscription.id, {
         eventType: 'subscription_renewed',
         gatewayEventId: `renewal:${authorizedPayment.id || authorizedPaymentId}`,
+        mpTopic: 'automatic-payments',
+        ...sellerEventContext,
+        mpPaymentId: authorizedPayment.id || null,
+        paymentStatus: authorizedPayment.status || null,
+        paymentMethod: 'credit_card',
+        paymentType: 'subscription_authorized_payment',
+        amountCents,
+        actionTaken: 'renewed',
         payload: {
           payment: paymentResult.raw,
           subscription: gatewayResult.raw,
@@ -924,6 +1131,10 @@ export async function syncClientLoyaltyAuthorizedPaymentFromGateway(authorizedPa
         subscription: gatewayResult.raw,
       },
       gatewayEventId: gatewayEventId || authorizedPayment.id || authorizedPaymentId,
+      mpTopic: 'automatic-payments',
+      eventContext: sellerEventContext,
+      paymentType: 'subscription_authorized_payment',
+      amountCents,
     }, { db: conn })
     await conn.commit()
     return { ok: true, handled: true, status: updated.status, subscription: updated, failure: failureDetails }
@@ -951,7 +1162,7 @@ export async function cancelClientLoyaltySubscriptionForClient({
   const state = computeClientLoyaltySubscriptionState(subscription)
   if (!subscription.canceledAt && subscription.paymentMethod === 'credit_card' && subscription.gatewaySubscriptionId) {
     try {
-      const mpAccess = await resolveLoyaltyMpContext(subscription.estabelecimentoId)
+      const mpAccess = await resolveActiveLoyaltyMpContext(subscription.estabelecimentoId)
       await cancelMercadoPagoCardSubscription(subscription.gatewaySubscriptionId, {
         accessToken: mpAccess.accessToken,
       })

@@ -533,9 +533,13 @@ export const Api = {
   waConnectDisconnect: () => req('/whatsapp/account/disconnect', { method: 'POST' }),
 
   // Mercado Pago OAuth (estabelecimento)
-  mpConnectStart: () => req('/mercadopago/connect?json=1'),
-  mpConnectStatus: () => req('/mercadopago/status'),
-  mpConnectDisconnect: () => req('/mercadopago/disconnect', { method: 'POST' }),
+  marketplaceMpConnectStart: (params = {}) =>
+    req(`/marketplace/mp/connect/start${toQuery({ ...params, json: 1 })}`),
+  marketplaceMpAccount: () => req('/marketplace/mp/account'),
+  marketplaceMpDisconnect: () => req('/marketplace/mp/account', { method: 'DELETE' }),
+  mpConnectStart: (params = {}) => req(`/marketplace/mp/connect/start${toQuery({ ...params, json: 1 })}`),
+  mpConnectStatus: () => req('/marketplace/mp/account'),
+  mpConnectDisconnect: () => req('/marketplace/mp/account', { method: 'DELETE' }),
 
 
   // Admin (manutenção)
@@ -675,7 +679,7 @@ export const Api = {
 
   publicLoyaltyPlans: (idOrSlug) => req(`/public/estabelecimentos/${idOrSlug}/loyalty-plans`),
 
-  clientLoyaltyConfig: () => req('/cliente/loyalty/config'),
+  clientLoyaltyConfig: (params = {}) => req(`/cliente/loyalty/config${toQuery(params)}`),
 
   clientLoyaltySubscription: (params = {}) => req(`/cliente/loyalty/subscription${toQuery(params)}`),
 

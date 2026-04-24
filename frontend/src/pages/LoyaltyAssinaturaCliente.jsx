@@ -108,6 +108,7 @@ export default function LoyaltyAssinaturaCliente() {
   const [submitting, setSubmitting] = useState(false)
   const [notice, setNotice] = useState({ type: '', message: '' })
   const [gatewayPublicKey, setGatewayPublicKey] = useState('')
+  const [gatewayAccount, setGatewayAccount] = useState(null)
   const [plansBundle, setPlansBundle] = useState({ estabelecimento: null, plans: [] })
   const [currentDetails, setCurrentDetails] = useState(null)
   const [history, setHistory] = useState([])
@@ -117,6 +118,7 @@ export default function LoyaltyAssinaturaCliente() {
   const [cardFormResetKey, setCardFormResetKey] = useState(0)
   const [cardState, setCardState] = useState({ loading: false, ready: false, error: '' })
   const currentStatus = String(currentDetails?.subscription?.status || '').toLowerCase().trim()
+  const sellerConnected = gatewayAccount?.connected === true || gatewayAccount?.status === 'connected'
   const isCardPendingActivation = currentStatus === 'pending_payment' && String(currentDetails?.subscription?.payment_method || '').toLowerCase() === 'credit_card'
   const latestFailure = currentDetails?.latest_failure || null
   const latestFailureFriendlyText = getFailureFriendlyMessage(latestFailure)
@@ -125,7 +127,7 @@ export default function LoyaltyAssinaturaCliente() {
   const loadData = useCallback(async () => {
     setLoading(true)
     try {
-      const requests = [Api.clientLoyaltyConfig()]
+      const requests = [Api.clientLoyaltyConfig(estabelecimentoId ? { estabelecimento_id: estabelecimentoId } : {})]
       if (estabelecimentoId) {
         requests.push(Api.publicLoyaltyPlans(estabelecimentoId))
         requests.push(Api.clientLoyaltySubscription({ estabelecimento_id: estabelecimentoId }))
@@ -137,6 +139,7 @@ export default function LoyaltyAssinaturaCliente() {
       }
       const [configResponse, publicPlansResponse, currentResponse, historyResponse] = await Promise.all(requests)
       setGatewayPublicKey(configResponse?.mercadopago?.public_key || '')
+      setGatewayAccount(configResponse?.mercadopago?.account || null)
       setPlansBundle({
         estabelecimento: publicPlansResponse?.estabelecimento || null,
         plans: Array.isArray(publicPlansResponse?.plans) ? publicPlansResponse.plans : [],
@@ -170,6 +173,10 @@ export default function LoyaltyAssinaturaCliente() {
 
   const handlePixSubscribe = useCallback(async () => {
     if (!estabelecimentoId || !selectedPlanId) return
+    if (!sellerConnected) {
+      setNotice({ type: 'error', message: 'Este estabelecimento ainda nao conectou uma conta Mercado Pago.' })
+      return
+    }
     setSubmitting(true)
     setNotice({ type: '', message: '' })
     try {
@@ -188,7 +195,7 @@ export default function LoyaltyAssinaturaCliente() {
     } finally {
       setSubmitting(false)
     }
-  }, [estabelecimentoId, loadData, selectedPlanId])
+  }, [estabelecimentoId, loadData, selectedPlanId, sellerConnected])
 
   const handleCancel = useCallback(async () => {
     if (!currentDetails?.subscription?.id) return
@@ -224,6 +231,10 @@ export default function LoyaltyAssinaturaCliente() {
 
   const handleCardSubmit = useCallback(async (cardFormData) => {
     if (!estabelecimentoId || !selectedPlanId || !cardFormData?.token || cardSubmittingRef.current) return false
+    if (!sellerConnected) {
+      setNotice({ type: 'error', message: 'Conta Mercado Pago desconectada ou sem permissao valida.' })
+      return false
+    }
     cardSubmittingRef.current = true
     setSubmitting(true)
     setNotice({ type: '', message: '' })
@@ -258,10 +269,10 @@ export default function LoyaltyAssinaturaCliente() {
       cardSubmittingRef.current = false
       setSubmitting(false)
     }
-  }, [estabelecimentoId, loadData, resetCardFormForNewToken, selectedPlanId, user?.email])
+  }, [estabelecimentoId, loadData, resetCardFormForNewToken, selectedPlanId, sellerConnected, user?.email])
 
   useEffect(() => {
-    if (!gatewayPublicKey || paymentMethod !== 'credit_card' || !selectedPlan) {
+    if (!gatewayPublicKey || !sellerConnected || paymentMethod !== 'credit_card' || !selectedPlan) {
       setCardState({ loading: false, ready: false, error: '' })
       return undefined
     }
@@ -324,7 +335,7 @@ export default function LoyaltyAssinaturaCliente() {
       } catch {}
       cardFormRef.current = null
     }
-  }, [cardFormResetKey, gatewayPublicKey, handleCardSubmit, paymentMethod, selectedPlan])
+  }, [cardFormResetKey, gatewayPublicKey, handleCardSubmit, paymentMethod, selectedPlan, sellerConnected])
 
   const activeCredits = currentDetails?.credits || []
 
@@ -343,6 +354,12 @@ export default function LoyaltyAssinaturaCliente() {
       </div>
 
       {notice.message ? <div className={`loyalty-alert loyalty-alert--${notice.type || 'info'}`}>{notice.message}</div> : null}
+
+      {!sellerConnected && estabelecimentoId ? (
+        <div className="loyalty-alert loyalty-alert--warn">
+          Este estabelecimento ainda nao conectou uma conta Mercado Pago. A fidelidade mensal nao pode ser contratada no momento.
+        </div>
+      ) : null}
 
       {currentDetails ? (
         <section className="card loyalty-card loyalty-current">
@@ -458,6 +475,7 @@ export default function LoyaltyAssinaturaCliente() {
                   type="button"
                   className={`btn ${paymentMethod === 'pix' ? 'btn--primary' : 'btn--outline'}`}
                   onClick={() => setPaymentMethod('pix')}
+                  disabled={!sellerConnected}
                 >
                   PIX
                 </button>
@@ -465,6 +483,7 @@ export default function LoyaltyAssinaturaCliente() {
                   type="button"
                   className={`btn ${paymentMethod === 'credit_card' ? 'btn--primary' : 'btn--outline'}`}
                   onClick={() => setPaymentMethod('credit_card')}
+                  disabled={!sellerConnected}
                 >
                   Cartão
                 </button>
@@ -473,7 +492,7 @@ export default function LoyaltyAssinaturaCliente() {
               {paymentMethod === 'pix' ? (
                 <div className="loyalty-checkout-block">
                   <p>Pagamento manual por ciclo. Ao pagar, o plano é ativado e os créditos do mês são liberados.</p>
-                  <button type="button" className="btn btn--primary" onClick={handlePixSubscribe} disabled={submitting}>
+                  <button type="button" className="btn btn--primary" onClick={handlePixSubscribe} disabled={submitting || !sellerConnected}>
                     Gerar PIX
                   </button>
                   {pixCheckout?.pix ? (
@@ -487,6 +506,9 @@ export default function LoyaltyAssinaturaCliente() {
               ) : (
                 <div className="loyalty-checkout-block">
                   <p>Cartão com primeira cobrança confirmada pelo Mercado Pago, o que pode levar até cerca de 1 hora, e renovação automática mensal.</p>
+                  {!sellerConnected ? (
+                    <p className="loyalty-inline-error">Conta Mercado Pago desconectada ou sem permissao valida.</p>
+                  ) : null}
                   <form key={cardFormResetKey} id="client-loyalty-card-form" className="loyalty-card-form">
                     <div className="loyalty-card-form__grid">
                       <div id="client-loyalty-card-number" className="input loyalty-card-form__field" />
@@ -499,7 +521,7 @@ export default function LoyaltyAssinaturaCliente() {
                       <select id="client-loyalty-card-issuer" className="input loyalty-card-form__field" defaultValue="" />
                       <select id="client-loyalty-card-installments" className="input loyalty-card-form__field" defaultValue="" />
                     </div>
-                    <button type="submit" className="btn btn--primary" disabled={submitting || !cardState.ready}>
+                    <button type="submit" className="btn btn--primary" disabled={submitting || !cardState.ready || !sellerConnected}>
                       {cardState.loading ? 'Carregando...' : 'Assinar no cartão'}
                     </button>
                   </form>

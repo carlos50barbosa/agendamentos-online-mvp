@@ -14,18 +14,24 @@ export const CLIENT_LOYALTY_STATUSES = new Set([
 ])
 
 export const CLIENT_LOYALTY_PAYMENT_METHODS = new Set(['credit_card', 'pix'])
+export const CLIENT_LOYALTY_OWNER_TYPES = new Set(['platform', 'establishment'])
 
 const COLUMN_MAP = {
   clienteId: 'cliente_id',
   estabelecimentoId: 'estabelecimento_id',
   loyaltyPlanId: 'loyalty_plan_id',
+  ownerType: 'owner_type',
+  sellerMpAccountId: 'seller_mp_account_id',
   status: 'status',
   paymentMethod: 'payment_method',
   gateway: 'gateway',
   gatewayCustomerId: 'gateway_customer_id',
+  mpPayerId: 'mp_payer_id',
   gatewaySubscriptionId: 'gateway_subscription_id',
+  mpPreapprovalId: 'mp_preapproval_id',
   gatewayPaymentId: 'gateway_payment_id',
   externalReference: 'external_reference',
+  startedAt: 'started_at',
   currentPeriodStart: 'current_period_start',
   currentPeriodEnd: 'current_period_end',
   nextBillingAt: 'next_billing_at',
@@ -37,6 +43,7 @@ const COLUMN_MAP = {
 }
 
 const DATETIME_FIELDS = new Set([
+  'startedAt',
   'currentPeriodStart',
   'currentPeriodEnd',
   'nextBillingAt',
@@ -55,6 +62,11 @@ function safeJsonParse(value) {
   }
 }
 
+export function normalizeClientLoyaltyOwnerType(value, fallback = 'establishment') {
+  const normalized = String(value || '').trim().toLowerCase()
+  return CLIENT_LOYALTY_OWNER_TYPES.has(normalized) ? normalized : fallback
+}
+
 export function normalizeClientLoyaltyStatus(value, fallback = 'pending_pix') {
   const normalized = String(value || '').trim().toLowerCase()
   return CLIENT_LOYALTY_STATUSES.has(normalized) ? normalized : fallback
@@ -66,6 +78,7 @@ export function normalizeClientLoyaltyPaymentMethod(value, fallback = 'pix') {
 }
 
 function normalizePersistenceValue(key, value, fields = {}) {
+  if (key === 'ownerType') return normalizeClientLoyaltyOwnerType(value, fields.ownerType || 'establishment')
   if (key === 'status') return normalizeClientLoyaltyStatus(value, fields.status || 'pending_pix')
   if (key === 'paymentMethod') return normalizeClientLoyaltyPaymentMethod(value, fields.paymentMethod || 'pix')
   if (key === 'autoRenew') return value ? 1 : 0
@@ -86,13 +99,18 @@ function mapRow(row) {
     clienteId: Number(row.cliente_id),
     estabelecimentoId: Number(row.estabelecimento_id),
     loyaltyPlanId: Number(row.loyalty_plan_id),
+    ownerType: normalizeClientLoyaltyOwnerType(row.owner_type),
+    sellerMpAccountId: row.seller_mp_account_id == null ? null : Number(row.seller_mp_account_id),
     status: normalizeClientLoyaltyStatus(row.status),
     paymentMethod: normalizeClientLoyaltyPaymentMethod(row.payment_method),
     gateway: row.gateway || 'mercadopago',
     gatewayCustomerId: row.gateway_customer_id || null,
+    mpPayerId: row.mp_payer_id || row.gateway_customer_id || null,
     gatewaySubscriptionId: row.gateway_subscription_id || null,
+    mpPreapprovalId: row.mp_preapproval_id || row.gateway_subscription_id || null,
     gatewayPaymentId: row.gateway_payment_id || null,
     externalReference: row.external_reference || null,
+    startedAt: toDate(row.started_at),
     currentPeriodStart: toDate(row.current_period_start),
     currentPeriodEnd: toDate(row.current_period_end),
     nextBillingAt: toDate(row.next_billing_at),
@@ -158,14 +176,19 @@ export function serializeClientLoyaltySubscription(subscription, options = {}) {
     cliente_id: subscription.clienteId,
     estabelecimento_id: subscription.estabelecimentoId,
     loyalty_plan_id: subscription.loyaltyPlanId,
+    owner_type: normalizeClientLoyaltyOwnerType(subscription.ownerType),
+    seller_mp_account_id: subscription.sellerMpAccountId ?? null,
     status: state.resolvedStatus,
     status_raw: normalizeClientLoyaltyStatus(subscription.status),
     payment_method: normalizeClientLoyaltyPaymentMethod(subscription.paymentMethod),
     gateway: subscription.gateway || 'mercadopago',
     gateway_customer_id: subscription.gatewayCustomerId || null,
+    mp_payer_id: subscription.mpPayerId || subscription.gatewayCustomerId || null,
     gateway_subscription_id: subscription.gatewaySubscriptionId || null,
+    mp_preapproval_id: subscription.mpPreapprovalId || subscription.gatewaySubscriptionId || null,
     gateway_payment_id: subscription.gatewayPaymentId || null,
     external_reference: subscription.externalReference || null,
+    started_at: subscription.startedAt ? subscription.startedAt.toISOString() : null,
     current_period_start: subscription.currentPeriodStart ? subscription.currentPeriodStart.toISOString() : null,
     current_period_end: subscription.currentPeriodEnd ? subscription.currentPeriodEnd.toISOString() : null,
     next_billing_at: subscription.nextBillingAt ? subscription.nextBillingAt.toISOString() : null,
@@ -188,8 +211,8 @@ export async function getClientLoyaltySubscriptionById(id, { db = pool } = {}) {
 export async function getClientLoyaltySubscriptionByGatewayId(gatewaySubscriptionId, { db = pool } = {}) {
   if (!gatewaySubscriptionId) return null
   const [rows] = await db.query(
-    'SELECT * FROM client_loyalty_subscriptions WHERE gateway_subscription_id=? LIMIT 1',
-    [String(gatewaySubscriptionId)]
+    'SELECT * FROM client_loyalty_subscriptions WHERE gateway_subscription_id=? OR mp_preapproval_id=? LIMIT 1',
+    [String(gatewaySubscriptionId), String(gatewaySubscriptionId)]
   )
   return mapRow(rows?.[0])
 }
@@ -275,6 +298,7 @@ export async function getPreferredClientLoyaltySubscription(clienteId, estabelec
 export async function createClientLoyaltySubscription(data = {}, { db = pool } = {}) {
   const payload = {
     ...data,
+    ownerType: normalizeClientLoyaltyOwnerType(data.ownerType || data.owner_type, 'establishment'),
     status: normalizeClientLoyaltyStatus(data.status, 'pending_pix'),
     paymentMethod: normalizeClientLoyaltyPaymentMethod(data.paymentMethod || data.payment_method, 'pix'),
     gateway: String(data.gateway || 'mercadopago').trim() || 'mercadopago',
@@ -310,7 +334,28 @@ export async function updateClientLoyaltySubscription(id, fields = {}, { db = po
   return getClientLoyaltySubscriptionById(id, { db })
 }
 
-export async function appendClientLoyaltySubscriptionEvent(subscriptionId, { eventType, gatewayEventId = null, payload = null }, { db = pool } = {}) {
+export async function appendClientLoyaltySubscriptionEvent(
+  subscriptionId,
+  {
+    eventType,
+    gatewayEventId = null,
+    mpTopic = null,
+    ownerType = 'establishment',
+    ownerId = null,
+    estabelecimentoId = null,
+    mpUserId = null,
+    mpCollectorId = null,
+    mpPaymentId = null,
+    paymentStatus = null,
+    paymentMethod = null,
+    paymentType = null,
+    amountCents = null,
+    actionTaken = null,
+    ignoredReason = null,
+    payload = null,
+  },
+  { db = pool } = {}
+) {
   if (!subscriptionId || !eventType) return { duplicated: false, id: null }
   if (gatewayEventId) {
     const [existing] = await db.query(
@@ -327,12 +372,43 @@ export async function appendClientLoyaltySubscriptionEvent(subscriptionId, { eve
   const safePayload = payload == null ? null : sanitizeMercadoPagoSensitivePayload(payload)
   const [result] = await db.query(
     `INSERT INTO client_loyalty_subscription_events
-      (client_loyalty_subscription_id, tipo_evento, gateway_event_id, payload_json)
-     VALUES (?,?,?,?)`,
+      (
+        client_loyalty_subscription_id,
+        tipo_evento,
+        gateway_event_id,
+        mp_topic,
+        owner_type,
+        owner_id,
+        estabelecimento_id,
+        mp_user_id,
+        mp_collector_id,
+        mp_payment_id,
+        payment_status,
+        payment_method,
+        payment_type,
+        amount_cents,
+        action_taken,
+        ignored_reason,
+        payload_json
+      )
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     [
       subscriptionId,
       String(eventType),
       gatewayEventId == null ? null : String(gatewayEventId),
+      mpTopic == null ? null : String(mpTopic),
+      normalizeClientLoyaltyOwnerType(ownerType),
+      ownerId == null ? null : Number(ownerId),
+      estabelecimentoId == null ? null : Number(estabelecimentoId),
+      mpUserId == null ? null : String(mpUserId),
+      mpCollectorId == null ? null : String(mpCollectorId),
+      mpPaymentId == null ? null : String(mpPaymentId),
+      paymentStatus == null ? null : String(paymentStatus),
+      paymentMethod == null ? null : String(paymentMethod),
+      paymentType == null ? null : String(paymentType),
+      amountCents == null ? null : Number(amountCents),
+      actionTaken == null ? null : String(actionTaken),
+      ignoredReason == null ? null : String(ignoredReason),
       safePayload == null ? null : JSON.stringify(safePayload),
     ]
   )
@@ -342,7 +418,25 @@ export async function appendClientLoyaltySubscriptionEvent(subscriptionId, { eve
 export async function listClientLoyaltySubscriptionEvents(subscriptionId, { db = pool, limit = 50 } = {}) {
   const safeLimit = Math.max(1, Math.min(Number(limit || 50) || 50, 200))
   const [rows] = await db.query(
-    `SELECT id, client_loyalty_subscription_id, tipo_evento, gateway_event_id, payload_json, created_at
+    `SELECT id,
+            client_loyalty_subscription_id,
+            tipo_evento,
+            gateway_event_id,
+            mp_topic,
+            owner_type,
+            owner_id,
+            estabelecimento_id,
+            mp_user_id,
+            mp_collector_id,
+            mp_payment_id,
+            payment_status,
+            payment_method,
+            payment_type,
+            amount_cents,
+            action_taken,
+            ignored_reason,
+            payload_json,
+            created_at
        FROM client_loyalty_subscription_events
       WHERE client_loyalty_subscription_id=?
       ORDER BY created_at DESC, id DESC
@@ -354,6 +448,19 @@ export async function listClientLoyaltySubscriptionEvents(subscriptionId, { db =
     client_loyalty_subscription_id: Number(row.client_loyalty_subscription_id),
     tipo_evento: row.tipo_evento || '',
     gateway_event_id: row.gateway_event_id || null,
+    mp_topic: row.mp_topic || null,
+    owner_type: normalizeClientLoyaltyOwnerType(row.owner_type),
+    owner_id: row.owner_id == null ? null : Number(row.owner_id),
+    estabelecimento_id: row.estabelecimento_id == null ? null : Number(row.estabelecimento_id),
+    mp_user_id: row.mp_user_id || null,
+    mp_collector_id: row.mp_collector_id || null,
+    mp_payment_id: row.mp_payment_id || null,
+    payment_status: row.payment_status || null,
+    payment_method: row.payment_method || null,
+    payment_type: row.payment_type || null,
+    amount_cents: row.amount_cents == null ? null : Number(row.amount_cents),
+    action_taken: row.action_taken || null,
+    ignored_reason: row.ignored_reason || null,
     payload_json: sanitizeMercadoPagoSensitivePayload(safeJsonParse(row.payload_json)),
     created_at: row.created_at ? new Date(row.created_at).toISOString() : null,
   }))
