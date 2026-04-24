@@ -216,6 +216,26 @@ export async function getEstablishmentMpAccountByMpUserId(mpUserId) {
   )
 }
 
+export async function getEstablishmentMpAccountByMpCollectorId(mpCollectorId) {
+  const raw = String(mpCollectorId || '').trim()
+  if (!raw) return null
+  return (
+    await fetchNewAccountBySql('mp_collector_id=?', [raw])
+  ) || (
+    await fetchLegacyAccountBySql('mp_user_id=?', [raw])
+  )
+}
+
+export async function getEstablishmentMpAccountBySellerIdentifier(identifier) {
+  const raw = String(identifier || '').trim()
+  if (!raw) return null
+  return (
+    await getEstablishmentMpAccountByMpUserId(raw)
+  ) || (
+    await getEstablishmentMpAccountByMpCollectorId(raw)
+  )
+}
+
 async function syncLegacyMercadoPagoAccount({
   estabelecimentoId,
   mpUserId,

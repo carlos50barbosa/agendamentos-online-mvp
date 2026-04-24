@@ -1,15 +1,21 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import {
+process.env.DB_HOST ??= '127.0.0.1'
+process.env.DB_USER ??= 'root'
+process.env.DB_PASS ??= 'root'
+process.env.DB_NAME ??= 'test'
+process.env.JWT_SECRET ??= 'test-secret'
+
+const {
   normalizeClientLoyaltyOwnerType,
   serializeClientLoyaltySubscription,
-} from '../src/lib/client_loyalty_subscriptions.js'
-import { summarizeMpAccount } from '../src/services/mpAccounts.js'
-import {
+} = await import('../src/lib/client_loyalty_subscriptions.js')
+const { summarizeMpAccount } = await import('../src/services/mpAccounts.js')
+const {
   buildMercadoPagoSellerWebhookDeliveryKey,
   normalizeMercadoPagoSellerWebhookTopic,
-} from '../src/services/loyaltySubscriptions.js'
+} = await import('../src/services/loyaltySubscriptions.js')
 
 test('normalizeClientLoyaltyOwnerType keeps establishment ownership by default', () => {
   assert.equal(normalizeClientLoyaltyOwnerType(null), 'establishment')

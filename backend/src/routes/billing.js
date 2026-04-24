@@ -39,6 +39,8 @@ import { checkMonthlyAppointmentLimit } from '../lib/appointment_limits.js'
 import {
   getSubscriptionById,
   getSubscriptionByGatewayId,
+  getSubscriptionByGatewayPaymentId,
+  getSubscriptionByExternalReference,
   getSubscriptionEventByGatewayEventId,
   listSubscriptionEventsBySubscriptionId,
   listSubscriptionsForEstabelecimento,
@@ -48,13 +50,22 @@ import {
   updateSubscription,
   appendSubscriptionEvent,
 } from '../lib/subscriptions.js'
+import {
+  getClientLoyaltySubscriptionByExternalReference,
+  getClientLoyaltySubscriptionByGatewayId,
+  getClientLoyaltySubscriptionByGatewayPaymentId,
+} from '../lib/client_loyalty_subscriptions.js'
 import { pool } from '../lib/db.js'
 import { config } from '../lib/config.js'
 import { BillingService } from '../lib/billing_service.js'
 import { listActiveWhatsAppPacks, findWhatsAppPack } from '../lib/addon_packs.js'
 import { verifyMercadoPagoWebhookSignature } from '../lib/mp_signature.js'
 import { getMercadoPagoCredentialDiagnostics, toMercadoPagoCardFlowError } from '../lib/mercadopago_card_tokens.js'
-import { resolveMpAccessToken } from '../services/mpAccounts.js'
+import {
+  getMpAccountByEstabelecimentoId,
+  getMpAccountBySellerIdentifier,
+  resolveMpAccessToken,
+} from '../services/mpAccounts.js'
 import { logBlockedRouteAccess, resolveRouteTokenAccess } from '../lib/route_access.js'
 import { loadEffectiveSubscriptionContext } from '../lib/subscription_state.js'
 import { normalizeSubscriptionStatus } from '../lib/subscription_normalization.js'
@@ -82,9 +93,9 @@ import {
   canRunRecoveryCharge,
 } from '../lib/subscription_charge_policy.js'
 import {
+  syncClientLoyaltyPaymentFromGateway,
   syncClientLoyaltyAuthorizedPaymentFromGateway,
   syncClientLoyaltyCardSubscriptionFromGateway,
-  syncClientLoyaltyPixPaymentFromGateway,
 } from '../lib/client_loyalty_billing.js'
 import { cancelPendingPaymentAppointmentTx } from '../lib/appointment_loyalty.js'
 
@@ -114,6 +125,21 @@ function normalizeWebhookHeaderValue(value) {
   if (!value) return ''
   if (Array.isArray(value)) return value.join(',')
   return String(value)
+}
+
+function normalizeWebhookNumericUserId(value) {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null
+}
+
+function resolveBillingWebhookBodyUserId(req, event = {}) {
+  return normalizeWebhookNumericUserId(
+    req?.query?.user_id ??
+    event?.user_id ??
+    event?.userId ??
+    event?.data?.user_id ??
+    null
+  )
 }
 
 function parseSignatureHeaderForLog(header) {
@@ -229,7 +255,7 @@ function resolveBillingWebhookSyncDecision({
   const bodyTopic = normalizeBillingWebhookTopic(bodyType || event?.type || event?.topic || '')
   const headerTopic = normalizeBillingWebhookTopic(req?.headers?.['x-topic'] || '')
   const normalizedAction = String(bodyAction || event?.action || '').trim().toLowerCase()
-  const normalizedUserId = bodyUserId != null ? Number(bodyUserId) : null
+  const normalizedUserId = normalizeWebhookNumericUserId(bodyUserId)
   const ownerType = Number.isFinite(normalizedUserId) && normalizedUserId !== MP_COLLECTOR_ID
     ? 'establishment'
     : 'platform'
@@ -323,6 +349,548 @@ function logBillingWebhookSyncDecision({
         ? 'body_query_topic_conflict'
         : 'payment_topic_routed_to_authorized_payment',
     })
+  }
+}
+
+function buildBillingWebhookSellerLogPayload({
+  requestId = null,
+  resourceId = null,
+  syncDecision,
+  bodyType = null,
+  bodyAction = null,
+  bodyUserId = null,
+  connectedAccount = null,
+  matchedFlow = null,
+  actionTaken = null,
+  reason = null,
+  depositReason = null,
+  loyaltyReason = null,
+} = {}) {
+  const estabelecimentoId = connectedAccount?.estabelecimento_id || connectedAccount?.estabelecimentoId || null
+  return {
+    request_id: requestId || null,
+    resource_id: resourceId || null,
+    topic: syncDecision?.topic || null,
+    body_type: bodyType || null,
+    body_action: bodyAction || null,
+    body_user_id: bodyUserId ?? null,
+    platform_user_id: MP_COLLECTOR_ID,
+    connected_account_found: Boolean(estabelecimentoId),
+    connected_estabelecimento_id: estabelecimentoId,
+    estabelecimento_id: estabelecimentoId,
+    owner_type: estabelecimentoId ? 'establishment' : null,
+    matched_flow: matchedFlow || null,
+    chosen_sync_target: syncDecision?.chosenSyncTarget || null,
+    chosen_by_rule: syncDecision?.chosenByRule || null,
+    action_taken: actionTaken || null,
+    reason: reason || null,
+    deposit_reason: depositReason || null,
+    loyalty_reason: loyaltyReason || null,
+  }
+}
+
+function buildBillingWebhookOwnerResolutionPayload({
+  requestId = null,
+  resourceId = null,
+  syncDecision = null,
+  bodyType = null,
+  bodyAction = null,
+  bodyUserId = null,
+  ownerResolution = null,
+} = {}) {
+  return {
+    request_id: requestId || null,
+    topic: syncDecision?.topic || null,
+    body_type: bodyType || null,
+    body_action: bodyAction || null,
+    resource_id: resourceId || null,
+    body_user_id: bodyUserId ?? null,
+    platform_user_id: MP_COLLECTOR_ID,
+    resolved_owner_type: ownerResolution?.ownerType || null,
+    resolved_estabelecimento_id: ownerResolution?.estabelecimentoId || null,
+    resolved_mp_user_id: ownerResolution?.mpUserId || null,
+    resolved_collector_id: ownerResolution?.mpCollectorId || null,
+    matched_flow: ownerResolution?.matchedFlow || null,
+    chosen_sync_target: syncDecision?.chosenSyncTarget || null,
+    chosen_endpoint: syncDecision?.chosenEndpoint || null,
+    token_source: ownerResolution?.tokenSource || null,
+    resolution_rule: ownerResolution?.resolutionRule || null,
+    resolution_reason: ownerResolution?.reason || null,
+  }
+}
+
+async function findAuthorizedPaymentLoyaltyLink({
+  resourceId = null,
+  preapprovalId = null,
+  externalReference = null,
+  getByGatewayPaymentId = getClientLoyaltySubscriptionByGatewayPaymentId,
+  getByGatewayId = getClientLoyaltySubscriptionByGatewayId,
+  getByExternalReference = getClientLoyaltySubscriptionByExternalReference,
+} = {}) {
+  if (resourceId) {
+    const subscription = await getByGatewayPaymentId(String(resourceId))
+    if (subscription?.id) {
+      return { subscription, resolutionRule: 'loyalty_gateway_payment_id' }
+    }
+  }
+  if (preapprovalId) {
+    const subscription = await getByGatewayId(String(preapprovalId))
+    if (subscription?.id) {
+      return { subscription, resolutionRule: 'loyalty_preapproval_id' }
+    }
+  }
+  if (externalReference) {
+    const subscription = await getByExternalReference(String(externalReference))
+    if (subscription?.id) {
+      return { subscription, resolutionRule: 'loyalty_external_reference' }
+    }
+  }
+  return null
+}
+
+async function findAuthorizedPaymentPlatformLink({
+  resourceId = null,
+  preapprovalId = null,
+  externalReference = null,
+  getByGatewayPaymentId = getSubscriptionByGatewayPaymentId,
+  getByGatewayId = getSubscriptionByGatewayId,
+  getByExternalReference = getSubscriptionByExternalReference,
+} = {}) {
+  if (resourceId) {
+    const subscription = await getByGatewayPaymentId(String(resourceId))
+    if (subscription?.id) {
+      return { subscription, resolutionRule: 'platform_gateway_payment_id' }
+    }
+  }
+  if (preapprovalId) {
+    const subscription = await getByGatewayId(String(preapprovalId))
+    if (subscription?.id) {
+      return { subscription, resolutionRule: 'platform_preapproval_id' }
+    }
+  }
+  if (externalReference) {
+    const subscription = await getByExternalReference(String(externalReference))
+    if (subscription?.id) {
+      return { subscription, resolutionRule: 'platform_external_reference' }
+    }
+  }
+  return null
+}
+
+async function resolveAuthorizedPaymentWebhookOwnerContext({
+  resourceId,
+  event = {},
+  bodyUserId = null,
+  getConnectedAccountBySellerIdentifier = getMpAccountBySellerIdentifier,
+  getConnectedAccountByEstabelecimentoId = getMpAccountByEstabelecimentoId,
+  resolveEstablishmentAccessToken = resolveMpAccessToken,
+  getLoyaltySubscriptionByGatewayPaymentId = getClientLoyaltySubscriptionByGatewayPaymentId,
+  getLoyaltySubscriptionByGatewayId = getClientLoyaltySubscriptionByGatewayId,
+  getLoyaltySubscriptionByExternalReference = getClientLoyaltySubscriptionByExternalReference,
+  getPlatformSubscriptionByGatewayPaymentId = getSubscriptionByGatewayPaymentId,
+  getPlatformSubscriptionByGatewayId = getSubscriptionByGatewayId,
+  getPlatformSubscriptionByExternalReference = getSubscriptionByExternalReference,
+  platformAccessToken = config.billing?.mercadopago?.accessToken || null,
+} = {}) {
+  const normalizedUserId = normalizeWebhookNumericUserId(bodyUserId)
+  const preapprovalId = resolveWebhookMetadataPreapprovalId(event)
+  const externalReference = resolveWebhookExternalReference(event)
+
+  const finalizeSellerResolution = async (sellerAccount, resolutionRule) => {
+    const estabelecimentoId = Number(
+      sellerAccount?.estabelecimento_id ||
+      sellerAccount?.estabelecimentoId ||
+      0
+    ) || null
+    if (!estabelecimentoId) {
+      return {
+        ok: false,
+        ownerType: null,
+        matchedFlow: null,
+        tokenSource: null,
+        resolutionRule,
+        reason: 'unresolved_owner_for_authorized_payment',
+        fallbackBlocked: true,
+      }
+    }
+    const mpAccess = await resolveEstablishmentAccessToken(estabelecimentoId, { allowFallback: false })
+    if (!mpAccess?.accessToken) {
+      return {
+        ok: false,
+        ownerType: 'establishment',
+        matchedFlow: 'loyalty',
+        tokenSource: 'establishment',
+        resolutionRule,
+        reason: 'seller_account_found_but_no_valid_token',
+        fallbackBlocked: true,
+        estabelecimentoId,
+        mpUserId: sellerAccount?.mp_user_id || sellerAccount?.mpUserId || null,
+        mpCollectorId:
+          sellerAccount?.mp_collector_id ||
+          sellerAccount?.mpCollectorId ||
+          sellerAccount?.mp_user_id ||
+          sellerAccount?.mpUserId ||
+          null,
+        sellerAccount,
+      }
+    }
+    const resolvedAccount = mpAccess?.account || sellerAccount
+    return {
+      ok: true,
+      ownerType: 'establishment',
+      matchedFlow: 'loyalty',
+      tokenSource: 'establishment',
+      resolutionRule,
+      reason: null,
+      fallbackBlocked: false,
+      bodyUserId: normalizedUserId,
+      estabelecimentoId,
+      mpUserId: resolvedAccount?.mp_user_id || resolvedAccount?.mpUserId || null,
+      mpCollectorId:
+        resolvedAccount?.mp_collector_id ||
+        resolvedAccount?.mpCollectorId ||
+        resolvedAccount?.mp_user_id ||
+        resolvedAccount?.mpUserId ||
+        null,
+      sellerAccount: resolvedAccount,
+      accessToken: mpAccess.accessToken,
+    }
+  }
+
+  if (normalizedUserId && normalizedUserId !== MP_COLLECTOR_ID) {
+    const sellerAccount = await getConnectedAccountBySellerIdentifier(normalizedUserId)
+    if (sellerAccount?.estabelecimento_id || sellerAccount?.estabelecimentoId) {
+      return finalizeSellerResolution(sellerAccount, 'connected_seller_user')
+    }
+  }
+
+  const loyaltyLink = await findAuthorizedPaymentLoyaltyLink({
+    resourceId,
+    preapprovalId,
+    externalReference,
+    getByGatewayPaymentId: getLoyaltySubscriptionByGatewayPaymentId,
+    getByGatewayId: getLoyaltySubscriptionByGatewayId,
+    getByExternalReference: getLoyaltySubscriptionByExternalReference,
+  })
+  if (loyaltyLink?.subscription?.estabelecimentoId) {
+    const sellerAccount = await getConnectedAccountByEstabelecimentoId(loyaltyLink.subscription.estabelecimentoId)
+    if (sellerAccount?.estabelecimento_id || sellerAccount?.estabelecimentoId) {
+      return finalizeSellerResolution(sellerAccount, loyaltyLink.resolutionRule)
+    }
+    return {
+      ok: false,
+      ownerType: 'establishment',
+      matchedFlow: 'loyalty',
+      tokenSource: 'establishment',
+      resolutionRule: loyaltyLink.resolutionRule,
+      reason: 'seller_account_found_but_no_valid_token',
+      fallbackBlocked: true,
+      estabelecimentoId: Number(loyaltyLink.subscription.estabelecimentoId || 0) || null,
+      mpUserId: null,
+      mpCollectorId: null,
+      sellerAccount: null,
+    }
+  }
+
+  if (normalizedUserId === MP_COLLECTOR_ID) {
+    return {
+      ok: Boolean(platformAccessToken),
+      ownerType: 'platform',
+      matchedFlow: 'platform_saas',
+      tokenSource: 'platform',
+      resolutionRule: 'platform_user_id',
+      reason: platformAccessToken ? null : 'unresolved_owner_for_authorized_payment',
+      fallbackBlocked: !platformAccessToken,
+      bodyUserId: normalizedUserId,
+      estabelecimentoId: null,
+      mpUserId: String(MP_COLLECTOR_ID),
+      mpCollectorId: String(MP_COLLECTOR_ID),
+      sellerAccount: null,
+      accessToken: platformAccessToken || null,
+    }
+  }
+
+  const platformLink = await findAuthorizedPaymentPlatformLink({
+    resourceId,
+    preapprovalId,
+    externalReference,
+    getByGatewayPaymentId: getPlatformSubscriptionByGatewayPaymentId,
+    getByGatewayId: getPlatformSubscriptionByGatewayId,
+    getByExternalReference: getPlatformSubscriptionByExternalReference,
+  })
+  if (platformLink?.subscription?.id) {
+    return {
+      ok: Boolean(platformAccessToken),
+      ownerType: 'platform',
+      matchedFlow: 'platform_saas',
+      tokenSource: 'platform',
+      resolutionRule: platformLink.resolutionRule,
+      reason: platformAccessToken ? null : 'unresolved_owner_for_authorized_payment',
+      fallbackBlocked: !platformAccessToken,
+      bodyUserId: normalizedUserId,
+      estabelecimentoId: null,
+      mpUserId: String(MP_COLLECTOR_ID),
+      mpCollectorId: String(MP_COLLECTOR_ID),
+      sellerAccount: null,
+      accessToken: platformAccessToken || null,
+    }
+  }
+
+  return {
+    ok: false,
+    ownerType: null,
+    matchedFlow: null,
+    tokenSource: null,
+    resolutionRule: normalizedUserId && normalizedUserId !== MP_COLLECTOR_ID
+      ? 'connected_seller_user'
+      : 'no_confident_owner',
+    reason: 'unresolved_owner_for_authorized_payment',
+    fallbackBlocked: true,
+    bodyUserId: normalizedUserId,
+    estabelecimentoId: null,
+    mpUserId: null,
+    mpCollectorId: null,
+    sellerAccount: null,
+    accessToken: null,
+  }
+}
+
+async function resolveBillingAuthorizedPaymentWebhookAction({
+  resourceId,
+  syncEvent = {},
+  syncDecision = {},
+  bodyUserId = null,
+  ownerResolver = resolveAuthorizedPaymentWebhookOwnerContext,
+  loyaltyAuthorizedPaymentHandler = syncClientLoyaltyAuthorizedPaymentFromGateway,
+  platformAuthorizedPaymentHandler = syncAuthorizedPaymentFromGateway,
+} = {}) {
+  const ownerResolution = await ownerResolver({
+    resourceId,
+    event: syncEvent,
+    bodyUserId,
+    syncDecision,
+  })
+
+  if (!ownerResolution?.ok) {
+    return {
+      kind: 'ignored_unresolved_authorized_payment_owner',
+      ownerResolution,
+      responseBody: {
+        ok: true,
+        ignored: true,
+        reason: 'unresolved_authorized_payment_owner',
+      },
+    }
+  }
+
+  if (ownerResolution.ownerType === 'establishment') {
+    const loyaltyResult = await loyaltyAuthorizedPaymentHandler(resourceId, {
+      bodyUserId: ownerResolution.bodyUserId ?? bodyUserId,
+      gatewayEventId: resourceId,
+      sellerAccount: ownerResolution.sellerAccount || null,
+      accessToken: ownerResolution.accessToken || null,
+    })
+    return {
+      kind: 'seller_authorized_payment',
+      ownerResolution,
+      loyaltyResult,
+      responseBody: {
+        ok: true,
+        processed: Boolean(loyaltyResult?.handled),
+        loyalty: true,
+        reason: loyaltyResult?.reason || null,
+        status: loyaltyResult?.status || null,
+      },
+    }
+  }
+
+  const platformResult = await platformAuthorizedPaymentHandler(resourceId, {
+    gatewayEventId: resourceId,
+    accessToken: ownerResolution.accessToken || null,
+  })
+  return {
+    kind: 'platform_authorized_payment',
+    ownerResolution,
+    platformResult,
+    responseBody: {
+      ok: true,
+      processed: !!platformResult?.ok,
+      reason: platformResult?.reason || null,
+    },
+  }
+}
+
+async function resolveBillingPaymentWebhookAction({
+  resourceId,
+  syncEvent = {},
+  syncDecision = {},
+  bodyUserId = null,
+  resolveConnectedAccount = getMpAccountBySellerIdentifier,
+  depositHandler = handleDepositPaymentWebhook,
+  loyaltyPaymentHandler = syncClientLoyaltyPaymentFromGateway,
+  recoveryHandler = syncCardRecoveryPaymentFromGateway,
+  platformPaymentHandler = syncMercadoPagoPayment,
+} = {}) {
+  const normalizedUserId = bodyUserId != null ? Number(bodyUserId) : null
+  const effectiveBodyUserId = Number.isFinite(normalizedUserId) ? normalizedUserId : null
+  const hasExplicitForeignUser = effectiveBodyUserId != null && effectiveBodyUserId !== MP_COLLECTOR_ID
+
+  if (hasExplicitForeignUser) {
+    const connectedAccount = await resolveConnectedAccount(effectiveBodyUserId)
+    if (!connectedAccount?.estabelecimento_id && !connectedAccount?.estabelecimentoId) {
+      return {
+        kind: 'ignored_foreign_user_unknown_account',
+        ownerType: null,
+        matchedFlow: null,
+        connectedAccount: null,
+        responseBody: {
+          ok: true,
+          ignored: true,
+          reason: 'foreign_user_unknown_account',
+        },
+      }
+    }
+
+    const depositResult = await depositHandler({
+      resourceId,
+      event: syncEvent,
+      bodyUserId: effectiveBodyUserId,
+      ownerAccount: connectedAccount,
+    })
+    if (depositResult?.handled) {
+      return {
+        kind: 'seller_deposit',
+        ownerType: 'establishment',
+        matchedFlow: 'deposit',
+        connectedAccount,
+        depositResult,
+        responseBody: {
+          ok: true,
+          processed: true,
+          deposit: true,
+          status: depositResult.status || null,
+        },
+      }
+    }
+    if (depositResult?.ok && depositResult?.status) {
+      return {
+        kind: 'seller_deposit',
+        ownerType: 'establishment',
+        matchedFlow: 'deposit',
+        connectedAccount,
+        depositResult,
+        responseBody: {
+          ok: true,
+          processed: false,
+          deposit: true,
+          status: depositResult.status,
+        },
+      }
+    }
+
+    const loyaltyResult = await loyaltyPaymentHandler(resourceId, {
+      bodyUserId: effectiveBodyUserId,
+      gatewayEventId: resourceId,
+      sellerAccount: connectedAccount,
+    })
+    if (loyaltyResult?.ok) {
+      return {
+        kind: 'seller_loyalty',
+        ownerType: 'establishment',
+        matchedFlow: 'loyalty',
+        connectedAccount,
+        loyaltyResult,
+        responseBody: {
+          ok: true,
+          processed: Boolean(loyaltyResult?.handled),
+          loyalty: true,
+          status: loyaltyResult?.status || null,
+          reason: loyaltyResult?.reason || null,
+        },
+      }
+    }
+
+    return {
+      kind: 'ignored_foreign_user_unmatched_flow',
+      ownerType: 'establishment',
+      matchedFlow: null,
+      connectedAccount,
+      depositResult,
+      loyaltyResult,
+      responseBody: {
+        ok: true,
+        ignored: true,
+        reason: 'unmatched_connected_seller_flow',
+      },
+    }
+  }
+
+  const depositResult = await depositHandler({
+    resourceId,
+    event: syncEvent,
+    bodyUserId: effectiveBodyUserId,
+  })
+  if (depositResult?.handled) {
+    return {
+      kind: 'platform_deposit',
+      ownerType: 'platform',
+      matchedFlow: 'deposit',
+      depositResult,
+      responseBody: {
+        ok: true,
+        processed: true,
+        deposit: true,
+        status: depositResult.status || null,
+      },
+    }
+  }
+  if (depositResult?.ok && depositResult?.status) {
+    return {
+      kind: 'platform_deposit',
+      ownerType: 'platform',
+      matchedFlow: 'deposit',
+      depositResult,
+      responseBody: {
+        ok: true,
+        processed: false,
+        deposit: true,
+        status: depositResult.status,
+      },
+    }
+  }
+
+  const recoveryResult = await recoveryHandler(resourceId, {
+    gatewayEventId: resourceId,
+  })
+  if (recoveryResult?.ok) {
+    return {
+      kind: 'platform_recovery',
+      ownerType: 'platform',
+      matchedFlow: 'platform_saas',
+      recoveryResult,
+      responseBody: {
+        ok: true,
+        processed: Boolean(recoveryResult?.handled),
+        recovery: true,
+        status: recoveryResult?.status || null,
+        reason: recoveryResult?.reason || null,
+      },
+    }
+  }
+
+  const platformResult = await platformPaymentHandler(resourceId, syncEvent)
+  return {
+    kind: 'platform_payment',
+    ownerType: 'platform',
+    matchedFlow: 'platform_saas',
+    platformResult,
+    responseBody: {
+      ok: true,
+      processed: !!platformResult?.ok,
+      reason: platformResult?.reason || null,
+      already_processed: platformResult?.already_processed === true,
+      stale: platformResult?.stale === true,
+    },
   }
 }
 
@@ -1516,22 +2084,36 @@ async function syncCardSubscriptionFromGateway(gatewaySubscriptionId, {
 
 async function syncAuthorizedPaymentFromGateway(authorizedPaymentId, {
   gatewayEventId = null,
+  accessToken = null,
 } = {}) {
-  const paymentResult = await getMercadoPagoAuthorizedPayment(authorizedPaymentId)
+  const paymentResult = await getMercadoPagoAuthorizedPayment(authorizedPaymentId, { accessToken })
   const authorizedPayment = paymentResult.authorizedPayment
   const paymentOutcome = authorizedPayment?.paymentResult || summarizeMercadoPagoGatewayResult(paymentResult.raw)
-  if (!authorizedPayment?.preapprovalId) {
+  const localSubscription =
+    await getSubscriptionByGatewayPaymentId(authorizedPaymentId) ||
+    (authorizedPayment?.preapprovalId
+      ? await getSubscriptionByGatewayId(authorizedPayment.preapprovalId)
+      : null) ||
+    await getSubscriptionByExternalReference(authorizedPayment?.externalReference || '')
+  if (!authorizedPayment?.preapprovalId && !localSubscription) {
     return { ok: false, reason: 'preapproval_not_found' }
   }
-
-  const localSubscription = await getSubscriptionByGatewayId(authorizedPayment.preapprovalId)
   if (!localSubscription) {
     return { ok: false, reason: 'subscription_not_found' }
   }
 
-  const preapprovalResult = await getMercadoPagoCardSubscription(authorizedPayment.preapprovalId, {
+  const gatewaySubscriptionId =
+    authorizedPayment?.preapprovalId ||
+    localSubscription.gatewaySubscriptionId ||
+    null
+  if (!gatewaySubscriptionId) {
+    return { ok: false, reason: 'preapproval_not_found' }
+  }
+
+  const preapprovalResult = await getMercadoPagoCardSubscription(gatewaySubscriptionId, {
     fallbackPlan: localSubscription.plan,
     fallbackCycle: localSubscription.billingCycle,
+    accessToken,
   })
   const paymentDate = authorizedPayment.paidAt ? new Date(authorizedPayment.paidAt) : new Date()
   const fallbackCurrentPeriodEnd = addBillingCycleDate(paymentDate, localSubscription.billingCycle || preapprovalResult.subscription?.billingCycle || 'mensal')
@@ -2097,20 +2679,17 @@ function serializeTopupHistory(entry) {
   }
 }
 
-async function handleDepositPaymentWebhook({ resourceId, event, bodyUserId = null }) {
+async function handleDepositPaymentWebhook({ resourceId, event, bodyUserId = null, ownerAccount = null }) {
   const providerPaymentId = normalizeId(resourceId)
   if (!providerPaymentId) return { ok: false, reason: 'missing_resource_id' }
 
   let paymentRow = await fetchAppointmentPaymentByProvider(providerPaymentId)
-  let estabelecimentoId = paymentRow?.estabelecimento_id ?? null
+  let estabelecimentoId = paymentRow?.estabelecimento_id ?? ownerAccount?.estabelecimento_id ?? ownerAccount?.estabelecimentoId ?? null
 
   if (!estabelecimentoId && bodyUserId != null) {
-    const [rows] = await pool.query(
-      'SELECT estabelecimento_id FROM mercadopago_accounts WHERE mp_user_id=? LIMIT 1',
-      [Number(bodyUserId)]
-    )
-    if (rows?.[0]?.estabelecimento_id) {
-      estabelecimentoId = Number(rows[0].estabelecimento_id)
+    const account = ownerAccount || await getMpAccountBySellerIdentifier(bodyUserId)
+    if (account?.estabelecimento_id || account?.estabelecimentoId) {
+      estabelecimentoId = Number(account.estabelecimento_id || account.estabelecimentoId)
     }
   }
 
@@ -3294,7 +3873,7 @@ router.post('/whatsapp/pix', auth, isEstabelecimento, async (req, res) => {
 
 router.post('/webhook', async (req, res) => {
   const event = req.body || {}
-  const bodyUserId = event?.user_id ?? event?.userId ?? null
+  const bodyUserId = resolveBillingWebhookBodyUserId(req, event)
   const liveMode = typeof event?.live_mode === 'boolean' ? event.live_mode : null
   const bodyType = event?.type ?? event?.topic ?? null
   const bodyAction = event?.action ?? null
@@ -3383,57 +3962,81 @@ router.post('/webhook', async (req, res) => {
     })
 
     if (syncDecision.chosenSyncTarget === 'payment') {
-      const normalizedUserId = bodyUserId != null ? Number(bodyUserId) : null
-      const hasExplicitForeignUser = Number.isFinite(normalizedUserId) && normalizedUserId !== MP_COLLECTOR_ID
-
-      const depositResult = await handleDepositPaymentWebhook({
+      const paymentAction = await resolveBillingPaymentWebhookAction({
         resourceId,
-        event: syncEvent,
-        bodyUserId: Number.isFinite(normalizedUserId) ? normalizedUserId : null,
+        syncEvent,
+        syncDecision,
+        bodyUserId,
       })
-      if (depositResult?.handled) {
-        console.log('[billing:webhook][deposit] handled', resourceId, depositResult.status || 'ok')
-        return res.status(200).json({ ok: true, processed: true, deposit: true, status: depositResult.status || null })
-      }
-      if (depositResult?.ok && depositResult?.status) {
-        return res.status(200).json({ ok: true, processed: false, deposit: true, status: depositResult.status })
+
+      if (paymentAction.kind === 'seller_deposit' || paymentAction.kind === 'seller_loyalty') {
+        const actionTaken =
+          paymentAction.kind === 'seller_deposit'
+            ? (paymentAction.responseBody.processed ? 'deposit_processed' : 'deposit_acknowledged')
+            : (paymentAction.responseBody.processed ? 'loyalty_processed' : 'loyalty_acknowledged')
+        console.info('[billing:webhook] accepted_connected_seller_user', buildBillingWebhookSellerLogPayload({
+          requestId,
+          resourceId,
+          syncDecision,
+          bodyType,
+          bodyAction,
+          bodyUserId,
+          connectedAccount: paymentAction.connectedAccount,
+          matchedFlow: paymentAction.matchedFlow,
+          actionTaken,
+          reason:
+            paymentAction.kind === 'seller_deposit'
+              ? paymentAction.depositResult?.reason || null
+              : paymentAction.loyaltyResult?.reason || null,
+          depositReason: paymentAction.depositResult?.reason || null,
+          loyaltyReason: paymentAction.loyaltyResult?.reason || null,
+        }))
+        return res.status(200).json(paymentAction.responseBody)
       }
 
-      if (hasExplicitForeignUser) {
-        const loyaltyResult = await syncClientLoyaltyPixPaymentFromGateway(resourceId, {
-          bodyUserId: normalizedUserId,
-          gatewayEventId: resourceId,
-        })
-        if (loyaltyResult?.ok) {
-          console.log('[billing:webhook][loyalty] payment', resourceId, loyaltyResult?.handled ? 'processed' : 'ignored', {
-            ok: !!loyaltyResult?.ok,
-            status: loyaltyResult?.status || null,
-            reason: loyaltyResult?.reason || null,
-          })
-          return res.status(200).json({
-            ok: true,
-            processed: Boolean(loyaltyResult?.handled),
-            loyalty: true,
-            status: loyaltyResult?.status || null,
-            reason: loyaltyResult?.reason || null,
-          })
+      if (paymentAction.kind === 'ignored_foreign_user_unknown_account') {
+        console.warn('[billing:webhook] ignored_foreign_user_unknown_account', buildBillingWebhookSellerLogPayload({
+          requestId,
+          resourceId,
+          syncDecision,
+          bodyType,
+          bodyAction,
+          bodyUserId,
+          connectedAccount: null,
+          matchedFlow: null,
+          actionTaken: 'ignored',
+          reason: paymentAction.responseBody.reason,
+        }))
+        return res.status(200).json(paymentAction.responseBody)
+      }
+
+      if (paymentAction.kind === 'ignored_foreign_user_unmatched_flow') {
+        console.warn('[billing:webhook] ignored_foreign_user_unmatched_flow', buildBillingWebhookSellerLogPayload({
+          requestId,
+          resourceId,
+          syncDecision,
+          bodyType,
+          bodyAction,
+          bodyUserId,
+          connectedAccount: paymentAction.connectedAccount,
+          matchedFlow: null,
+          actionTaken: 'ignored',
+          reason: paymentAction.responseBody.reason,
+          depositReason: paymentAction.depositResult?.reason || null,
+          loyaltyReason: paymentAction.loyaltyResult?.reason || null,
+        }))
+        return res.status(200).json(paymentAction.responseBody)
+      }
+
+      if (paymentAction.kind === 'platform_deposit') {
+        if (paymentAction.depositResult?.handled) {
+          console.log('[billing:webhook][deposit] handled', resourceId, paymentAction.depositResult.status || 'ok')
         }
-        console.warn('[billing:webhook] ignored_foreign_user', {
-          resource_id: verification.id || null,
-          body_user_id: bodyUserId,
-          expected_user_id: MP_COLLECTOR_ID,
-          live_mode: liveMode,
-          body_type: bodyType,
-          body_action: bodyAction,
-          reason: depositResult?.reason || 'foreign_user',
-        })
-        return res.status(200).json({ ok: true, ignored: true, reason: depositResult?.reason || 'foreign_user' })
+        return res.status(200).json(paymentAction.responseBody)
       }
 
-      const recoveryResult = await syncCardRecoveryPaymentFromGateway(resourceId, {
-        gatewayEventId: resourceId,
-      })
-      if (recoveryResult?.ok) {
+      if (paymentAction.kind === 'platform_recovery') {
+        const recoveryResult = paymentAction.recoveryResult
         console.log('[billing:webhook] subscription_recovery_payment', resourceId, recoveryResult?.handled ? 'processed' : 'ignored', {
           ok: !!recoveryResult?.ok,
           reason: recoveryResult?.reason || null,
@@ -3441,37 +4044,74 @@ router.post('/webhook', async (req, res) => {
           normalized_reason: recoveryResult?.paymentResult?.normalized_reason || null,
           status_detail: recoveryResult?.paymentResult?.status_detail || null,
         })
-        return res.status(200).json({
-          ok: true,
-          processed: Boolean(recoveryResult?.handled),
-          recovery: true,
-          status: recoveryResult?.status || null,
-          reason: recoveryResult?.reason || null,
-        })
+        return res.status(200).json(paymentAction.responseBody)
       }
 
-      const r = await syncMercadoPagoPayment(resourceId, syncEvent)
+      const r = paymentAction.platformResult
       console.log('[billing:webhook] payment', resourceId, r?.ok ? 'approved' : 'ignored', {
         ok: !!r?.ok,
         reason: r?.reason || null,
         already_processed: r?.already_processed === true,
         stale: r?.stale === true,
       })
-      return res.status(200).json({
-        ok: true,
-        processed: !!r?.ok,
-        reason: r?.reason || null,
-        already_processed: r?.already_processed === true,
-        stale: r?.stale === true,
-      })
+      return res.status(200).json(paymentAction.responseBody)
     }
 
     if (syncDecision.chosenSyncTarget === 'authorized_payment') {
-      const loyaltyResult = await syncClientLoyaltyAuthorizedPaymentFromGateway(resourceId, {
+      const authorizedPaymentAction = await resolveBillingAuthorizedPaymentWebhookAction({
+        resourceId,
+        syncEvent,
+        syncDecision,
         bodyUserId,
-        gatewayEventId: resourceId,
       })
-      if (loyaltyResult?.ok) {
+      const ownerResolution = authorizedPaymentAction.ownerResolution || null
+      console.info('[billing:webhook] owner_resolution', buildBillingWebhookOwnerResolutionPayload({
+        requestId,
+        resourceId,
+        syncDecision,
+        bodyType,
+        bodyAction,
+        bodyUserId,
+        ownerResolution,
+      }))
+
+      if (authorizedPaymentAction.kind === 'ignored_unresolved_authorized_payment_owner') {
+        if (ownerResolution?.reason === 'seller_account_found_but_no_valid_token') {
+          console.warn('[billing:webhook] seller_account_found_but_no_valid_token', buildBillingWebhookOwnerResolutionPayload({
+            requestId,
+            resourceId,
+            syncDecision,
+            bodyType,
+            bodyAction,
+            bodyUserId,
+            ownerResolution,
+          }))
+        }
+        console.warn('[billing:webhook] unresolved_owner_for_authorized_payment', buildBillingWebhookOwnerResolutionPayload({
+          requestId,
+          resourceId,
+          syncDecision,
+          bodyType,
+          bodyAction,
+          bodyUserId,
+          ownerResolution,
+        }))
+        if (ownerResolution?.fallbackBlocked) {
+          console.warn('[billing:webhook] fallback_to_platform_blocked', buildBillingWebhookOwnerResolutionPayload({
+            requestId,
+            resourceId,
+            syncDecision,
+            bodyType,
+            bodyAction,
+            bodyUserId,
+            ownerResolution,
+          }))
+        }
+        return res.status(200).json(authorizedPaymentAction.responseBody)
+      }
+
+      if (authorizedPaymentAction.kind === 'seller_authorized_payment') {
+        const loyaltyResult = authorizedPaymentAction.loyaltyResult
         console.log('[billing:webhook][loyalty] subscription_authorized_payment', resourceId, loyaltyResult?.handled ? 'processed' : 'ignored', {
           ok: !!loyaltyResult?.ok,
           reason: loyaltyResult?.reason || null,
@@ -3479,24 +4119,27 @@ router.post('/webhook', async (req, res) => {
           status_detail: loyaltyResult?.failure?.status_detail || null,
           rejection_code: loyaltyResult?.failure?.code || null,
           rejection_description: loyaltyResult?.failure?.description || null,
+          owner_type: ownerResolution?.ownerType || null,
+          matched_flow: ownerResolution?.matchedFlow || null,
+          token_source: ownerResolution?.tokenSource || null,
+          resolution_rule: ownerResolution?.resolutionRule || null,
         })
-        return res.status(200).json({
-          ok: true,
-          processed: Boolean(loyaltyResult?.handled),
-          loyalty: true,
-          reason: loyaltyResult?.reason || null,
-          status: loyaltyResult?.status || null,
-        })
+        return res.status(200).json(authorizedPaymentAction.responseBody)
       }
-      const result = await syncAuthorizedPaymentFromGateway(resourceId, { gatewayEventId: resourceId })
+
+      const result = authorizedPaymentAction.platformResult
       console.log('[billing:webhook] subscription_authorized_payment', resourceId, result?.ok ? 'processed' : 'ignored', {
         ok: !!result?.ok,
         reason: result?.reason || null,
         status: result?.paymentResult?.status || null,
         status_detail: result?.paymentResult?.status_detail || null,
         normalized_reason: result?.paymentResult?.normalized_reason || null,
+        owner_type: ownerResolution?.ownerType || null,
+        matched_flow: ownerResolution?.matchedFlow || null,
+        token_source: ownerResolution?.tokenSource || null,
+        resolution_rule: ownerResolution?.resolutionRule || null,
       })
-      return res.status(200).json({ ok: true, processed: !!result?.ok, reason: result?.reason || null })
+      return res.status(200).json(authorizedPaymentAction.responseBody)
     }
 
     if (syncDecision.chosenSyncTarget === 'subscription') {
@@ -4001,6 +4644,10 @@ router.get('/renew/pix/status', auth, isEstabelecimento, async (req, res) => {
 
 export {
   normalizeBillingWebhookTopic,
+  resolveAuthorizedPaymentWebhookOwnerContext,
+  resolveBillingAuthorizedPaymentWebhookAction,
+  resolveBillingWebhookBodyUserId,
+  resolveBillingPaymentWebhookAction,
   resolveBillingWebhookSyncDecision,
 }
 

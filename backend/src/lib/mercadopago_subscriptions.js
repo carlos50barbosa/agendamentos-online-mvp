@@ -311,6 +311,8 @@ function mapAuthorizedPaymentResponse(data) {
   return {
     id: data.id || null,
     preapprovalId: data.preapproval_id || data.subscription_id || null,
+    externalReference: data.external_reference || null,
+    collectorId: data.collector_id || data.user_id || null,
     status: paymentResult?.should_activate_subscription
       ? 'active'
       : paymentResult?.status_group === 'pending'

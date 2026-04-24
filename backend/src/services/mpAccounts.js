@@ -1,7 +1,9 @@
 import {
   disconnectEstablishmentMpAccount,
   getEstablishmentMpAccountByEstabelecimentoId,
+  getEstablishmentMpAccountByMpCollectorId,
   getEstablishmentMpAccountByMpUserId,
+  getEstablishmentMpAccountBySellerIdentifier,
   getEstablishmentMpPublicKey,
   isMpDepositFallbackAllowed,
   refreshEstablishmentMpAccessToken,
@@ -18,6 +20,14 @@ export async function getMpAccountByEstabelecimentoId(estabelecimentoId) {
 
 export async function getMpAccountByMpUserId(mpUserId) {
   return getEstablishmentMpAccountByMpUserId(mpUserId)
+}
+
+export async function getMpAccountByMpCollectorId(mpCollectorId) {
+  return getEstablishmentMpAccountByMpCollectorId(mpCollectorId)
+}
+
+export async function getMpAccountBySellerIdentifier(identifier) {
+  return getEstablishmentMpAccountBySellerIdentifier(identifier)
 }
 
 export async function upsertMpAccount({

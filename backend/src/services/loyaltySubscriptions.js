@@ -4,11 +4,11 @@ import {
   createClientLoyaltyPixCheckout,
   loadClientLoyaltySubscriptionDetails,
   startClientLoyaltyCardSubscription,
+  syncClientLoyaltyPaymentFromGateway,
   syncClientLoyaltyAuthorizedPaymentFromGateway,
   syncClientLoyaltyCardSubscriptionFromGateway,
-  syncClientLoyaltyPixPaymentFromGateway,
 } from '../lib/client_loyalty_billing.js'
-import { disconnectMpAccount, getMpAccountByMpUserId } from './mpAccounts.js'
+import { disconnectMpAccount, getMpAccountBySellerIdentifier } from './mpAccounts.js'
 
 function safeJsonStringify(value) {
   if (value == null) return null
@@ -225,7 +225,7 @@ export async function processLoyaltyMercadoPagoSellerWebhook(req, verification) 
     }
   }
 
-  const ownerAccount = bodyUserId ? await getMpAccountByMpUserId(bodyUserId) : null
+  const ownerAccount = bodyUserId ? await getMpAccountBySellerIdentifier(bodyUserId) : null
   const ownerContext = buildOwnerContext(ownerAccount)
   const deliveryKey = buildDeliveryKey({
     topic,
@@ -265,9 +265,10 @@ export async function processLoyaltyMercadoPagoSellerWebhook(req, verification) 
 
   if (topic === 'payment') {
     result = normalizeSellerWebhookResponse(
-      await syncClientLoyaltyPixPaymentFromGateway(resourceId, {
+      await syncClientLoyaltyPaymentFromGateway(resourceId, {
         bodyUserId,
         gatewayEventId: deliveryKey,
+        sellerAccount: ownerAccount,
       })
     )
     actionTaken = result.processed ? 'payment_synced' : null
