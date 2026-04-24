@@ -1148,40 +1148,42 @@ export async function syncClientLoyaltyPaymentFromGateway(paymentId, {
 export async function syncClientLoyaltyCardSubscriptionFromGateway(gatewaySubscriptionId, {
   bodyUserId = null,
   gatewayEventId = null,
+  sellerAccount = null,
+  accessToken = null,
 } = {}) {
   const localSubscription = await getClientLoyaltySubscriptionByGatewayId(gatewaySubscriptionId)
   if (!localSubscription) {
     return { ok: false, reason: 'subscription_not_found' }
   }
 
-  let accessToken = null
-  let sellerAccount = null
+  let resolvedAccessToken = accessToken || null
+  let resolvedSellerAccount = sellerAccount || null
   if (localSubscription.estabelecimentoId) {
     const mpAccess = await resolveMpAccessToken(localSubscription.estabelecimentoId, { allowFallback: false })
-    accessToken = mpAccess?.accessToken || null
-    sellerAccount = mpAccess?.account || sellerAccount
+    resolvedAccessToken = resolvedAccessToken || mpAccess?.accessToken || null
+    resolvedSellerAccount = resolvedSellerAccount || mpAccess?.account || null
   }
-  if (!accessToken) {
-    const gatewayContext = await resolveGatewayContextFromUserId(bodyUserId)
-    accessToken = gatewayContext?.accessToken || null
-    sellerAccount = gatewayContext?.account || sellerAccount
+  if (!resolvedAccessToken) {
+    const gatewayContext = await resolveGatewayContextFromUserId(bodyUserId, resolvedSellerAccount)
+    resolvedAccessToken = gatewayContext?.accessToken || null
+    resolvedSellerAccount = gatewayContext?.account || resolvedSellerAccount
   }
-  if (!accessToken) {
+  if (!resolvedAccessToken) {
     return { ok: false, reason: 'mp_token_missing' }
   }
 
   const gatewayResult = await getMercadoPagoCardSubscription(gatewaySubscriptionId, {
     fallbackCycle: 'mensal',
-    accessToken,
+    accessToken: resolvedAccessToken,
   })
   const gatewaySubscription = gatewayResult.subscription
   if (
-    sellerAccount?.estabelecimento_id &&
-    Number(localSubscription.estabelecimentoId || 0) !== Number(sellerAccount.estabelecimento_id || 0)
+    resolvedSellerAccount?.estabelecimento_id &&
+    Number(localSubscription.estabelecimentoId || 0) !== Number(resolvedSellerAccount.estabelecimento_id || 0)
   ) {
     return { ok: false, reason: 'establishment_mismatch' }
   }
-  const sellerEventContext = buildSellerEventContext(sellerAccount, localSubscription.estabelecimentoId, {})
+  const sellerEventContext = buildSellerEventContext(resolvedSellerAccount, localSubscription.estabelecimentoId, {})
   const conn = await pool.getConnection()
   try {
     await conn.beginTransaction()
@@ -1195,7 +1197,7 @@ export async function syncClientLoyaltyCardSubscriptionFromGateway(gatewaySubscr
       : gatewaySubscription?.status || localSubscription.status
     const updated = await updateClientLoyaltySubscription(localSubscription.id, {
       ownerType: 'establishment',
-      sellerMpAccountId: sellerAccount?.id || localSubscription.sellerMpAccountId || null,
+      sellerMpAccountId: resolvedSellerAccount?.id || localSubscription.sellerMpAccountId || null,
       paymentMethod: 'credit_card',
       gatewayCustomerId: gatewaySubscription?.gatewayCustomerId || localSubscription.gatewayCustomerId || null,
       mpPayerId: gatewaySubscription?.gatewayCustomerId || localSubscription.mpPayerId || localSubscription.gatewayCustomerId || null,

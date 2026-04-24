@@ -11,9 +11,11 @@ const {
   normalizeBillingWebhookTopic,
   resolveAuthorizedPaymentWebhookOwnerContext,
   resolveBillingAuthorizedPaymentWebhookAction,
+  resolveBillingSubscriptionWebhookAction,
   resolveBillingWebhookBodyUserId,
   resolveBillingPaymentWebhookAction,
   resolveBillingWebhookSyncDecision,
+  resolveSubscriptionWebhookOwnerContext,
 } = await import('../src/routes/billing.js')
 
 test('normalizeBillingWebhookTopic canonicalizes subscription aliases', () => {
@@ -230,6 +232,9 @@ test('authorized payment owner resolution finds loyalty seller by preapproval li
         ? { id: 9, estabelecimento_id: 26, mp_user_id: '1055436081', mp_collector_id: '1055436081' }
         : null
     ),
+    getPlatformSubscriptionByGatewayPaymentId: async () => null,
+    getPlatformSubscriptionByGatewayId: async () => null,
+    getPlatformSubscriptionByExternalReference: async () => null,
     resolveEstablishmentAccessToken: async () => ({
       accessToken: 'seller-token',
       account: { id: 9, estabelecimento_id: 26, mp_user_id: '1055436081', mp_collector_id: '1055436081' },
@@ -238,7 +243,44 @@ test('authorized payment owner resolution finds loyalty seller by preapproval li
 
   assert.equal(result.ok, true)
   assert.equal(result.ownerType, 'establishment')
-  assert.equal(result.resolutionRule, 'loyalty_preapproval_id')
+  assert.equal(result.lookupBy, 'mp_preapproval_id')
+  assert.equal(result.resolutionRule, 'loyalty_subscription_linkage')
+  assert.equal(result.estabelecimentoId, 26)
+})
+
+test('authorized payment owner resolution finds loyalty seller by event linkage when payload omits user and preapproval', async () => {
+  const result = await resolveAuthorizedPaymentWebhookOwnerContext({
+    resourceId: '7027488798',
+    event: { type: 'subscription_authorized_payment' },
+    bodyUserId: null,
+    getLoyaltySubscriptionByGatewayPaymentId: async () => null,
+    getLoyaltySubscriptionByGatewayId: async () => null,
+    getLoyaltySubscriptionByExternalReference: async () => null,
+    getLoyaltySubscriptionByEventResourceId: async (value, options) => {
+      assert.equal(options?.mpTopic, 'automatic-payments')
+      assert.equal(options?.paymentType, 'subscription_authorized_payment')
+      return String(value) === '7027488798'
+        ? { id: 88, estabelecimentoId: 26, mpPreapprovalId: 'preapp_456' }
+        : null
+    },
+    getConnectedAccountByEstabelecimentoId: async (value) => (
+      Number(value) === 26
+        ? { id: 9, estabelecimento_id: 26, mp_user_id: '1055436081', mp_collector_id: '1055436081' }
+        : null
+    ),
+    getPlatformSubscriptionByGatewayPaymentId: async () => null,
+    getPlatformSubscriptionByGatewayId: async () => null,
+    getPlatformSubscriptionByExternalReference: async () => null,
+    resolveEstablishmentAccessToken: async () => ({
+      accessToken: 'seller-token',
+      account: { id: 9, estabelecimento_id: 26, mp_user_id: '1055436081', mp_collector_id: '1055436081' },
+    }),
+  })
+
+  assert.equal(result.ok, true)
+  assert.equal(result.ownerType, 'establishment')
+  assert.equal(result.lookupBy, 'event_linkage')
+  assert.equal(result.resolutionRule, 'loyalty_subscription_linkage')
   assert.equal(result.estabelecimentoId, 26)
 })
 
@@ -250,6 +292,11 @@ test('authorized payment owner resolution keeps platform flow explicit', async (
     getLoyaltySubscriptionByGatewayPaymentId: async () => null,
     getLoyaltySubscriptionByGatewayId: async () => null,
     getLoyaltySubscriptionByExternalReference: async () => null,
+    getLoyaltySubscriptionByEventResourceId: async () => null,
+    getLoyaltySubscriptionByWebhookResourceId: async () => null,
+    getPlatformSubscriptionByGatewayPaymentId: async () => null,
+    getPlatformSubscriptionByGatewayId: async () => null,
+    getPlatformSubscriptionByExternalReference: async () => null,
     platformAccessToken: 'platform-token',
   })
 
@@ -326,5 +373,131 @@ test('authorized payment webhook blocks silent fallback to platform when owner i
   assert.equal(result.kind, 'ignored_unresolved_authorized_payment_owner')
   assert.equal(result.responseBody.ignored, true)
   assert.equal(result.responseBody.reason, 'unresolved_authorized_payment_owner')
+  assert.equal(platformCalls, 0)
+})
+
+test('preapproval owner resolution finds loyalty seller by internal preapproval linkage', async () => {
+  const result = await resolveSubscriptionWebhookOwnerContext({
+    resourceId: 'preapp_456',
+    event: { type: 'subscription_preapproval' },
+    bodyUserId: null,
+    getLoyaltySubscriptionByGatewayId: async (value) => (
+      String(value) === 'preapp_456'
+        ? { id: 88, estabelecimentoId: 26, gatewaySubscriptionId: 'preapp_456' }
+        : null
+    ),
+    getPlatformSubscriptionByGatewayId: async () => null,
+    getPlatformSubscriptionByExternalReference: async () => null,
+    getConnectedAccountByEstabelecimentoId: async (value) => (
+      Number(value) === 26
+        ? { id: 9, estabelecimento_id: 26, mp_user_id: '1055436081', mp_collector_id: '1055436081' }
+        : null
+    ),
+    resolveEstablishmentAccessToken: async () => ({
+      accessToken: 'seller-token',
+      account: { id: 9, estabelecimento_id: 26, mp_user_id: '1055436081', mp_collector_id: '1055436081' },
+    }),
+  })
+
+  assert.equal(result.ok, true)
+  assert.equal(result.ownerType, 'establishment')
+  assert.equal(result.matchedFlow, 'loyalty')
+  assert.equal(result.tokenSource, 'establishment')
+  assert.equal(result.lookupBy, 'mp_preapproval_id')
+  assert.equal(result.resolutionRule, 'loyalty_preapproval_linkage')
+  assert.equal(result.estabelecimentoId, 26)
+})
+
+test('preapproval owner resolution keeps platform SaaS explicit when subscription belongs to the platform', async () => {
+  const result = await resolveSubscriptionWebhookOwnerContext({
+    resourceId: 'preapp_platform_123',
+    event: { type: 'subscription_preapproval' },
+    bodyUserId: 281768531,
+    getLoyaltySubscriptionByGatewayId: async () => null,
+    getLoyaltySubscriptionByExternalReference: async () => null,
+    getLoyaltySubscriptionByEventResourceId: async () => null,
+    getLoyaltySubscriptionByWebhookResourceId: async () => null,
+    getPlatformSubscriptionByGatewayId: async (value) => (
+      String(value) === 'preapp_platform_123'
+        ? { id: 44, gatewaySubscriptionId: 'preapp_platform_123' }
+        : null
+    ),
+    platformAccessToken: 'platform-token',
+  })
+
+  assert.equal(result.ok, true)
+  assert.equal(result.ownerType, 'platform')
+  assert.equal(result.matchedFlow, 'platform_saas')
+  assert.equal(result.tokenSource, 'platform')
+  assert.equal(result.lookupBy, 'mp_preapproval_id')
+  assert.equal(result.resolutionRule, 'platform_subscription_linkage')
+  assert.equal(result.accessToken, 'platform-token')
+})
+
+test('preapproval webhook uses establishment token and skips platform fallback for loyalty flow', async () => {
+  let platformCalls = 0
+  const result = await resolveBillingSubscriptionWebhookAction({
+    resourceId: 'preapp_456',
+    syncEvent: { type: 'subscription_preapproval' },
+    syncDecision: { topic: 'subscription_preapproval', chosenSyncTarget: 'subscription', chosenEndpoint: '/preapproval/{id}' },
+    bodyUserId: null,
+    ownerResolver: async () => ({
+      ok: true,
+      ownerType: 'establishment',
+      matchedFlow: 'loyalty',
+      tokenSource: 'establishment',
+      lookupBy: 'mp_preapproval_id',
+      resolutionRule: 'loyalty_preapproval_linkage',
+      estabelecimentoId: 26,
+      mpUserId: '1055436081',
+      mpCollectorId: '1055436081',
+      sellerAccount: { id: 9, estabelecimento_id: 26, mp_user_id: '1055436081' },
+      accessToken: 'seller-token',
+    }),
+    loyaltySubscriptionHandler: async (_resourceId, options) => {
+      assert.equal(options.accessToken, 'seller-token')
+      assert.equal(options.sellerAccount?.estabelecimento_id, 26)
+      return { ok: true, handled: true, status: 'active' }
+    },
+    platformSubscriptionHandler: async () => {
+      platformCalls += 1
+      return { ok: true }
+    },
+  })
+
+  assert.equal(result.kind, 'seller_subscription')
+  assert.equal(result.ownerResolution?.ownerType, 'establishment')
+  assert.equal(result.responseBody.processed, true)
+  assert.equal(platformCalls, 0)
+})
+
+test('preapproval webhook blocks silent fallback to platform when owner is unresolved', async () => {
+  let platformCalls = 0
+  const result = await resolveBillingSubscriptionWebhookAction({
+    resourceId: 'preapp_456',
+    syncEvent: { type: 'subscription_preapproval' },
+    syncDecision: { topic: 'subscription_preapproval', chosenSyncTarget: 'subscription', chosenEndpoint: '/preapproval/{id}' },
+    bodyUserId: null,
+    ownerResolver: async () => ({
+      ok: false,
+      ownerType: null,
+      matchedFlow: null,
+      tokenSource: null,
+      lookupBy: null,
+      resolutionRule: 'no_confident_owner',
+      reason: 'unresolved_owner_for_preapproval',
+      fallbackBlocked: true,
+      accessToken: null,
+    }),
+    loyaltySubscriptionHandler: async () => ({ ok: true, handled: true, status: 'active' }),
+    platformSubscriptionHandler: async () => {
+      platformCalls += 1
+      return { ok: true }
+    },
+  })
+
+  assert.equal(result.kind, 'ignored_unresolved_subscription_owner')
+  assert.equal(result.responseBody.ignored, true)
+  assert.equal(result.responseBody.reason, 'unresolved_subscription_owner')
   assert.equal(platformCalls, 0)
 })

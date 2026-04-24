@@ -52,8 +52,10 @@ import {
 } from '../lib/subscriptions.js'
 import {
   getClientLoyaltySubscriptionByExternalReference,
+  getClientLoyaltySubscriptionByEventResourceId,
   getClientLoyaltySubscriptionByGatewayId,
   getClientLoyaltySubscriptionByGatewayPaymentId,
+  getClientLoyaltySubscriptionByWebhookResourceId,
 } from '../lib/client_loyalty_subscriptions.js'
 import { pool } from '../lib/db.js'
 import { config } from '../lib/config.js'
@@ -197,6 +199,10 @@ function normalizeBillingWebhookTopic(value) {
   return normalized
 }
 
+function isSubscriptionWebhookTopic(topic) {
+  return topic === 'subscription_preapproval' || topic === 'subscription_authorized_payment'
+}
+
 function topicToSyncTarget(topic) {
   if (topic === 'payment') return 'payment'
   if (topic === 'subscription_authorized_payment') return 'authorized_payment'
@@ -231,16 +237,16 @@ function resolveWebhookMetadataPreapprovalId(event = {}) {
 function inferWebhookMatchedFlow({
   event = {},
   normalizedUserId = null,
+  topic = null,
 } = {}) {
-  const ownerType = Number.isFinite(normalizedUserId) && normalizedUserId !== MP_COLLECTOR_ID
-    ? 'establishment'
-    : 'platform'
+  const normalizedTopic = normalizeBillingWebhookTopic(topic || event?.type || event?.topic || '')
   const metadataType = String(event?.metadata?.type || event?.metadata?.kind || '').trim().toLowerCase()
   const externalReference = resolveWebhookExternalReference(event)
   if (metadataType === 'deposit' || /^dep:ag:\d+:pay:\d+:est:\d+/i.test(String(externalReference || ''))) {
     return 'deposit'
   }
-  if (ownerType === 'establishment') return 'loyalty'
+  if (Number.isFinite(normalizedUserId) && normalizedUserId !== MP_COLLECTOR_ID) return 'loyalty'
+  if (isSubscriptionWebhookTopic(normalizedTopic) && !Number.isFinite(normalizedUserId)) return null
   return 'platform_saas'
 }
 
@@ -256,10 +262,11 @@ function resolveBillingWebhookSyncDecision({
   const headerTopic = normalizeBillingWebhookTopic(req?.headers?.['x-topic'] || '')
   const normalizedAction = String(bodyAction || event?.action || '').trim().toLowerCase()
   const normalizedUserId = normalizeWebhookNumericUserId(bodyUserId)
-  const ownerType = Number.isFinite(normalizedUserId) && normalizedUserId !== MP_COLLECTOR_ID
-    ? 'establishment'
-    : 'platform'
-  const matchedFlow = inferWebhookMatchedFlow({ event, normalizedUserId })
+  const inferredTopic = bodyTopic || queryTopic || headerTopic || ''
+  const ownerType = Number.isFinite(normalizedUserId)
+    ? (normalizedUserId !== MP_COLLECTOR_ID ? 'establishment' : 'platform')
+    : (isSubscriptionWebhookTopic(inferredTopic) ? null : 'platform')
+  const matchedFlow = inferWebhookMatchedFlow({ event, normalizedUserId, topic: inferredTopic })
 
   const bodySyncTarget = topicToSyncTarget(bodyTopic)
   const querySyncTarget = topicToSyncTarget(queryTopic)
@@ -323,6 +330,7 @@ function logBillingWebhookSyncDecision({
   bodyType = null,
   bodyAction = null,
   event = {},
+  ownerResolution = null,
 } = {}) {
   const payload = {
     request_id: requestId || null,
@@ -334,8 +342,8 @@ function logBillingWebhookSyncDecision({
     resource_id: resourceId || null,
     external_reference: resolveWebhookExternalReference(event),
     metadata_preapproval_id: resolveWebhookMetadataPreapprovalId(event),
-    owner_type: decision?.ownerType || null,
-    matched_flow: decision?.matchedFlow || null,
+    owner_type: ownerResolution?.ownerType || decision?.ownerType || null,
+    matched_flow: ownerResolution?.matchedFlow || decision?.matchedFlow || null,
     chosen_sync_target: decision?.chosenSyncTarget || null,
     chosen_by_rule: decision?.chosenByRule || null,
     chosen_endpoint: decision?.chosenEndpoint || null,
@@ -414,9 +422,250 @@ function buildBillingWebhookOwnerResolutionPayload({
     chosen_sync_target: syncDecision?.chosenSyncTarget || null,
     chosen_endpoint: syncDecision?.chosenEndpoint || null,
     token_source: ownerResolution?.tokenSource || null,
+    lookup_by: ownerResolution?.lookupBy || null,
     resolution_rule: ownerResolution?.resolutionRule || null,
     resolution_reason: ownerResolution?.reason || null,
   }
+}
+
+function buildUnresolvedWebhookOwnerResolution({
+  normalizedUserId = null,
+  lookupBy = null,
+  resolutionRule = 'no_confident_owner',
+  reason,
+  fallbackBlocked = true,
+} = {}) {
+  return {
+    ok: false,
+    ownerType: null,
+    matchedFlow: null,
+    tokenSource: null,
+    lookupBy,
+    resolutionRule,
+    reason,
+    fallbackBlocked,
+    bodyUserId: normalizedUserId,
+    estabelecimentoId: null,
+    mpUserId: null,
+    mpCollectorId: null,
+    sellerAccount: null,
+    accessToken: null,
+  }
+}
+
+function buildPlatformWebhookOwnerResolution({
+  normalizedUserId = null,
+  lookupBy = null,
+  resolutionRule = null,
+  platformAccessToken = config.billing?.mercadopago?.accessToken || null,
+  unresolvedReason = 'unresolved_owner_for_authorized_payment',
+} = {}) {
+  return {
+    ok: Boolean(platformAccessToken),
+    ownerType: 'platform',
+    matchedFlow: 'platform_saas',
+    tokenSource: 'platform',
+    lookupBy,
+    resolutionRule,
+    reason: platformAccessToken ? null : unresolvedReason,
+    fallbackBlocked: !platformAccessToken,
+    bodyUserId: normalizedUserId,
+    estabelecimentoId: null,
+    mpUserId: String(MP_COLLECTOR_ID),
+    mpCollectorId: String(MP_COLLECTOR_ID),
+    sellerAccount: null,
+    accessToken: platformAccessToken || null,
+  }
+}
+
+function buildConflictingWebhookOwnerResolution({
+  normalizedUserId = null,
+  lookupBy = 'event_linkage',
+  conflict = null,
+} = {}) {
+  return {
+    ...buildUnresolvedWebhookOwnerResolution({
+      normalizedUserId,
+      lookupBy,
+      resolutionRule: 'conflicting_owner_resolution',
+      reason: 'conflicting_owner_resolution',
+      fallbackBlocked: true,
+    }),
+    conflict,
+  }
+}
+
+async function finalizeSellerWebhookOwnerResolution({
+  sellerAccount = null,
+  normalizedUserId = null,
+  matchedFlow = 'loyalty',
+  lookupBy = null,
+  resolutionRule = null,
+  unresolvedReason = 'unresolved_owner_for_authorized_payment',
+  resolveEstablishmentAccessToken = resolveMpAccessToken,
+} = {}) {
+  const estabelecimentoId = Number(
+    sellerAccount?.estabelecimento_id ||
+    sellerAccount?.estabelecimentoId ||
+    0
+  ) || null
+
+  if (!estabelecimentoId) {
+    return buildUnresolvedWebhookOwnerResolution({
+      normalizedUserId,
+      lookupBy,
+      resolutionRule,
+      reason: unresolvedReason,
+    })
+  }
+
+  const mpAccess = await resolveEstablishmentAccessToken(estabelecimentoId, { allowFallback: false })
+  if (!mpAccess?.accessToken) {
+    return {
+      ok: false,
+      ownerType: 'establishment',
+      matchedFlow,
+      tokenSource: 'establishment',
+      lookupBy,
+      resolutionRule,
+      reason: 'seller_account_found_but_no_valid_token',
+      fallbackBlocked: true,
+      bodyUserId: normalizedUserId,
+      estabelecimentoId,
+      mpUserId: sellerAccount?.mp_user_id || sellerAccount?.mpUserId || null,
+      mpCollectorId:
+        sellerAccount?.mp_collector_id ||
+        sellerAccount?.mpCollectorId ||
+        sellerAccount?.mp_user_id ||
+        sellerAccount?.mpUserId ||
+        null,
+      sellerAccount,
+      accessToken: null,
+    }
+  }
+
+  const resolvedAccount = mpAccess?.account || sellerAccount
+  return {
+    ok: true,
+    ownerType: 'establishment',
+    matchedFlow,
+    tokenSource: 'establishment',
+    lookupBy,
+    resolutionRule,
+    reason: null,
+    fallbackBlocked: false,
+    bodyUserId: normalizedUserId,
+    estabelecimentoId,
+    mpUserId: resolvedAccount?.mp_user_id || resolvedAccount?.mpUserId || null,
+    mpCollectorId:
+      resolvedAccount?.mp_collector_id ||
+      resolvedAccount?.mpCollectorId ||
+      resolvedAccount?.mp_user_id ||
+      resolvedAccount?.mpUserId ||
+      null,
+    sellerAccount: resolvedAccount,
+    accessToken: mpAccess.accessToken,
+  }
+}
+
+async function findSubscriptionLoyaltyLink({
+  resourceId = null,
+  preapprovalId = null,
+  externalReference = null,
+  getByGatewayId = getClientLoyaltySubscriptionByGatewayId,
+  getByExternalReference = getClientLoyaltySubscriptionByExternalReference,
+  getByEventResourceId = getClientLoyaltySubscriptionByEventResourceId,
+  getByWebhookResourceId = getClientLoyaltySubscriptionByWebhookResourceId,
+} = {}) {
+  const preapprovalCandidates = [...new Set(
+    [preapprovalId, resourceId]
+      .filter(Boolean)
+      .map((value) => String(value))
+  )]
+
+  for (const candidate of preapprovalCandidates) {
+    const subscription = await getByGatewayId(candidate)
+    if (subscription?.id) {
+      return {
+        subscription,
+        lookupBy: 'mp_preapproval_id',
+        resolutionRule: 'loyalty_preapproval_linkage',
+      }
+    }
+  }
+
+  if (externalReference) {
+    const subscription = await getByExternalReference(String(externalReference))
+    if (subscription?.id) {
+      return {
+        subscription,
+        lookupBy: 'external_reference',
+        resolutionRule: 'loyalty_preapproval_linkage',
+      }
+    }
+  }
+
+  if (resourceId) {
+    const subscription = await getByEventResourceId(String(resourceId), { mpTopic: 'subscription' })
+    if (subscription?.id) {
+      return {
+        subscription,
+        lookupBy: 'event_linkage',
+        resolutionRule: 'loyalty_preapproval_linkage',
+      }
+    }
+  }
+
+  if (resourceId) {
+    const subscription = await getByWebhookResourceId(String(resourceId), { topic: 'subscription' })
+    if (subscription?.id) {
+      return {
+        subscription,
+        lookupBy: 'event_linkage',
+        resolutionRule: 'loyalty_preapproval_linkage',
+      }
+    }
+  }
+
+  return null
+}
+
+async function findSubscriptionPlatformLink({
+  resourceId = null,
+  preapprovalId = null,
+  externalReference = null,
+  getByGatewayId = getSubscriptionByGatewayId,
+  getByExternalReference = getSubscriptionByExternalReference,
+} = {}) {
+  const preapprovalCandidates = [...new Set(
+    [preapprovalId, resourceId]
+      .filter(Boolean)
+      .map((value) => String(value))
+  )]
+
+  for (const candidate of preapprovalCandidates) {
+    const subscription = await getByGatewayId(candidate)
+    if (subscription?.id) {
+      return {
+        subscription,
+        lookupBy: 'mp_preapproval_id',
+        resolutionRule: 'platform_subscription_linkage',
+      }
+    }
+  }
+
+  if (externalReference) {
+    const subscription = await getByExternalReference(String(externalReference))
+    if (subscription?.id) {
+      return {
+        subscription,
+        lookupBy: 'external_reference',
+        resolutionRule: 'platform_subscription_linkage',
+      }
+    }
+  }
+
+  return null
 }
 
 async function findAuthorizedPaymentLoyaltyLink({
@@ -426,25 +675,67 @@ async function findAuthorizedPaymentLoyaltyLink({
   getByGatewayPaymentId = getClientLoyaltySubscriptionByGatewayPaymentId,
   getByGatewayId = getClientLoyaltySubscriptionByGatewayId,
   getByExternalReference = getClientLoyaltySubscriptionByExternalReference,
+  getByEventResourceId = getClientLoyaltySubscriptionByEventResourceId,
+  getByWebhookResourceId = getClientLoyaltySubscriptionByWebhookResourceId,
 } = {}) {
   if (resourceId) {
     const subscription = await getByGatewayPaymentId(String(resourceId))
     if (subscription?.id) {
-      return { subscription, resolutionRule: 'loyalty_gateway_payment_id' }
+      return {
+        subscription,
+        lookupBy: 'authorized_payment_id',
+        resolutionRule: 'loyalty_subscription_linkage',
+      }
     }
   }
+
   if (preapprovalId) {
     const subscription = await getByGatewayId(String(preapprovalId))
     if (subscription?.id) {
-      return { subscription, resolutionRule: 'loyalty_preapproval_id' }
+      return {
+        subscription,
+        lookupBy: 'mp_preapproval_id',
+        resolutionRule: 'loyalty_subscription_linkage',
+      }
     }
   }
+
   if (externalReference) {
     const subscription = await getByExternalReference(String(externalReference))
     if (subscription?.id) {
-      return { subscription, resolutionRule: 'loyalty_external_reference' }
+      return {
+        subscription,
+        lookupBy: 'external_reference',
+        resolutionRule: 'loyalty_subscription_linkage',
+      }
     }
   }
+
+  if (resourceId) {
+    const subscription = await getByEventResourceId(String(resourceId), {
+      mpTopic: 'automatic-payments',
+      paymentType: 'subscription_authorized_payment',
+    })
+    if (subscription?.id) {
+      return {
+        subscription,
+        lookupBy: 'event_linkage',
+        resolutionRule: 'loyalty_subscription_linkage',
+      }
+    }
+  }
+
+  if (resourceId) {
+    const subscription = await getByWebhookResourceId(String(resourceId), { topic: 'automatic-payments' })
+    if (subscription?.id) {
+      return {
+        subscription,
+        lookupBy: 'event_linkage',
+        resolutionRule: 'loyalty_subscription_linkage',
+      }
+    }
+  }
+
   return null
 }
 
@@ -459,22 +750,149 @@ async function findAuthorizedPaymentPlatformLink({
   if (resourceId) {
     const subscription = await getByGatewayPaymentId(String(resourceId))
     if (subscription?.id) {
-      return { subscription, resolutionRule: 'platform_gateway_payment_id' }
+      return {
+        subscription,
+        lookupBy: 'authorized_payment_id',
+        resolutionRule: 'platform_subscription_linkage',
+      }
     }
   }
+
   if (preapprovalId) {
     const subscription = await getByGatewayId(String(preapprovalId))
     if (subscription?.id) {
-      return { subscription, resolutionRule: 'platform_preapproval_id' }
+      return {
+        subscription,
+        lookupBy: 'mp_preapproval_id',
+        resolutionRule: 'platform_subscription_linkage',
+      }
     }
   }
+
   if (externalReference) {
     const subscription = await getByExternalReference(String(externalReference))
     if (subscription?.id) {
-      return { subscription, resolutionRule: 'platform_external_reference' }
+      return {
+        subscription,
+        lookupBy: 'external_reference',
+        resolutionRule: 'platform_subscription_linkage',
+      }
     }
   }
+
   return null
+}
+
+async function resolveSubscriptionWebhookOwnerContext({
+  resourceId,
+  event = {},
+  bodyUserId = null,
+  getConnectedAccountBySellerIdentifier = getMpAccountBySellerIdentifier,
+  getConnectedAccountByEstabelecimentoId = getMpAccountByEstabelecimentoId,
+  resolveEstablishmentAccessToken = resolveMpAccessToken,
+  getLoyaltySubscriptionByGatewayId = getClientLoyaltySubscriptionByGatewayId,
+  getLoyaltySubscriptionByExternalReference = getClientLoyaltySubscriptionByExternalReference,
+  getLoyaltySubscriptionByEventResourceId = getClientLoyaltySubscriptionByEventResourceId,
+  getLoyaltySubscriptionByWebhookResourceId = getClientLoyaltySubscriptionByWebhookResourceId,
+  getPlatformSubscriptionByGatewayId = getSubscriptionByGatewayId,
+  getPlatformSubscriptionByExternalReference = getSubscriptionByExternalReference,
+  platformAccessToken = config.billing?.mercadopago?.accessToken || null,
+} = {}) {
+  const normalizedUserId = normalizeWebhookNumericUserId(bodyUserId)
+  const preapprovalId = resolveWebhookMetadataPreapprovalId(event) || (resourceId ? String(resourceId) : null)
+  const externalReference = resolveWebhookExternalReference(event)
+  const bodySellerAccount =
+    normalizedUserId && normalizedUserId !== MP_COLLECTOR_ID
+      ? await getConnectedAccountBySellerIdentifier(normalizedUserId)
+      : null
+
+  const loyaltyLink = await findSubscriptionLoyaltyLink({
+    resourceId,
+    preapprovalId,
+    externalReference,
+    getByGatewayId: getLoyaltySubscriptionByGatewayId,
+    getByExternalReference: getLoyaltySubscriptionByExternalReference,
+    getByEventResourceId: getLoyaltySubscriptionByEventResourceId,
+    getByWebhookResourceId: getLoyaltySubscriptionByWebhookResourceId,
+  })
+  const platformLink = await findSubscriptionPlatformLink({
+    resourceId,
+    preapprovalId,
+    externalReference,
+    getByGatewayId: getPlatformSubscriptionByGatewayId,
+    getByExternalReference: getPlatformSubscriptionByExternalReference,
+  })
+
+  if (loyaltyLink?.subscription?.id && platformLink?.subscription?.id) {
+    return buildConflictingWebhookOwnerResolution({
+      normalizedUserId,
+      lookupBy: loyaltyLink.lookupBy || platformLink.lookupBy || 'event_linkage',
+      conflict: {
+        loyalty_subscription_id: loyaltyLink.subscription.id,
+        platform_subscription_id: platformLink.subscription.id,
+      },
+    })
+  }
+
+  if (loyaltyLink?.subscription?.estabelecimentoId) {
+    const linkedEstabelecimentoId = Number(loyaltyLink.subscription.estabelecimentoId || 0) || null
+    if (
+      bodySellerAccount?.estabelecimento_id &&
+      linkedEstabelecimentoId &&
+      Number(bodySellerAccount.estabelecimento_id || 0) !== linkedEstabelecimentoId
+    ) {
+      return buildConflictingWebhookOwnerResolution({
+        normalizedUserId,
+        lookupBy: loyaltyLink.lookupBy,
+        conflict: {
+          loyalty_estabelecimento_id: linkedEstabelecimentoId,
+          body_user_estabelecimento_id: Number(bodySellerAccount.estabelecimento_id || 0) || null,
+        },
+      })
+    }
+
+    const sellerAccount =
+      bodySellerAccount && Number(bodySellerAccount.estabelecimento_id || 0) === linkedEstabelecimentoId
+        ? bodySellerAccount
+        : await getConnectedAccountByEstabelecimentoId(linkedEstabelecimentoId)
+
+    return finalizeSellerWebhookOwnerResolution({
+      sellerAccount: sellerAccount || { estabelecimento_id: linkedEstabelecimentoId },
+      normalizedUserId,
+      matchedFlow: 'loyalty',
+      lookupBy: loyaltyLink.lookupBy,
+      resolutionRule: loyaltyLink.resolutionRule,
+      unresolvedReason: 'unresolved_owner_for_preapproval',
+      resolveEstablishmentAccessToken,
+    })
+  }
+
+  if (platformLink?.subscription?.id) {
+    return buildPlatformWebhookOwnerResolution({
+      normalizedUserId,
+      lookupBy: platformLink.lookupBy,
+      resolutionRule: platformLink.resolutionRule,
+      platformAccessToken,
+      unresolvedReason: 'unresolved_owner_for_preapproval',
+    })
+  }
+
+  if (normalizedUserId === MP_COLLECTOR_ID) {
+    return buildPlatformWebhookOwnerResolution({
+      normalizedUserId,
+      lookupBy: 'body_user_id',
+      resolutionRule: 'platform_user_id',
+      platformAccessToken,
+      unresolvedReason: 'unresolved_owner_for_preapproval',
+    })
+  }
+
+  return buildUnresolvedWebhookOwnerResolution({
+    normalizedUserId,
+    lookupBy: bodySellerAccount ? 'body_user_id' : null,
+    resolutionRule: bodySellerAccount ? 'connected_seller_user' : 'no_confident_owner',
+    reason: 'unresolved_owner_for_preapproval',
+  })
 }
 
 async function resolveAuthorizedPaymentWebhookOwnerContext({
@@ -487,6 +905,8 @@ async function resolveAuthorizedPaymentWebhookOwnerContext({
   getLoyaltySubscriptionByGatewayPaymentId = getClientLoyaltySubscriptionByGatewayPaymentId,
   getLoyaltySubscriptionByGatewayId = getClientLoyaltySubscriptionByGatewayId,
   getLoyaltySubscriptionByExternalReference = getClientLoyaltySubscriptionByExternalReference,
+  getLoyaltySubscriptionByEventResourceId = getClientLoyaltySubscriptionByEventResourceId,
+  getLoyaltySubscriptionByWebhookResourceId = getClientLoyaltySubscriptionByWebhookResourceId,
   getPlatformSubscriptionByGatewayPaymentId = getSubscriptionByGatewayPaymentId,
   getPlatformSubscriptionByGatewayId = getSubscriptionByGatewayId,
   getPlatformSubscriptionByExternalReference = getSubscriptionByExternalReference,
@@ -495,73 +915,21 @@ async function resolveAuthorizedPaymentWebhookOwnerContext({
   const normalizedUserId = normalizeWebhookNumericUserId(bodyUserId)
   const preapprovalId = resolveWebhookMetadataPreapprovalId(event)
   const externalReference = resolveWebhookExternalReference(event)
+  const bodySellerAccount =
+    normalizedUserId && normalizedUserId !== MP_COLLECTOR_ID
+      ? await getConnectedAccountBySellerIdentifier(normalizedUserId)
+      : null
 
-  const finalizeSellerResolution = async (sellerAccount, resolutionRule) => {
-    const estabelecimentoId = Number(
-      sellerAccount?.estabelecimento_id ||
-      sellerAccount?.estabelecimentoId ||
-      0
-    ) || null
-    if (!estabelecimentoId) {
-      return {
-        ok: false,
-        ownerType: null,
-        matchedFlow: null,
-        tokenSource: null,
-        resolutionRule,
-        reason: 'unresolved_owner_for_authorized_payment',
-        fallbackBlocked: true,
-      }
-    }
-    const mpAccess = await resolveEstablishmentAccessToken(estabelecimentoId, { allowFallback: false })
-    if (!mpAccess?.accessToken) {
-      return {
-        ok: false,
-        ownerType: 'establishment',
-        matchedFlow: 'loyalty',
-        tokenSource: 'establishment',
-        resolutionRule,
-        reason: 'seller_account_found_but_no_valid_token',
-        fallbackBlocked: true,
-        estabelecimentoId,
-        mpUserId: sellerAccount?.mp_user_id || sellerAccount?.mpUserId || null,
-        mpCollectorId:
-          sellerAccount?.mp_collector_id ||
-          sellerAccount?.mpCollectorId ||
-          sellerAccount?.mp_user_id ||
-          sellerAccount?.mpUserId ||
-          null,
-        sellerAccount,
-      }
-    }
-    const resolvedAccount = mpAccess?.account || sellerAccount
-    return {
-      ok: true,
-      ownerType: 'establishment',
+  if (bodySellerAccount?.estabelecimento_id || bodySellerAccount?.estabelecimentoId) {
+    return finalizeSellerWebhookOwnerResolution({
+      sellerAccount: bodySellerAccount,
+      normalizedUserId,
       matchedFlow: 'loyalty',
-      tokenSource: 'establishment',
-      resolutionRule,
-      reason: null,
-      fallbackBlocked: false,
-      bodyUserId: normalizedUserId,
-      estabelecimentoId,
-      mpUserId: resolvedAccount?.mp_user_id || resolvedAccount?.mpUserId || null,
-      mpCollectorId:
-        resolvedAccount?.mp_collector_id ||
-        resolvedAccount?.mpCollectorId ||
-        resolvedAccount?.mp_user_id ||
-        resolvedAccount?.mpUserId ||
-        null,
-      sellerAccount: resolvedAccount,
-      accessToken: mpAccess.accessToken,
-    }
-  }
-
-  if (normalizedUserId && normalizedUserId !== MP_COLLECTOR_ID) {
-    const sellerAccount = await getConnectedAccountBySellerIdentifier(normalizedUserId)
-    if (sellerAccount?.estabelecimento_id || sellerAccount?.estabelecimentoId) {
-      return finalizeSellerResolution(sellerAccount, 'connected_seller_user')
-    }
+      lookupBy: 'body_user_id',
+      resolutionRule: 'connected_seller_user',
+      unresolvedReason: 'unresolved_owner_for_authorized_payment',
+      resolveEstablishmentAccessToken,
+    })
   }
 
   const loyaltyLink = await findAuthorizedPaymentLoyaltyLink({
@@ -571,45 +939,9 @@ async function resolveAuthorizedPaymentWebhookOwnerContext({
     getByGatewayPaymentId: getLoyaltySubscriptionByGatewayPaymentId,
     getByGatewayId: getLoyaltySubscriptionByGatewayId,
     getByExternalReference: getLoyaltySubscriptionByExternalReference,
+    getByEventResourceId: getLoyaltySubscriptionByEventResourceId,
+    getByWebhookResourceId: getLoyaltySubscriptionByWebhookResourceId,
   })
-  if (loyaltyLink?.subscription?.estabelecimentoId) {
-    const sellerAccount = await getConnectedAccountByEstabelecimentoId(loyaltyLink.subscription.estabelecimentoId)
-    if (sellerAccount?.estabelecimento_id || sellerAccount?.estabelecimentoId) {
-      return finalizeSellerResolution(sellerAccount, loyaltyLink.resolutionRule)
-    }
-    return {
-      ok: false,
-      ownerType: 'establishment',
-      matchedFlow: 'loyalty',
-      tokenSource: 'establishment',
-      resolutionRule: loyaltyLink.resolutionRule,
-      reason: 'seller_account_found_but_no_valid_token',
-      fallbackBlocked: true,
-      estabelecimentoId: Number(loyaltyLink.subscription.estabelecimentoId || 0) || null,
-      mpUserId: null,
-      mpCollectorId: null,
-      sellerAccount: null,
-    }
-  }
-
-  if (normalizedUserId === MP_COLLECTOR_ID) {
-    return {
-      ok: Boolean(platformAccessToken),
-      ownerType: 'platform',
-      matchedFlow: 'platform_saas',
-      tokenSource: 'platform',
-      resolutionRule: 'platform_user_id',
-      reason: platformAccessToken ? null : 'unresolved_owner_for_authorized_payment',
-      fallbackBlocked: !platformAccessToken,
-      bodyUserId: normalizedUserId,
-      estabelecimentoId: null,
-      mpUserId: String(MP_COLLECTOR_ID),
-      mpCollectorId: String(MP_COLLECTOR_ID),
-      sellerAccount: null,
-      accessToken: platformAccessToken || null,
-    }
-  }
-
   const platformLink = await findAuthorizedPaymentPlatformLink({
     resourceId,
     preapprovalId,
@@ -618,41 +950,60 @@ async function resolveAuthorizedPaymentWebhookOwnerContext({
     getByGatewayId: getPlatformSubscriptionByGatewayId,
     getByExternalReference: getPlatformSubscriptionByExternalReference,
   })
-  if (platformLink?.subscription?.id) {
-    return {
-      ok: Boolean(platformAccessToken),
-      ownerType: 'platform',
-      matchedFlow: 'platform_saas',
-      tokenSource: 'platform',
-      resolutionRule: platformLink.resolutionRule,
-      reason: platformAccessToken ? null : 'unresolved_owner_for_authorized_payment',
-      fallbackBlocked: !platformAccessToken,
-      bodyUserId: normalizedUserId,
-      estabelecimentoId: null,
-      mpUserId: String(MP_COLLECTOR_ID),
-      mpCollectorId: String(MP_COLLECTOR_ID),
-      sellerAccount: null,
-      accessToken: platformAccessToken || null,
-    }
+
+  if (loyaltyLink?.subscription?.id && platformLink?.subscription?.id) {
+    return buildConflictingWebhookOwnerResolution({
+      normalizedUserId,
+      lookupBy: loyaltyLink.lookupBy || platformLink.lookupBy || 'event_linkage',
+      conflict: {
+        loyalty_subscription_id: loyaltyLink.subscription.id,
+        platform_subscription_id: platformLink.subscription.id,
+      },
+    })
   }
 
-  return {
-    ok: false,
-    ownerType: null,
-    matchedFlow: null,
-    tokenSource: null,
+  if (loyaltyLink?.subscription?.estabelecimentoId) {
+    const linkedEstabelecimentoId = Number(loyaltyLink.subscription.estabelecimentoId || 0) || null
+    const sellerAccount = await getConnectedAccountByEstabelecimentoId(linkedEstabelecimentoId)
+    return finalizeSellerWebhookOwnerResolution({
+      sellerAccount: sellerAccount || { estabelecimento_id: linkedEstabelecimentoId },
+      normalizedUserId,
+      matchedFlow: 'loyalty',
+      lookupBy: loyaltyLink.lookupBy,
+      resolutionRule: loyaltyLink.resolutionRule,
+      unresolvedReason: 'unresolved_owner_for_authorized_payment',
+      resolveEstablishmentAccessToken,
+    })
+  }
+
+  if (normalizedUserId === MP_COLLECTOR_ID) {
+    return buildPlatformWebhookOwnerResolution({
+      normalizedUserId,
+      lookupBy: 'body_user_id',
+      resolutionRule: 'platform_user_id',
+      platformAccessToken,
+      unresolvedReason: 'unresolved_owner_for_authorized_payment',
+    })
+  }
+
+  if (platformLink?.subscription?.id) {
+    return buildPlatformWebhookOwnerResolution({
+      normalizedUserId,
+      lookupBy: platformLink.lookupBy,
+      resolutionRule: platformLink.resolutionRule,
+      platformAccessToken,
+      unresolvedReason: 'unresolved_owner_for_authorized_payment',
+    })
+  }
+
+  return buildUnresolvedWebhookOwnerResolution({
+    normalizedUserId,
+    lookupBy: normalizedUserId && normalizedUserId !== MP_COLLECTOR_ID ? 'body_user_id' : null,
     resolutionRule: normalizedUserId && normalizedUserId !== MP_COLLECTOR_ID
       ? 'connected_seller_user'
       : 'no_confident_owner',
     reason: 'unresolved_owner_for_authorized_payment',
-    fallbackBlocked: true,
-    bodyUserId: normalizedUserId,
-    estabelecimentoId: null,
-    mpUserId: null,
-    mpCollectorId: null,
-    sellerAccount: null,
-    accessToken: null,
-  }
+  })
 }
 
 async function resolveBillingAuthorizedPaymentWebhookAction({
@@ -660,21 +1011,22 @@ async function resolveBillingAuthorizedPaymentWebhookAction({
   syncEvent = {},
   syncDecision = {},
   bodyUserId = null,
+  ownerResolution = null,
   ownerResolver = resolveAuthorizedPaymentWebhookOwnerContext,
   loyaltyAuthorizedPaymentHandler = syncClientLoyaltyAuthorizedPaymentFromGateway,
   platformAuthorizedPaymentHandler = syncAuthorizedPaymentFromGateway,
 } = {}) {
-  const ownerResolution = await ownerResolver({
+  const resolvedOwner = ownerResolution || await ownerResolver({
     resourceId,
     event: syncEvent,
     bodyUserId,
     syncDecision,
   })
 
-  if (!ownerResolution?.ok) {
+  if (!resolvedOwner?.ok) {
     return {
       kind: 'ignored_unresolved_authorized_payment_owner',
-      ownerResolution,
+      ownerResolution: resolvedOwner,
       responseBody: {
         ok: true,
         ignored: true,
@@ -683,16 +1035,16 @@ async function resolveBillingAuthorizedPaymentWebhookAction({
     }
   }
 
-  if (ownerResolution.ownerType === 'establishment') {
+  if (resolvedOwner.ownerType === 'establishment') {
     const loyaltyResult = await loyaltyAuthorizedPaymentHandler(resourceId, {
-      bodyUserId: ownerResolution.bodyUserId ?? bodyUserId,
+      bodyUserId: resolvedOwner.bodyUserId ?? bodyUserId,
       gatewayEventId: resourceId,
-      sellerAccount: ownerResolution.sellerAccount || null,
-      accessToken: ownerResolution.accessToken || null,
+      sellerAccount: resolvedOwner.sellerAccount || null,
+      accessToken: resolvedOwner.accessToken || null,
     })
     return {
       kind: 'seller_authorized_payment',
-      ownerResolution,
+      ownerResolution: resolvedOwner,
       loyaltyResult,
       responseBody: {
         ok: true,
@@ -706,11 +1058,77 @@ async function resolveBillingAuthorizedPaymentWebhookAction({
 
   const platformResult = await platformAuthorizedPaymentHandler(resourceId, {
     gatewayEventId: resourceId,
-    accessToken: ownerResolution.accessToken || null,
+    accessToken: resolvedOwner.accessToken || null,
   })
   return {
     kind: 'platform_authorized_payment',
-    ownerResolution,
+    ownerResolution: resolvedOwner,
+    platformResult,
+    responseBody: {
+      ok: true,
+      processed: !!platformResult?.ok,
+      reason: platformResult?.reason || null,
+    },
+  }
+}
+
+async function resolveBillingSubscriptionWebhookAction({
+  resourceId,
+  syncEvent = {},
+  syncDecision = {},
+  bodyUserId = null,
+  ownerResolution = null,
+  ownerResolver = resolveSubscriptionWebhookOwnerContext,
+  loyaltySubscriptionHandler = syncClientLoyaltyCardSubscriptionFromGateway,
+  platformSubscriptionHandler = syncCardSubscriptionFromGateway,
+} = {}) {
+  const resolvedOwner = ownerResolution || await ownerResolver({
+    resourceId,
+    event: syncEvent,
+    bodyUserId,
+    syncDecision,
+  })
+
+  if (!resolvedOwner?.ok) {
+    return {
+      kind: 'ignored_unresolved_subscription_owner',
+      ownerResolution: resolvedOwner,
+      responseBody: {
+        ok: true,
+        ignored: true,
+        reason: 'unresolved_subscription_owner',
+      },
+    }
+  }
+
+  if (resolvedOwner.ownerType === 'establishment') {
+    const loyaltyResult = await loyaltySubscriptionHandler(resourceId, {
+      bodyUserId: resolvedOwner.bodyUserId ?? bodyUserId,
+      gatewayEventId: resourceId,
+      sellerAccount: resolvedOwner.sellerAccount || null,
+      accessToken: resolvedOwner.accessToken || null,
+    })
+    return {
+      kind: 'seller_subscription',
+      ownerResolution: resolvedOwner,
+      loyaltyResult,
+      responseBody: {
+        ok: true,
+        processed: Boolean(loyaltyResult?.handled),
+        loyalty: true,
+        reason: loyaltyResult?.reason || null,
+        status: loyaltyResult?.status || null,
+      },
+    }
+  }
+
+  const platformResult = await platformSubscriptionHandler(resourceId, {
+    gatewayEventId: resourceId,
+    accessToken: resolvedOwner.accessToken || null,
+  })
+  return {
+    kind: 'platform_subscription',
+    ownerResolution: resolvedOwner,
     platformResult,
     responseBody: {
       ok: true,
@@ -2020,6 +2438,7 @@ async function finalizeNonApprovedCardRecovery({
 async function syncCardSubscriptionFromGateway(gatewaySubscriptionId, {
   gatewayEventId = null,
   eventType = null,
+  accessToken = null,
 } = {}) {
   const localSubscription = await getSubscriptionByGatewayId(gatewaySubscriptionId)
   if (!localSubscription) {
@@ -2029,6 +2448,7 @@ async function syncCardSubscriptionFromGateway(gatewaySubscriptionId, {
   const gatewayResult = await getMercadoPagoCardSubscription(gatewaySubscriptionId, {
     fallbackPlan: localSubscription.plan,
     fallbackCycle: localSubscription.billingCycle,
+    accessToken,
   })
   const gatewaySubscription = gatewayResult.subscription
   const graceDays = Number(config.billing?.reminders?.graceDays ?? process.env.SUBSCRIPTION_GRACE_DAYS ?? 3) || 3
@@ -3952,6 +4372,21 @@ router.post('/webhook', async (req, res) => {
   }
 
   try {
+    const preResolvedOwnerResolution =
+      syncDecision.chosenSyncTarget === 'authorized_payment'
+        ? await resolveAuthorizedPaymentWebhookOwnerContext({
+          resourceId,
+          event: syncEvent,
+          bodyUserId,
+        })
+        : syncDecision.chosenSyncTarget === 'subscription'
+          ? await resolveSubscriptionWebhookOwnerContext({
+            resourceId,
+            event: syncEvent,
+            bodyUserId,
+          })
+          : null
+
     logBillingWebhookSyncDecision({
       requestId,
       resourceId,
@@ -3959,6 +4394,7 @@ router.post('/webhook', async (req, res) => {
       bodyType,
       bodyAction,
       event,
+      ownerResolution: preResolvedOwnerResolution,
     })
 
     if (syncDecision.chosenSyncTarget === 'payment') {
@@ -4063,9 +4499,10 @@ router.post('/webhook', async (req, res) => {
         syncEvent,
         syncDecision,
         bodyUserId,
+        ownerResolution: preResolvedOwnerResolution,
       })
       const ownerResolution = authorizedPaymentAction.ownerResolution || null
-      console.info('[billing:webhook] owner_resolution', buildBillingWebhookOwnerResolutionPayload({
+      const ownerResolutionPayload = buildBillingWebhookOwnerResolutionPayload({
         requestId,
         resourceId,
         syncDecision,
@@ -4073,39 +4510,20 @@ router.post('/webhook', async (req, res) => {
         bodyAction,
         bodyUserId,
         ownerResolution,
-      }))
+      })
+      console.info('[billing:webhook] owner_resolution_authorized_payment', ownerResolutionPayload)
 
       if (authorizedPaymentAction.kind === 'ignored_unresolved_authorized_payment_owner') {
         if (ownerResolution?.reason === 'seller_account_found_but_no_valid_token') {
-          console.warn('[billing:webhook] seller_account_found_but_no_valid_token', buildBillingWebhookOwnerResolutionPayload({
-            requestId,
-            resourceId,
-            syncDecision,
-            bodyType,
-            bodyAction,
-            bodyUserId,
-            ownerResolution,
-          }))
+          console.warn('[billing:webhook] seller_account_found_but_no_valid_token', ownerResolutionPayload)
         }
-        console.warn('[billing:webhook] unresolved_owner_for_authorized_payment', buildBillingWebhookOwnerResolutionPayload({
-          requestId,
-          resourceId,
-          syncDecision,
-          bodyType,
-          bodyAction,
-          bodyUserId,
-          ownerResolution,
-        }))
+        if (ownerResolution?.reason === 'conflicting_owner_resolution') {
+          console.warn('[billing:webhook] conflicting_owner_resolution', ownerResolutionPayload)
+        } else {
+          console.warn('[billing:webhook] unresolved_owner_for_authorized_payment', ownerResolutionPayload)
+        }
         if (ownerResolution?.fallbackBlocked) {
-          console.warn('[billing:webhook] fallback_to_platform_blocked', buildBillingWebhookOwnerResolutionPayload({
-            requestId,
-            resourceId,
-            syncDecision,
-            bodyType,
-            bodyAction,
-            bodyUserId,
-            ownerResolution,
-          }))
+          console.warn('[billing:webhook] fallback_to_platform_blocked', ownerResolutionPayload)
         }
         return res.status(200).json(authorizedPaymentAction.responseBody)
       }
@@ -4143,30 +4561,66 @@ router.post('/webhook', async (req, res) => {
     }
 
     if (syncDecision.chosenSyncTarget === 'subscription') {
-      const loyaltyResult = await syncClientLoyaltyCardSubscriptionFromGateway(resourceId, {
+      const subscriptionAction = await resolveBillingSubscriptionWebhookAction({
+        resourceId,
+        syncEvent,
+        syncDecision,
         bodyUserId,
-        gatewayEventId: resourceId,
+        ownerResolution: preResolvedOwnerResolution,
       })
-      if (loyaltyResult?.ok) {
+      const ownerResolution = subscriptionAction.ownerResolution || null
+      const ownerResolutionPayload = buildBillingWebhookOwnerResolutionPayload({
+        requestId,
+        resourceId,
+        syncDecision,
+        bodyType,
+        bodyAction,
+        bodyUserId,
+        ownerResolution,
+      })
+      console.info('[billing:webhook] owner_resolution_preapproval', ownerResolutionPayload)
+
+      if (subscriptionAction.kind === 'ignored_unresolved_subscription_owner') {
+        if (ownerResolution?.reason === 'seller_account_found_but_no_valid_token') {
+          console.warn('[billing:webhook] seller_account_found_but_no_valid_token', ownerResolutionPayload)
+        }
+        if (ownerResolution?.reason === 'conflicting_owner_resolution') {
+          console.warn('[billing:webhook] conflicting_owner_resolution', ownerResolutionPayload)
+        } else {
+          console.warn('[billing:webhook] unresolved_owner_for_preapproval', ownerResolutionPayload)
+        }
+        if (ownerResolution?.fallbackBlocked) {
+          console.warn('[billing:webhook] fallback_to_platform_blocked', ownerResolutionPayload)
+        }
+        return res.status(200).json(subscriptionAction.responseBody)
+      }
+
+      if (subscriptionAction.kind === 'seller_subscription') {
+        const loyaltyResult = subscriptionAction.loyaltyResult
         console.log('[billing:webhook][loyalty] subscription_preapproval', resourceId, loyaltyResult?.handled ? 'processed' : 'ignored', {
           ok: !!loyaltyResult?.ok,
           reason: loyaltyResult?.reason || null,
           status: loyaltyResult?.status || null,
+          owner_type: ownerResolution?.ownerType || null,
+          matched_flow: ownerResolution?.matchedFlow || null,
+          token_source: ownerResolution?.tokenSource || null,
+          lookup_by: ownerResolution?.lookupBy || null,
+          resolution_rule: ownerResolution?.resolutionRule || null,
         })
-        return res.status(200).json({
-          ok: true,
-          processed: Boolean(loyaltyResult?.handled),
-          loyalty: true,
-          reason: loyaltyResult?.reason || null,
-          status: loyaltyResult?.status || null,
-        })
+        return res.status(200).json(subscriptionAction.responseBody)
       }
-      const result = await syncCardSubscriptionFromGateway(resourceId, { gatewayEventId: resourceId })
+
+      const result = subscriptionAction.platformResult
       console.log('[billing:webhook] subscription_preapproval', resourceId, result?.ok ? 'processed' : 'ignored', {
         ok: !!result?.ok,
         reason: result?.reason || null,
+        owner_type: ownerResolution?.ownerType || null,
+        matched_flow: ownerResolution?.matchedFlow || null,
+        token_source: ownerResolution?.tokenSource || null,
+        lookup_by: ownerResolution?.lookupBy || null,
+        resolution_rule: ownerResolution?.resolutionRule || null,
       })
-      return res.status(200).json({ ok: true, processed: !!result?.ok, reason: result?.reason || null })
+      return res.status(200).json(subscriptionAction.responseBody)
     }
 
     console.log('[billing:webhook] ignoring topic', topic || 'unknown', 'for resource', resourceId);
@@ -4646,9 +5100,11 @@ export {
   normalizeBillingWebhookTopic,
   resolveAuthorizedPaymentWebhookOwnerContext,
   resolveBillingAuthorizedPaymentWebhookAction,
+  resolveBillingSubscriptionWebhookAction,
   resolveBillingWebhookBodyUserId,
   resolveBillingPaymentWebhookAction,
   resolveBillingWebhookSyncDecision,
+  resolveSubscriptionWebhookOwnerContext,
 }
 
 export default router

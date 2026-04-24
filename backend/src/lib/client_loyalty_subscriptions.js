@@ -62,6 +62,10 @@ function safeJsonParse(value) {
   }
 }
 
+function isMissingTableError(error) {
+  return error?.code === 'ER_NO_SUCH_TABLE' || error?.errno === 1146
+}
+
 export function normalizeClientLoyaltyOwnerType(value, fallback = 'establishment') {
   const normalized = String(value || '').trim().toLowerCase()
   return CLIENT_LOYALTY_OWNER_TYPES.has(normalized) ? normalized : fallback
@@ -233,6 +237,78 @@ export async function getClientLoyaltySubscriptionByExternalReference(externalRe
     [String(externalReference)]
   )
   return mapRow(rows?.[0])
+}
+
+export async function getClientLoyaltySubscriptionByEventResourceId(resourceId, {
+  mpTopic = null,
+  paymentType = null,
+  db = pool,
+} = {}) {
+  if (!resourceId) return null
+
+  const filters = ['(ev.mp_payment_id=? OR ev.gateway_event_id=?)']
+  const values = [String(resourceId), String(resourceId)]
+
+  if (mpTopic) {
+    filters.push('ev.mp_topic=?')
+    values.push(String(mpTopic))
+  }
+  if (paymentType) {
+    filters.push('ev.payment_type=?')
+    values.push(String(paymentType))
+  }
+
+  try {
+    const [rows] = await db.query(
+      `SELECT cls.*
+         FROM client_loyalty_subscription_events ev
+         JOIN client_loyalty_subscriptions cls
+           ON cls.id = ev.client_loyalty_subscription_id
+        WHERE ${filters.join(' AND ')}
+        ORDER BY ev.id DESC
+        LIMIT 1`,
+      values
+    )
+    return mapRow(rows?.[0])
+  } catch (error) {
+    if (isMissingTableError(error)) return null
+    throw error
+  }
+}
+
+export async function getClientLoyaltySubscriptionByWebhookResourceId(resourceId, {
+  topic = null,
+  db = pool,
+} = {}) {
+  if (!resourceId) return null
+
+  const filters = [
+    'mw.resource_id=?',
+    'mw.loyalty_subscription_id IS NOT NULL',
+  ]
+  const values = [String(resourceId)]
+
+  if (topic) {
+    filters.push('mw.topic=?')
+    values.push(String(topic))
+  }
+
+  try {
+    const [rows] = await db.query(
+      `SELECT cls.*
+         FROM mercadopago_webhook_events mw
+         JOIN client_loyalty_subscriptions cls
+           ON cls.id = mw.loyalty_subscription_id
+        WHERE ${filters.join(' AND ')}
+        ORDER BY mw.updated_at DESC, mw.id DESC
+        LIMIT 1`,
+      values
+    )
+    return mapRow(rows?.[0])
+  } catch (error) {
+    if (isMissingTableError(error)) return null
+    throw error
+  }
 }
 
 export async function listClientLoyaltySubscriptionsForClient(clienteId, { db = pool } = {}) {
