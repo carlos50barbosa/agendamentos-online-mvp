@@ -158,6 +158,174 @@ function shouldLogMismatchForIp(ip) {
   return true
 }
 
+function normalizeBillingWebhookTopic(value) {
+  const normalized = String(value || '').trim().toLowerCase()
+  if (!normalized) return ''
+  if (normalized === 'payment') return 'payment'
+  if (['subscription_preapproval', 'subscription', 'preapproval'].includes(normalized)) {
+    return 'subscription_preapproval'
+  }
+  if (['subscription_authorized_payment', 'automatic-payments', 'automatic_payment'].includes(normalized)) {
+    return 'subscription_authorized_payment'
+  }
+  return normalized
+}
+
+function topicToSyncTarget(topic) {
+  if (topic === 'payment') return 'payment'
+  if (topic === 'subscription_authorized_payment') return 'authorized_payment'
+  if (topic === 'subscription_preapproval') return 'subscription'
+  return null
+}
+
+function resolveWebhookExternalReference(event = {}) {
+  return String(
+    event?.external_reference ||
+    event?.externalReference ||
+    event?.metadata?.external_reference ||
+    event?.metadata?.externalReference ||
+    ''
+  ).trim() || null
+}
+
+function resolveWebhookMetadataPreapprovalId(event = {}) {
+  return String(
+    event?.metadata?.preapproval_id ||
+    event?.metadata?.preapprovalId ||
+    event?.metadata?.subscription_id ||
+    event?.metadata?.subscriptionId ||
+    event?.preapproval_id ||
+    event?.preapprovalId ||
+    event?.data?.preapproval_id ||
+    event?.data?.preapprovalId ||
+    ''
+  ).trim() || null
+}
+
+function inferWebhookMatchedFlow({
+  event = {},
+  normalizedUserId = null,
+} = {}) {
+  const ownerType = Number.isFinite(normalizedUserId) && normalizedUserId !== MP_COLLECTOR_ID
+    ? 'establishment'
+    : 'platform'
+  const metadataType = String(event?.metadata?.type || event?.metadata?.kind || '').trim().toLowerCase()
+  const externalReference = resolveWebhookExternalReference(event)
+  if (metadataType === 'deposit' || /^dep:ag:\d+:pay:\d+:est:\d+/i.test(String(externalReference || ''))) {
+    return 'deposit'
+  }
+  if (ownerType === 'establishment') return 'loyalty'
+  return 'platform_saas'
+}
+
+function resolveBillingWebhookSyncDecision({
+  req,
+  event = {},
+  bodyUserId = null,
+  bodyType = null,
+  bodyAction = null,
+} = {}) {
+  const queryTopic = normalizeBillingWebhookTopic(req?.query?.type || req?.query?.topic || '')
+  const bodyTopic = normalizeBillingWebhookTopic(bodyType || event?.type || event?.topic || '')
+  const headerTopic = normalizeBillingWebhookTopic(req?.headers?.['x-topic'] || '')
+  const normalizedAction = String(bodyAction || event?.action || '').trim().toLowerCase()
+  const normalizedUserId = bodyUserId != null ? Number(bodyUserId) : null
+  const ownerType = Number.isFinite(normalizedUserId) && normalizedUserId !== MP_COLLECTOR_ID
+    ? 'establishment'
+    : 'platform'
+  const matchedFlow = inferWebhookMatchedFlow({ event, normalizedUserId })
+
+  const bodySyncTarget = topicToSyncTarget(bodyTopic)
+  const querySyncTarget = topicToSyncTarget(queryTopic)
+  const headerSyncTarget = topicToSyncTarget(headerTopic)
+  const topicsConflict = Boolean(bodyTopic && queryTopic && bodyTopic !== queryTopic)
+
+  let topic = bodyTopic || queryTopic || headerTopic || ''
+  let chosenSyncTarget = null
+  let chosenByRule = 'unsupported_topic'
+
+  if (bodySyncTarget) {
+    topic = bodyTopic
+    chosenSyncTarget = bodySyncTarget
+    chosenByRule = topicsConflict
+      ? `body_topic_overrides_query_topic:${bodyTopic}<-${queryTopic}`
+      : 'body_topic'
+  } else if (querySyncTarget) {
+    topic = queryTopic
+    chosenSyncTarget = querySyncTarget
+    chosenByRule = 'query_topic_fallback'
+  } else if (headerSyncTarget) {
+    topic = headerTopic
+    chosenSyncTarget = headerSyncTarget
+    chosenByRule = 'header_topic_fallback'
+  } else if (normalizedAction.startsWith('payment.')) {
+    topic = 'payment'
+    chosenSyncTarget = 'payment'
+    chosenByRule = 'body_action_payment_fallback'
+  }
+
+  const chosenEndpoint =
+    chosenSyncTarget === 'payment'
+      ? '/v1/payments/{id}'
+      : chosenSyncTarget === 'authorized_payment'
+        ? '/authorized_payments/{id}'
+        : chosenSyncTarget === 'subscription'
+          ? '/preapproval/{id}'
+          : null
+
+  return {
+    topic: topic || null,
+    queryTopic: queryTopic || null,
+    bodyTopic: bodyTopic || null,
+    headerTopic: headerTopic || null,
+    bodyAction: normalizedAction || null,
+    bodyUserId,
+    normalizedUserId: Number.isFinite(normalizedUserId) ? normalizedUserId : null,
+    ownerType,
+    matchedFlow,
+    chosenSyncTarget,
+    chosenByRule,
+    chosenEndpoint,
+    topicsConflict,
+  }
+}
+
+function logBillingWebhookSyncDecision({
+  requestId = null,
+  resourceId = null,
+  decision,
+  bodyType = null,
+  bodyAction = null,
+  event = {},
+} = {}) {
+  const payload = {
+    request_id: requestId || null,
+    topic: decision?.topic || null,
+    query_topic: decision?.queryTopic || null,
+    body_topic: decision?.bodyTopic || null,
+    body_type: bodyType || null,
+    body_action: bodyAction || null,
+    resource_id: resourceId || null,
+    external_reference: resolveWebhookExternalReference(event),
+    metadata_preapproval_id: resolveWebhookMetadataPreapprovalId(event),
+    owner_type: decision?.ownerType || null,
+    matched_flow: decision?.matchedFlow || null,
+    chosen_sync_target: decision?.chosenSyncTarget || null,
+    chosen_by_rule: decision?.chosenByRule || null,
+    chosen_endpoint: decision?.chosenEndpoint || null,
+  }
+  console.info('[billing:webhook] sync_target_selected', payload)
+
+  if (decision?.topicsConflict || (decision?.topic === 'payment' && decision?.chosenSyncTarget === 'authorized_payment')) {
+    console.warn('[billing:webhook] sync_target_mismatch', {
+      ...payload,
+      mismatch_reason: decision?.topicsConflict
+        ? 'body_query_topic_conflict'
+        : 'payment_topic_routed_to_authorized_payment',
+    })
+  }
+}
+
 async function summarizeReminders(estabelecimentoId) {
   const [rows] = await pool.query(
     `SELECT reminder_kind, channel, MAX(sent_at) AS sent_at
@@ -3126,18 +3294,18 @@ router.post('/whatsapp/pix', auth, isEstabelecimento, async (req, res) => {
 
 router.post('/webhook', async (req, res) => {
   const event = req.body || {}
-  const topic = String(
-    req.query?.type ||
-    req.query?.topic ||
-    event?.type ||
-    event?.topic ||
-    req.headers['x-topic'] ||
-    ''
-  ).toLowerCase()
   const bodyUserId = event?.user_id ?? event?.userId ?? null
   const liveMode = typeof event?.live_mode === 'boolean' ? event.live_mode : null
   const bodyType = event?.type ?? event?.topic ?? null
   const bodyAction = event?.action ?? null
+  const syncDecision = resolveBillingWebhookSyncDecision({
+    req,
+    event,
+    bodyUserId,
+    bodyType,
+    bodyAction,
+  })
+  const topic = syncDecision.topic || ''
 
   const verification = verifyMercadoPagoWebhookSignature(req)
   if (!verification.ok) {
@@ -3197,11 +3365,24 @@ router.post('/webhook', async (req, res) => {
     _webhook: {
       request_id: requestId,
       topic: topic || null,
+      query_topic: syncDecision.queryTopic || null,
+      body_topic: syncDecision.bodyTopic || null,
+      chosen_sync_target: syncDecision.chosenSyncTarget || null,
+      chosen_by_rule: syncDecision.chosenByRule || null,
     },
   }
 
   try {
-    if (topic === 'payment') {
+    logBillingWebhookSyncDecision({
+      requestId,
+      resourceId,
+      decision: syncDecision,
+      bodyType,
+      bodyAction,
+      event,
+    })
+
+    if (syncDecision.chosenSyncTarget === 'payment') {
       const normalizedUserId = bodyUserId != null ? Number(bodyUserId) : null
       const hasExplicitForeignUser = Number.isFinite(normalizedUserId) && normalizedUserId !== MP_COLLECTOR_ID
 
@@ -3285,7 +3466,7 @@ router.post('/webhook', async (req, res) => {
       })
     }
 
-    if (topic === 'subscription_authorized_payment') {
+    if (syncDecision.chosenSyncTarget === 'authorized_payment') {
       const loyaltyResult = await syncClientLoyaltyAuthorizedPaymentFromGateway(resourceId, {
         bodyUserId,
         gatewayEventId: resourceId,
@@ -3318,7 +3499,7 @@ router.post('/webhook', async (req, res) => {
       return res.status(200).json({ ok: true, processed: !!result?.ok, reason: result?.reason || null })
     }
 
-    if (topic === 'subscription_preapproval') {
+    if (syncDecision.chosenSyncTarget === 'subscription') {
       const loyaltyResult = await syncClientLoyaltyCardSubscriptionFromGateway(resourceId, {
         bodyUserId,
         gatewayEventId: resourceId,
@@ -3817,6 +3998,11 @@ router.get('/renew/pix/status', auth, isEstabelecimento, async (req, res) => {
     return res.status(500).json({ error: 'renewal_status_failed' })
   }
 })
+
+export {
+  normalizeBillingWebhookTopic,
+  resolveBillingWebhookSyncDecision,
+}
 
 export default router
 
