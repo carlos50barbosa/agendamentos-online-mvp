@@ -243,8 +243,8 @@ test('authorized payment owner resolution finds loyalty seller by preapproval li
 
   assert.equal(result.ok, true)
   assert.equal(result.ownerType, 'establishment')
-  assert.equal(result.lookupBy, 'mp_preapproval_id')
-  assert.equal(result.resolutionRule, 'loyalty_subscription_linkage')
+  assert.equal(result.lookupBy, 'metadata_preapproval_id')
+  assert.equal(result.resolutionRule, 'loyalty_authorized_payment_linkage')
   assert.equal(result.estabelecimentoId, 26)
 })
 
@@ -280,7 +280,68 @@ test('authorized payment owner resolution finds loyalty seller by event linkage 
   assert.equal(result.ok, true)
   assert.equal(result.ownerType, 'establishment')
   assert.equal(result.lookupBy, 'event_linkage')
-  assert.equal(result.resolutionRule, 'loyalty_subscription_linkage')
+  assert.equal(result.resolutionRule, 'loyalty_authorized_payment_linkage')
+  assert.equal(result.estabelecimentoId, 26)
+})
+
+test('authorized payment owner resolution probes known loyalty sellers and resolves by internal subscription linkage', async () => {
+  const attemptedTokens = []
+  const result = await resolveAuthorizedPaymentWebhookOwnerContext({
+    resourceId: '7027501745',
+    event: { type: 'subscription_authorized_payment' },
+    bodyUserId: null,
+    getLoyaltySubscriptionByGatewayPaymentId: async () => null,
+    getLoyaltySubscriptionByExternalReference: async () => null,
+    getLoyaltySubscriptionByEventResourceId: async () => null,
+    getLoyaltySubscriptionByWebhookResourceId: async () => null,
+    listLoyaltyAuthorizedPaymentProbeCandidates: async () => ([
+      { estabelecimentoId: 26 },
+    ]),
+    resolveEstablishmentAccessToken: async (value) => ({
+      accessToken: Number(value) === 26 ? 'seller-token-26' : null,
+      account: { id: 9, estabelecimento_id: 26, mp_user_id: '1055436081', mp_collector_id: '1055436081' },
+    }),
+    getAuthorizedPayment: async (value, options) => {
+      attemptedTokens.push(options?.accessToken || null)
+      assert.equal(String(value), '7027501745')
+      return {
+        authorizedPayment: {
+          id: '7027501745',
+          preapprovalId: '87b2057170144ef3a7b8f13bfc5150e3',
+          externalReference: 'loyalty:sub:17:est:26:cli:158:plan:1:uuid:test',
+        },
+      }
+    },
+    getConnectedAccountByEstabelecimentoId: async (value) => (
+      Number(value) === 26
+        ? { id: 9, estabelecimento_id: 26, mp_user_id: '1055436081', mp_collector_id: '1055436081' }
+        : null
+    ),
+    getPlatformSubscriptionByGatewayPaymentId: async () => null,
+    getPlatformSubscriptionByGatewayId: async () => null,
+    getPlatformSubscriptionByExternalReference: async () => null,
+    getLoyaltySubscriptionByGatewayId: async (value) => (
+      String(value) === '87b2057170144ef3a7b8f13bfc5150e3'
+        ? {
+          id: 17,
+          estabelecimentoId: 26,
+          gatewaySubscriptionId: '87b2057170144ef3a7b8f13bfc5150e3',
+          mpPreapprovalId: '87b2057170144ef3a7b8f13bfc5150e3',
+          externalReference: 'loyalty:sub:17:est:26:cli:158:plan:1:uuid:test',
+        }
+        : null
+    ),
+  })
+
+  assert.deepEqual(attemptedTokens, ['seller-token-26'])
+  assert.equal(result.ok, true)
+  assert.equal(result.ownerType, 'establishment')
+  assert.equal(result.matchedFlow, 'loyalty')
+  assert.equal(result.tokenSource, 'establishment')
+  assert.equal(result.lookupBy, 'loyalty_subscription_linkage')
+  assert.equal(result.resolutionRule, 'loyalty_authorized_payment_linkage')
+  assert.equal(result.metadataPreapprovalId, '87b2057170144ef3a7b8f13bfc5150e3')
+  assert.equal(result.externalReference, 'loyalty:sub:17:est:26:cli:158:plan:1:uuid:test')
   assert.equal(result.estabelecimentoId, 26)
 })
 

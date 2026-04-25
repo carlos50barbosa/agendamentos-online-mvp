@@ -327,6 +327,27 @@ export async function listClientLoyaltySubscriptionsForEstablishment(estabelecim
   return rows.map(mapRow)
 }
 
+export async function listClientLoyaltyAuthorizedPaymentProbeCandidates({ db = pool, limit = 50 } = {}) {
+  const safeLimit = Math.max(1, Math.min(Number(limit || 50) || 50, 200))
+  const [rows] = await db.query(
+    `SELECT estabelecimento_id,
+            MAX(updated_at) AS last_updated_at
+       FROM client_loyalty_subscriptions
+      WHERE payment_method='credit_card'
+        AND gateway='mercadopago'
+        AND estabelecimento_id IS NOT NULL
+        AND (mp_preapproval_id IS NOT NULL OR external_reference IS NOT NULL)
+        AND status IN ('trialing', 'active', 'pending_payment', 'past_due', 'unpaid', 'canceled')
+      GROUP BY estabelecimento_id
+      ORDER BY last_updated_at DESC, estabelecimento_id DESC
+      LIMIT ${safeLimit}`
+  )
+  return rows.map((row) => ({
+    estabelecimentoId: Number(row.estabelecimento_id || 0) || null,
+    lastUpdatedAt: row.last_updated_at ? new Date(row.last_updated_at) : null,
+  })).filter((candidate) => candidate.estabelecimentoId)
+}
+
 export function pickPreferredClientLoyaltySubscription(subscriptions = [], { referenceDate = new Date() } = {}) {
   const reference = toDate(referenceDate) || new Date()
   const candidates = Array.isArray(subscriptions) ? subscriptions.filter(Boolean) : []

@@ -51,6 +51,7 @@ import {
   appendSubscriptionEvent,
 } from '../lib/subscriptions.js'
 import {
+  listClientLoyaltyAuthorizedPaymentProbeCandidates,
   getClientLoyaltySubscriptionByExternalReference,
   getClientLoyaltySubscriptionByEventResourceId,
   getClientLoyaltySubscriptionByGatewayId,
@@ -404,6 +405,7 @@ function buildBillingWebhookOwnerResolutionPayload({
   bodyType = null,
   bodyAction = null,
   bodyUserId = null,
+  event = {},
   ownerResolution = null,
 } = {}) {
   return {
@@ -414,6 +416,8 @@ function buildBillingWebhookOwnerResolutionPayload({
     resource_id: resourceId || null,
     body_user_id: bodyUserId ?? null,
     platform_user_id: MP_COLLECTOR_ID,
+    metadata_preapproval_id: ownerResolution?.metadataPreapprovalId || resolveWebhookMetadataPreapprovalId(event),
+    external_reference: ownerResolution?.externalReference || resolveWebhookExternalReference(event),
     resolved_owner_type: ownerResolution?.ownerType || null,
     resolved_estabelecimento_id: ownerResolution?.estabelecimentoId || null,
     resolved_mp_user_id: ownerResolution?.mpUserId || null,
@@ -425,6 +429,52 @@ function buildBillingWebhookOwnerResolutionPayload({
     lookup_by: ownerResolution?.lookupBy || null,
     resolution_rule: ownerResolution?.resolutionRule || null,
     resolution_reason: ownerResolution?.reason || null,
+  }
+}
+
+function normalizeOwnerResolutionFailedLookups(failedLookups = []) {
+  const list = Array.isArray(failedLookups) ? failedLookups : []
+  const normalized = []
+  const seen = new Set()
+  for (const item of list) {
+    const lookupBy = String(item?.lookupBy || '').trim().toLowerCase()
+    if (!lookupBy) continue
+    const reason = String(item?.reason || '').trim().toLowerCase() || null
+    const key = `${lookupBy}:${reason || ''}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    normalized.push({ lookupBy, reason })
+  }
+  return normalized
+}
+
+function decorateWebhookOwnerResolution(resolution, {
+  metadataPreapprovalId = null,
+  externalReference = null,
+  failedLookups = [],
+} = {}) {
+  if (!resolution) return null
+  return {
+    ...resolution,
+    metadataPreapprovalId: resolution.metadataPreapprovalId || metadataPreapprovalId || null,
+    externalReference: resolution.externalReference || externalReference || null,
+    failedLookups: normalizeOwnerResolutionFailedLookups([
+      ...(Array.isArray(resolution.failedLookups) ? resolution.failedLookups : []),
+      ...failedLookups,
+    ]),
+  }
+}
+
+function logAuthorizedPaymentLookupFailures(payload = {}, ownerResolution = null) {
+  const failedLookups = normalizeOwnerResolutionFailedLookups(ownerResolution?.failedLookups)
+  for (const failure of failedLookups) {
+    const lookupBy = String(failure.lookupBy || '').trim().toLowerCase()
+    if (!lookupBy) continue
+    console.warn(`[billing:webhook] authorized_payment_lookup_failed_by_${lookupBy}`, {
+      ...payload,
+      lookup_by: lookupBy,
+      failed_lookup_reason: failure.reason || null,
+    })
   }
 }
 
@@ -672,21 +722,26 @@ async function findAuthorizedPaymentLoyaltyLink({
   resourceId = null,
   preapprovalId = null,
   externalReference = null,
+  preapprovalLookupBy = 'metadata_preapproval_id',
   getByGatewayPaymentId = getClientLoyaltySubscriptionByGatewayPaymentId,
   getByGatewayId = getClientLoyaltySubscriptionByGatewayId,
   getByExternalReference = getClientLoyaltySubscriptionByExternalReference,
   getByEventResourceId = getClientLoyaltySubscriptionByEventResourceId,
   getByWebhookResourceId = getClientLoyaltySubscriptionByWebhookResourceId,
 } = {}) {
+  const failedLookups = []
+
   if (resourceId) {
     const subscription = await getByGatewayPaymentId(String(resourceId))
     if (subscription?.id) {
       return {
         subscription,
         lookupBy: 'authorized_payment_id',
-        resolutionRule: 'loyalty_subscription_linkage',
+        resolutionRule: 'loyalty_authorized_payment_linkage',
+        failedLookups,
       }
     }
+    failedLookups.push({ lookupBy: 'authorized_payment_id', reason: 'subscription_not_found' })
   }
 
   if (preapprovalId) {
@@ -694,10 +749,12 @@ async function findAuthorizedPaymentLoyaltyLink({
     if (subscription?.id) {
       return {
         subscription,
-        lookupBy: 'mp_preapproval_id',
-        resolutionRule: 'loyalty_subscription_linkage',
+        lookupBy: preapprovalLookupBy,
+        resolutionRule: 'loyalty_authorized_payment_linkage',
+        failedLookups,
       }
     }
+    failedLookups.push({ lookupBy: preapprovalLookupBy, reason: 'subscription_not_found' })
   }
 
   if (externalReference) {
@@ -706,9 +763,11 @@ async function findAuthorizedPaymentLoyaltyLink({
       return {
         subscription,
         lookupBy: 'external_reference',
-        resolutionRule: 'loyalty_subscription_linkage',
+        resolutionRule: 'loyalty_authorized_payment_linkage',
+        failedLookups,
       }
     }
+    failedLookups.push({ lookupBy: 'external_reference', reason: 'subscription_not_found' })
   }
 
   if (resourceId) {
@@ -720,9 +779,11 @@ async function findAuthorizedPaymentLoyaltyLink({
       return {
         subscription,
         lookupBy: 'event_linkage',
-        resolutionRule: 'loyalty_subscription_linkage',
+        resolutionRule: 'loyalty_authorized_payment_linkage',
+        failedLookups,
       }
     }
+    failedLookups.push({ lookupBy: 'event_linkage', reason: 'subscription_not_found' })
   }
 
   if (resourceId) {
@@ -731,18 +792,20 @@ async function findAuthorizedPaymentLoyaltyLink({
       return {
         subscription,
         lookupBy: 'event_linkage',
-        resolutionRule: 'loyalty_subscription_linkage',
+        resolutionRule: 'loyalty_authorized_payment_linkage',
+        failedLookups,
       }
     }
   }
 
-  return null
+  return { subscription: null, failedLookups }
 }
 
 async function findAuthorizedPaymentPlatformLink({
   resourceId = null,
   preapprovalId = null,
   externalReference = null,
+  preapprovalLookupBy = 'metadata_preapproval_id',
   getByGatewayPaymentId = getSubscriptionByGatewayPaymentId,
   getByGatewayId = getSubscriptionByGatewayId,
   getByExternalReference = getSubscriptionByExternalReference,
@@ -753,7 +816,7 @@ async function findAuthorizedPaymentPlatformLink({
       return {
         subscription,
         lookupBy: 'authorized_payment_id',
-        resolutionRule: 'platform_subscription_linkage',
+        resolutionRule: 'platform_authorized_payment_linkage',
       }
     }
   }
@@ -763,8 +826,8 @@ async function findAuthorizedPaymentPlatformLink({
     if (subscription?.id) {
       return {
         subscription,
-        lookupBy: 'mp_preapproval_id',
-        resolutionRule: 'platform_subscription_linkage',
+        lookupBy: preapprovalLookupBy,
+        resolutionRule: 'platform_authorized_payment_linkage',
       }
     }
   }
@@ -775,7 +838,158 @@ async function findAuthorizedPaymentPlatformLink({
       return {
         subscription,
         lookupBy: 'external_reference',
-        resolutionRule: 'platform_subscription_linkage',
+        resolutionRule: 'platform_authorized_payment_linkage',
+      }
+    }
+  }
+
+  return null
+}
+
+async function probeAuthorizedPaymentLoyaltyLink({
+  resourceId = null,
+  getAuthorizedPayment = getMercadoPagoAuthorizedPayment,
+  listProbeCandidates = listClientLoyaltyAuthorizedPaymentProbeCandidates,
+  resolveEstablishmentAccessToken = resolveMpAccessToken,
+  getByGatewayId = getClientLoyaltySubscriptionByGatewayId,
+  getByExternalReference = getClientLoyaltySubscriptionByExternalReference,
+} = {}) {
+  const failedLookups = []
+  if (!resourceId) {
+    return { subscription: null, failedLookups }
+  }
+
+  const candidates = await listProbeCandidates({ limit: 50 })
+  if (!Array.isArray(candidates) || !candidates.length) {
+    failedLookups.push({ lookupBy: 'loyalty_subscription_linkage', reason: 'no_probe_candidates' })
+    return { subscription: null, failedLookups }
+  }
+
+  const matches = []
+  for (const candidate of candidates) {
+    const estabelecimentoId = Number(candidate?.estabelecimentoId || 0) || null
+    if (!estabelecimentoId) continue
+
+    const mpAccess = await resolveEstablishmentAccessToken(estabelecimentoId, { allowFallback: false })
+    if (!mpAccess?.accessToken) continue
+
+    let paymentResult = null
+    try {
+      paymentResult = await getAuthorizedPayment(String(resourceId), { accessToken: mpAccess.accessToken })
+    } catch {
+      continue
+    }
+
+    const authorizedPayment = paymentResult?.authorizedPayment || null
+    const metadataPreapprovalId = String(authorizedPayment?.preapprovalId || '').trim() || null
+    const gatewayExternalReference = String(authorizedPayment?.externalReference || '').trim() || null
+    let subscription = null
+    let matchedBy = null
+
+    if (metadataPreapprovalId) {
+      subscription = await getByGatewayId(metadataPreapprovalId)
+      if (subscription?.id) matchedBy = 'metadata_preapproval_id'
+      else failedLookups.push({ lookupBy: 'metadata_preapproval_id', reason: 'subscription_not_found' })
+    }
+
+    if (!subscription && gatewayExternalReference) {
+      subscription = await getByExternalReference(gatewayExternalReference)
+      if (subscription?.id) matchedBy = 'external_reference'
+      else failedLookups.push({ lookupBy: 'external_reference', reason: 'subscription_not_found' })
+    }
+
+    if (!subscription) {
+      failedLookups.push({
+        lookupBy: 'loyalty_subscription_linkage',
+        reason: metadataPreapprovalId || gatewayExternalReference
+          ? 'probe_linkage_not_found'
+          : 'probe_payload_missing_linkage',
+      })
+      continue
+    }
+
+    matches.push({
+      subscription,
+      sellerAccount: mpAccess.account || null,
+      accessToken: mpAccess.accessToken,
+      metadataPreapprovalId,
+      externalReference: gatewayExternalReference,
+      matchedBy,
+    })
+  }
+
+  if (!matches.length) {
+    failedLookups.push({ lookupBy: 'loyalty_subscription_linkage', reason: 'authorized_payment_not_accessible_with_known_seller_tokens' })
+    return { subscription: null, failedLookups }
+  }
+
+  const uniqueMatches = matches.filter((match, index, list) => (
+    list.findIndex((item) => (
+      Number(item.subscription?.estabelecimentoId || 0) === Number(match.subscription?.estabelecimentoId || 0) &&
+      Number(item.subscription?.id || 0) === Number(match.subscription?.id || 0)
+    )) === index
+  ))
+
+  if (uniqueMatches.length > 1) {
+    return {
+      conflict: {
+        loyalty_subscription_ids: uniqueMatches.map((match) => Number(match.subscription?.id || 0)).filter(Boolean),
+        loyalty_estabelecimento_ids: uniqueMatches.map((match) => Number(match.subscription?.estabelecimentoId || 0)).filter(Boolean),
+      },
+      failedLookups,
+    }
+  }
+
+  return {
+    ...uniqueMatches[0],
+    lookupBy: 'loyalty_subscription_linkage',
+    resolutionRule: 'loyalty_authorized_payment_linkage',
+    failedLookups,
+  }
+}
+
+async function probeAuthorizedPaymentPlatformLink({
+  resourceId = null,
+  platformAccessToken = config.billing?.mercadopago?.accessToken || null,
+  getAuthorizedPayment = getMercadoPagoAuthorizedPayment,
+  getByGatewayId = getSubscriptionByGatewayId,
+  getByExternalReference = getSubscriptionByExternalReference,
+} = {}) {
+  if (!resourceId || !platformAccessToken) return null
+
+  let paymentResult = null
+  try {
+    paymentResult = await getAuthorizedPayment(String(resourceId), { accessToken: platformAccessToken })
+  } catch {
+    return null
+  }
+
+  const authorizedPayment = paymentResult?.authorizedPayment || null
+  const metadataPreapprovalId = String(authorizedPayment?.preapprovalId || '').trim() || null
+  const gatewayExternalReference = String(authorizedPayment?.externalReference || '').trim() || null
+
+  if (metadataPreapprovalId) {
+    const subscription = await getByGatewayId(metadataPreapprovalId)
+    if (subscription?.id) {
+      return {
+        subscription,
+        lookupBy: 'metadata_preapproval_id',
+        resolutionRule: 'platform_authorized_payment_linkage',
+        metadataPreapprovalId,
+        externalReference: gatewayExternalReference,
+      }
+    }
+  }
+
+  if (gatewayExternalReference) {
+    const subscription = await getByExternalReference(gatewayExternalReference)
+    if (subscription?.id) {
+      return {
+        subscription,
+        lookupBy: 'external_reference',
+        resolutionRule: 'platform_authorized_payment_linkage',
+        metadataPreapprovalId,
+        externalReference: gatewayExternalReference,
       }
     }
   }
@@ -902,18 +1116,20 @@ async function resolveAuthorizedPaymentWebhookOwnerContext({
   getConnectedAccountBySellerIdentifier = getMpAccountBySellerIdentifier,
   getConnectedAccountByEstabelecimentoId = getMpAccountByEstabelecimentoId,
   resolveEstablishmentAccessToken = resolveMpAccessToken,
+  getAuthorizedPayment = getMercadoPagoAuthorizedPayment,
   getLoyaltySubscriptionByGatewayPaymentId = getClientLoyaltySubscriptionByGatewayPaymentId,
   getLoyaltySubscriptionByGatewayId = getClientLoyaltySubscriptionByGatewayId,
   getLoyaltySubscriptionByExternalReference = getClientLoyaltySubscriptionByExternalReference,
   getLoyaltySubscriptionByEventResourceId = getClientLoyaltySubscriptionByEventResourceId,
   getLoyaltySubscriptionByWebhookResourceId = getClientLoyaltySubscriptionByWebhookResourceId,
+  listLoyaltyAuthorizedPaymentProbeCandidates = listClientLoyaltyAuthorizedPaymentProbeCandidates,
   getPlatformSubscriptionByGatewayPaymentId = getSubscriptionByGatewayPaymentId,
   getPlatformSubscriptionByGatewayId = getSubscriptionByGatewayId,
   getPlatformSubscriptionByExternalReference = getSubscriptionByExternalReference,
   platformAccessToken = config.billing?.mercadopago?.accessToken || null,
 } = {}) {
   const normalizedUserId = normalizeWebhookNumericUserId(bodyUserId)
-  const preapprovalId = resolveWebhookMetadataPreapprovalId(event)
+  const metadataPreapprovalId = resolveWebhookMetadataPreapprovalId(event)
   const externalReference = resolveWebhookExternalReference(event)
   const bodySellerAccount =
     normalizedUserId && normalizedUserId !== MP_COLLECTOR_ID
@@ -921,7 +1137,7 @@ async function resolveAuthorizedPaymentWebhookOwnerContext({
       : null
 
   if (bodySellerAccount?.estabelecimento_id || bodySellerAccount?.estabelecimentoId) {
-    return finalizeSellerWebhookOwnerResolution({
+    return decorateWebhookOwnerResolution(await finalizeSellerWebhookOwnerResolution({
       sellerAccount: bodySellerAccount,
       normalizedUserId,
       matchedFlow: 'loyalty',
@@ -929,13 +1145,17 @@ async function resolveAuthorizedPaymentWebhookOwnerContext({
       resolutionRule: 'connected_seller_user',
       unresolvedReason: 'unresolved_owner_for_authorized_payment',
       resolveEstablishmentAccessToken,
+    }), {
+      metadataPreapprovalId,
+      externalReference,
     })
   }
 
   const loyaltyLink = await findAuthorizedPaymentLoyaltyLink({
     resourceId,
-    preapprovalId,
+    preapprovalId: metadataPreapprovalId,
     externalReference,
+    preapprovalLookupBy: 'metadata_preapproval_id',
     getByGatewayPaymentId: getLoyaltySubscriptionByGatewayPaymentId,
     getByGatewayId: getLoyaltySubscriptionByGatewayId,
     getByExternalReference: getLoyaltySubscriptionByExternalReference,
@@ -944,28 +1164,62 @@ async function resolveAuthorizedPaymentWebhookOwnerContext({
   })
   const platformLink = await findAuthorizedPaymentPlatformLink({
     resourceId,
-    preapprovalId,
+    preapprovalId: metadataPreapprovalId,
     externalReference,
+    preapprovalLookupBy: 'metadata_preapproval_id',
     getByGatewayPaymentId: getPlatformSubscriptionByGatewayPaymentId,
     getByGatewayId: getPlatformSubscriptionByGatewayId,
     getByExternalReference: getPlatformSubscriptionByExternalReference,
   })
+  const loyaltyProbe = !loyaltyLink?.subscription?.id && normalizedUserId !== MP_COLLECTOR_ID
+    ? await probeAuthorizedPaymentLoyaltyLink({
+      resourceId,
+      getAuthorizedPayment,
+      listProbeCandidates: listLoyaltyAuthorizedPaymentProbeCandidates,
+      resolveEstablishmentAccessToken,
+      getByGatewayId: getLoyaltySubscriptionByGatewayId,
+      getByExternalReference: getLoyaltySubscriptionByExternalReference,
+    })
+    : null
+  const combinedFailedLookups = normalizeOwnerResolutionFailedLookups([
+    ...(Array.isArray(loyaltyLink?.failedLookups) ? loyaltyLink.failedLookups : []),
+    ...(Array.isArray(loyaltyProbe?.failedLookups) ? loyaltyProbe.failedLookups : []),
+  ])
 
   if (loyaltyLink?.subscription?.id && platformLink?.subscription?.id) {
-    return buildConflictingWebhookOwnerResolution({
+    return decorateWebhookOwnerResolution(buildConflictingWebhookOwnerResolution({
       normalizedUserId,
       lookupBy: loyaltyLink.lookupBy || platformLink.lookupBy || 'event_linkage',
       conflict: {
         loyalty_subscription_id: loyaltyLink.subscription.id,
         platform_subscription_id: platformLink.subscription.id,
       },
+    }), {
+      metadataPreapprovalId,
+      externalReference,
+      failedLookups: combinedFailedLookups,
+    })
+  }
+
+  if (loyaltyProbe?.subscription?.id && platformLink?.subscription?.id) {
+    return decorateWebhookOwnerResolution(buildConflictingWebhookOwnerResolution({
+      normalizedUserId,
+      lookupBy: loyaltyProbe.lookupBy || platformLink.lookupBy || 'event_linkage',
+      conflict: {
+        loyalty_subscription_id: loyaltyProbe.subscription.id,
+        platform_subscription_id: platformLink.subscription.id,
+      },
+    }), {
+      metadataPreapprovalId: loyaltyProbe.metadataPreapprovalId || metadataPreapprovalId,
+      externalReference: loyaltyProbe.externalReference || externalReference,
+      failedLookups: combinedFailedLookups,
     })
   }
 
   if (loyaltyLink?.subscription?.estabelecimentoId) {
     const linkedEstabelecimentoId = Number(loyaltyLink.subscription.estabelecimentoId || 0) || null
     const sellerAccount = await getConnectedAccountByEstabelecimentoId(linkedEstabelecimentoId)
-    return finalizeSellerWebhookOwnerResolution({
+    return decorateWebhookOwnerResolution(await finalizeSellerWebhookOwnerResolution({
       sellerAccount: sellerAccount || { estabelecimento_id: linkedEstabelecimentoId },
       normalizedUserId,
       matchedFlow: 'loyalty',
@@ -973,36 +1227,105 @@ async function resolveAuthorizedPaymentWebhookOwnerContext({
       resolutionRule: loyaltyLink.resolutionRule,
       unresolvedReason: 'unresolved_owner_for_authorized_payment',
       resolveEstablishmentAccessToken,
+    }), {
+      metadataPreapprovalId,
+      externalReference,
+      failedLookups: combinedFailedLookups,
+    })
+  }
+
+  if (loyaltyProbe?.conflict) {
+    return decorateWebhookOwnerResolution(buildConflictingWebhookOwnerResolution({
+      normalizedUserId,
+      lookupBy: 'loyalty_subscription_linkage',
+      conflict: loyaltyProbe.conflict,
+    }), {
+      metadataPreapprovalId: loyaltyProbe.metadataPreapprovalId || metadataPreapprovalId,
+      externalReference: loyaltyProbe.externalReference || externalReference,
+      failedLookups: combinedFailedLookups,
+    })
+  }
+
+  if (loyaltyProbe?.subscription?.estabelecimentoId) {
+    const linkedEstabelecimentoId = Number(loyaltyProbe.subscription.estabelecimentoId || 0) || null
+    const sellerAccount =
+      loyaltyProbe.sellerAccount ||
+      await getConnectedAccountByEstabelecimentoId(linkedEstabelecimentoId)
+    return decorateWebhookOwnerResolution(await finalizeSellerWebhookOwnerResolution({
+      sellerAccount: sellerAccount || { estabelecimento_id: linkedEstabelecimentoId },
+      normalizedUserId,
+      matchedFlow: 'loyalty',
+      lookupBy: loyaltyProbe.lookupBy,
+      resolutionRule: loyaltyProbe.resolutionRule,
+      unresolvedReason: 'unresolved_owner_for_authorized_payment',
+      resolveEstablishmentAccessToken,
+    }), {
+      metadataPreapprovalId: loyaltyProbe.metadataPreapprovalId || metadataPreapprovalId,
+      externalReference: loyaltyProbe.externalReference || externalReference,
+      failedLookups: combinedFailedLookups,
     })
   }
 
   if (normalizedUserId === MP_COLLECTOR_ID) {
-    return buildPlatformWebhookOwnerResolution({
+    return decorateWebhookOwnerResolution(buildPlatformWebhookOwnerResolution({
       normalizedUserId,
       lookupBy: 'body_user_id',
       resolutionRule: 'platform_user_id',
       platformAccessToken,
       unresolvedReason: 'unresolved_owner_for_authorized_payment',
+    }), {
+      metadataPreapprovalId,
+      externalReference,
+      failedLookups: combinedFailedLookups,
     })
   }
 
   if (platformLink?.subscription?.id) {
-    return buildPlatformWebhookOwnerResolution({
+    return decorateWebhookOwnerResolution(buildPlatformWebhookOwnerResolution({
       normalizedUserId,
       lookupBy: platformLink.lookupBy,
       resolutionRule: platformLink.resolutionRule,
       platformAccessToken,
       unresolvedReason: 'unresolved_owner_for_authorized_payment',
+    }), {
+      metadataPreapprovalId,
+      externalReference,
+      failedLookups: combinedFailedLookups,
     })
   }
 
-  return buildUnresolvedWebhookOwnerResolution({
+  const platformProbe = await probeAuthorizedPaymentPlatformLink({
+    resourceId,
+    platformAccessToken,
+    getAuthorizedPayment,
+    getByGatewayId: getPlatformSubscriptionByGatewayId,
+    getByExternalReference: getPlatformSubscriptionByExternalReference,
+  })
+  if (platformProbe?.subscription?.id) {
+    return decorateWebhookOwnerResolution(buildPlatformWebhookOwnerResolution({
+      normalizedUserId,
+      lookupBy: platformProbe.lookupBy,
+      resolutionRule: platformProbe.resolutionRule,
+      platformAccessToken,
+      unresolvedReason: 'unresolved_owner_for_authorized_payment',
+    }), {
+      metadataPreapprovalId: platformProbe.metadataPreapprovalId || metadataPreapprovalId,
+      externalReference: platformProbe.externalReference || externalReference,
+      failedLookups: combinedFailedLookups,
+    })
+  }
+
+  return decorateWebhookOwnerResolution(buildUnresolvedWebhookOwnerResolution({
     normalizedUserId,
     lookupBy: normalizedUserId && normalizedUserId !== MP_COLLECTOR_ID ? 'body_user_id' : null,
     resolutionRule: normalizedUserId && normalizedUserId !== MP_COLLECTOR_ID
       ? 'connected_seller_user'
       : 'no_confident_owner',
     reason: 'unresolved_owner_for_authorized_payment',
+  }), {
+    metadataPreapprovalId: loyaltyProbe?.metadataPreapprovalId || metadataPreapprovalId,
+    externalReference: loyaltyProbe?.externalReference || externalReference,
+    failedLookups: combinedFailedLookups,
   })
 }
 
@@ -4509,11 +4832,13 @@ router.post('/webhook', async (req, res) => {
         bodyType,
         bodyAction,
         bodyUserId,
+        event: syncEvent,
         ownerResolution,
       })
       console.info('[billing:webhook] owner_resolution_authorized_payment', ownerResolutionPayload)
 
       if (authorizedPaymentAction.kind === 'ignored_unresolved_authorized_payment_owner') {
+        logAuthorizedPaymentLookupFailures(ownerResolutionPayload, ownerResolution)
         if (ownerResolution?.reason === 'seller_account_found_but_no_valid_token') {
           console.warn('[billing:webhook] seller_account_found_but_no_valid_token', ownerResolutionPayload)
         }
@@ -4576,6 +4901,7 @@ router.post('/webhook', async (req, res) => {
         bodyType,
         bodyAction,
         bodyUserId,
+        event: syncEvent,
         ownerResolution,
       })
       console.info('[billing:webhook] owner_resolution_preapproval', ownerResolutionPayload)
