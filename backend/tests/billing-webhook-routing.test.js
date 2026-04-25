@@ -11,12 +11,16 @@ const {
   normalizeBillingWebhookTopic,
   resolveAuthorizedPaymentWebhookOwnerContext,
   resolveBillingAuthorizedPaymentWebhookAction,
+  resolveConnectedSellerPaymentFlowMatch,
   resolveBillingSubscriptionWebhookAction,
   resolveBillingWebhookBodyUserId,
   resolveBillingPaymentWebhookAction,
   resolveBillingWebhookSyncDecision,
   resolveSubscriptionWebhookOwnerContext,
 } = await import('../src/routes/billing.js')
+const {
+  resolveClientLoyaltyPaymentMatch,
+} = await import('../src/lib/client_loyalty_billing.js')
 
 test('normalizeBillingWebhookTopic canonicalizes subscription aliases', () => {
   assert.equal(normalizeBillingWebhookTopic('payment'), 'payment')
@@ -121,6 +125,18 @@ test('billing payment webhook accepts connected seller deposits', async () => {
     syncDecision: { topic: 'payment', chosenSyncTarget: 'payment', chosenByRule: 'body_topic' },
     bodyUserId: 1055436081,
     resolveConnectedAccount: async () => ({ id: 9, estabelecimento_id: 26, mp_user_id: '1055436081' }),
+    sellerPaymentFlowMatcher: async () => ({
+      paymentFetched: true,
+      matchedFlow: 'deposit',
+      matchRule: 'metadata_type_deposit',
+      depositMatch: true,
+      depositReason: 'metadata_type_deposit',
+      loyaltyMatch: false,
+      loyaltyReason: 'not_loyalty_payment',
+      payment: { id: '155488227017' },
+      accessToken: 'seller-token',
+      sellerAccount: { id: 9, estabelecimento_id: 26, mp_user_id: '1055436081' },
+    }),
     depositHandler: async () => ({ handled: true, status: 'approved' }),
     loyaltyPaymentHandler: async () => {
       loyaltyCalls += 1
@@ -144,8 +160,35 @@ test('billing payment webhook accepts connected seller loyalty payments after de
     syncDecision: { topic: 'payment', chosenSyncTarget: 'payment', chosenByRule: 'body_topic' },
     bodyUserId: 1055436081,
     resolveConnectedAccount: async () => ({ id: 9, estabelecimento_id: 26, mp_user_id: '1055436081' }),
+    sellerPaymentFlowMatcher: async () => ({
+      paymentFetched: true,
+      accessToken: 'seller-token',
+      sellerAccount: { id: 9, estabelecimento_id: 26, mp_user_id: '1055436081' },
+      payment: { id: '155488227017', external_reference: 'loyalty:sub:17:est:26:cli:158:plan:1:uuid:test' },
+      paymentStatus: 'approved',
+      operationType: 'recurring_payment',
+      externalReference: 'loyalty:sub:17:est:26:cli:158:plan:1:uuid:test',
+      metadataPreapprovalId: 'preapp_456',
+      poiType: 'SUBSCRIPTIONS',
+      subscriptionId: 'preapp_456',
+      depositMatch: false,
+      depositReason: 'not_deposit',
+      loyaltyMatch: true,
+      loyaltyReason: null,
+      matchedFlow: 'loyalty',
+      matchRule: 'recurring_payment_subscription_linkage',
+      loyaltyMatchContext: {
+        matched: true,
+        matchRule: 'recurring_payment_subscription_linkage',
+      },
+    }),
     depositHandler: async () => ({ ok: false, reason: 'not_deposit' }),
-    loyaltyPaymentHandler: async () => ({ ok: true, handled: true, status: 'active', reason: null }),
+    loyaltyPaymentHandler: async (_paymentId, options) => {
+      assert.equal(options.accessToken, 'seller-token')
+      assert.equal(options.prefetchedPayment?.id, '155488227017')
+      assert.equal(options.paymentMatch?.matchRule, 'recurring_payment_subscription_linkage')
+      return { ok: true, handled: true, status: 'active', reason: null }
+    },
   })
 
   assert.equal(result.kind, 'seller_loyalty')
@@ -178,8 +221,26 @@ test('billing payment webhook keeps known seller users blocked when no internal 
     syncDecision: { topic: 'payment', chosenSyncTarget: 'payment', chosenByRule: 'body_topic' },
     bodyUserId: 1055436081,
     resolveConnectedAccount: async () => ({ id: 9, estabelecimento_id: 26, mp_user_id: '1055436081' }),
-    depositHandler: async () => ({ ok: false, reason: 'not_deposit' }),
-    loyaltyPaymentHandler: async () => ({ ok: false, reason: 'subscription_not_found' }),
+    sellerPaymentFlowMatcher: async () => ({
+      paymentFetched: true,
+      paymentStatus: 'rejected',
+      operationType: 'regular_payment',
+      externalReference: null,
+      metadataPreapprovalId: null,
+      poiType: null,
+      subscriptionId: null,
+      depositMatch: false,
+      depositReason: 'not_deposit',
+      loyaltyMatch: false,
+      loyaltyReason: 'not_loyalty_payment',
+      matchedFlow: null,
+      matchRule: null,
+      loyaltyMatchContext: {
+        matched: false,
+        reason: 'not_loyalty_payment',
+        failureCodes: ['missing_external_reference', 'missing_preapproval_linkage'],
+      },
+    }),
   })
 
   assert.equal(result.kind, 'ignored_foreign_user_unmatched_flow')
@@ -188,7 +249,134 @@ test('billing payment webhook keeps known seller users blocked when no internal 
   assert.equal(result.responseBody.ignored, true)
   assert.equal(result.responseBody.reason, 'unmatched_connected_seller_flow')
   assert.equal(result.depositResult?.reason, 'not_deposit')
-  assert.equal(result.loyaltyResult?.reason, 'subscription_not_found')
+  assert.equal(result.loyaltyResult?.reason, 'not_loyalty_payment')
+})
+
+test('billing payment webhook blocks conflicting seller flow matches', async () => {
+  const result = await resolveBillingPaymentWebhookAction({
+    resourceId: '155337500782',
+    syncEvent: {},
+    syncDecision: { topic: 'payment', chosenSyncTarget: 'payment', chosenByRule: 'body_topic' },
+    bodyUserId: 1055436081,
+    resolveConnectedAccount: async () => ({ id: 9, estabelecimento_id: 26, mp_user_id: '1055436081' }),
+    sellerPaymentFlowMatcher: async () => ({
+      paymentFetched: true,
+      depositMatch: true,
+      depositReason: 'metadata_type_deposit',
+      loyaltyMatch: true,
+      loyaltyReason: null,
+      matchedFlow: null,
+      matchRule: 'conflicting_connected_seller_flow',
+      conflict: true,
+    }),
+  })
+
+  assert.equal(result.kind, 'conflicting_connected_seller_flow')
+  assert.equal(result.ownerType, 'establishment')
+  assert.equal(result.responseBody.ignored, true)
+  assert.equal(result.responseBody.reason, 'conflicting_connected_seller_flow')
+})
+
+test('connected seller payment flow match fetches payment.created and classifies loyalty safely', async () => {
+  const result = await resolveConnectedSellerPaymentFlowMatch({
+    resourceId: '155337500782',
+    connectedAccount: { id: 9, estabelecimento_id: 26, mp_user_id: '1055436081' },
+    bodyUserId: 1055436081,
+    resolveEstablishmentAccessToken: async () => ({
+      accessToken: 'seller-token',
+      account: { id: 9, estabelecimento_id: 26, mp_user_id: '1055436081' },
+    }),
+    fetchPayment: async (_paymentId, options) => {
+      assert.equal(options.accessToken, 'seller-token')
+      return {
+        id: '155337500782',
+        status: 'rejected',
+        operation_type: 'recurring_payment',
+        external_reference: 'loyalty:sub:17:est:26:cli:158:plan:1:uuid:test',
+        metadata: { preapproval_id: '87b2057170144ef3a7b8f13bfc5150e3' },
+        point_of_interaction: {
+          type: 'SUBSCRIPTIONS',
+          transaction_data: { subscription_id: '87b2057170144ef3a7b8f13bfc5150e3' },
+        },
+      }
+    },
+    loyaltyPaymentMatcher: (payment, options) => resolveClientLoyaltyPaymentMatch(payment, {
+      gatewayEventId: options?.gatewayEventId,
+      getSubscriptionByGatewayId: async (value) => (
+        String(value) === '87b2057170144ef3a7b8f13bfc5150e3'
+          ? { id: 17, estabelecimentoId: 26, gatewaySubscriptionId: '87b2057170144ef3a7b8f13bfc5150e3' }
+          : null
+      ),
+      getSubscriptionByExternalReference: async (value) => (
+        String(value).startsWith('loyalty:sub:17:')
+          ? { id: 17, estabelecimentoId: 26, externalReference: value }
+          : null
+      ),
+    }),
+  })
+
+  assert.equal(result.paymentFetched, true)
+  assert.equal(result.depositMatch, false)
+  assert.equal(result.loyaltyMatch, true)
+  assert.equal(result.matchedFlow, 'loyalty')
+  assert.equal(result.matchRule, 'recurring_payment_subscription_linkage')
+  assert.equal(result.metadataPreapprovalId, '87b2057170144ef3a7b8f13bfc5150e3')
+  assert.equal(result.externalReference, 'loyalty:sub:17:est:26:cli:158:plan:1:uuid:test')
+  assert.equal(result.poiType, 'SUBSCRIPTIONS')
+})
+
+test('client loyalty payment matcher recognizes recurring seller payments by subscription linkage', async () => {
+  const result = await resolveClientLoyaltyPaymentMatch({
+    id: '155337500782',
+    status: 'rejected',
+    operation_type: 'recurring_payment',
+    external_reference: 'loyalty:sub:17:est:26:cli:158:plan:1:uuid:test',
+    metadata: { preapproval_id: '87b2057170144ef3a7b8f13bfc5150e3' },
+    point_of_interaction: {
+      type: 'SUBSCRIPTIONS',
+      transaction_data: { subscription_id: '87b2057170144ef3a7b8f13bfc5150e3' },
+    },
+  }, {
+    gatewayEventId: '155337500782',
+    getSubscriptionByGatewayId: async (value) => (
+      String(value) === '87b2057170144ef3a7b8f13bfc5150e3'
+        ? { id: 17, estabelecimentoId: 26, gatewaySubscriptionId: '87b2057170144ef3a7b8f13bfc5150e3' }
+        : null
+    ),
+    getSubscriptionByExternalReference: async () => null,
+    getSubscriptionByGatewayPaymentId: async () => null,
+    getSubscriptionByEventResourceId: async () => null,
+    getSubscriptionByWebhookResourceId: async () => null,
+  })
+
+  assert.equal(result.matched, true)
+  assert.equal(result.matchRule, 'recurring_payment_subscription_linkage')
+  assert.equal(result.lookupBy, 'mp_preapproval_id')
+  assert.equal(result.localSubscription?.estabelecimentoId, 26)
+})
+
+test('client loyalty payment matcher keeps unknown seller payments unmatched', async () => {
+  const result = await resolveClientLoyaltyPaymentMatch({
+    id: '155337500782',
+    status: 'approved',
+    operation_type: 'regular_payment',
+    metadata: {},
+    point_of_interaction: {
+      type: 'CHECKOUT',
+      transaction_data: {},
+    },
+  }, {
+    gatewayEventId: '155337500782',
+    getSubscriptionByGatewayId: async () => null,
+    getSubscriptionByExternalReference: async () => null,
+    getSubscriptionByGatewayPaymentId: async () => null,
+    getSubscriptionByEventResourceId: async () => null,
+    getSubscriptionByWebhookResourceId: async () => null,
+  })
+
+  assert.equal(result.matched, false)
+  assert.equal(result.reason, 'not_loyalty_payment')
+  assert.deepEqual(result.failureCodes, ['missing_external_reference', 'missing_preapproval_linkage'])
 })
 
 test('authorized payment owner resolution prefers connected seller users with valid token', async () => {

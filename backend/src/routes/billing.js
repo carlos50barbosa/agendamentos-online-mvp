@@ -96,6 +96,7 @@ import {
   canRunRecoveryCharge,
 } from '../lib/subscription_charge_policy.js'
 import {
+  resolveClientLoyaltyPaymentMatch,
   syncClientLoyaltyPaymentFromGateway,
   syncClientLoyaltyAuthorizedPaymentFromGateway,
   syncClientLoyaltyCardSubscriptionFromGateway,
@@ -395,6 +396,60 @@ function buildBillingWebhookSellerLogPayload({
     reason: reason || null,
     deposit_reason: depositReason || null,
     loyalty_reason: loyaltyReason || null,
+  }
+}
+
+function buildBillingWebhookSellerFlowMatchPayload({
+  requestId = null,
+  resourceId = null,
+  syncDecision,
+  bodyType = null,
+  bodyAction = null,
+  bodyUserId = null,
+  connectedAccount = null,
+  matchedFlow = null,
+  flowMatch = null,
+} = {}) {
+  const estabelecimentoId = connectedAccount?.estabelecimento_id || connectedAccount?.estabelecimentoId || null
+  return {
+    request_id: requestId || null,
+    resource_id: resourceId || null,
+    topic: syncDecision?.topic || null,
+    body_type: bodyType || null,
+    body_action: bodyAction || null,
+    body_user_id: bodyUserId ?? null,
+    estabelecimento_id: estabelecimentoId,
+    owner_type: estabelecimentoId ? 'establishment' : null,
+    payment_status: flowMatch?.paymentStatus || null,
+    operation_type: flowMatch?.operationType || null,
+    external_reference: flowMatch?.externalReference || null,
+    metadata_preapproval_id: flowMatch?.metadataPreapprovalId || null,
+    poi_type: flowMatch?.poiType || null,
+    subscription_id: flowMatch?.subscriptionId || null,
+    deposit_match: flowMatch?.depositMatch === true,
+    loyalty_match: flowMatch?.loyaltyMatch === true,
+    matched_flow: matchedFlow || flowMatch?.matchedFlow || null,
+    match_rule: flowMatch?.matchRule || null,
+    deposit_reason: flowMatch?.depositReason || null,
+    loyalty_reason: flowMatch?.loyaltyReason || null,
+  }
+}
+
+function normalizeSellerPaymentMatchFailureCodes(failureCodes = []) {
+  const normalized = []
+  const seen = new Set()
+  for (const item of Array.isArray(failureCodes) ? failureCodes : []) {
+    const value = String(item || '').trim().toLowerCase()
+    if (!value || seen.has(value)) continue
+    seen.add(value)
+    normalized.push(value)
+  }
+  return normalized
+}
+
+function logSellerPaymentMatchFailures(payload = {}, flowMatch = null) {
+  for (const code of normalizeSellerPaymentMatchFailureCodes(flowMatch?.loyaltyMatchContext?.failureCodes || [])) {
+    console.warn(`[billing:webhook] loyalty_payment_match_failed_${code}`, payload)
   }
 }
 
@@ -1461,6 +1516,104 @@ async function resolveBillingSubscriptionWebhookAction({
   }
 }
 
+async function resolveConnectedSellerPaymentFlowMatch({
+  resourceId,
+  connectedAccount = null,
+  bodyUserId = null,
+  fetchPayment = fetchMercadoPagoPayment,
+  resolveEstablishmentAccessToken = resolveMpAccessToken,
+  loyaltyPaymentMatcher = resolveClientLoyaltyPaymentMatch,
+} = {}) {
+  const estabelecimentoId = Number(
+    connectedAccount?.estabelecimento_id || connectedAccount?.estabelecimentoId || 0
+  ) || null
+  if (!estabelecimentoId) {
+    return {
+      paymentFetched: false,
+      depositMatch: false,
+      depositReason: 'estabelecimento_not_found',
+      loyaltyMatch: false,
+      loyaltyReason: 'estabelecimento_not_found',
+      matchedFlow: null,
+      matchRule: null,
+    }
+  }
+
+  const mpAccess = await resolveEstablishmentAccessToken(estabelecimentoId, { allowFallback: false })
+  const accessToken = mpAccess?.accessToken || null
+  const sellerAccount = mpAccess?.account || connectedAccount
+  if (!accessToken) {
+    return {
+      paymentFetched: false,
+      accessToken: null,
+      sellerAccount,
+      depositMatch: false,
+      depositReason: 'mp_token_missing',
+      loyaltyMatch: false,
+      loyaltyReason: 'mp_token_missing',
+      matchedFlow: null,
+      matchRule: null,
+    }
+  }
+
+  let payment = null
+  try {
+    payment = await fetchPayment(resourceId, { accessToken })
+  } catch (error) {
+    return {
+      paymentFetched: false,
+      accessToken,
+      sellerAccount,
+      fetchError: error?.message || 'mp_fetch_failed',
+      depositMatch: false,
+      depositReason: 'mp_fetch_failed',
+      loyaltyMatch: false,
+      loyaltyReason: 'mp_fetch_failed',
+      matchedFlow: null,
+      matchRule: null,
+    }
+  }
+
+  const metadataType = String(payment?.metadata?.type || payment?.metadata?.kind || '').toLowerCase()
+  const externalReference = String(payment?.external_reference || '').trim() || null
+  const depositMatch = metadataType === 'deposit' || /^dep:ag:\d+:pay:\d+:est:\d+/i.test(externalReference || '')
+  const depositReason = depositMatch
+    ? (metadataType === 'deposit' ? 'metadata_type_deposit' : 'external_reference_deposit')
+    : 'not_deposit'
+  const loyaltyMatchContext = await loyaltyPaymentMatcher(payment, {
+    gatewayEventId: resourceId,
+  })
+  const loyaltyMatch = Boolean(loyaltyMatchContext?.matched)
+  const conflict = depositMatch && loyaltyMatch
+  const matchedFlow = conflict ? null : (depositMatch ? 'deposit' : (loyaltyMatch ? 'loyalty' : null))
+  const matchRule = conflict
+    ? 'conflicting_connected_seller_flow'
+    : (depositMatch ? depositReason : (loyaltyMatchContext?.matchRule || null))
+
+  return {
+    paymentFetched: true,
+    accessToken,
+    sellerAccount,
+    payment,
+    paymentStatus: String(payment?.status || '').trim().toLowerCase() || null,
+    operationType: String(payment?.operation_type || payment?.operationType || '').trim().toLowerCase() || null,
+    externalReference,
+    metadataPreapprovalId: loyaltyMatchContext?.preapprovalId || null,
+    poiType: String(payment?.point_of_interaction?.type || '').trim().toUpperCase() || null,
+    subscriptionId: loyaltyMatchContext?.subscriptionId || null,
+    depositMatch,
+    depositReason,
+    loyaltyMatch,
+    loyaltyReason: loyaltyMatchContext?.reason || (loyaltyMatch ? null : 'not_loyalty_payment'),
+    matchedFlow,
+    matchRule,
+    conflict,
+    loyaltyMatchContext,
+    estabelecimentoId,
+    bodyUserId,
+  }
+}
+
 async function resolveBillingPaymentWebhookAction({
   resourceId,
   syncEvent = {},
@@ -1469,6 +1622,7 @@ async function resolveBillingPaymentWebhookAction({
   resolveConnectedAccount = getMpAccountBySellerIdentifier,
   depositHandler = handleDepositPaymentWebhook,
   loyaltyPaymentHandler = syncClientLoyaltyPaymentFromGateway,
+  sellerPaymentFlowMatcher = resolveConnectedSellerPaymentFlowMatch,
   recoveryHandler = syncCardRecoveryPaymentFromGateway,
   platformPaymentHandler = syncMercadoPagoPayment,
 } = {}) {
@@ -1492,6 +1646,147 @@ async function resolveBillingPaymentWebhookAction({
       }
     }
 
+    const flowMatch = await sellerPaymentFlowMatcher({
+      resourceId,
+      connectedAccount,
+      bodyUserId: effectiveBodyUserId,
+    })
+
+    if (flowMatch?.conflict) {
+      return {
+        kind: 'conflicting_connected_seller_flow',
+        ownerType: 'establishment',
+        matchedFlow: null,
+        connectedAccount,
+        flowMatch,
+        responseBody: {
+          ok: true,
+          ignored: true,
+          reason: 'conflicting_connected_seller_flow',
+        },
+      }
+    }
+
+    if (flowMatch?.paymentFetched && flowMatch?.matchedFlow === 'deposit') {
+      const depositResult = await depositHandler({
+        resourceId,
+        event: syncEvent,
+        bodyUserId: effectiveBodyUserId,
+        ownerAccount: flowMatch?.sellerAccount || connectedAccount,
+        prefetchedPayment: flowMatch.payment,
+        accessToken: flowMatch.accessToken,
+      })
+      if (depositResult?.handled) {
+        return {
+          kind: 'seller_deposit',
+          ownerType: 'establishment',
+          matchedFlow: 'deposit',
+          connectedAccount,
+          flowMatch,
+          depositResult,
+          responseBody: {
+            ok: true,
+            processed: true,
+            deposit: true,
+            status: depositResult.status || null,
+          },
+        }
+      }
+      if (depositResult?.ok && depositResult?.status) {
+        return {
+          kind: 'seller_deposit',
+          ownerType: 'establishment',
+          matchedFlow: 'deposit',
+          connectedAccount,
+          flowMatch,
+          depositResult,
+          responseBody: {
+            ok: true,
+            processed: false,
+            deposit: true,
+            status: depositResult.status,
+          },
+        }
+      }
+      return {
+        kind: 'ignored_foreign_user_unmatched_flow',
+        ownerType: 'establishment',
+        matchedFlow: null,
+        connectedAccount,
+        flowMatch,
+        depositResult,
+        loyaltyResult: null,
+        responseBody: {
+          ok: true,
+          ignored: true,
+          reason: 'unmatched_connected_seller_flow',
+        },
+      }
+    }
+
+    if (flowMatch?.paymentFetched && flowMatch?.matchedFlow === 'loyalty') {
+      const loyaltyResult = await loyaltyPaymentHandler(resourceId, {
+        bodyUserId: effectiveBodyUserId,
+        gatewayEventId: resourceId,
+        sellerAccount: flowMatch?.sellerAccount || connectedAccount,
+        accessToken: flowMatch.accessToken,
+        prefetchedPayment: flowMatch.payment,
+        paymentMatch: flowMatch.loyaltyMatchContext,
+      })
+      if (loyaltyResult?.ok) {
+        return {
+          kind: 'seller_loyalty',
+          ownerType: 'establishment',
+          matchedFlow: 'loyalty',
+          connectedAccount,
+          flowMatch,
+          loyaltyResult,
+          responseBody: {
+            ok: true,
+            processed: Boolean(loyaltyResult?.handled),
+            loyalty: true,
+            status: loyaltyResult?.status || null,
+            reason: loyaltyResult?.reason || null,
+          },
+        }
+      }
+      return {
+        kind: 'ignored_foreign_user_unmatched_flow',
+        ownerType: 'establishment',
+        matchedFlow: null,
+        connectedAccount,
+        flowMatch,
+        depositResult: null,
+        loyaltyResult,
+        responseBody: {
+          ok: true,
+          ignored: true,
+          reason: 'unmatched_connected_seller_flow',
+        },
+      }
+    }
+
+    if (flowMatch?.paymentFetched) {
+      return {
+        kind: 'ignored_foreign_user_unmatched_flow',
+        ownerType: 'establishment',
+        matchedFlow: null,
+        connectedAccount,
+        flowMatch,
+        depositResult: { ok: false, reason: flowMatch?.depositReason || 'not_deposit' },
+        loyaltyResult: {
+          ok: false,
+          reason: flowMatch?.loyaltyReason || 'not_loyalty_payment',
+          matchDetails: flowMatch?.loyaltyMatchContext || null,
+        },
+        responseBody: {
+          ok: true,
+          ignored: true,
+          reason: 'unmatched_connected_seller_flow',
+        },
+      }
+    }
+
     const depositResult = await depositHandler({
       resourceId,
       event: syncEvent,
@@ -1504,6 +1799,7 @@ async function resolveBillingPaymentWebhookAction({
         ownerType: 'establishment',
         matchedFlow: 'deposit',
         connectedAccount,
+        flowMatch,
         depositResult,
         responseBody: {
           ok: true,
@@ -1519,6 +1815,7 @@ async function resolveBillingPaymentWebhookAction({
         ownerType: 'establishment',
         matchedFlow: 'deposit',
         connectedAccount,
+        flowMatch,
         depositResult,
         responseBody: {
           ok: true,
@@ -1540,6 +1837,7 @@ async function resolveBillingPaymentWebhookAction({
         ownerType: 'establishment',
         matchedFlow: 'loyalty',
         connectedAccount,
+        flowMatch,
         loyaltyResult,
         responseBody: {
           ok: true,
@@ -1556,6 +1854,7 @@ async function resolveBillingPaymentWebhookAction({
       ownerType: 'establishment',
       matchedFlow: null,
       connectedAccount,
+      flowMatch,
       depositResult,
       loyaltyResult,
       responseBody: {
@@ -3422,7 +3721,14 @@ function serializeTopupHistory(entry) {
   }
 }
 
-async function handleDepositPaymentWebhook({ resourceId, event, bodyUserId = null, ownerAccount = null }) {
+async function handleDepositPaymentWebhook({
+  resourceId,
+  event,
+  bodyUserId = null,
+  ownerAccount = null,
+  prefetchedPayment = null,
+  accessToken: providedAccessToken = null,
+}) {
   const providerPaymentId = normalizeId(resourceId)
   if (!providerPaymentId) return { ok: false, reason: 'missing_resource_id' }
 
@@ -3440,18 +3746,22 @@ async function handleDepositPaymentWebhook({ resourceId, event, bodyUserId = nul
     return { ok: false, reason: 'estabelecimento_not_found' }
   }
 
-  const mpAccess = await resolveMpAccessToken(estabelecimentoId, { allowFallback: false })
+  const mpAccess = providedAccessToken
+    ? { accessToken: providedAccessToken }
+    : await resolveMpAccessToken(estabelecimentoId, { allowFallback: false })
   const accessToken = mpAccess.accessToken || null
   if (!accessToken) {
     return { ok: false, reason: 'mp_token_missing', estabelecimentoId }
   }
 
-  let payment = null
-  try {
-    payment = await fetchMercadoPagoPayment(providerPaymentId, { accessToken })
-  } catch (err) {
-    console.warn('[billing:webhook][deposit] fetch_payment_failed', err?.message || err)
-    return { ok: false, reason: 'mp_fetch_failed' }
+  let payment = prefetchedPayment || null
+  if (!payment) {
+    try {
+      payment = await fetchMercadoPagoPayment(providerPaymentId, { accessToken })
+    } catch (err) {
+      console.warn('[billing:webhook][deposit] fetch_payment_failed', err?.message || err)
+      return { ok: false, reason: 'mp_fetch_failed' }
+    }
   }
   if (!payment?.id) return { ok: false, reason: 'payment_not_found' }
 
@@ -4728,6 +5038,37 @@ router.post('/webhook', async (req, res) => {
         bodyUserId,
       })
 
+      if (
+        paymentAction.connectedAccount &&
+        (
+          paymentAction.kind === 'seller_deposit' ||
+          paymentAction.kind === 'seller_loyalty' ||
+          paymentAction.kind === 'ignored_foreign_user_unmatched_flow' ||
+          paymentAction.kind === 'conflicting_connected_seller_flow'
+        )
+      ) {
+        const sellerFlowPayload = buildBillingWebhookSellerFlowMatchPayload({
+          requestId,
+          resourceId,
+          syncDecision,
+          bodyType,
+          bodyAction,
+          bodyUserId,
+          connectedAccount: paymentAction.connectedAccount,
+          matchedFlow: paymentAction.matchedFlow,
+          flowMatch: paymentAction.flowMatch,
+        })
+        console.info('[billing:webhook] seller_payment_flow_match', sellerFlowPayload)
+        if (paymentAction.kind === 'ignored_foreign_user_unmatched_flow' && paymentAction.flowMatch?.paymentFetched) {
+          logSellerPaymentMatchFailures(sellerFlowPayload, paymentAction.flowMatch)
+          console.warn('[billing:webhook] seller_payment_unmatched_after_gateway_fetch', sellerFlowPayload)
+        }
+        if (paymentAction.kind === 'conflicting_connected_seller_flow') {
+          console.warn('[billing:webhook] conflicting_connected_seller_flow', sellerFlowPayload)
+          return res.status(200).json(paymentAction.responseBody)
+        }
+      }
+
       if (paymentAction.kind === 'seller_deposit' || paymentAction.kind === 'seller_loyalty') {
         const actionTaken =
           paymentAction.kind === 'seller_deposit'
@@ -5428,6 +5769,7 @@ export {
   resolveBillingAuthorizedPaymentWebhookAction,
   resolveBillingSubscriptionWebhookAction,
   resolveBillingWebhookBodyUserId,
+  resolveConnectedSellerPaymentFlowMatch,
   resolveBillingPaymentWebhookAction,
   resolveBillingWebhookSyncDecision,
   resolveSubscriptionWebhookOwnerContext,
