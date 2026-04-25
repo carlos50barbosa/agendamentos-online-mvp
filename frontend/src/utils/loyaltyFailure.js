@@ -27,6 +27,10 @@ export function resolveLoyaltyFailureDisplay(details = null) {
   const technicalMessage = normalizeValue(
     details?.last_failure_message ||
     details?.subscription?.last_failure_message ||
+    details?.last_failure_gateway_message ||
+    details?.subscription?.last_failure_gateway_message ||
+    rawFailure?.message ||
+    rawFailure?.description ||
     rawFailure?.friendly_message
   ) || null
   const occurredAt = (
@@ -50,5 +54,33 @@ export function resolveLoyaltyFailureDisplay(details = null) {
     occurredAt,
     source,
     raw: rawFailure,
+  }
+}
+
+export function resolveLoyaltyRetryDisplay(details = null) {
+  const failure = resolveLoyaltyFailureDisplay(details)
+  const retryOptions = details?.retry_options || details?.subscription?.retry_options || null
+  const cardRetry = retryOptions?.card || null
+  const pixRetry = retryOptions?.pix || null
+  const highRisk = failure.technicalCode === 'cc_rejected_high_risk'
+
+  return {
+    showRecovery: Boolean(failure.technicalCode || retryOptions?.suggested),
+    title: highRisk
+      ? 'Nao foi possivel aprovar este cartao no momento.'
+      : (failure.technicalCode ? 'Voce pode regularizar a assinatura.' : ''),
+    description: highRisk
+      ? 'Tente outro cartao ou pague por PIX.'
+      : (
+        cardRetry?.message ||
+        pixRetry?.message ||
+        ''
+      ),
+    cardActionLabel: 'Tentar outro cartao',
+    pixActionLabel: 'Pagar por PIX',
+    cardCooldownActive: cardRetry?.cooldown_active === true,
+    cardCooldownRemainingMs: Number(cardRetry?.cooldown_remaining_ms || 0) || 0,
+    cardEnabled: cardRetry?.enabled !== false,
+    pixEnabled: pixRetry?.enabled !== false,
   }
 }

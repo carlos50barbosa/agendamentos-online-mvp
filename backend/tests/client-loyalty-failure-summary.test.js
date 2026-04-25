@@ -8,7 +8,10 @@ process.env.DB_NAME ??= 'test'
 process.env.JWT_SECRET ??= 'test-secret'
 
 const {
+  buildClientLoyaltyPaymentSnapshot,
+  resolveClientLoyaltyRetryOptions,
   resolveLatestClientLoyaltyFailureSummary,
+  resolveLatestClientLoyaltyPaymentSnapshot,
 } = await import('../src/lib/client_loyalty_billing.js')
 
 test('client loyalty failure summary prefers payment status_detail over newer authorized payment without detail', () => {
@@ -95,4 +98,70 @@ test('client loyalty failure summary stays empty when past_due has no technical 
   })
 
   assert.equal(summary, null)
+})
+
+test('client loyalty payment snapshot keeps status_detail audit fields', () => {
+  const snapshot = buildClientLoyaltyPaymentSnapshot({
+    id: '155550314653',
+    status: 'rejected',
+    status_detail: 'cc_rejected_high_risk',
+    payment_type_id: 'credit_card',
+    payment_method_id: 'master',
+    transaction_amount: 79.9,
+    external_reference: 'loyalty:sub:17:est:26:cli:158:plan:1:uuid:test',
+    date_created: '2026-04-25T08:00:00.000Z',
+    date_approved: null,
+  }, {
+    paymentTarget: 'payment',
+  })
+
+  assert.equal(snapshot?.payment_id, '155550314653')
+  assert.equal(snapshot?.status, 'rejected')
+  assert.equal(snapshot?.status_detail, 'cc_rejected_high_risk')
+  assert.equal(snapshot?.payment_method_id, 'master')
+  assert.equal(snapshot?.transaction_amount, 79.9)
+})
+
+test('client loyalty payment snapshot resolver reads explicit snapshot payloads', () => {
+  const snapshot = resolveLatestClientLoyaltyPaymentSnapshot([
+    {
+      id: 22,
+      tipo_evento: 'payment_snapshot',
+      mp_topic: 'payment',
+      payload_json: {
+        snapshot: {
+          payment_target: 'payment',
+          payment_id: '155550314653',
+          status: 'rejected',
+          status_detail: 'cc_rejected_high_risk',
+          payment_method_id: 'master',
+          payment_type_id: 'credit_card',
+          transaction_amount: 79.9,
+          external_reference: 'loyalty:sub:17:est:26:cli:158:plan:1:uuid:test',
+          date_created: '2026-04-25T08:00:00.000Z',
+        },
+      },
+      created_at: '2026-04-25T08:05:00.000Z',
+    },
+  ])
+
+  assert.equal(snapshot?.payment_id, '155550314653')
+  assert.equal(snapshot?.status_detail, 'cc_rejected_high_risk')
+  assert.equal(snapshot?.payment_target, 'payment')
+})
+
+test('client loyalty retry options block card cooldown after high risk while keeping PIX enabled', () => {
+  const retryOptions = resolveClientLoyaltyRetryOptions({
+    subscriptionStatus: 'past_due',
+    latestFailure: {
+      code: 'cc_rejected_high_risk',
+      created_at: '2026-04-25T08:30:00.000Z',
+    },
+    referenceDate: '2026-04-25T09:00:00.000Z',
+  })
+
+  assert.equal(retryOptions?.recommended_method, 'pix')
+  assert.equal(retryOptions?.card?.cooldown_active, true)
+  assert.equal(retryOptions?.card?.enabled, false)
+  assert.equal(retryOptions?.pix?.enabled, true)
 })

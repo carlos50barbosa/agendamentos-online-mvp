@@ -470,6 +470,10 @@ function buildBillingWebhookOwnerResolutionPayload({
     body_action: bodyAction || null,
     resource_id: resourceId || null,
     body_user_id: bodyUserId ?? null,
+    body_user_estabelecimento_id:
+      ownerResolution?.sellerAccount?.estabelecimento_id ||
+      ownerResolution?.sellerAccount?.estabelecimentoId ||
+      null,
     platform_user_id: MP_COLLECTOR_ID,
     metadata_preapproval_id: ownerResolution?.metadataPreapprovalId || resolveWebhookMetadataPreapprovalId(event),
     external_reference: ownerResolution?.externalReference || resolveWebhookExternalReference(event),
@@ -484,6 +488,8 @@ function buildBillingWebhookOwnerResolutionPayload({
     lookup_by: ownerResolution?.lookupBy || null,
     resolution_rule: ownerResolution?.resolutionRule || null,
     resolution_reason: ownerResolution?.reason || null,
+    failed_lookups: normalizeOwnerResolutionFailedLookups(ownerResolution?.failedLookups),
+    conflict: ownerResolution?.conflict || null,
   }
 }
 
@@ -851,6 +857,7 @@ async function findAuthorizedPaymentLoyaltyLink({
         failedLookups,
       }
     }
+    failedLookups.push({ lookupBy: 'webhook_linkage', reason: 'subscription_not_found' })
   }
 
   return { subscription: null, failedLookups }
@@ -1191,21 +1198,6 @@ async function resolveAuthorizedPaymentWebhookOwnerContext({
       ? await getConnectedAccountBySellerIdentifier(normalizedUserId)
       : null
 
-  if (bodySellerAccount?.estabelecimento_id || bodySellerAccount?.estabelecimentoId) {
-    return decorateWebhookOwnerResolution(await finalizeSellerWebhookOwnerResolution({
-      sellerAccount: bodySellerAccount,
-      normalizedUserId,
-      matchedFlow: 'loyalty',
-      lookupBy: 'body_user_id',
-      resolutionRule: 'connected_seller_user',
-      unresolvedReason: 'unresolved_owner_for_authorized_payment',
-      resolveEstablishmentAccessToken,
-    }), {
-      metadataPreapprovalId,
-      externalReference,
-    })
-  }
-
   const loyaltyLink = await findAuthorizedPaymentLoyaltyLink({
     resourceId,
     preapprovalId: metadataPreapprovalId,
@@ -1226,7 +1218,7 @@ async function resolveAuthorizedPaymentWebhookOwnerContext({
     getByGatewayId: getPlatformSubscriptionByGatewayId,
     getByExternalReference: getPlatformSubscriptionByExternalReference,
   })
-  const loyaltyProbe = !loyaltyLink?.subscription?.id && normalizedUserId !== MP_COLLECTOR_ID
+  const loyaltyProbe = !loyaltyLink?.subscription?.id
     ? await probeAuthorizedPaymentLoyaltyLink({
       resourceId,
       getAuthorizedPayment,
@@ -1273,6 +1265,24 @@ async function resolveAuthorizedPaymentWebhookOwnerContext({
 
   if (loyaltyLink?.subscription?.estabelecimentoId) {
     const linkedEstabelecimentoId = Number(loyaltyLink.subscription.estabelecimentoId || 0) || null
+    if (
+      bodySellerAccount?.estabelecimento_id &&
+      linkedEstabelecimentoId &&
+      Number(bodySellerAccount.estabelecimento_id || 0) !== linkedEstabelecimentoId
+    ) {
+      return decorateWebhookOwnerResolution(buildConflictingWebhookOwnerResolution({
+        normalizedUserId,
+        lookupBy: loyaltyLink.lookupBy || 'body_user_id',
+        conflict: {
+          loyalty_estabelecimento_id: linkedEstabelecimentoId,
+          body_user_estabelecimento_id: Number(bodySellerAccount.estabelecimento_id || 0) || null,
+        },
+      }), {
+        metadataPreapprovalId,
+        externalReference,
+        failedLookups: combinedFailedLookups,
+      })
+    }
     const sellerAccount = await getConnectedAccountByEstabelecimentoId(linkedEstabelecimentoId)
     return decorateWebhookOwnerResolution(await finalizeSellerWebhookOwnerResolution({
       sellerAccount: sellerAccount || { estabelecimento_id: linkedEstabelecimentoId },
@@ -1303,6 +1313,24 @@ async function resolveAuthorizedPaymentWebhookOwnerContext({
 
   if (loyaltyProbe?.subscription?.estabelecimentoId) {
     const linkedEstabelecimentoId = Number(loyaltyProbe.subscription.estabelecimentoId || 0) || null
+    if (
+      bodySellerAccount?.estabelecimento_id &&
+      linkedEstabelecimentoId &&
+      Number(bodySellerAccount.estabelecimento_id || 0) !== linkedEstabelecimentoId
+    ) {
+      return decorateWebhookOwnerResolution(buildConflictingWebhookOwnerResolution({
+        normalizedUserId,
+        lookupBy: loyaltyProbe.lookupBy || 'body_user_id',
+        conflict: {
+          loyalty_estabelecimento_id: linkedEstabelecimentoId,
+          body_user_estabelecimento_id: Number(bodySellerAccount.estabelecimento_id || 0) || null,
+        },
+      }), {
+        metadataPreapprovalId: loyaltyProbe.metadataPreapprovalId || metadataPreapprovalId,
+        externalReference: loyaltyProbe.externalReference || externalReference,
+        failedLookups: combinedFailedLookups,
+      })
+    }
     const sellerAccount =
       loyaltyProbe.sellerAccount ||
       await getConnectedAccountByEstabelecimentoId(linkedEstabelecimentoId)
@@ -1317,6 +1345,22 @@ async function resolveAuthorizedPaymentWebhookOwnerContext({
     }), {
       metadataPreapprovalId: loyaltyProbe.metadataPreapprovalId || metadataPreapprovalId,
       externalReference: loyaltyProbe.externalReference || externalReference,
+      failedLookups: combinedFailedLookups,
+    })
+  }
+
+  if (bodySellerAccount?.estabelecimento_id || bodySellerAccount?.estabelecimentoId) {
+    return decorateWebhookOwnerResolution(await finalizeSellerWebhookOwnerResolution({
+      sellerAccount: bodySellerAccount,
+      normalizedUserId,
+      matchedFlow: 'loyalty',
+      lookupBy: 'body_user_id',
+      resolutionRule: 'connected_seller_user',
+      unresolvedReason: 'unresolved_owner_for_authorized_payment',
+      resolveEstablishmentAccessToken,
+    }), {
+      metadataPreapprovalId: loyaltyProbe?.metadataPreapprovalId || metadataPreapprovalId,
+      externalReference: loyaltyProbe?.externalReference || externalReference,
       failedLookups: combinedFailedLookups,
     })
   }

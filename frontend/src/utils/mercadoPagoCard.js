@@ -54,6 +54,10 @@ export function getMercadoPagoCardErrorMessage(error, fallback = 'Nao foi possiv
     return 'Os dados do cartao precisam ser confirmados novamente para gerar um novo token de seguranca.'
   }
 
+  if (getErrorCode(error) === 'client_loyalty_card_retry_cooldown') {
+    return error?.data?.message || 'Nao foi possivel aprovar este cartao no momento. Tente PIX ou aguarde antes de tentar novamente.'
+  }
+
   if (getStatusDetail(error) === 'cc_rejected_high_risk') {
     return 'Nao foi possivel aprovar este cartao no momento. Revise os dados do titular ou tente outro cartao.'
   }

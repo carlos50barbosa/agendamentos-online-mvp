@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { Api } from '../utils/api.js'
 import { getUser } from '../utils/auth.js'
-import { resolveLoyaltyFailureDisplay } from '../utils/loyaltyFailure.js'
+import { resolveLoyaltyFailureDisplay, resolveLoyaltyRetryDisplay } from '../utils/loyaltyFailure.js'
 import { getMercadoPagoCardErrorMessage, isMercadoPagoCardTokenRefreshRequired } from '../utils/mercadoPagoCard.js'
 
 let mercadoPagoSdkPromise = null
@@ -25,6 +25,16 @@ function formatDate(value) {
     hour: '2-digit',
     minute: '2-digit',
   })
+}
+
+function formatCooldown(value) {
+  const totalMinutes = Math.max(1, Math.ceil((Number(value || 0) || 0) / 60000))
+  if (totalMinutes >= 60) {
+    const hours = Math.floor(totalMinutes / 60)
+    const minutes = totalMinutes % 60
+    return minutes ? `${hours}h ${minutes}min` : `${hours}h`
+  }
+  return `${totalMinutes} min`
 }
 
 function getStatusLabel(value) {
@@ -122,7 +132,10 @@ export default function LoyaltyAssinaturaCliente() {
   const sellerConnected = gatewayAccount?.connected === true || gatewayAccount?.status === 'connected'
   const isCardPendingActivation = currentStatus === 'pending_payment' && String(currentDetails?.subscription?.payment_method || '').toLowerCase() === 'credit_card'
   const failureDisplay = resolveLoyaltyFailureDisplay(currentDetails)
+  const retryDisplay = resolveLoyaltyRetryDisplay(currentDetails)
   const latestFailure = failureDisplay.raw || null
+  const latestPaymentSnapshot = currentDetails?.latest_payment_snapshot || currentDetails?.subscription?.latest_payment_snapshot || null
+  const cardRetryBlocked = retryDisplay.cardCooldownActive || retryDisplay.cardEnabled === false
 
   const loadData = useCallback(async () => {
     setLoading(true)
@@ -390,11 +403,40 @@ export default function LoyaltyAssinaturaCliente() {
           {failureDisplay.technicalCode ? (
             <div className="loyalty-failure-box">
               <strong>Cobranca pendente de regularizacao</strong>
-              <span>Status da assinatura: {currentStatus || '-'}</span>
+              <span>Status da assinatura: {currentDetails?.subscription_status || currentStatus || '-'}</span>
               <span>Ultima falha tecnica: {failureDisplay.technicalCode}</span>
               {failureDisplay.technicalMessage ? <span>{failureDisplay.technicalMessage}</span> : null}
               {failureDisplay.occurredAt ? <span>Ultima tentativa registrada em: {formatDate(failureDisplay.occurredAt)}</span> : null}
               {latestFailure?.payment_method_id ? <span>Metodo da ultima tentativa: {latestFailure.payment_method_id}</span> : null}
+              {latestPaymentSnapshot?.status ? <span>Ultimo status do payment: {latestPaymentSnapshot.status}</span> : null}
+              {latestPaymentSnapshot?.status_detail ? <span>Ultimo status_detail do payment: {latestPaymentSnapshot.status_detail}</span> : null}
+              {retryDisplay.showRecovery ? (
+                <>
+                  {retryDisplay.title ? <span>{retryDisplay.title}</span> : null}
+                  {retryDisplay.description ? <span>{retryDisplay.description}</span> : null}
+                  {retryDisplay.cardCooldownActive ? (
+                    <span>Cartao temporariamente em cooldown: {formatCooldown(retryDisplay.cardCooldownRemainingMs)}.</span>
+                  ) : null}
+                  <div className="loyalty-card__actions">
+                    <button
+                      type="button"
+                      className="btn btn--outline"
+                      onClick={() => setPaymentMethod('credit_card')}
+                      disabled={!retryDisplay.cardEnabled}
+                    >
+                      {retryDisplay.cardActionLabel}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn--primary"
+                      onClick={() => setPaymentMethod('pix')}
+                      disabled={!retryDisplay.pixEnabled}
+                    >
+                      {retryDisplay.pixActionLabel}
+                    </button>
+                  </div>
+                </>
+              ) : null}
             </div>
           ) : null}
 
@@ -507,6 +549,13 @@ export default function LoyaltyAssinaturaCliente() {
                   {!sellerConnected ? (
                     <p className="loyalty-inline-error">Conta Mercado Pago desconectada ou sem permissao valida.</p>
                   ) : null}
+                  {cardRetryBlocked ? (
+                    <p className="loyalty-inline-error">
+                      {retryDisplay.cardCooldownActive
+                        ? `Aguarde ${formatCooldown(retryDisplay.cardCooldownRemainingMs)} antes de tentar novamente no cartao, ou use PIX agora.`
+                        : 'Nao foi possivel aprovar este cartao no momento. Tente PIX ou outro cartao.'}
+                    </p>
+                  ) : null}
                   <form key={cardFormResetKey} id="client-loyalty-card-form" className="loyalty-card-form">
                     <div className="loyalty-card-form__grid">
                       <div id="client-loyalty-card-number" className="input loyalty-card-form__field" />
@@ -519,7 +568,7 @@ export default function LoyaltyAssinaturaCliente() {
                       <select id="client-loyalty-card-issuer" className="input loyalty-card-form__field" defaultValue="" />
                       <select id="client-loyalty-card-installments" className="input loyalty-card-form__field" defaultValue="" />
                     </div>
-                    <button type="submit" className="btn btn--primary" disabled={submitting || !cardState.ready || !sellerConnected}>
+                    <button type="submit" className="btn btn--primary" disabled={submitting || !cardState.ready || !sellerConnected || cardRetryBlocked}>
                       {cardState.loading ? 'Carregando...' : 'Assinar no cartão'}
                     </button>
                   </form>

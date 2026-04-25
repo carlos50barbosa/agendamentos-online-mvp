@@ -393,6 +393,15 @@ test('authorized payment owner resolution prefers connected seller users with va
       accessToken: 'seller-token',
       account: { id: 9, estabelecimento_id: 26, mp_user_id: '1055436081', mp_collector_id: '1055436081' },
     }),
+    getLoyaltySubscriptionByGatewayPaymentId: async () => null,
+    getLoyaltySubscriptionByGatewayId: async () => null,
+    getLoyaltySubscriptionByExternalReference: async () => null,
+    getLoyaltySubscriptionByEventResourceId: async () => null,
+    getLoyaltySubscriptionByWebhookResourceId: async () => null,
+    listLoyaltyAuthorizedPaymentProbeCandidates: async () => [],
+    getPlatformSubscriptionByGatewayPaymentId: async () => null,
+    getPlatformSubscriptionByGatewayId: async () => null,
+    getPlatformSubscriptionByExternalReference: async () => null,
   })
 
   assert.equal(result.ok, true)
@@ -533,6 +542,60 @@ test('authorized payment owner resolution probes known loyalty sellers and resol
   assert.equal(result.estabelecimentoId, 26)
 })
 
+test('authorized payment owner resolution prefers loyalty linkage even when webhook body user is the platform collector', async () => {
+  const result = await resolveAuthorizedPaymentWebhookOwnerContext({
+    resourceId: '7027501745',
+    event: { type: 'subscription_authorized_payment' },
+    bodyUserId: 281768531,
+    getLoyaltySubscriptionByGatewayPaymentId: async () => null,
+    getLoyaltySubscriptionByGatewayId: async (value) => (
+      String(value) === '87b2057170144ef3a7b8f13bfc5150e3'
+        ? {
+          id: 17,
+          estabelecimentoId: 26,
+          gatewaySubscriptionId: '87b2057170144ef3a7b8f13bfc5150e3',
+          mpPreapprovalId: '87b2057170144ef3a7b8f13bfc5150e3',
+          externalReference: 'loyalty:sub:17:est:26:cli:158:plan:1:uuid:test',
+        }
+        : null
+    ),
+    getLoyaltySubscriptionByExternalReference: async () => null,
+    getLoyaltySubscriptionByEventResourceId: async () => null,
+    getLoyaltySubscriptionByWebhookResourceId: async () => null,
+    listLoyaltyAuthorizedPaymentProbeCandidates: async () => ([
+      { estabelecimentoId: 26 },
+    ]),
+    resolveEstablishmentAccessToken: async (value) => ({
+      accessToken: Number(value) === 26 ? 'seller-token-26' : null,
+      account: { id: 9, estabelecimento_id: 26, mp_user_id: '1055436081', mp_collector_id: '1055436081' },
+    }),
+    getAuthorizedPayment: async () => ({
+      authorizedPayment: {
+        id: '7027501745',
+        preapprovalId: '87b2057170144ef3a7b8f13bfc5150e3',
+        externalReference: 'loyalty:sub:17:est:26:cli:158:plan:1:uuid:test',
+      },
+    }),
+    getConnectedAccountByEstabelecimentoId: async (value) => (
+      Number(value) === 26
+        ? { id: 9, estabelecimento_id: 26, mp_user_id: '1055436081', mp_collector_id: '1055436081' }
+        : null
+    ),
+    getPlatformSubscriptionByGatewayPaymentId: async () => null,
+    getPlatformSubscriptionByGatewayId: async () => null,
+    getPlatformSubscriptionByExternalReference: async () => null,
+    platformAccessToken: 'platform-token',
+  })
+
+  assert.equal(result.ok, true)
+  assert.equal(result.ownerType, 'establishment')
+  assert.equal(result.matchedFlow, 'loyalty')
+  assert.equal(result.tokenSource, 'establishment')
+  assert.equal(result.lookupBy, 'loyalty_subscription_linkage')
+  assert.equal(result.resolutionRule, 'loyalty_authorized_payment_linkage')
+  assert.equal(result.estabelecimentoId, 26)
+})
+
 test('authorized payment owner resolution keeps platform flow explicit', async () => {
   const result = await resolveAuthorizedPaymentWebhookOwnerContext({
     resourceId: '7027488798',
@@ -543,6 +606,7 @@ test('authorized payment owner resolution keeps platform flow explicit', async (
     getLoyaltySubscriptionByExternalReference: async () => null,
     getLoyaltySubscriptionByEventResourceId: async () => null,
     getLoyaltySubscriptionByWebhookResourceId: async () => null,
+    listLoyaltyAuthorizedPaymentProbeCandidates: async () => [],
     getPlatformSubscriptionByGatewayPaymentId: async () => null,
     getPlatformSubscriptionByGatewayId: async () => null,
     getPlatformSubscriptionByExternalReference: async () => null,

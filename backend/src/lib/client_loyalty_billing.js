@@ -40,6 +40,10 @@ const CLIENT_LOYALTY_CARD_PENDING_WINDOW_MS = Math.max(
   Number(process.env.CLIENT_LOYALTY_CARD_PENDING_WINDOW_MS || 2 * 60 * 60 * 1000) || (2 * 60 * 60 * 1000),
   60000
 )
+const CLIENT_LOYALTY_HIGH_RISK_COOLDOWN_MS = Math.max(
+  Number(process.env.CLIENT_LOYALTY_HIGH_RISK_COOLDOWN_MS || 60 * 60 * 1000) || (60 * 60 * 1000),
+  60000
+)
 const DAY_MS = 86400000
 
 function createError(message, status = 400, code = 'bad_request', details = null) {
@@ -258,6 +262,13 @@ function mapClientLoyaltyFailureFriendlyMessage(code) {
   return messages[normalized] || null
 }
 
+function normalizeClientLoyaltySnapshotDate(value) {
+  const parsed = toDate(value)
+  if (parsed) return parsed.toISOString()
+  const text = String(value || '').trim()
+  return text || null
+}
+
 function resolveClientLoyaltyFailureSource(event) {
   const paymentType = String(event?.payment_type || '').trim().toLowerCase()
   const mpTopic = String(event?.mp_topic || '').trim().toLowerCase()
@@ -301,7 +312,7 @@ export function resolveLatestClientLoyaltyFailureSummary(events = [], {
   subscriptionStatus = null,
 } = {}) {
   const normalizedStatus = String(subscriptionStatus || '').trim().toLowerCase()
-  if (normalizedStatus && normalizedStatus !== 'past_due') return null
+  if (normalizedStatus && !['past_due', 'unpaid', 'expired'].includes(normalizedStatus)) return null
 
   const candidates = (Array.isArray(events) ? events : [])
     .filter((event) => ['payment_failed', 'payment_expired'].includes(String(event?.tipo_evento || '').toLowerCase()))
@@ -330,6 +341,258 @@ export function resolveLatestClientLoyaltyFailureSummary(events = [], {
     payment_method_id: selected.payment_method_id || null,
     payment_type_id: selected.payment_type_id || null,
   }
+}
+
+export function buildClientLoyaltyPaymentSnapshot(record = null, {
+  paymentId = null,
+  paymentTarget = 'payment',
+} = {}) {
+  const raw = record?.payment || record?.authorized_payment || record || null
+  if (!raw || typeof raw !== 'object') return null
+
+  const transactionAmount = raw?.transaction_amount != null
+    ? Number(raw.transaction_amount)
+    : raw?.amountCents != null
+      ? Number(raw.amountCents || 0) / 100
+      : null
+
+  const snapshot = {
+    payment_target: String(paymentTarget || 'payment').trim().toLowerCase() || 'payment',
+    payment_id: raw?.id != null ? String(raw.id) : (paymentId != null ? String(paymentId) : null),
+    status: raw?.status || raw?.rawStatus || null,
+    status_detail: raw?.status_detail || raw?.statusDetail || null,
+    payment_type_id: raw?.payment_type_id || raw?.paymentTypeId || null,
+    payment_method_id: raw?.payment_method_id || raw?.paymentMethod || null,
+    transaction_amount: Number.isFinite(transactionAmount) ? Number(transactionAmount.toFixed(2)) : null,
+    external_reference: raw?.external_reference || raw?.externalReference || null,
+    date_created: normalizeClientLoyaltySnapshotDate(raw?.date_created || raw?.dateCreated || null),
+    date_approved: normalizeClientLoyaltySnapshotDate(
+      raw?.date_approved ||
+      raw?.paidAt ||
+      raw?.last_modified ||
+      raw?.date_last_updated ||
+      null
+    ),
+  }
+
+  return (
+    snapshot.payment_id ||
+    snapshot.status ||
+    snapshot.status_detail ||
+    snapshot.external_reference
+  ) ? snapshot : null
+}
+
+function hasClientLoyaltyPaymentSnapshot(snapshot) {
+  return Boolean(
+    snapshot &&
+    (
+      snapshot.payment_id ||
+      snapshot.status ||
+      snapshot.status_detail ||
+      snapshot.external_reference
+    )
+  )
+}
+
+function buildClientLoyaltyPaymentAuditEventId(prefix, snapshot = null, extra = []) {
+  const parts = [
+    prefix,
+    snapshot?.payment_target || 'payment',
+    snapshot?.payment_id || 'unknown',
+    snapshot?.status || 'unknown',
+    snapshot?.status_detail || 'none',
+    ...extra.map((value) => String(value || '').trim()).filter(Boolean),
+  ]
+  return parts.join(':')
+}
+
+async function recordClientLoyaltyPaymentSnapshotTx(subscriptionId, {
+  snapshot = null,
+  mpTopic = null,
+  eventContext = null,
+  paymentType = null,
+  rawPayload = null,
+}, { db = pool } = {}) {
+  if (!subscriptionId || !hasClientLoyaltyPaymentSnapshot(snapshot)) return null
+
+  console.info('[client-loyalty] payment_snapshot', {
+    subscription_id: subscriptionId,
+    mp_topic: mpTopic || null,
+    ...snapshot,
+  })
+
+  await appendClientLoyaltySubscriptionEvent(subscriptionId, {
+    eventType: 'payment_snapshot',
+    gatewayEventId: buildClientLoyaltyPaymentAuditEventId('payment_snapshot', snapshot),
+    mpTopic,
+    ...(eventContext || {}),
+    mpPaymentId: snapshot.payment_id || null,
+    paymentStatus: snapshot.status || null,
+    paymentMethod: snapshot.payment_method_id || null,
+    paymentType: paymentType || snapshot.payment_type_id || snapshot.payment_target || null,
+    amountCents: Number.isFinite(Number(snapshot.transaction_amount))
+      ? Math.round(Number(snapshot.transaction_amount) * 100)
+      : null,
+    actionTaken: 'snapshot_recorded',
+    payload: {
+      snapshot,
+      raw: rawPayload,
+    },
+  }, { db })
+
+  return snapshot
+}
+
+async function recordClientLoyaltyPaymentStatusTransitionTx(subscriptionId, {
+  snapshot = null,
+  previousSubscriptionStatus = null,
+  nextSubscriptionStatus = null,
+  mpTopic = null,
+  eventContext = null,
+  paymentType = null,
+  rawPayload = null,
+}, { db = pool } = {}) {
+  if (!subscriptionId || !nextSubscriptionStatus || !hasClientLoyaltyPaymentSnapshot(snapshot)) return null
+
+  console.info('[client-loyalty] payment_status_transition', {
+    subscription_id: subscriptionId,
+    mp_topic: mpTopic || null,
+    previous_subscription_status: previousSubscriptionStatus || null,
+    next_subscription_status: nextSubscriptionStatus || null,
+    ...snapshot,
+  })
+
+  await appendClientLoyaltySubscriptionEvent(subscriptionId, {
+    eventType: 'payment_status_transition',
+    gatewayEventId: buildClientLoyaltyPaymentAuditEventId('payment_status_transition', snapshot, [
+      previousSubscriptionStatus,
+      nextSubscriptionStatus,
+    ]),
+    mpTopic,
+    ...(eventContext || {}),
+    mpPaymentId: snapshot.payment_id || null,
+    paymentStatus: snapshot.status || null,
+    paymentMethod: snapshot.payment_method_id || null,
+    paymentType: paymentType || snapshot.payment_type_id || snapshot.payment_target || null,
+    amountCents: Number.isFinite(Number(snapshot.transaction_amount))
+      ? Math.round(Number(snapshot.transaction_amount) * 100)
+      : null,
+    actionTaken: 'subscription_status_updated',
+    payload: {
+      previous_subscription_status: previousSubscriptionStatus || null,
+      next_subscription_status: nextSubscriptionStatus || null,
+      snapshot,
+      raw: rawPayload,
+    },
+  }, { db })
+
+  return snapshot
+}
+
+function extractClientLoyaltyPaymentSnapshotFromEvent(event) {
+  if (!event) return null
+  const payload = event?.payload_json || null
+  const explicitSnapshot = payload?.snapshot || payload?.payment_snapshot || null
+  if (explicitSnapshot) {
+    return buildClientLoyaltyPaymentSnapshot(explicitSnapshot, {
+      paymentId: explicitSnapshot?.payment_id || null,
+      paymentTarget: explicitSnapshot?.payment_target || resolveClientLoyaltyFailureSource(event),
+    })
+  }
+
+  const raw = payload?.raw || payload || null
+  return buildClientLoyaltyPaymentSnapshot(raw, {
+    paymentTarget: resolveClientLoyaltyFailureSource(event),
+  })
+}
+
+export function resolveLatestClientLoyaltyPaymentSnapshot(events = []) {
+  return (Array.isArray(events) ? events : [])
+    .map(extractClientLoyaltyPaymentSnapshotFromEvent)
+    .find(hasClientLoyaltyPaymentSnapshot) || null
+}
+
+export function resolveClientLoyaltyRetryOptions({
+  subscriptionStatus = null,
+  latestFailure = null,
+  referenceDate = new Date(),
+} = {}) {
+  const normalizedStatus = String(subscriptionStatus || '').trim().toLowerCase()
+  const failureCode = String(latestFailure?.code || latestFailure?.status_detail || '').trim().toLowerCase() || null
+  const failureAt = toDate(latestFailure?.created_at || latestFailure?.date_created || null)
+  const reference = toDate(referenceDate) || new Date()
+  const failureAgeMs = failureAt ? Math.max(reference.getTime() - failureAt.getTime(), 0) : null
+  const highRiskCooldownActive =
+    failureCode === 'cc_rejected_high_risk' &&
+    failureAgeMs != null &&
+    failureAgeMs < CLIENT_LOYALTY_HIGH_RISK_COOLDOWN_MS
+  const cooldownRemainingMs = highRiskCooldownActive
+    ? Math.max(CLIENT_LOYALTY_HIGH_RISK_COOLDOWN_MS - failureAgeMs, 0)
+    : 0
+  const recoverySuggested = ['pending_payment', 'past_due', 'unpaid', 'expired'].includes(normalizedStatus)
+
+  return {
+    suggested: recoverySuggested,
+    recommended_method: failureCode === 'cc_rejected_high_risk' ? 'pix' : 'credit_card',
+    card: {
+      available: recoverySuggested,
+      enabled: recoverySuggested && !highRiskCooldownActive,
+      action: 'try_other_card',
+      cooldown_active: highRiskCooldownActive,
+      cooldown_remaining_ms: cooldownRemainingMs,
+      message: highRiskCooldownActive
+        ? 'Por seguranca, aguarde um pouco antes de tentar novamente no cartao. Se preferir, pague por PIX agora.'
+        : recoverySuggested
+          ? 'Voce pode tentar outro cartao para reativar a assinatura.'
+          : null,
+    },
+    pix: {
+      available: true,
+      enabled: true,
+      action: 'pay_with_pix',
+      message: 'Voce pode pagar por PIX para liberar o ciclo atual.',
+    },
+  }
+}
+
+async function assertClientLoyaltyCardRetryAllowed(subscription, {
+  db = pool,
+  referenceDate = new Date(),
+} = {}) {
+  if (!subscription?.id) return { latestFailure: null, retryOptions: resolveClientLoyaltyRetryOptions() }
+
+  const events = await listClientLoyaltySubscriptionEvents(subscription.id, { db, limit: 30 })
+  const latestFailure = resolveLatestClientLoyaltyFailureSummary(events, {
+    subscriptionStatus: subscription.status || null,
+  })
+  const retryOptions = resolveClientLoyaltyRetryOptions({
+    subscriptionStatus: subscription.status || null,
+    latestFailure,
+    referenceDate,
+  })
+
+  if (retryOptions?.card?.cooldown_active) {
+    const cooldownRemainingMs = Math.max(Number(retryOptions.card.cooldown_remaining_ms || 0), 0)
+    throw createError(
+      'Nao foi possivel aprovar este cartao no momento. Tente PIX ou aguarde um pouco antes de tentar outro cartao.',
+      409,
+      'client_loyalty_card_retry_cooldown',
+      {
+        cooldown_active: true,
+        cooldown_remaining_ms: cooldownRemainingMs,
+        retry_after_sec: Math.max(1, Math.ceil(cooldownRemainingMs / 1000)),
+        action_recommendation: 'use_pix_or_wait_before_retry',
+        status_detail: latestFailure?.code || latestFailure?.status_detail || null,
+        last_failure_code: latestFailure?.code || null,
+        last_failure_source: latestFailure?.source || null,
+        suggested_payment_method: 'pix',
+        alternative_payment_method: 'credit_card',
+      }
+    )
+  }
+
+  return { latestFailure, retryOptions }
 }
 
 async function fetchEstablishmentSummary(estabelecimentoId, { db = pool } = {}) {
@@ -664,6 +927,12 @@ export async function startClientLoyaltyCardSubscription({
       )
     }
     if (['pending_payment', 'past_due', 'unpaid', 'expired', 'canceled'].includes(state.resolvedStatus)) {
+      if (
+        current.paymentMethod === 'credit_card' &&
+        ['past_due', 'unpaid', 'expired', 'canceled'].includes(state.resolvedStatus)
+      ) {
+        await assertClientLoyaltyCardRetryAllowed(current, { db })
+      }
       await retireReplaceableClientLoyaltySubscription(current, {
         reason: 'replaced_by_new_card_checkout',
         db,
@@ -1127,6 +1396,10 @@ export async function syncClientLoyaltyPixPaymentFromGateway(paymentId, {
     localSubscription.estabelecimentoId || estabelecimentoId,
     {}
   )
+  const paymentSnapshot = buildClientLoyaltyPaymentSnapshot(payment, {
+    paymentId,
+    paymentTarget: 'payment',
+  })
   const amountCents = Number.isFinite(Number(payment?.transaction_amount))
     ? Math.round(Number(payment.transaction_amount) * 100)
     : null
@@ -1140,6 +1413,13 @@ export async function syncClientLoyaltyPixPaymentFromGateway(paymentId, {
       await conn.rollback()
       return { ok: false, reason: 'subscription_not_found' }
     }
+    await recordClientLoyaltyPaymentSnapshotTx(localSubscription.id, {
+      snapshot: paymentSnapshot,
+      mpTopic: 'payment',
+      eventContext: sellerEventContext,
+      paymentType,
+      rawPayload: payment,
+    }, { db: conn })
 
     if (isApprovedGatewayPaymentStatus(paymentStatus)) {
       if (String(locked.gateway_payment_id || '') === String(payment?.id || '')) {
@@ -1161,6 +1441,15 @@ export async function syncClientLoyaltyPixPaymentFromGateway(paymentId, {
         paymentType,
         amountCents,
       }, { db: conn })
+      await recordClientLoyaltyPaymentStatusTransitionTx(localSubscription.id, {
+        snapshot: paymentSnapshot,
+        previousSubscriptionStatus: locked.status || null,
+        nextSubscriptionStatus: 'active',
+        mpTopic: 'payment',
+        eventContext: sellerEventContext,
+        paymentType,
+        rawPayload: payment,
+      }, { db: conn })
       await conn.commit()
       return { ok: true, handled: true, status: 'active', subscription: activated }
     }
@@ -1177,6 +1466,15 @@ export async function syncClientLoyaltyPixPaymentFromGateway(paymentId, {
         paymentType,
         amountCents,
       }, { db: conn })
+      await recordClientLoyaltyPaymentStatusTransitionTx(localSubscription.id, {
+        snapshot: paymentSnapshot,
+        previousSubscriptionStatus: locked.status || null,
+        nextSubscriptionStatus: updated.status || null,
+        mpTopic: 'payment',
+        eventContext: sellerEventContext,
+        paymentType,
+        rawPayload: payment,
+      }, { db: conn })
       await conn.commit()
       return { ok: true, handled: true, status: updated.status, subscription: updated }
     }
@@ -1187,6 +1485,15 @@ export async function syncClientLoyaltyPixPaymentFromGateway(paymentId, {
       status: 'pending_pix',
       gatewayPaymentId: payment?.id ? String(payment.id) : null,
       externalReference: payment?.external_reference || localSubscription.externalReference || null,
+    }, { db: conn })
+    await recordClientLoyaltyPaymentStatusTransitionTx(localSubscription.id, {
+      snapshot: paymentSnapshot,
+      previousSubscriptionStatus: locked.status || null,
+      nextSubscriptionStatus: 'pending_pix',
+      mpTopic: 'payment',
+      eventContext: sellerEventContext,
+      paymentType,
+      rawPayload: payment,
     }, { db: conn })
     await appendClientLoyaltySubscriptionEvent(localSubscription.id, {
       eventType: 'pix_pending',
@@ -1269,6 +1576,10 @@ async function syncClientLoyaltyCardPaymentFromGateway(paymentId, {
     localSubscription.estabelecimentoId || estabelecimentoId,
     {}
   )
+  const paymentSnapshot = buildClientLoyaltyPaymentSnapshot(payment, {
+    paymentId,
+    paymentTarget: 'payment',
+  })
   const conn = await pool.getConnection()
   try {
     await conn.beginTransaction()
@@ -1277,6 +1588,13 @@ async function syncClientLoyaltyCardPaymentFromGateway(paymentId, {
       await conn.rollback()
       return { ok: false, reason: 'subscription_not_found' }
     }
+    await recordClientLoyaltyPaymentSnapshotTx(localSubscription.id, {
+      snapshot: paymentSnapshot,
+      mpTopic: 'payment',
+      eventContext: sellerEventContext,
+      paymentType,
+      rawPayload: payment,
+    }, { db: conn })
 
     if (isApprovedGatewayPaymentStatus(paymentStatus)) {
       const activated = await activateSubscriptionCycleTx(localSubscription.id, {
@@ -1292,6 +1610,15 @@ async function syncClientLoyaltyCardPaymentFromGateway(paymentId, {
         eventContext: sellerEventContext,
         paymentType,
         amountCents,
+      }, { db: conn })
+      await recordClientLoyaltyPaymentStatusTransitionTx(localSubscription.id, {
+        snapshot: paymentSnapshot,
+        previousSubscriptionStatus: locked.status || null,
+        nextSubscriptionStatus: 'active',
+        mpTopic: 'payment',
+        eventContext: sellerEventContext,
+        paymentType,
+        rawPayload: payment,
       }, { db: conn })
       await conn.commit()
       return { ok: true, handled: true, status: 'active', subscription: activated }
@@ -1311,6 +1638,15 @@ async function syncClientLoyaltyCardPaymentFromGateway(paymentId, {
         paymentType,
         amountCents,
       }, { db: conn })
+      await recordClientLoyaltyPaymentStatusTransitionTx(localSubscription.id, {
+        snapshot: paymentSnapshot,
+        previousSubscriptionStatus: locked.status || null,
+        nextSubscriptionStatus: updated.status || null,
+        mpTopic: 'payment',
+        eventContext: sellerEventContext,
+        paymentType,
+        rawPayload: payment,
+      }, { db: conn })
       await conn.commit()
       return { ok: true, handled: true, status: updated.status, subscription: updated }
     }
@@ -1326,6 +1662,15 @@ async function syncClientLoyaltyCardPaymentFromGateway(paymentId, {
       externalReference: payment?.external_reference || localSubscription.externalReference || null,
       gatewayCustomerId: payment?.payer?.id != null ? String(payment.payer.id) : null,
       mpPayerId: payment?.payer?.id != null ? String(payment.payer.id) : null,
+    }, { db: conn })
+    await recordClientLoyaltyPaymentStatusTransitionTx(localSubscription.id, {
+      snapshot: paymentSnapshot,
+      previousSubscriptionStatus: locked.status || null,
+      nextSubscriptionStatus: 'pending_payment',
+      mpTopic: 'payment',
+      eventContext: sellerEventContext,
+      paymentType,
+      rawPayload: payment,
     }, { db: conn })
     await appendClientLoyaltySubscriptionEvent(localSubscription.id, {
       eventType: 'payment_pending',
@@ -1567,9 +1912,28 @@ export async function syncClientLoyaltyAuthorizedPaymentFromGateway(authorizedPa
   try {
     await conn.beginTransaction()
     const sellerEventContext = buildSellerEventContext(resolvedSellerAccount, localSubscription.estabelecimentoId, {})
+    const paymentSnapshot = buildClientLoyaltyPaymentSnapshot(paymentResult.raw, {
+      paymentId: authorizedPayment.id || authorizedPaymentId,
+      paymentTarget: 'authorized_payment',
+    })
     const amountCents = authorizedPayment.amountCents != null
       ? Number(authorizedPayment.amountCents || 0)
       : null
+    const locked = await lockSubscriptionRow(localSubscription.id, { db: conn })
+    if (!locked) {
+      await conn.rollback()
+      return { ok: false, reason: 'subscription_not_found' }
+    }
+    await recordClientLoyaltyPaymentSnapshotTx(localSubscription.id, {
+      snapshot: paymentSnapshot,
+      mpTopic: 'automatic-payments',
+      eventContext: sellerEventContext,
+      paymentType: 'subscription_authorized_payment',
+      rawPayload: {
+        payment: paymentResult.raw,
+        subscription: gatewayResult.raw,
+      },
+    }, { db: conn })
     if (authorizedPayment.status === 'active') {
       const activated = await activateSubscriptionCycleTx(localSubscription.id, {
         paymentDate: authorizedPayment.paidAt || new Date(),
@@ -1587,6 +1951,18 @@ export async function syncClientLoyaltyAuthorizedPaymentFromGateway(authorizedPa
         eventContext: sellerEventContext,
         paymentType: 'subscription_authorized_payment',
         amountCents,
+      }, { db: conn })
+      await recordClientLoyaltyPaymentStatusTransitionTx(localSubscription.id, {
+        snapshot: paymentSnapshot,
+        previousSubscriptionStatus: locked.status || null,
+        nextSubscriptionStatus: 'active',
+        mpTopic: 'automatic-payments',
+        eventContext: sellerEventContext,
+        paymentType: 'subscription_authorized_payment',
+        rawPayload: {
+          payment: paymentResult.raw,
+          subscription: gatewayResult.raw,
+        },
       }, { db: conn })
       await appendClientLoyaltySubscriptionEvent(localSubscription.id, {
         eventType: 'subscription_renewed',
@@ -1638,6 +2014,18 @@ export async function syncClientLoyaltyAuthorizedPaymentFromGateway(authorizedPa
       eventContext: sellerEventContext,
       paymentType: 'subscription_authorized_payment',
       amountCents,
+    }, { db: conn })
+    await recordClientLoyaltyPaymentStatusTransitionTx(localSubscription.id, {
+      snapshot: paymentSnapshot,
+      previousSubscriptionStatus: locked.status || null,
+      nextSubscriptionStatus: updated.status || null,
+      mpTopic: 'automatic-payments',
+      eventContext: sellerEventContext,
+      paymentType: 'subscription_authorized_payment',
+      rawPayload: {
+        payment: paymentResult.raw,
+        subscription: gatewayResult.raw,
+      },
     }, { db: conn })
     await conn.commit()
     return { ok: true, handled: true, status: updated.status, subscription: updated, failure: failureDetails }
@@ -1723,16 +2111,26 @@ export async function loadClientLoyaltySubscriptionDetails(subscriptionInput, {
   const latestFailure = resolveLatestClientLoyaltyFailureSummary(events, {
     subscriptionStatus: serializedSubscription?.status || null,
   })
+  const latestPaymentSnapshot = resolveLatestClientLoyaltyPaymentSnapshot(events)
+  const retryOptions = resolveClientLoyaltyRetryOptions({
+    subscriptionStatus: serializedSubscription?.status || null,
+    latestFailure,
+  })
 
   return {
     subscription: {
       ...serializedSubscription,
       last_failure_code: latestFailure?.code || null,
+      last_failure_status: latestFailure?.status || null,
+      last_failure_status_detail: latestFailure?.status_detail || null,
       last_failure_message: latestFailure?.friendly_message || null,
+      last_failure_gateway_message: latestFailure?.message || latestFailure?.description || null,
       last_failure_at: latestFailure?.created_at || null,
       last_failure_source: latestFailure?.source || null,
       last_failure_payment_method_id: latestFailure?.payment_method_id || null,
       last_failure_payment_type_id: latestFailure?.payment_type_id || null,
+      latest_payment_snapshot: latestPaymentSnapshot,
+      retry_options: retryOptions,
     },
     subscription_status: serializedSubscription?.status || null,
     plan,
@@ -1746,10 +2144,15 @@ export async function loadClientLoyaltySubscriptionDetails(subscriptionInput, {
       : null,
     credits,
     events,
+    latest_payment_snapshot: latestPaymentSnapshot,
     latest_failure: latestFailure,
     last_failure_code: latestFailure?.code || null,
+    last_failure_status: latestFailure?.status || null,
+    last_failure_status_detail: latestFailure?.status_detail || null,
     last_failure_message: latestFailure?.friendly_message || null,
+    last_failure_gateway_message: latestFailure?.message || latestFailure?.description || null,
     last_failure_at: latestFailure?.created_at || null,
     last_failure_source: latestFailure?.source || null,
+    retry_options: retryOptions,
   }
 }

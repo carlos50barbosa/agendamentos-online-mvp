@@ -55,6 +55,39 @@ function parseServiceIds(value) {
   return raw.split(',').map((entry) => normalizeId(entry)).filter(Boolean)
 }
 
+function getDetailsClienteId(details) {
+  return normalizeId(
+    details?.subscription?.cliente_id ||
+    details?.subscription?.clienteId
+  )
+}
+
+function getDetailsEstabelecimentoId(details) {
+  return normalizeId(
+    details?.subscription?.estabelecimento_id ||
+    details?.subscription?.estabelecimentoId
+  )
+}
+
+export function filterClientLoyaltyDetailsForAuthenticatedClient(detailsList = [], {
+  clienteId = null,
+  estabelecimentoId = null,
+} = {}) {
+  const safeClienteId = normalizeId(clienteId)
+  const safeEstabelecimentoId = normalizeId(estabelecimentoId)
+
+  return (Array.isArray(detailsList) ? detailsList : [detailsList])
+    .filter(Boolean)
+    .filter((details) => (
+      !safeClienteId ||
+      getDetailsClienteId(details) === safeClienteId
+    ))
+    .filter((details) => (
+      !safeEstabelecimentoId ||
+      getDetailsEstabelecimentoId(details) === safeEstabelecimentoId
+    ))
+}
+
 async function fetchPreviewServices(estabelecimentoId, serviceIds) {
   if (!serviceIds.length) return []
   const placeholders = serviceIds.map(() => '?').join(',')
@@ -114,16 +147,22 @@ router.get('/subscription', auth, isCliente, async (req, res) => {
     const estabelecimentoId = normalizeId(req.query?.estabelecimento_id || req.query?.establishment_id)
     if (estabelecimentoId) {
       const subscription = await getPreferredClientLoyaltySubscription(req.user.id, estabelecimentoId)
-      const details = subscription
-        ? await loadClientLoyaltySubscriptionDetails(subscription)
-        : null
+      const details = filterClientLoyaltyDetailsForAuthenticatedClient(
+        [subscription ? await loadClientLoyaltySubscriptionDetails(subscription) : null],
+        {
+          clienteId: req.user.id,
+          estabelecimentoId,
+        }
+      )[0] || null
       return res.json({ subscription: details })
     }
 
     const subscriptions = await listClientLoyaltySubscriptionsForClient(req.user.id)
-    const details = await Promise.all(
+    const details = filterClientLoyaltyDetailsForAuthenticatedClient(await Promise.all(
       subscriptions.map((subscription) => loadClientLoyaltySubscriptionDetails(subscription))
-    )
+    ), {
+      clienteId: req.user.id,
+    })
     return res.json({ subscriptions: details.filter(Boolean) })
   } catch (error) {
     return handleRouteError(res, error)
@@ -153,9 +192,17 @@ router.get('/context', auth, isCliente, async (req, res) => {
       : null
 
     return res.json({
-      subscription: context.subscription
-        ? await loadClientLoyaltySubscriptionDetails(context.subscription, { includeEvents: false })
-        : null,
+      subscription: filterClientLoyaltyDetailsForAuthenticatedClient(
+        [
+          context.subscription
+            ? await loadClientLoyaltySubscriptionDetails(context.subscription, { includeEvents: false })
+            : null,
+        ],
+        {
+          clienteId: req.user.id,
+          estabelecimentoId,
+        }
+      )[0] || null,
       plan: context.plan,
       credits: context.credits,
       credits_by_service: context.credits_by_service,
@@ -320,9 +367,12 @@ router.get('/history', auth, isCliente, async (req, res) => {
     const subscriptions = estabelecimentoId
       ? [await getPreferredClientLoyaltySubscription(req.user.id, estabelecimentoId)].filter(Boolean)
       : await listClientLoyaltySubscriptionsForClient(req.user.id)
-    const details = await Promise.all(
+    const details = filterClientLoyaltyDetailsForAuthenticatedClient(await Promise.all(
       subscriptions.map((subscription) => loadClientLoyaltySubscriptionDetails(subscription, { includeEvents: true }))
-    )
+    ), {
+      clienteId: req.user.id,
+      estabelecimentoId,
+    })
     return res.json({ subscriptions: details.filter(Boolean) })
   } catch (error) {
     return handleRouteError(res, error)
