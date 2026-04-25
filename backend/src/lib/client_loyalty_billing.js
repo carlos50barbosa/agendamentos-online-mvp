@@ -248,11 +248,88 @@ function extractClientLoyaltyFailureFromEvent(event) {
   }
 }
 
-function findLatestClientLoyaltyFailure(events = []) {
-  const candidate = (Array.isArray(events) ? events : []).find((event) =>
-    ['payment_failed', 'payment_expired'].includes(String(event?.tipo_evento || '').toLowerCase())
-  )
-  return candidate ? extractClientLoyaltyFailureFromEvent(candidate) : null
+function mapClientLoyaltyFailureFriendlyMessage(code) {
+  const normalized = String(code || '').trim().toLowerCase()
+  const messages = {
+    cc_rejected_high_risk: 'A ultima tentativa de cobranca foi recusada por analise de risco do cartao.',
+    cc_rejected_insufficient_amount: 'A ultima tentativa de cobranca foi recusada por saldo ou limite insuficiente.',
+    cc_rejected_bad_filled_security_code: 'A ultima tentativa de cobranca foi recusada por dados do cartao invalidos.',
+  }
+  return messages[normalized] || null
+}
+
+function resolveClientLoyaltyFailureSource(event) {
+  const paymentType = String(event?.payment_type || '').trim().toLowerCase()
+  const mpTopic = String(event?.mp_topic || '').trim().toLowerCase()
+  if (paymentType === 'subscription_authorized_payment' || mpTopic === 'automatic-payments') {
+    return 'authorized_payment'
+  }
+  return 'payment'
+}
+
+function extractClientLoyaltyFailureGatewayRecord(event) {
+  const payload = event?.payload_json || null
+  const raw = payload?.raw || payload || null
+  const record = raw?.payment || raw?.authorized_payment || raw || null
+  return record && typeof record === 'object' ? record : null
+}
+
+function buildClientLoyaltyFailureCandidate(event) {
+  const extracted = extractClientLoyaltyFailureFromEvent(event)
+  if (!extracted) return null
+  const gatewayRecord = extractClientLoyaltyFailureGatewayRecord(event)
+  const technicalCode = String(extracted.status_detail || '').trim() || null
+  return {
+    ...extracted,
+    code: technicalCode,
+    source: resolveClientLoyaltyFailureSource(event),
+    payment_method_id:
+      gatewayRecord?.payment_method_id ||
+      gatewayRecord?.payment_method ||
+      null,
+    payment_type_id: gatewayRecord?.payment_type_id || null,
+    date_created:
+      gatewayRecord?.date_created ||
+      gatewayRecord?.date_last_updated ||
+      gatewayRecord?.last_modified ||
+      extracted.created_at ||
+      null,
+  }
+}
+
+export function resolveLatestClientLoyaltyFailureSummary(events = [], {
+  subscriptionStatus = null,
+} = {}) {
+  const normalizedStatus = String(subscriptionStatus || '').trim().toLowerCase()
+  if (normalizedStatus && normalizedStatus !== 'past_due') return null
+
+  const candidates = (Array.isArray(events) ? events : [])
+    .filter((event) => ['payment_failed', 'payment_expired'].includes(String(event?.tipo_evento || '').toLowerCase()))
+    .map(buildClientLoyaltyFailureCandidate)
+    .filter(Boolean)
+
+  const selected =
+    candidates.find((candidate) => candidate.source === 'payment' && candidate.code) ||
+    candidates.find((candidate) => candidate.source === 'authorized_payment' && candidate.code) ||
+    null
+
+  if (!selected) return null
+
+  return {
+    status: selected.status || null,
+    status_detail: selected.status_detail || null,
+    code: selected.code || null,
+    description: selected.description || null,
+    message: selected.message || null,
+    friendly_message:
+      mapClientLoyaltyFailureFriendlyMessage(selected.code) ||
+      'A ultima tentativa de cobranca nao foi aprovada. Revise os dados do cartao ou tente outro meio de pagamento.',
+    source: selected.source || null,
+    created_at: selected.date_created || selected.created_at || null,
+    gateway_event_id: selected.gateway_event_id || null,
+    payment_method_id: selected.payment_method_id || null,
+    payment_type_id: selected.payment_type_id || null,
+  }
 }
 
 async function fetchEstablishmentSummary(estabelecimentoId, { db = pool } = {}) {
@@ -1642,10 +1719,22 @@ export async function loadClientLoyaltySubscriptionDetails(subscriptionInput, {
   const events = includeEvents
     ? await listClientLoyaltySubscriptionEvents(subscription.id, { db, limit: eventLimit })
     : []
-  const latestFailure = findLatestClientLoyaltyFailure(events)
+  const serializedSubscription = serializeClientLoyaltySubscription(subscription)
+  const latestFailure = resolveLatestClientLoyaltyFailureSummary(events, {
+    subscriptionStatus: serializedSubscription?.status || null,
+  })
 
   return {
-    subscription: serializeClientLoyaltySubscription(subscription),
+    subscription: {
+      ...serializedSubscription,
+      last_failure_code: latestFailure?.code || null,
+      last_failure_message: latestFailure?.friendly_message || null,
+      last_failure_at: latestFailure?.created_at || null,
+      last_failure_source: latestFailure?.source || null,
+      last_failure_payment_method_id: latestFailure?.payment_method_id || null,
+      last_failure_payment_type_id: latestFailure?.payment_type_id || null,
+    },
+    subscription_status: serializedSubscription?.status || null,
     plan,
     estabelecimento: estabelecimento
       ? {
@@ -1658,5 +1747,9 @@ export async function loadClientLoyaltySubscriptionDetails(subscriptionInput, {
     credits,
     events,
     latest_failure: latestFailure,
+    last_failure_code: latestFailure?.code || null,
+    last_failure_message: latestFailure?.friendly_message || null,
+    last_failure_at: latestFailure?.created_at || null,
+    last_failure_source: latestFailure?.source || null,
   }
 }

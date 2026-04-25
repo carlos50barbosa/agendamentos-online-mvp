@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { Api } from '../utils/api.js'
 import { getUser } from '../utils/auth.js'
+import { resolveLoyaltyFailureDisplay } from '../utils/loyaltyFailure.js'
 import { getMercadoPagoCardErrorMessage, isMercadoPagoCardTokenRefreshRequired } from '../utils/mercadoPagoCard.js'
 
 let mercadoPagoSdkPromise = null
@@ -120,9 +121,8 @@ export default function LoyaltyAssinaturaCliente() {
   const currentStatus = String(currentDetails?.subscription?.status || '').toLowerCase().trim()
   const sellerConnected = gatewayAccount?.connected === true || gatewayAccount?.status === 'connected'
   const isCardPendingActivation = currentStatus === 'pending_payment' && String(currentDetails?.subscription?.payment_method || '').toLowerCase() === 'credit_card'
-  const latestFailure = currentDetails?.latest_failure || null
-  const latestFailureFriendlyText = getFailureFriendlyMessage(latestFailure)
-  const latestFailureText = formatFailureDetail(latestFailure)
+  const failureDisplay = resolveLoyaltyFailureDisplay(currentDetails)
+  const latestFailure = failureDisplay.raw || null
 
   const loadData = useCallback(async () => {
     setLoading(true)
@@ -366,7 +366,7 @@ export default function LoyaltyAssinaturaCliente() {
           <div className="loyalty-card__header">
             <div>
               <h2>{currentDetails.plan?.nome || 'Plano atual'}</h2>
-              <p>{getStatusLabel(currentDetails.subscription?.status)}</p>
+              <p>{getStatusLabel(currentDetails.subscription?.status)}{currentStatus ? ` (${currentStatus})` : ''}</p>
             </div>
             <div className="loyalty-current__price">
               {currentDetails.plan ? formatCurrencyFromCents(currentDetails.plan.preco_centavos) : '-'}
@@ -387,16 +387,14 @@ export default function LoyaltyAssinaturaCliente() {
             <span>Pagamento: {currentDetails.subscription?.payment_method || '-'}</span>
           </div>
 
-          {latestFailure ? (
+          {failureDisplay.technicalCode ? (
             <div className="loyalty-failure-box">
-              <strong>Motivo da ultima falha</strong>
-              <span>{latestFailureFriendlyText || latestFailureText || latestFailure.status || 'Falha informada pelo gateway.'}</span>
-              {latestFailureText && latestFailureText !== latestFailureFriendlyText ? (
-                <span>Detalhe tecnico: {latestFailureText}</span>
-              ) : null}
-              {latestFailure.status_detail ? <span>Status do gateway: {latestFailure.status_detail}</span> : null}
-              {latestFailure.code ? <span>Código: {latestFailure.code}</span> : null}
-              {latestFailure.created_at ? <span>Registrado em: {formatDate(latestFailure.created_at)}</span> : null}
+              <strong>Cobranca pendente de regularizacao</strong>
+              <span>Status da assinatura: {currentStatus || '-'}</span>
+              <span>Ultima falha tecnica: {failureDisplay.technicalCode}</span>
+              {failureDisplay.technicalMessage ? <span>{failureDisplay.technicalMessage}</span> : null}
+              {failureDisplay.occurredAt ? <span>Ultima tentativa registrada em: {formatDate(failureDisplay.occurredAt)}</span> : null}
+              {latestFailure?.payment_method_id ? <span>Metodo da ultima tentativa: {latestFailure.payment_method_id}</span> : null}
             </div>
           ) : null}
 
