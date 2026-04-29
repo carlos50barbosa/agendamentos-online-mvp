@@ -92,7 +92,7 @@ CREATE TABLE IF NOT EXISTS client_loyalty_subscription_events (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
   client_loyalty_subscription_id BIGINT NOT NULL,
   tipo_evento VARCHAR(80) NOT NULL,
-  gateway_event_id VARCHAR(120) NULL,
+  gateway_event_id VARCHAR(191) NULL,
   payload_json LONGTEXT NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   INDEX idx_client_loyalty_events_sub (client_loyalty_subscription_id, created_at),

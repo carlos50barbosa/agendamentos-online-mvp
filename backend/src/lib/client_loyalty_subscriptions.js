@@ -1,6 +1,7 @@
 import { pool } from './db.js'
 import { toDatabaseDateTime } from './database_datetime.js'
 import { sanitizeMercadoPagoSensitivePayload } from './mercadopago_card_tokens.js'
+import { createHash } from 'node:crypto'
 
 export const CLIENT_LOYALTY_STATUSES = new Set([
   'trialing',
@@ -15,6 +16,8 @@ export const CLIENT_LOYALTY_STATUSES = new Set([
 
 export const CLIENT_LOYALTY_PAYMENT_METHODS = new Set(['credit_card', 'pix'])
 export const CLIENT_LOYALTY_OWNER_TYPES = new Set(['platform', 'establishment'])
+export const CLIENT_LOYALTY_GATEWAY_EVENT_ID_DB_LENGTH = 191
+export const CLIENT_LOYALTY_GATEWAY_EVENT_ID_SAFE_LENGTH = 120
 
 const COLUMN_MAP = {
   clienteId: 'cliente_id',
@@ -59,6 +62,172 @@ function safeJsonParse(value) {
     return JSON.parse(value)
   } catch {
     return null
+  }
+}
+
+function stableHash(value, length = 32) {
+  const input = typeof value === 'string' ? value : JSON.stringify(value ?? null)
+  return createHash('sha256').update(input || '').digest('hex').slice(0, length)
+}
+
+function normalizeIdToken(value, fallback = '') {
+  const normalized = String(value || '').trim().replace(/[^A-Za-z0-9._-]/g, '_')
+  return normalized || fallback
+}
+
+function resolveGatewayEventIdResourceType({ mpTopic = null, paymentType = null, payload = null } = {}) {
+  const snapshot = payload?.snapshot || payload?.payment_snapshot || null
+  const target = String(snapshot?.payment_target || '').trim().toLowerCase()
+  const topic = String(mpTopic || '').trim().toLowerCase()
+  const type = String(paymentType || '').trim().toLowerCase()
+  if (target === 'authorized_payment' || topic === 'automatic-payments' || type === 'subscription_authorized_payment') {
+    return 'ap'
+  }
+  if (target === 'preapproval' || topic === 'subscription' || type === 'subscription_preapproval') {
+    return 'pa'
+  }
+  return 'pay'
+}
+
+function resolveGatewayEventIdResourceId(raw = '', {
+  mpPaymentId = null,
+  payload = null,
+} = {}) {
+  const snapshot = payload?.snapshot || payload?.payment_snapshot || null
+  const rawPayment = payload?.payment || payload?.raw?.payment || payload?.raw || null
+  const direct = normalizeIdToken(
+    mpPaymentId ||
+      snapshot?.payment_id ||
+      rawPayment?.id ||
+      payload?.authorized_payment_id ||
+      payload?.payment_id ||
+      ''
+  )
+  if (direct) return direct
+
+  const text = String(raw || '')
+  const authorizedMatch = text.match(/(?:authorized_payment|automatic-payments|ap)[:/_-]+([A-Za-z0-9._-]+)/i)
+  if (authorizedMatch?.[1]) return normalizeIdToken(authorizedMatch[1])
+  const preapprovalMatch = text.match(/(?:preapproval|subscription|pa)[:/_-]+([A-Za-z0-9._-]+)/i)
+  if (preapprovalMatch?.[1]) return normalizeIdToken(preapprovalMatch[1])
+  const paymentMatch = text.match(/(?:payment|pay)[:/_-]+([A-Za-z0-9._-]+)/i)
+  if (paymentMatch?.[1]) return normalizeIdToken(paymentMatch[1])
+  return ''
+}
+
+function resolveGatewayEventIdPrefix(eventType = '') {
+  const type = String(eventType || '').trim().toLowerCase()
+  const prefixes = {
+    payment_snapshot: 'snap',
+    payment_status_transition: 'pst',
+    payment_pending: 'pending',
+    payment_failed: 'failed',
+    payment_expired: 'expired',
+    subscription_renewed: 'renewal',
+    subscription_canceled: 'cancel',
+    card_subscription_created: 'sub',
+    card_subscription_create_failed: 'subfail',
+  }
+  return prefixes[type] || normalizeIdToken(type, 'evt').slice(0, 24)
+}
+
+function resolveGatewayEventIdHashSource(raw = '', { payload = null } = {}) {
+  if (payload && typeof payload === 'object') {
+    return {
+      previous_subscription_status: payload.previous_subscription_status || null,
+      next_subscription_status: payload.next_subscription_status || null,
+      transition_rule: payload.transition_rule || null,
+      snapshot: payload.snapshot || payload.payment_snapshot || null,
+    }
+  }
+  return String(raw || '')
+}
+
+export function normalizeClientLoyaltyGatewayEventId(gatewayEventId, context = {}) {
+  const originalId = gatewayEventId == null ? '' : String(gatewayEventId).trim()
+  if (!originalId) {
+    return {
+      originalId: null,
+      normalizedId: null,
+      originalLength: 0,
+      changed: false,
+      strategy: 'empty',
+      hashFallback: false,
+    }
+  }
+
+  if (originalId.length <= CLIENT_LOYALTY_GATEWAY_EVENT_ID_SAFE_LENGTH) {
+    return {
+      originalId,
+      normalizedId: originalId,
+      originalLength: originalId.length,
+      changed: false,
+      strategy: 'original',
+      hashFallback: false,
+    }
+  }
+
+  const eventType = String(context.eventType || '').trim()
+  const resourceId = resolveGatewayEventIdResourceId(originalId, context)
+  if (resourceId) {
+    const prefix = resolveGatewayEventIdPrefix(eventType)
+    const resourceType = resolveGatewayEventIdResourceType(context)
+    const hash = stableHash(resolveGatewayEventIdHashSource(originalId, context), 12)
+    const normalizedId = `${prefix}:${resourceType}:${resourceId}:${hash}`.slice(0, CLIENT_LOYALTY_GATEWAY_EVENT_ID_SAFE_LENGTH)
+    return {
+      originalId,
+      normalizedId,
+      originalLength: originalId.length,
+      changed: normalizedId !== originalId,
+      strategy: `${resourceType}_resource_hash`,
+      hashFallback: false,
+    }
+  }
+
+  return {
+    originalId,
+    normalizedId: `hash:${stableHash(originalId, 32)}`,
+    originalLength: originalId.length,
+    changed: true,
+    strategy: 'sha256_32',
+    hashFallback: true,
+  }
+}
+
+function logClientLoyaltyGatewayEventIdNormalization(resolution, context = {}) {
+  if (!resolution?.changed) return
+  console.info('[client-loyalty] event_id_normalized', {
+    event_type: context.eventType || null,
+    mp_topic: context.mpTopic || null,
+    payment_type: context.paymentType || null,
+    original_length: resolution.originalLength || 0,
+    original_id: resolution.originalId && resolution.originalId.length <= 220
+      ? resolution.originalId
+      : `${String(resolution.originalId || '').slice(0, 200)}...`,
+    normalized_id: resolution.normalizedId || null,
+    strategy: resolution.strategy || null,
+    fallback_hash: Boolean(resolution.hashFallback),
+  })
+}
+
+function withGatewayEventIdNormalizationPayload(payload, resolution) {
+  if (!resolution?.changed) return payload
+  const metadata = {
+    original_gateway_event_id: resolution.originalId || null,
+    original_gateway_event_id_length: resolution.originalLength || 0,
+    normalized_gateway_event_id: resolution.normalizedId || null,
+    strategy: resolution.strategy || null,
+    fallback_hash: Boolean(resolution.hashFallback),
+  }
+  if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
+    return {
+      ...payload,
+      event_id_normalization: metadata,
+    }
+  }
+  return {
+    value: payload ?? null,
+    event_id_normalization: metadata,
   }
 }
 
@@ -454,7 +623,21 @@ export async function appendClientLoyaltySubscriptionEvent(
   { db = pool } = {}
 ) {
   if (!subscriptionId || !eventType) return { duplicated: false, id: null }
-  if (gatewayEventId) {
+  const gatewayEventIdResolution = normalizeClientLoyaltyGatewayEventId(gatewayEventId, {
+    eventType,
+    mpTopic,
+    mpPaymentId,
+    paymentType,
+    payload,
+  })
+  const normalizedGatewayEventId = gatewayEventIdResolution.normalizedId
+  logClientLoyaltyGatewayEventIdNormalization(gatewayEventIdResolution, {
+    eventType,
+    mpTopic,
+    paymentType,
+  })
+
+  if (normalizedGatewayEventId) {
     const [existing] = await db.query(
       `SELECT id
          FROM client_loyalty_subscription_events
@@ -462,11 +645,12 @@ export async function appendClientLoyaltySubscriptionEvent(
           AND tipo_evento=?
           AND gateway_event_id=?
         LIMIT 1`,
-      [subscriptionId, String(eventType), String(gatewayEventId)]
+      [subscriptionId, String(eventType), normalizedGatewayEventId]
     )
     if (existing?.length) return { duplicated: true, id: existing[0].id }
   }
-  const safePayload = payload == null ? null : sanitizeMercadoPagoSensitivePayload(payload)
+  const payloadWithEventId = withGatewayEventIdNormalizationPayload(payload, gatewayEventIdResolution)
+  const safePayload = payloadWithEventId == null ? null : sanitizeMercadoPagoSensitivePayload(payloadWithEventId)
   const [result] = await db.query(
     `INSERT INTO client_loyalty_subscription_events
       (
@@ -492,7 +676,7 @@ export async function appendClientLoyaltySubscriptionEvent(
     [
       subscriptionId,
       String(eventType),
-      gatewayEventId == null ? null : String(gatewayEventId),
+      normalizedGatewayEventId,
       mpTopic == null ? null : String(mpTopic),
       normalizeClientLoyaltyOwnerType(ownerType),
       ownerId == null ? null : Number(ownerId),

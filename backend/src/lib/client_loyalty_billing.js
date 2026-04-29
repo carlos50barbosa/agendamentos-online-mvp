@@ -20,6 +20,7 @@ import {
   getPreferredClientLoyaltySubscription,
   getClientLoyaltySubscriptionByWebhookResourceId,
   listClientLoyaltySubscriptionEvents,
+  normalizeClientLoyaltyGatewayEventId,
   serializeClientLoyaltySubscription,
   updateClientLoyaltySubscription,
 } from './client_loyalty_subscriptions.js'
@@ -817,7 +818,34 @@ function buildClientLoyaltyPaymentAuditEventId(prefix, snapshot = null, extra = 
     snapshot?.status_detail || 'none',
     ...extra.map((value) => String(value || '').trim()).filter(Boolean),
   ]
-  return parts.join(':')
+  const originalId = parts.join(':')
+  const resolution = normalizeClientLoyaltyGatewayEventId(originalId, {
+    eventType: prefix,
+    mpTopic: snapshot?.payment_target === 'authorized_payment' ? 'automatic-payments' : snapshot?.payment_target || null,
+    mpPaymentId: snapshot?.payment_id || null,
+    paymentType: snapshot?.payment_type_id || snapshot?.payment_target || null,
+    payload: {
+      previous_subscription_status: extra[0] || null,
+      next_subscription_status: extra[1] || null,
+      transition_rule: extra[2] || null,
+      snapshot,
+    },
+  })
+  if (resolution.changed) {
+    console.info('[client-loyalty] event_id_normalized', {
+      event_type: prefix,
+      mp_topic: snapshot?.payment_target === 'authorized_payment' ? 'automatic-payments' : snapshot?.payment_target || null,
+      payment_type: snapshot?.payment_type_id || snapshot?.payment_target || null,
+      original_length: resolution.originalLength || 0,
+      original_id: resolution.originalId && resolution.originalId.length <= 220
+        ? resolution.originalId
+        : `${String(resolution.originalId || '').slice(0, 200)}...`,
+      normalized_id: resolution.normalizedId || null,
+      strategy: resolution.strategy || null,
+      fallback_hash: Boolean(resolution.hashFallback),
+    })
+  }
+  return resolution.normalizedId
 }
 
 async function recordClientLoyaltyPaymentSnapshotTx(subscriptionId, {

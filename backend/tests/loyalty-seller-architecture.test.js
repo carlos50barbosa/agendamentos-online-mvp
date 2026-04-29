@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { readFileSync } from 'node:fs'
+import { dirname, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 process.env.DB_HOST ??= '127.0.0.1'
 process.env.DB_USER ??= 'root'
@@ -7,8 +10,12 @@ process.env.DB_PASS ??= 'root'
 process.env.DB_NAME ??= 'test'
 process.env.JWT_SECRET ??= 'test-secret'
 
+const __dirname = dirname(fileURLToPath(import.meta.url))
+
 const {
+  appendClientLoyaltySubscriptionEvent,
   computeClientLoyaltySubscriptionState,
+  normalizeClientLoyaltyGatewayEventId,
   normalizeClientLoyaltyOwnerType,
   serializeClientLoyaltySubscription,
 } = await import('../src/lib/client_loyalty_subscriptions.js')
@@ -149,4 +156,124 @@ test('buildMercadoPagoSellerWebhookDeliveryKey keeps owner and resource traceabi
   })
 
   assert.equal(key, 'seller:payment:payment.updated:pay_999:281768531:27')
+})
+
+test('client loyalty gateway event id normalization shortens long transition ids deterministically', () => {
+  const original = 'payment_status_transition:authorized_payment:156205780317:in_process:pending_review_manual:pending_payment:pending_payment:authorized_payment_pending_review'
+  const context = {
+    eventType: 'payment_status_transition',
+    mpTopic: 'automatic-payments',
+    mpPaymentId: '156205780317',
+    paymentType: 'subscription_authorized_payment',
+    payload: {
+      previous_subscription_status: 'pending_payment',
+      next_subscription_status: 'pending_payment',
+      transition_rule: 'authorized_payment_pending_review',
+      snapshot: {
+        payment_id: '156205780317',
+        payment_target: 'authorized_payment',
+        status: 'in_process',
+        status_detail: 'pending_review_manual',
+      },
+    },
+  }
+
+  const first = normalizeClientLoyaltyGatewayEventId(original, context)
+  const second = normalizeClientLoyaltyGatewayEventId(original, context)
+
+  assert.equal(first.normalizedId, second.normalizedId)
+  assert.equal(first.normalizedId.startsWith('pst:ap:156205780317:'), true)
+  assert.equal(first.normalizedId.length <= 120, true)
+  assert.equal(first.changed, true)
+})
+
+test('appendClientLoyaltySubscriptionEvent stores a short id and preserves full payload details', async () => {
+  const queries = []
+  const fakeDb = {
+    async query(sql, values) {
+      queries.push({ sql, values })
+      if (/SELECT id\s+FROM client_loyalty_subscription_events/.test(sql)) return [[]]
+      if (/INSERT INTO client_loyalty_subscription_events/.test(sql)) return [{ insertId: 44 }]
+      throw new Error(`unexpected query: ${sql}`)
+    },
+  }
+  const original = 'payment_status_transition:authorized_payment:156205780317:in_process:pending_review_manual:pending_payment:pending_payment:authorized_payment_pending_review'
+
+  const result = await appendClientLoyaltySubscriptionEvent(12, {
+    eventType: 'payment_status_transition',
+    gatewayEventId: original,
+    mpTopic: 'automatic-payments',
+    mpPaymentId: '156205780317',
+    paymentType: 'subscription_authorized_payment',
+    payload: {
+      previous_subscription_status: 'pending_payment',
+      next_subscription_status: 'pending_payment',
+      transition_rule: 'authorized_payment_pending_review',
+      snapshot: {
+        payment_id: '156205780317',
+        payment_target: 'authorized_payment',
+        status: 'in_process',
+        status_detail: 'pending_review_manual',
+      },
+      raw: {
+        payment: {
+          id: '156205780317',
+          status: 'in_process',
+        },
+      },
+    },
+  }, { db: fakeDb })
+
+  const insert = queries.find((entry) => /INSERT INTO client_loyalty_subscription_events/.test(entry.sql))
+  const payloadJson = JSON.parse(insert.values[16])
+
+  assert.equal(result.id, 44)
+  assert.equal(insert.values[2].startsWith('pst:ap:156205780317:'), true)
+  assert.equal(insert.values[2].length <= 120, true)
+  assert.equal(payloadJson.transition_rule, 'authorized_payment_pending_review')
+  assert.equal(payloadJson.snapshot.status_detail, 'pending_review_manual')
+  assert.equal(payloadJson.event_id_normalization.original_gateway_event_id, original)
+  assert.equal(payloadJson.event_id_normalization.normalized_gateway_event_id, insert.values[2])
+})
+
+test('appendClientLoyaltySubscriptionEvent deduplicates using the normalized event id', async () => {
+  const queries = []
+  const fakeDb = {
+    async query(sql, values) {
+      queries.push({ sql, values })
+      if (/SELECT id\s+FROM client_loyalty_subscription_events/.test(sql)) return [[{ id: 77 }]]
+      throw new Error(`unexpected query: ${sql}`)
+    },
+  }
+  const original = 'payment_status_transition:authorized_payment:156205780317:in_process:pending_review_manual:pending_payment:pending_payment:authorized_payment_pending_review'
+
+  const result = await appendClientLoyaltySubscriptionEvent(12, {
+    eventType: 'payment_status_transition',
+    gatewayEventId: original,
+    mpTopic: 'automatic-payments',
+    mpPaymentId: '156205780317',
+    paymentType: 'subscription_authorized_payment',
+    payload: {
+      transition_rule: 'authorized_payment_pending_review',
+      snapshot: {
+        payment_id: '156205780317',
+        payment_target: 'authorized_payment',
+      },
+    },
+  }, { db: fakeDb })
+
+  assert.equal(result.duplicated, true)
+  assert.equal(result.id, 77)
+  assert.equal(queries.length, 1)
+  assert.equal(queries[0].values[2].startsWith('pst:ap:156205780317:'), true)
+})
+
+test('client loyalty event schema migration allows indexed normalized ids with compatibility headroom', () => {
+  const migration = readFileSync(resolve(__dirname, '../sql/2026-04-29-normalize-client-loyalty-event-ids.sql'), 'utf8')
+  const schema = readFileSync(resolve(__dirname, '../sql/schema.sql'), 'utf8')
+
+  assert.match(migration, /gateway_event_id\s+VARCHAR\(191\)\s+NULL/i)
+  assert.match(migration, /idx_client_loyalty_events_dedupe/i)
+  assert.match(schema, /gateway_event_id\s+VARCHAR\(191\)\s+NULL/i)
+  assert.match(schema, /idx_client_loyalty_events_dedupe\s+\(client_loyalty_subscription_id,\s*tipo_evento,\s*gateway_event_id\)/i)
 })
