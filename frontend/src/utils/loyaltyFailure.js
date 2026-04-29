@@ -33,9 +33,9 @@ function isRealFailureCode(value) {
 export function getLoyaltyFailureFriendlyMessage(code, fallbackMessage = null) {
   const normalized = normalizeKey(code)
   const messages = {
-    cc_rejected_high_risk: 'A ultima tentativa de cobranca foi recusada por analise de risco do cartao.',
-    cc_rejected_insufficient_amount: 'A ultima tentativa de cobranca foi recusada por saldo ou limite insuficiente.',
-    cc_rejected_bad_filled_security_code: 'A ultima tentativa de cobranca foi recusada por dados do cartao invalidos.',
+    cc_rejected_high_risk: 'A última tentativa de cobrança foi recusada por análise de risco do cartão.',
+    cc_rejected_insufficient_amount: 'A última tentativa de cobrança foi recusada por saldo ou limite insuficiente.',
+    cc_rejected_bad_filled_security_code: 'A última tentativa de cobrança foi recusada por dados do cartão inválidos.',
   }
   return messages[normalized] || normalizeValue(fallbackMessage) || ''
 }
@@ -103,9 +103,9 @@ export function resolveLoyaltyPaymentStateDisplay(details = null) {
     return {
       show: true,
       kind: 'pending_review',
-      title: 'Pagamento em analise',
-      description: 'Estamos aguardando a revisao manual do Mercado Pago.',
-      statusLabel: 'Pagamento em analise',
+      title: 'Pagamento em análise',
+      description: 'Estamos aguardando a revisão manual do Mercado Pago.',
+      statusLabel: 'Pagamento em análise',
     }
   }
 
@@ -113,9 +113,9 @@ export function resolveLoyaltyPaymentStateDisplay(details = null) {
     return {
       show: true,
       kind: 'scheduled',
-      title: 'Cobranca agendada',
-      description: 'Estamos aguardando a confirmacao do pagamento.',
-      statusLabel: 'Cobranca agendada',
+      title: 'Cobrança agendada',
+      description: 'Estamos aguardando a confirmação do pagamento.',
+      statusLabel: 'Cobrança agendada',
     }
   }
 
@@ -123,8 +123,8 @@ export function resolveLoyaltyPaymentStateDisplay(details = null) {
     return {
       show: true,
       kind: 'processing',
-      title: 'Cobranca em processamento',
-      description: 'Sua cobranca esta em processamento. Aguarde a confirmacao do pagamento.',
+      title: 'Cobrança em processamento',
+      description: 'Sua cobrança está em processamento. Aguarde a confirmação do pagamento.',
       statusLabel: 'Pagamento em processamento',
     }
   }
@@ -133,8 +133,8 @@ export function resolveLoyaltyPaymentStateDisplay(details = null) {
     return {
       show: true,
       kind: 'pending_payment',
-      title: 'Aguardando confirmacao do pagamento',
-      description: 'A primeira cobranca sera confirmada pelo Mercado Pago.',
+      title: 'Aguardando confirmação do pagamento',
+      description: 'A primeira cobrança será confirmada pelo Mercado Pago.',
       statusLabel: 'Aguardando pagamento',
     }
   }
@@ -158,16 +158,16 @@ export function resolveLoyaltyRetryDisplay(details = null) {
   return {
     showRecovery: Boolean(failure.technicalCode || retryOptions?.suggested),
     title: highRisk
-      ? 'Nao foi possivel aprovar este cartao no momento.'
-      : (failure.technicalCode ? 'Voce pode regularizar a assinatura.' : ''),
+      ? 'Não foi possível aprovar este cartão no momento.'
+      : (failure.technicalCode ? 'Você pode regularizar a assinatura.' : ''),
     description: highRisk
-      ? 'Voce pode tentar outro cartao ou pagar por PIX. Por seguranca, novas tentativas com este cartao podem ficar indisponiveis por alguns minutos.'
+      ? 'Você pode tentar outro cartão ou pagar por PIX. Por segurança, novas tentativas com este cartão podem ficar indisponíveis por alguns minutos.'
       : (
         cardRetry?.message ||
         pixRetry?.message ||
         ''
       ),
-    cardActionLabel: 'Tentar outro cartao',
+    cardActionLabel: 'Tentar outro cartão',
     pixActionLabel: highRisk ? 'Pagar por PIX agora' : 'Pagar por PIX',
     cardCooldownActive: cardRetry?.cooldown_active === true,
     cardCooldownRemainingMs: Number(cardRetry?.cooldown_remaining_ms || 0) || 0,

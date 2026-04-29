@@ -1,3 +1,5 @@
+import { getClientIpInfo } from './client_ip.js';
+
 function normalizeToken(value) {
   if (value === undefined || value === null) return '';
   return String(value).trim();
@@ -74,18 +76,32 @@ function sanitizeLogValue(value, maxLength = 256) {
   return normalized.length > maxLength ? `${normalized.slice(0, maxLength)}...` : normalized;
 }
 
-function getRawRequestIp(req) {
-  const forwarded = String(req?.headers?.['x-forwarded-for'] || '').trim();
-  if (forwarded) {
-    const [first] = forwarded.split(',');
-    const normalized = String(first || '').trim();
-    if (normalized) return normalized;
-  }
-  return (
-    String(req?.ip || '').trim() ||
-    String(req?.socket?.remoteAddress || '').trim() ||
-    null
-  );
+function parseBooleanEnv(value, fallback = false) {
+  const normalized = String(value ?? '').trim().toLowerCase();
+  if (!normalized) return fallback;
+  if (['1', 'true', 'yes', 'on'].includes(normalized)) return true;
+  if (['0', 'false', 'no', 'off'].includes(normalized)) return false;
+  return fallback;
+}
+
+function shouldExposeFullIpDiagnostics() {
+  const nodeEnv = String(process.env.NODE_ENV || '').trim().toLowerCase();
+  if (parseBooleanEnv(process.env.LOG_FULL_IP, false)) return true;
+  return !nodeEnv || ['development', 'dev', 'test', 'staging', 'stage'].includes(nodeEnv);
+}
+
+function redactIpDiagnostics(context) {
+  if (shouldExposeFullIpDiagnostics()) return context;
+  const {
+    req_ip: _reqIp,
+    req_ips: _reqIps,
+    socket_remote_address: _socketRemoteAddress,
+    x_forwarded_for: _xForwardedFor,
+    x_real_ip: _xRealIp,
+    cf_connecting_ip: _cfConnectingIp,
+    ...redacted
+  } = context;
+  return redacted;
 }
 
 export function maskIpForLog(value) {
@@ -116,7 +132,8 @@ export function normalizeRequestId(value) {
 }
 
 export function getRequestAccessLogContext(req) {
-  const ip = getRawRequestIp(req);
+  const ipInfo = getClientIpInfo(req);
+  const ip = ipInfo.ip || null;
   const originalUrl = String(req?.originalUrl || req?.url || '').trim();
   return {
     method: String(req?.method || '').trim() || null,
@@ -124,6 +141,14 @@ export function getRequestAccessLogContext(req) {
     path: originalUrl ? originalUrl.split('?')[0] : (String(req?.path || '').trim() || null),
     ip,
     ip_masked: maskIpForLog(ip),
+    ip_source: ipInfo.source || null,
+    ip_trusted_proxy: ipInfo.trusted_proxy,
+    req_ip: ipInfo.req_ip,
+    req_ips: ipInfo.req_ips,
+    socket_remote_address: ipInfo.socket_remote_address,
+    x_forwarded_for: sanitizeLogValue(ipInfo.x_forwarded_for, 512),
+    x_real_ip: sanitizeLogValue(ipInfo.x_real_ip, 128),
+    cf_connecting_ip: sanitizeLogValue(ipInfo.cf_connecting_ip, 128),
     host: sanitizeLogValue(req?.headers?.host, 128),
     origin: sanitizeLogValue(req?.headers?.origin, 256),
     referer: sanitizeLogValue(req?.headers?.referer, 256),
@@ -182,11 +207,12 @@ export function logSecurityEvent(eventKey, req, details = {}, {
   bucketKey = null,
 } = {}) {
   const context = getRequestAccessLogContext(req);
+  const logContext = redactIpDiagnostics(context);
   const normalizedBucketKey = String(bucketKey || context.ip || 'unknown').trim() || 'unknown';
   const counter = incrementSecurityEventCounter(`${eventKey}:${normalizedBucketKey}`, windowMs);
   const logger = typeof console[level] === 'function' ? console[level].bind(console) : console.warn.bind(console);
   logger(`[security][${eventKey}] event`, {
-    ...context,
+    ...logContext,
     ip: context.ip_masked || context.ip || null,
     ...details,
     counter_window_ms: windowMs,
@@ -197,10 +223,11 @@ export function logSecurityEvent(eventKey, req, details = {}, {
 
 export function logBlockedRouteAccess(routeKey, req, details = {}) {
   const context = getRequestAccessLogContext(req);
+  const logContext = redactIpDiagnostics(context);
   const bucketKey = String(context.ip || 'unknown').trim() || 'unknown';
   const counter = incrementSecurityEventCounter(`${routeKey}:${bucketKey}:blocked`, 300000);
   console.warn(`[security][${routeKey}] blocked`, {
-    ...context,
+    ...logContext,
     ip: context.ip_masked || context.ip || null,
     ...details,
     counter_window_ms: 300000,

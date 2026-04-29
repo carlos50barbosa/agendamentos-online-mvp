@@ -235,7 +235,7 @@ export default function ClientAppointmentsPage() {
   const appointmentMetrics = useMemo(() => ([
     { label: 'Total', value: appointments.length },
     { label: 'Confirmados', value: appointments.filter((item) => item.effectiveStatus === 'confirmado').length },
-    { label: 'Concluidos', value: appointments.filter((item) => item.effectiveStatus === 'concluido').length },
+    { label: 'Concluídos', value: appointments.filter((item) => item.effectiveStatus === 'concluido').length },
     { label: 'Pendentes', value: appointments.filter((item) => ['pendente', 'pendente_pagamento'].includes(item.effectiveStatus)).length },
   ]), [appointments]);
 

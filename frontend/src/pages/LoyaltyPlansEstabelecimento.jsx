@@ -95,11 +95,11 @@ export default function LoyaltyPlansEstabelecimento() {
         window.location.assign(response.url)
         return
       }
-      throw new Error('Nao foi possivel iniciar a conexao com o Mercado Pago.')
+      throw new Error('Não foi possível iniciar a conexão com o Mercado Pago.')
     } catch (error) {
       setNotice({
         type: 'error',
-        message: error?.data?.message || error?.message || 'Nao foi possivel iniciar a conexao com o Mercado Pago.',
+        message: error?.data?.message || error?.message || 'Não foi possível iniciar a conexão com o Mercado Pago.',
       })
     } finally {
       setMpBusy(false)
@@ -116,7 +116,7 @@ export default function LoyaltyPlansEstabelecimento() {
     } catch (error) {
       setNotice({
         type: 'error',
-        message: error?.data?.message || error?.message || 'Nao foi possivel desconectar a conta Mercado Pago.',
+        message: error?.data?.message || error?.message || 'Não foi possível desconectar a conta Mercado Pago.',
       })
     } finally {
       setMpBusy(false)
@@ -270,7 +270,7 @@ export default function LoyaltyPlansEstabelecimento() {
           <div>
             <h2>Conta Mercado Pago do estabelecimento</h2>
             <p>
-              A fidelidade mensal usa a conta conectada do estabelecimento. O dinheiro nao passa pela conta da plataforma.
+              A fidelidade mensal usa a conta conectada do estabelecimento. O dinheiro não passa pela conta da plataforma.
             </p>
           </div>
           <span className={`loyalty-status loyalty-status--${mpConnected ? 'active' : 'inactive'}`}>
@@ -283,7 +283,7 @@ export default function LoyaltyPlansEstabelecimento() {
         </div>
         {!mpConnected ? (
           <div className="loyalty-alert loyalty-alert--warn" style={{ marginTop: 16 }}>
-            Este estabelecimento ainda nao conectou uma conta Mercado Pago. Sem essa conexao a fidelidade mensal nao pode ser vendida.
+            Este estabelecimento ainda não conectou uma conta Mercado Pago. Sem essa conexão, a fidelidade mensal não pode ser vendida.
           </div>
         ) : null}
         <div className="loyalty-form__actions" style={{ marginTop: 16 }}>
@@ -325,13 +325,13 @@ export default function LoyaltyPlansEstabelecimento() {
                 <input className="input" value={form.desconto_percentual_extras} onChange={(event) => handleFieldChange('desconto_percentual_extras', event.target.value)} />
               </label>
               <label>
-                <span>Maximo de assinantes</span>
+                <span>Máximo de assinantes</span>
                 <input className="input" value={form.max_assinantes} onChange={(event) => handleFieldChange('max_assinantes', event.target.value)} />
               </label>
             </div>
 
             <label>
-              <span>Descricao</span>
+              <span>Descrição</span>
               <textarea className="input loyalty-form__textarea" value={form.descricao} onChange={(event) => handleFieldChange('descricao', event.target.value)} />
             </label>
 

@@ -501,7 +501,7 @@ export default function Clientes() {
     return {
       reagendar: `Oi ${drawerName}! Quer reagendar um horário esta semana?`,
       confirmar: `Oi ${drawerName}! Confirmando seu horário em ${dateLabel} às ${timeLabel}.`,
-      avaliacao: `Oi ${drawerName}! Como foi seu atendimento Pode me dar uma avaliação?`,
+      avaliacao: `Oi ${drawerName}! Como foi seu atendimento? Pode me dar uma avaliação?`,
     };
   }, [drawerName, lastVisit]);
 
@@ -572,7 +572,7 @@ export default function Clientes() {
             <IconSearch aria-hidden style={{ marginRight: 4 }} />
             <input
               type="search"
-              placeholder="Buscar cliente (nome, email ou telefone)"
+              placeholder="Buscar cliente (nome, e-mail ou telefone)"
               value={searchText}
               onChange={(event) => setSearchText(event.target.value)}
             />

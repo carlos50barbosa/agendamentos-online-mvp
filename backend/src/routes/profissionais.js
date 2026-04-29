@@ -84,7 +84,7 @@ router.post(
         avatarUrl = await saveAvatarFromDataUrl(avatar, estId, null);
       } catch (err) {
         if (err?.code === 'AVATAR_TOO_LARGE') {
-          return res.status(400).json({ error: 'avatar_grande', message: 'A imagem deve ter no maximo 2MB.' });
+          return res.status(400).json({ error: 'avatar_grande', message: 'A imagem deve ter no máximo 2MB.' });
         }
         if (err?.code === 'AVATAR_INVALID') {
           return res.status(400).json({ error: 'avatar_invalido', message: 'Envie uma imagem PNG, JPG ou WEBP.' });
@@ -167,7 +167,7 @@ router.put(
         nextAvatar = await saveAvatarFromDataUrl(avatar, estId, wantsRemove ? null : row.avatar_url);
       } catch (err) {
         if (err?.code === 'AVATAR_TOO_LARGE') {
-          return res.status(400).json({ error: 'avatar_grande', message: 'A imagem deve ter no maximo 2MB.' });
+          return res.status(400).json({ error: 'avatar_grande', message: 'A imagem deve ter no máximo 2MB.' });
         }
         if (err?.code === 'AVATAR_INVALID') {
           return res.status(400).json({ error: 'avatar_invalido', message: 'Envie uma imagem PNG, JPG ou WEBP.' });

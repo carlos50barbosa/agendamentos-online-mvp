@@ -189,7 +189,7 @@ function buildCsvHeaders() {
     { key: 'cliente', label: 'Cliente' },
     { key: 'servico', label: 'Serviço' },
     { key: 'profissional', label: 'Profissional' },
-    { key: 'inicio', label: 'Inicio' },
+    { key: 'inicio', label: 'Início' },
     { key: 'fim', label: 'Fim' },
     { key: 'status', label: 'Status' },
     { key: 'valor', label: 'Valor (BRL)' },
@@ -546,7 +546,7 @@ async function handleOverview(req, res) {
     });
   } catch (err) {
     console.error('[relatorios][overview]', err);
-    res.status(500).json({ error: 'internal_error', message: 'Falha ao gerar relatorio.' });
+    res.status(500).json({ error: 'internal_error', message: 'Falha ao gerar relatório.' });
   }
 }
 
@@ -625,7 +625,7 @@ router.get('/estabelecimento/profissionais', authRequired, isEstabelecimento, as
     });
   } catch (err) {
     console.error('[relatorios][profissionais]', err);
-    res.status(500).json({ error: 'internal_error', message: 'Falha ao gerar relatorio.' });
+    res.status(500).json({ error: 'internal_error', message: 'Falha ao gerar relatório.' });
   }
 });
 
@@ -687,7 +687,7 @@ router.get('/estabelecimento/funil', authRequired, isEstabelecimento, async (req
     });
   } catch (err) {
     console.error('[relatorios][funil]', err);
-    res.status(500).json({ error: 'internal_error', message: 'Falha ao gerar relatorio.' });
+    res.status(500).json({ error: 'internal_error', message: 'Falha ao gerar relatório.' });
   }
 });
 
@@ -778,7 +778,7 @@ router.get('/estabelecimento/export.csv', authRequired, isEstabelecimento, async
   } catch (err) {
     console.error('[relatorios][export]', err);
     if (!res.headersSent) {
-      res.status(500).json({ error: 'internal_error', message: 'Falha ao exportar relatorio.' });
+      res.status(500).json({ error: 'internal_error', message: 'Falha ao exportar relatório.' });
     }
   } finally {
     if (res.headersSent && !res.writableEnded) {

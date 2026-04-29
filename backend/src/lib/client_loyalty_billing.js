@@ -143,10 +143,10 @@ export function validateClientLoyaltyCardPayerData({
   const warnings = {}
 
   if (!isValidEmail(normalized.payerEmail)) {
-    errors.payer_email = 'Informe um e-mail valido para a cobranca.'
+    errors.payer_email = 'Informe um e-mail válido para a cobrança.'
   }
   if (!hasMeaningfulFullName(normalized.cardholderName)) {
-    errors.cardholder_name = 'Informe o nome completo do titular do cartao.'
+    errors.cardholder_name = 'Informe o nome completo do titular do cartão.'
   }
   if (!normalized.identificationType) {
     errors.identification_type = 'Informe o tipo do documento do titular.'
@@ -154,9 +154,9 @@ export function validateClientLoyaltyCardPayerData({
   if (!normalized.identificationNumber) {
     errors.identification_number = 'Informe o CPF do titular.'
   } else if (normalized.identificationType === 'CPF' && !isValidCpf(normalized.identificationNumber)) {
-    errors.identification_number = 'Informe um CPF valido para o titular.'
+    errors.identification_number = 'Informe um CPF válido para o titular.'
   } else if (normalized.identificationType !== 'CPF' && normalized.identificationNumber.length < 5) {
-    errors.identification_number = 'Informe um documento valido para o titular.'
+    errors.identification_number = 'Informe um documento válido para o titular.'
   }
   if (!normalized.payerPhone) {
     warnings.payer_phone = 'Telefone ausente no contexto do pagador.'
@@ -174,7 +174,7 @@ function assertClientLoyaltyCardPayerData(input = {}) {
   const validation = validateClientLoyaltyCardPayerData(input)
   if (!validation.valid) {
     throw createError(
-      'Confira os dados do titular do cartao antes de continuar.',
+      'Confira os dados do titular do cartão antes de continuar.',
       400,
       'client_loyalty_card_payer_data_invalid',
       {
@@ -569,9 +569,9 @@ function extractClientLoyaltyFailureFromEvent(event) {
 function mapClientLoyaltyFailureFriendlyMessage(code) {
   const normalized = String(code || '').trim().toLowerCase()
   const messages = {
-    cc_rejected_high_risk: 'A ultima tentativa de cobranca foi recusada por analise de risco do cartao.',
-    cc_rejected_insufficient_amount: 'A ultima tentativa de cobranca foi recusada por saldo ou limite insuficiente.',
-    cc_rejected_bad_filled_security_code: 'A ultima tentativa de cobranca foi recusada por dados do cartao invalidos.',
+    cc_rejected_high_risk: 'A última tentativa de cobrança foi recusada por análise de risco do cartão.',
+    cc_rejected_insufficient_amount: 'A última tentativa de cobrança foi recusada por saldo ou limite insuficiente.',
+    cc_rejected_bad_filled_security_code: 'A última tentativa de cobrança foi recusada por dados do cartão inválidos.',
   }
   return messages[normalized] || null
 }
@@ -668,7 +668,7 @@ export function resolveLatestClientLoyaltyFailureSummary(events = [], {
     message: selected.message || null,
     friendly_message:
       mapClientLoyaltyFailureFriendlyMessage(selected.code) ||
-      'A ultima tentativa de cobranca nao foi aprovada. Revise os dados do cartao ou tente outro meio de pagamento.',
+      'A última tentativa de cobrança não foi aprovada. Revise os dados do cartão ou tente outro meio de pagamento.',
     source: selected.source || null,
     created_at: selected.date_created || selected.created_at || null,
     gateway_event_id: selected.gateway_event_id || null,
@@ -1113,16 +1113,16 @@ export function resolveClientLoyaltyRetryOptions({
       cooldown_remaining_ms: effectiveCooldownRemainingMs,
       cooldown_reason: cooldownReason,
       message: effectiveCooldownActive
-        ? 'Por seguranca, novas tentativas com cartao ficam indisponiveis por alguns minutos. Se preferir, pague por PIX agora.'
+        ? 'Por segurança, novas tentativas com cartão ficam indisponíveis por alguns minutos. Se preferir, pague por PIX agora.'
         : recoverySuggested
-          ? 'Voce pode tentar outro cartao para reativar a assinatura.'
+          ? 'Você pode tentar outro cartão para reativar a assinatura.'
           : null,
     },
     pix: {
       available: true,
       enabled: true,
       action: 'pay_with_pix',
-      message: 'Voce pode pagar por PIX para liberar o ciclo atual.',
+      message: 'Você pode pagar por PIX para liberar o ciclo atual.',
     },
   }
 }
@@ -1189,8 +1189,8 @@ async function assertClientLoyaltyCardRetryAllowed(subscription, {
     }, { db })
     throw createError(
       cooldownReason === 'recent_similar_attempts'
-        ? 'Muitas tentativas parecidas em poucos minutos. Use PIX agora ou aguarde antes de tentar cartao novamente.'
-        : 'Nao foi possivel aprovar este cartao no momento. Tente PIX ou aguarde um pouco antes de tentar outro cartao.',
+        ? 'Muitas tentativas parecidas em poucos minutos. Use PIX agora ou aguarde antes de tentar cartão novamente.'
+        : 'Não foi possível aprovar este cartão no momento. Tente PIX ou aguarde um pouco antes de tentar outro cartão.',
       409,
       'client_loyalty_card_retry_cooldown',
       {
@@ -1308,7 +1308,7 @@ async function resolveActiveLoyaltyMpContext(estabelecimentoId) {
       )
     }
     throw createError(
-      'Este estabelecimento ainda nao conectou uma conta Mercado Pago.',
+      'Este estabelecimento ainda não conectou uma conta Mercado Pago.',
       409,
       'mp_not_connected',
       { reason: reason || 'not_connected' }
@@ -1610,7 +1610,7 @@ export async function startClientLoyaltyCardSubscription({
       throw createError(
         pendingCardCheckout
           ? 'Já existe uma assinatura aguardando a primeira cobrança do cartão para este estabelecimento. O Mercado Pago pode levar até cerca de 1 hora para confirmar.'
-          : 'Ja existe uma assinatura em andamento para este estabelecimento.',
+          : 'Já existe uma assinatura em andamento para este estabelecimento.',
         409,
         'client_loyalty_subscription_conflict'
       )
@@ -1754,7 +1754,7 @@ export async function createClientLoyaltyPixCheckout({
     const state = computeClientLoyaltySubscriptionState(current)
     if (state.benefitsActive) {
       throw createError(
-        'Este plano ja esta ativo no ciclo atual.',
+        'Este plano já está ativo no ciclo atual.',
         409,
         'client_loyalty_subscription_active'
       )

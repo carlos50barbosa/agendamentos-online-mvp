@@ -360,7 +360,7 @@ export default function ProfissionaisEstabelecimento() {
       return;
     }
     if (file.size > MAX_AVATAR_SIZE) {
-      showToast('error', 'A imagem deve ter no maximo 2MB.');
+      showToast('error', 'A imagem deve ter no máximo 2MB.');
       return;
     }
 
@@ -429,7 +429,7 @@ export default function ProfissionaisEstabelecimento() {
       } else if (error?.data?.error === 'avatar_invalido') {
         showToast('error', 'Envie uma imagem PNG, JPG ou WEBP.');
       } else if (error?.data?.error === 'avatar_grande') {
-        showToast('error', 'A imagem deve ter no maximo 2MB.');
+        showToast('error', 'A imagem deve ter no máximo 2MB.');
       } else {
         showToast('error', 'Erro ao cadastrar profissional.');
       }
@@ -466,7 +466,7 @@ export default function ProfissionaisEstabelecimento() {
       if (error?.data?.error === 'avatar_invalido') {
         showToast('error', 'Envie uma imagem PNG, JPG ou WEBP.');
       } else if (error?.data?.error === 'avatar_grande') {
-        showToast('error', 'A imagem deve ter no maximo 2MB.');
+        showToast('error', 'A imagem deve ter no máximo 2MB.');
       } else {
         showToast('error', 'Falha ao atualizar profissional.');
       }

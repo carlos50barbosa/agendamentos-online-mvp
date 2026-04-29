@@ -18,7 +18,7 @@ test('loyalty failure display keeps subscription status separate from technical 
       status: 'past_due',
     },
     last_failure_code: 'cc_rejected_high_risk',
-    last_failure_message: 'A ultima tentativa de cobranca foi recusada por analise de risco do cartao.',
+    last_failure_message: 'A última tentativa de cobrança foi recusada por análise de risco do cartão.',
     last_failure_at: '2026-04-25T08:00:00.000Z',
     latest_failure: {
       payment_method_id: 'master',
@@ -27,14 +27,14 @@ test('loyalty failure display keeps subscription status separate from technical 
 
   assert.equal(display.subscriptionStatus, 'past_due')
   assert.equal(display.technicalCode, 'cc_rejected_high_risk')
-  assert.equal(display.technicalMessage, 'A ultima tentativa de cobranca foi recusada por analise de risco do cartao.')
+  assert.equal(display.technicalMessage, 'A última tentativa de cobrança foi recusada por análise de risco do cartão.')
   assert.equal(display.occurredAt, '2026-04-25T08:00:00.000Z')
 })
 
 test('loyalty failure display falls back to mapped friendly message when backend only sends technical code', () => {
   assert.equal(
     getLoyaltyFailureFriendlyMessage('cc_rejected_insufficient_amount'),
-    'A ultima tentativa de cobranca foi recusada por saldo ou limite insuficiente.'
+    'A última tentativa de cobrança foi recusada por saldo ou limite insuficiente.'
   )
 
   const display = resolveLoyaltyFailureDisplay({
@@ -46,7 +46,7 @@ test('loyalty failure display falls back to mapped friendly message when backend
 
   assert.equal(display.subscriptionStatus, 'past_due')
   assert.equal(display.technicalCode, 'cc_rejected_insufficient_amount')
-  assert.equal(display.technicalMessage, 'A ultima tentativa de cobranca foi recusada por saldo ou limite insuficiente.')
+  assert.equal(display.technicalMessage, 'A última tentativa de cobrança foi recusada por saldo ou limite insuficiente.')
 })
 
 test('loyalty retry display exposes PIX fallback for high risk declines', () => {
@@ -67,8 +67,8 @@ test('loyalty retry display exposes PIX fallback for high risk declines', () => 
   })
 
   assert.equal(display.showRecovery, true)
-  assert.equal(display.title, 'Nao foi possivel aprovar este cartao no momento.')
-  assert.equal(display.description, 'Voce pode tentar outro cartao ou pagar por PIX. Por seguranca, novas tentativas com este cartao podem ficar indisponiveis por alguns minutos.')
+  assert.equal(display.title, 'Não foi possível aprovar este cartão no momento.')
+  assert.equal(display.description, 'Você pode tentar outro cartão ou pagar por PIX. Por segurança, novas tentativas com este cartão podem ficar indisponíveis por alguns minutos.')
   assert.equal(display.cardCooldownActive, true)
   assert.equal(display.pixEnabled, true)
   assert.equal(display.pixActionLabel, 'Pagar por PIX agora')
@@ -80,7 +80,7 @@ test('loyalty failure display does not show manual review as technical failure',
     latest_failure: {
       status: 'in-process',
       status_detail: 'pending_review_manual',
-      friendly_message: 'Pagamento em analise.',
+      friendly_message: 'Pagamento em análise.',
     },
   })
 
@@ -103,7 +103,7 @@ test('loyalty payment state display describes manual review and scheduled paymen
 
   assert.equal(review.show, true)
   assert.equal(review.kind, 'pending_review')
-  assert.equal(review.statusLabel, 'Pagamento em analise')
+  assert.equal(review.statusLabel, 'Pagamento em análise')
 
   const scheduled = resolveLoyaltyPaymentStateDisplay({
     subscription_status: 'pending_payment',
@@ -115,7 +115,7 @@ test('loyalty payment state display describes manual review and scheduled paymen
 
   assert.equal(scheduled.show, true)
   assert.equal(scheduled.kind, 'scheduled')
-  assert.equal(scheduled.statusLabel, 'Cobranca agendada')
+  assert.equal(scheduled.statusLabel, 'Cobrança agendada')
 })
 
 test('loyalty payment state display keeps real expiration separate from pending payment states', () => {

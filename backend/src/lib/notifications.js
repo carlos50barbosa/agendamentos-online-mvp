@@ -668,7 +668,7 @@ export async function notifyEmail(to, subject, html) {
       subject,
       html,
     });
-    if (cfg.debug) console.log('✅ Email enviado para %s (%s)', to, subject);
+    if (cfg.debug) console.log('✅ E-mail enviado para %s (%s)', to, subject);
     return { ok: true };
   } catch (err) {
     console.error('[email] erro', err);

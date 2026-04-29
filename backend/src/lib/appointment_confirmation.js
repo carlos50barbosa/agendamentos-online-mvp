@@ -144,7 +144,7 @@ estabelecimentoId: ag.estabelecimento_id, agendamentoId: ag.id, to: telEst, kind
 }
     } catch {}
 } catch (err) {
-console.warn('[deposit][notify] falha ao disparar notificacoes', err?.message || err);
+console.warn('[deposit][notify] falha ao disparar notificações', err?.message || err);
 }
 }
 

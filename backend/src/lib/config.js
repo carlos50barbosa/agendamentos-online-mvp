@@ -148,6 +148,9 @@ export const config = {
         deprecationUrl: getAny('PAYMENTS_LEGACY_QUERY_TOKEN_DEPRECATION_URL') || null,
       },
     },
+    logging: {
+      fullIp: parseBool(getAny('LOG_FULL_IP'), false),
+    },
   },
   billing: {
     provider: getAny('BILLING_PROVIDER', 'PAYMENT_PROVIDER') || 'mercadopago',
@@ -200,14 +203,14 @@ export function getOperationalHardeningWarnings(env = process.env, cfg = config)
     warnings.push({
       code: 'wa_allow_unsigned_enabled',
       severity,
-      message: '[security][wa/webhook] WA_WEBHOOK_ALLOW_UNSIGNED=true; assinatura do webhook oficial esta em modo permissivo.',
+      message: '[security][wa/webhook] WA_WEBHOOK_ALLOW_UNSIGNED=true; assinatura do webhook oficial está em modo permissivo.',
     })
   }
   if (cfg.billing?.mercadopago?.allowUnsigned) {
     warnings.push({
       code: 'mercadopago_allow_unsigned_enabled',
       severity,
-      message: '[security][mercadopago] MERCADOPAGO_ALLOW_UNSIGNED/BILLING_ALLOW_UNSIGNED habilitado; webhooks sem assinatura serao aceitos.',
+      message: '[security][mercadopago] MERCADOPAGO_ALLOW_UNSIGNED/BILLING_ALLOW_UNSIGNED habilitado; webhooks sem assinatura serão aceitos.',
     })
   }
   if (
@@ -224,7 +227,7 @@ export function getOperationalHardeningWarnings(env = process.env, cfg = config)
     warnings.push({
       code: 'trust_proxy_disabled',
       severity: 'warn',
-      message: '[security][http] TRUST_PROXY=false em producao; IP real e limites por cliente podem ficar incorretos atras de proxy reverso.',
+      message: '[security][http] TRUST_PROXY=false em produção; IP real e limites por cliente podem ficar incorretos atrás de proxy reverso.',
     })
   }
   if (
@@ -254,6 +257,13 @@ export function getOperationalHardeningWarnings(env = process.env, cfg = config)
       message: '[security][rate-limit] RATE_LIMIT_STORE=redis sem RATE_LIMIT_REDIS_URL; o bootstrap precisa injetar um client Redis compatível ou o store fará fallback.',
     })
   }
+  if (nodeEnv === 'production' && parseBool(getAnyFromEnv(env, 'LOG_FULL_IP'), cfg.security?.logging?.fullIp === true)) {
+    warnings.push({
+      code: 'log_full_ip_enabled',
+      severity: 'warn',
+      message: '[security][http] LOG_FULL_IP=true em produção; use apenas temporariamente para diagnóstico e proteja o destino dos logs.',
+    })
+  }
   const legacyQueryTokenSunsetAt = cfg.security?.payments?.legacyQueryToken?.sunsetAt
   if (cfg.security?.payments?.legacyQueryToken?.enabled === false) {
     warnings.push({
@@ -268,7 +278,7 @@ export function getOperationalHardeningWarnings(env = process.env, cfg = config)
       warnings.push({
         code: 'payments_legacy_query_token_sunset_elapsed',
         severity: 'warn',
-        message: '[security][payments] PAYMENTS_LEGACY_QUERY_TOKEN_SUNSET_AT ja passou; monitore o uso legado antes de remover o fallback ?token=.',
+        message: '[security][payments] PAYMENTS_LEGACY_QUERY_TOKEN_SUNSET_AT já passou; monitore o uso legado antes de remover o fallback ?token=.',
       })
     }
   }

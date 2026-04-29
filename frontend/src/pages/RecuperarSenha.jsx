@@ -33,7 +33,7 @@ export default function RecuperarSenha() {
       if (error?.status === 404) {
         setSent(true);
       } else {
-        setErr(error?.message || 'Nao foi possivel enviar o email agora.');
+        setErr(error?.message || 'Não foi possível enviar o e-mail agora.');
       }
     } finally {
       setLoading(false);
@@ -48,7 +48,7 @@ export default function RecuperarSenha() {
       <main className="login-preview__main">
         <section className="login-preview__card">
           <div className="login-preview__grid">
-            <aside className="login-preview__aside" aria-label="Informacoes sobre recuperacao">
+            <aside className="login-preview__aside" aria-label="Informações sobre recuperação">
               <div className="auth-portal__brand">
                 <LogoAO size={40} className="login-preview__logo-mark" />
                 <div className="auth-portal__brand-copy">
@@ -60,20 +60,20 @@ export default function RecuperarSenha() {
               <span className="auth-portal__aside-badge">Recuperacao segura</span>
 
               <div>
-                <h2 className="auth-portal__aside-title">Recupere sua conta sem perder o contexto do proximo acesso.</h2>
+                <h2 className="auth-portal__aside-title">Recupere sua conta sem perder o contexto do próximo acesso.</h2>
                 <p className="auth-portal__aside-copy">
-                  Informe o e-mail usado na plataforma. Se houver uma conta vinculada, enviaremos um link para redefinir a senha com seguranca.
+                  Informe o e-mail usado na plataforma. Se houver uma conta vinculada, enviaremos um link para redefinir a senha com segurança.
                 </p>
               </div>
 
               <ul className="auth-portal__list">
                 <li className="auth-portal__list-item">
                   <IconShield className="auth-portal__list-icon" />
-                  <span>Resposta neutra para nao expor a existencia de contas.</span>
+                  <span>Resposta neutra para não expor a existência de contas.</span>
                 </li>
                 <li className="auth-portal__list-item">
                   <IconKey className="auth-portal__list-icon" />
-                  <span>Fluxo alinhado com login e redefinicao de senha.</span>
+                  <span>Fluxo alinhado com login e redefinição de senha.</span>
                 </li>
                 <li className="auth-portal__list-item">
                   <IconSpark className="auth-portal__list-icon" />
@@ -82,7 +82,7 @@ export default function RecuperarSenha() {
               </ul>
 
               <div className="auth-portal__aside-footer">
-                Se voce nao lembrar o e-mail usado, o suporte pode ajudar a retomar o acesso com mais contexto.
+                Se você não lembrar o e-mail usado, o suporte pode ajudar a retomar o acesso com mais contexto.
               </div>
             </aside>
 
@@ -100,7 +100,7 @@ export default function RecuperarSenha() {
                   <div>
                     <div className="login-preview__alert-title">Solicitacao enviada</div>
                     <div className="login-preview__alert-text">
-                      Se existir uma conta para <strong>{email}</strong>, voce recebera um e-mail com instrucoes.
+                      Se existir uma conta para <strong>{email}</strong>, você receberá um e-mail com instruções.
                     </div>
                   </div>
                 </div>
@@ -110,7 +110,7 @@ export default function RecuperarSenha() {
                 <div className="login-preview__alert login-preview__alert--error" role="alert">
                   <span className="login-preview__alert-dot" aria-hidden="true" />
                   <div>
-                    <div className="login-preview__alert-title">Nao foi possivel concluir</div>
+                    <div className="login-preview__alert-title">Não foi possível concluir</div>
                     <div className="login-preview__alert-text">{err}</div>
                   </div>
                 </div>

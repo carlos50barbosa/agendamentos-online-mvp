@@ -56,11 +56,25 @@ const MP_NOTIFICATION_URL = String(process.env.MP_NOTIFICATION_URL || '').trim()
 const BILLING_ROUTES_ENABLED = (() => {
   const env = String(process.env.NODE_ENV || '').toLowerCase();
   if (env === 'production' && MP_NOTIFICATION_URL.toLowerCase().includes('ngrok')) {
-    console.error('[billing] FATAL: MP_NOTIFICATION_URL aponta para ngrok em producao. Rotas de billing desativadas.');
+    console.error('[billing] FATAL: MP_NOTIFICATION_URL aponta para ngrok em produção. Rotas de billing desativadas.');
     return false;
   }
   return true;
 })();
+
+function parseBooleanEnv(value, fallback = false) {
+  const normalized = String(value ?? '').trim().toLowerCase();
+  if (!normalized) return fallback;
+  if (['1', 'true', 'yes', 'on'].includes(normalized)) return true;
+  if (['0', 'false', 'no', 'off'].includes(normalized)) return false;
+  return fallback;
+}
+
+function shouldLogFullIpDiagnostics() {
+  const nodeEnv = String(process.env.NODE_ENV || '').trim().toLowerCase();
+  if (parseBooleanEnv(process.env.LOG_FULL_IP, false)) return true;
+  return !nodeEnv || ['development', 'dev', 'test', 'staging', 'stage'].includes(nodeEnv);
+}
 
 // Se hoje o Nginx mantém /api até o Node, passe withApiPrefix=true (mas aceitamos ambos):
 mountWebhooks(app, true);
@@ -100,6 +114,7 @@ app.use((req, res, next) => {
     const durationMs = Number(process.hrtime.bigint() - startedAt) / 1e6;
     const context = getRequestAccessLogContext(req);
     const suspiciousSignals = res.statusCode === 404 ? classifySuspiciousRequest(req) : [];
+    const logFullIp = shouldLogFullIpDiagnostics();
     const payload = {
       request_id: req.requestId || context.request_id || null,
       method: context.method,
@@ -107,9 +122,20 @@ app.use((req, res, next) => {
       url: context.url,
       status: res.statusCode,
       duration_ms: Math.round(durationMs * 100) / 100,
-      ip: context.ip_masked || context.ip || null,
+      ip: logFullIp ? context.ip : (context.ip_masked || context.ip || null),
+      ip_source: context.ip_source || null,
+      ip_trusted_proxy: context.ip_trusted_proxy,
       user_agent: context.user_agent,
     };
+    if (logFullIp) {
+      payload.client_ip = context.ip || null;
+      payload.req_ip = context.req_ip || null;
+      payload.req_ips = context.req_ips || [];
+      payload.x_forwarded_for = context.x_forwarded_for || null;
+      payload.x_real_ip = context.x_real_ip || null;
+      payload.cf_connecting_ip = context.cf_connecting_ip || null;
+      payload.socket_remote_address = context.socket_remote_address || null;
+    }
     if (suspiciousSignals.length) {
       payload.scan_signals = suspiciousSignals;
     }
@@ -384,7 +410,7 @@ app.listen(PORT, HOST, () => {
   console.log('[routes] whatsapp oficial: /api/webhooks/whatsapp (aliases: /webhooks/whatsapp, /wa/webhook, /api/wa/webhook)');
 });
 
-// Tarefas de manutencao: limpeza de tokens expirados e lembretes de cobranca
+// Tarefas de manutencao: limpeza de tokens expirados e lembretes de cobrança
 startMaintenance(pool);
 startPublicPendingCleanup(pool);
 startAppointmentPaymentCleanup(pool);

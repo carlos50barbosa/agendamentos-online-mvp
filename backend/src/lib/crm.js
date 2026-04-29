@@ -63,7 +63,7 @@ export function classifyRelationship({
   }
 
   if (daysSinceLastVisit != null && daysSinceLastVisit >= dormantAfterDays) {
-    return { code: 'sumido', label: `Sumido ha ${daysSinceLastVisit} dias` };
+    return { code: 'sumido', label: `Sumido há ${daysSinceLastVisit} dias` };
   }
 
   if (Number(totalAppointments || 0) >= 2) {

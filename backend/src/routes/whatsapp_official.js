@@ -63,7 +63,7 @@ function policyMessage(reason) {
     return 'No momento, vou te encaminhar para um atendente humano.';
   }
   if (reason === 'HUMAN_ONLY') {
-    return 'Este canal esta em atendimento humano. Vou te encaminhar agora.';
+    return 'Este canal está em atendimento humano. Vou te encaminhar agora.';
   }
   if (reason === 'ROLLOUT_HOLDOUT') {
     return 'Para esta conversa, vou te encaminhar para um atendente humano.';
@@ -72,7 +72,7 @@ function policyMessage(reason) {
 }
 
 function pausedMessage() {
-  return 'Seu atendimento humano esta em andamento. Se quiser retomar o bot, digite "voltar bot" ou "menu".';
+  return 'Seu atendimento humano está em andamento. Se quiser retomar o bot, digite "voltar bot" ou "menu".';
 }
 
 function rateLimitMessage(retryAfterSec) {

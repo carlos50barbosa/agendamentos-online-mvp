@@ -167,7 +167,7 @@ async function sendEstabReminder(pool, row) {
         `<p>Você tem um atendimento de <b>${service}</b>${profLabel} às <b>${whenLabel}</b> para o cliente <b>${clientName}</b>.</p>`
       );
     } catch (err) {
-      console.warn('[estab-reminder-5h] falha ao enviar email', err?.message || err);
+      console.warn('[estab-reminder-5h] falha ao enviar e-mail', err?.message || err);
     }
   }
 

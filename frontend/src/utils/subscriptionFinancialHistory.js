@@ -1,36 +1,36 @@
 const PAYMENT_METHOD_LABELS = {
-  credit_card: 'Cartao de credito',
+  credit_card: 'Cartão de crédito',
   pix: 'PIX',
-  credit_balance: 'Credito da assinatura',
+  credit_balance: 'Crédito da assinatura',
 }
 
 const STATUS_DETAIL_MESSAGES = {
-  cc_rejected_high_risk: 'Nao foi possivel aprovar este cartao no momento.',
-  card_token_already_consumed: 'Os dados do cartao precisam ser confirmados novamente.',
+  cc_rejected_high_risk: 'Não foi possível aprovar este cartão no momento.',
+  card_token_already_consumed: 'Os dados do cartão precisam ser confirmados novamente.',
 }
 
 const FALLBACK_EVENT_TITLES = {
   subscription_created: 'Assinatura criada',
   payment_approved: 'Pagamento aprovado',
-  payment_failed: 'Pagamento nao aprovado',
-  payment_recovery_attempt: 'Tentativa com cartao',
-  payment_recovered: 'Pendencia regularizada',
-  payment_pending: 'Pagamento em analise',
+  payment_failed: 'Pagamento não aprovado',
+  payment_recovery_attempt: 'Tentativa com cartão',
+  payment_recovered: 'Pendência regularizada',
+  payment_pending: 'Pagamento em análise',
   pix_generated: 'PIX em aberto',
   pix_paid: 'PIX pago',
   pix_expired: 'PIX expirado',
-  pix_obsolete: 'PIX substituido',
+  pix_obsolete: 'PIX substituído',
   subscription_renewed: 'Assinatura renovada',
   subscription_canceled: 'Assinatura cancelada',
   subscription_blocked: 'Assinatura bloqueada',
   payment_method_changed: 'Forma de pagamento alterada',
   subscription_updated: 'Assinatura atualizada',
   subscription_state_corrected: 'Estado sincronizado',
-  upgrade_credit_generated: 'Upgrade com credito proporcional',
-  subscription_credit_reserved: 'Credito reservado',
-  subscription_credit_applied: 'Credito aplicado',
-  subscription_credit_released: 'Credito liberado',
-  subscription_upgraded: 'Plano substituido',
+  upgrade_credit_generated: 'Upgrade com crédito proporcional',
+  subscription_credit_reserved: 'Crédito reservado',
+  subscription_credit_applied: 'Crédito aplicado',
+  subscription_credit_released: 'Crédito liberado',
+  subscription_upgraded: 'Plano substituído',
 }
 
 const FINANCIAL_EVENT_TYPES = new Set([
@@ -81,7 +81,7 @@ function normalizePaymentMethod(value) {
 
 function getPaymentMethodLabel(value) {
   const key = normalizePaymentMethod(value)
-  return PAYMENT_METHOD_LABELS[key] || (key || 'Nao definido')
+  return PAYMENT_METHOD_LABELS[key] || (key || 'Não definido')
 }
 
 function getPaymentResult(event) {
@@ -158,22 +158,22 @@ function resolveStatusMeta(event, paymentMethod) {
     return { payment_status: 'expired', status_group: 'expired', label: 'Expirado', tone: 'danger' }
   }
   if (eventType === 'pix_obsolete') {
-    return { payment_status: 'obsolete', status_group: 'obsolete', label: 'Substituido', tone: 'neutral' }
+    return { payment_status: 'obsolete', status_group: 'obsolete', label: 'Substituído', tone: 'neutral' }
   }
   if (eventType === 'payment_recovery_attempt') {
     return { payment_status: 'started', status_group: 'started', label: 'Tentativa iniciada', tone: 'info' }
   }
   if (eventType === 'upgrade_credit_generated') {
-    return { payment_status: 'generated', status_group: 'generated', label: 'Credito gerado', tone: 'success' }
+    return { payment_status: 'generated', status_group: 'generated', label: 'Crédito gerado', tone: 'success' }
   }
   if (eventType === 'subscription_credit_reserved') {
     return { payment_status: 'reserved', status_group: 'reserved', label: 'Abatimento agendado', tone: 'info' }
   }
   if (eventType === 'subscription_credit_applied') {
-    return { payment_status: 'applied', status_group: 'approved', label: 'Credito aplicado', tone: 'success' }
+    return { payment_status: 'applied', status_group: 'approved', label: 'Crédito aplicado', tone: 'success' }
   }
   if (eventType === 'subscription_credit_released') {
-    return { payment_status: 'released', status_group: 'released', label: 'Credito liberado', tone: 'neutral' }
+    return { payment_status: 'released', status_group: 'released', label: 'Crédito liberado', tone: 'neutral' }
   }
 
   if (statusGroup === 'approved' || ['approved', 'paid', 'active'].includes(status)) {
@@ -183,7 +183,7 @@ function resolveStatusMeta(event, paymentMethod) {
     return {
       payment_status: 'pending',
       status_group: 'pending',
-      label: paymentMethod === 'pix' ? 'Aguardando pagamento' : 'Em analise',
+      label: paymentMethod === 'pix' ? 'Aguardando pagamento' : 'Em análise',
       tone: 'warning',
     }
   }
@@ -194,7 +194,7 @@ function resolveStatusMeta(event, paymentMethod) {
     return {
       payment_status: 'rejected',
       status_group: 'rejected',
-      label: paymentMethod === 'pix' ? 'Nao pago' : 'Recusado',
+      label: paymentMethod === 'pix' ? 'Não pago' : 'Recusado',
       tone: 'danger',
     }
   }
@@ -239,7 +239,7 @@ function getReferenceData(event, paymentMethod) {
     if (gatewayEventId) return { label: 'ID PIX', value: gatewayEventId, key: `pix:${gatewayEventId}` }
   }
 
-  if (externalReference) return { label: 'Referencia', value: externalReference, key: externalReference }
+  if (externalReference) return { label: 'Referência', value: externalReference, key: externalReference }
   if (gatewayEventId) return { label: 'ID', value: gatewayEventId, key: gatewayEventId }
   if (paymentId) return { label: 'Pagamento', value: paymentId, key: paymentId }
   return { label: null, value: null, key: null }
@@ -262,49 +262,49 @@ function buildDisplayCopy(event, paymentMethod, statusMeta, reasonMessage) {
       display_subtitle:
         sourcePlan && targetPlan
           ? `${sourcePlan.charAt(0).toUpperCase() + sourcePlan.slice(1)} -> ${targetPlan.charAt(0).toUpperCase() + targetPlan.slice(1)}`
-          : 'Credito proporcional gerado',
+          : 'Crédito proporcional gerado',
       display_message:
         generatedCredit
-          ? `Credito proporcional gerado: ${generatedCredit}.${sourceNominal && targetNominal ? ` Plano anterior ${sourceNominal} e novo plano ${targetNominal}.` : ''} O abatimento entrara automaticamente nas proximas cobrancas.`
-          : (reasonMessage || 'Credito proporcional gerado no upgrade do plano.'),
+          ? `Crédito proporcional gerado: ${generatedCredit}.${sourceNominal && targetNominal ? ` Plano anterior ${sourceNominal} e novo plano ${targetNominal}.` : ''} O abatimento entrará automaticamente nas próximas cobranças.`
+          : (reasonMessage || 'Crédito proporcional gerado no upgrade do plano.'),
     }
   }
 
   if (eventType === 'subscription_credit_reserved') {
     return {
-      display_title: 'Credito reservado',
-      display_subtitle: 'Abatimento programado para a proxima cobranca.',
+      display_title: 'Crédito reservado',
+      display_subtitle: 'Abatimento programado para a próxima cobrança.',
       display_message:
         nextChargeCredit && nextChargeAmount
-          ? `Abatimento previsto: ${nextChargeCredit}. Proxima cobranca estimada: ${nextChargeAmount}.`
-          : (reasonMessage || 'O credito disponivel sera abatido automaticamente na proxima renovacao.'),
+          ? `Abatimento previsto: ${nextChargeCredit}. Próxima cobrança estimada: ${nextChargeAmount}.`
+          : (reasonMessage || 'O crédito disponível será abatido automaticamente na próxima renovação.'),
     }
   }
 
   if (eventType === 'subscription_credit_applied') {
     return {
-      display_title: 'Credito aplicado',
-      display_subtitle: 'Abatimento registrado na renovacao.',
+      display_title: 'Crédito aplicado',
+      display_subtitle: 'Abatimento registrado na renovação.',
       display_message:
         appliedCredit
           ? `Valor abatido: ${appliedCredit}.`
-          : (reasonMessage || 'O credito proporcional foi consumido na renovacao da assinatura.'),
+          : (reasonMessage || 'O crédito proporcional foi consumido na renovação da assinatura.'),
     }
   }
 
   if (eventType === 'subscription_credit_released') {
     return {
-      display_title: 'Credito liberado',
+      display_title: 'Crédito liberado',
       display_subtitle: 'Reserva cancelada e saldo devolvido para uso futuro.',
-      display_message: reasonMessage || 'O credito voltou a ficar disponivel para a proxima cobranca.',
+      display_message: reasonMessage || 'O crédito voltou a ficar disponível para a próxima cobrança.',
     }
   }
 
   if (eventType === 'pix_obsolete') {
     return {
-      display_title: 'PIX anterior substituido',
-      display_subtitle: 'Esta cobranca deixou de valer porque outra conciliacao resolveu a assinatura.',
-      display_message: reasonMessage || 'O PIX anterior foi mantido no historico, mas nao compete mais com o pagamento confirmado.',
+      display_title: 'PIX anterior substituído',
+      display_subtitle: 'Esta cobrança deixou de valer porque outra conciliação resolveu a assinatura.',
+      display_message: reasonMessage || 'O PIX anterior foi mantido no histórico, mas não compete mais com o pagamento confirmado.',
     }
   }
 
@@ -320,14 +320,14 @@ function buildDisplayCopy(event, paymentMethod, statusMeta, reasonMessage) {
       return {
         display_title: 'PIX pago',
         display_subtitle: 'Pagamento PIX confirmado.',
-        display_message: reasonMessage || 'A assinatura foi atualizada com a confirmacao do PIX.',
+        display_message: reasonMessage || 'A assinatura foi atualizada com a confirmação do PIX.',
       }
     }
     if (statusMeta.payment_status === 'expired' || statusMeta.status_group === 'rejected') {
       return {
         display_title: 'PIX expirado',
-        display_subtitle: 'O PIX nao foi concluido.',
-        display_message: reasonMessage || 'Gere um novo PIX para continuar a regularizacao.',
+        display_subtitle: 'O PIX não foi concluído.',
+        display_message: reasonMessage || 'Gere um novo PIX para continuar a regularização.',
       }
     }
   }
@@ -335,30 +335,30 @@ function buildDisplayCopy(event, paymentMethod, statusMeta, reasonMessage) {
   if (paymentMethod === 'credit_card') {
     if (eventType === 'payment_recovery_attempt' && statusMeta.status_group === 'started') {
       return {
-        display_title: 'Tentativa com cartao',
-        display_subtitle: 'Tentativa de regularizacao iniciada.',
-        display_message: reasonMessage || 'A cobranca foi enviada para processamento no cartao.',
+        display_title: 'Tentativa com cartão',
+        display_subtitle: 'Tentativa de regularização iniciada.',
+        display_message: reasonMessage || 'A cobrança foi enviada para processamento no cartão.',
       }
     }
     if (statusMeta.status_group === 'approved') {
       return {
-        display_title: 'Cartao aprovado',
-        display_subtitle: 'Pendencia regularizada no cartao.',
-        display_message: reasonMessage || 'A assinatura voltou a usar o cartao como fluxo principal.',
+        display_title: 'Cartão aprovado',
+        display_subtitle: 'Pendência regularizada no cartão.',
+        display_message: reasonMessage || 'A assinatura voltou a usar o cartão como fluxo principal.',
       }
     }
     if (statusMeta.status_group === 'pending') {
       return {
-        display_title: 'Cartao em analise',
-        display_subtitle: 'Tentativa com cartao em processamento.',
-        display_message: reasonMessage || 'Aguarde a confirmacao antes de repetir a cobranca.',
+        display_title: 'Cartão em análise',
+        display_subtitle: 'Tentativa com cartão em processamento.',
+        display_message: reasonMessage || 'Aguarde a confirmação antes de repetir a cobrança.',
       }
     }
     if (statusMeta.status_group === 'rejected') {
       return {
-        display_title: 'Cartao recusado',
-        display_subtitle: 'Tentativa com cartao nao aprovada.',
-        display_message: reasonMessage || 'Revise os dados do titular ou tente outro cartao.',
+        display_title: 'Cartão recusado',
+        display_subtitle: 'Tentativa com cartão não aprovada.',
+        display_message: reasonMessage || 'Revise os dados do titular ou tente outro cartão.',
       }
     }
   }
@@ -425,42 +425,42 @@ function buildSubscriptionSummary({ subscriptionStatus, openPixEvent, latestCard
 
   if (openPixEvent && latestCardRejected) {
     return {
-      title: 'Pendente de regularizacao',
-      message: 'Ha um PIX em aberto aguardando pagamento. A ultima tentativa com cartao de credito nao foi aprovada.',
+      title: 'Pendente de regularização',
+      message: 'Há um PIX em aberto aguardando pagamento. A última tentativa com cartão de crédito não foi aprovada.',
     }
   }
 
   if (openPixEvent) {
     return {
-      title: 'Pendente de regularizacao',
-      message: 'Sua assinatura esta aguardando a regularizacao do pagamento. Existe um PIX em aberto aguardando pagamento.',
+      title: 'Pendente de regularização',
+      message: 'Sua assinatura está aguardando a regularização do pagamento. Existe um PIX em aberto aguardando pagamento.',
     }
   }
 
   if (latestCardRejected) {
     return {
-      title: 'Pendente de regularizacao',
-      message: 'Sua assinatura esta aguardando regularizacao do pagamento. A ultima tentativa com cartao de credito nao foi aprovada.',
+      title: 'Pendente de regularização',
+      message: 'Sua assinatura está aguardando regularização do pagamento. A última tentativa com cartão de crédito não foi aprovada.',
     }
   }
 
   if (['pending_payment', 'pending_pix', 'past_due', 'unpaid', 'expired'].includes(normalizedStatus)) {
     return {
-      title: 'Pendente de regularizacao',
-      message: 'Sua assinatura esta aguardando regularizacao do pagamento.',
+      title: 'Pendente de regularização',
+      message: 'Sua assinatura está aguardando regularização do pagamento.',
     }
   }
 
   if (normalizedStatus === 'active') {
     return {
       title: 'Assinatura ativa',
-      message: 'Nao existe pendencia financeira aberta no momento.',
+      message: 'Não existe pendência financeira aberta no momento.',
     }
   }
 
   return {
     title: 'Status da assinatura',
-    message: 'Acompanhe abaixo os ultimos eventos de cobranca por metodo de pagamento.',
+    message: 'Acompanhe abaixo os Últimos eventos de cobrança por método de pagamento.',
   }
 }
 

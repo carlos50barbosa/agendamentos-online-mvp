@@ -1208,7 +1208,7 @@ export default function ServicosEstabelecimento() {
 
               </div>
 
-              <small className="muted" style={{ fontSize: 11 }}>Formatos aceitos: PNG, JPG ou WEBP (at? 2 MB).</small>
+              <small className="muted" style={{ fontSize: 11 }}>Formatos aceitos: PNG, JPG ou WEBP (até 2 MB).</small>
 
               {newImageError && <div className="service-form__error">{newImageError}</div>}
 
@@ -1411,7 +1411,7 @@ export default function ServicosEstabelecimento() {
 
           <p>
 
-            Tem certeza que deseja excluir <b>{toDelete?.nome}</b> Esta ação não
+            Tem certeza que deseja excluir <b>{toDelete?.nome}</b>? Esta ação não
 
             pode ser desfeita.
 
@@ -1614,7 +1614,7 @@ export default function ServicosEstabelecimento() {
 
               </div>
 
-              <small className="muted" style={{ fontSize: 11 }}>Formatos aceitos: PNG, JPG ou WEBP (at? 2 MB).</small>
+              <small className="muted" style={{ fontSize: 11 }}>Formatos aceitos: PNG, JPG ou WEBP (até 2 MB).</small>
 
               {editImageError && <div className="service-form__error">{editImageError}</div>}
 

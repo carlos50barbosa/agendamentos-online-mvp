@@ -67,10 +67,10 @@ export function validateLoyaltyCardPayerData({
   const warnings = {}
 
   if (!isValidEmail(normalized.payerEmail)) {
-    errors.payer_email = 'Informe um e-mail valido para a cobranca.'
+    errors.payer_email = 'Informe um e-mail válido para a cobrança.'
   }
   if (!hasMeaningfulFullName(normalized.cardholderName)) {
-    errors.cardholder_name = 'Informe o nome completo do titular do cartao.'
+    errors.cardholder_name = 'Informe o nome completo do titular do cartão.'
   }
   if (!normalized.identificationType) {
     errors.identification_type = 'Informe o tipo do documento do titular.'
@@ -78,9 +78,9 @@ export function validateLoyaltyCardPayerData({
   if (!normalized.identificationNumber) {
     errors.identification_number = 'Informe o CPF do titular.'
   } else if (normalized.identificationType === 'CPF' && !isValidCpf(normalized.identificationNumber)) {
-    errors.identification_number = 'Informe um CPF valido para o titular.'
+    errors.identification_number = 'Informe um CPF válido para o titular.'
   } else if (normalized.identificationType !== 'CPF' && normalized.identificationNumber.length < 5) {
-    errors.identification_number = 'Informe um documento valido para o titular.'
+    errors.identification_number = 'Informe um documento válido para o titular.'
   }
   if (!normalized.payerPhone) {
     warnings.payer_phone = 'Telefone ausente no contexto do pagador.'

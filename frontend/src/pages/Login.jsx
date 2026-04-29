@@ -224,12 +224,12 @@ export default function Login() {
         ? 'Use seu e-mail e sua senha para continuar com seus agendamentos.'
         : 'Escolha se deseja entrar como cliente ou estabelecimento.';
 
-  const asideBadge = isEstablishmentContext ? 'Workspace premium' : 'Plataforma confiavel';
+  const asideBadge = isEstablishmentContext ? 'Workspace premium' : 'Plataforma confiável';
   const asideTitle = isEstablishmentContext
-    ? 'A rotina do estabelecimento comeca com clareza, seguranca e contexto.'
-    : 'Acesse sua conta com a mesma consistencia de um produto premium.';
+    ? 'A rotina do estabelecimento começa com clareza, segurança e contexto.'
+    : 'Acesse sua conta com a mesma consistência de um produto premium.';
   const asideCopy = isEstablishmentContext
-    ? 'Tenha agenda, equipe, servicos e clientes no mesmo fluxo, com uma experiencia preparada para operacoes profissionais.'
+    ? 'Tenha agenda, equipe, serviços e clientes no mesmo fluxo, com uma experiência preparada para operações profissionais.'
     : 'Um fluxo objetivo para entrar, retomar sessao e seguir seu dia sem ruido visual ou etapas desnecessarias.';
 
   const hasRedirectTarget = Boolean(nextParam || storedNext);
@@ -300,7 +300,7 @@ export default function Login() {
     if (loading) return;
 
     if (!email || !isValidEmail(email)) {
-      setErrorMsg('Informe um e-mail valido para continuar.');
+      setErrorMsg('Informe um e-mail válido para continuar.');
       emailRef.current?.focus();
       return;
     }
@@ -335,9 +335,9 @@ export default function Login() {
       const message =
         err?.message === 'tipo_incorreto'
           ? (tipo === 'CLIENTE'
-              ? 'Este acesso e para clientes. Use a opcao de estabelecimento.'
-              : 'Este acesso e para estabelecimentos. Use a opcao de cliente.')
-          : (err?.data?.message || err?.message || 'Nao foi possivel entrar. Verifique seus dados.');
+              ? 'Este acesso é para clientes. Use a opção de estabelecimento.'
+              : 'Este acesso é para estabelecimentos. Use a opção de cliente.')
+          : (err?.data?.message || err?.message || 'Não foi possível entrar. Verifique seus dados.');
 
       setErrorMsg(message);
     } finally {
@@ -396,7 +396,7 @@ export default function Login() {
                 <LogoAO size={40} className="login-preview__logo-mark" />
                 <div className="auth-portal__brand-copy">
                   <div className="auth-portal__brand-title">Agendamentos Online</div>
-                  <div className="auth-portal__brand-subtitle">Entrada segura para clientes e operacoes</div>
+                  <div className="auth-portal__brand-subtitle">Entrada segura para clientes e operações</div>
                 </div>
               </div>
 
@@ -425,11 +425,11 @@ export default function Login() {
                 </li>
                 <li className="auth-portal__list-item">
                   <IconSpark className="auth-portal__list-icon" />
-                  <span>{isEstablishmentContext ? 'Fluxo profissional para agenda, equipe e clientes.' : 'Entrada rapida para acompanhar agendamentos e historico.'}</span>
+                  <span>{isEstablishmentContext ? 'Fluxo profissional para agenda, equipe e clientes.' : 'Entrada rápida para acompanhar agendamentos e histórico.'}</span>
                 </li>
                 <li className="auth-portal__list-item">
                   <IconCheck className="auth-portal__list-icon" />
-                  <span>Layout consistente para primeiro acesso, retorno e recuperacao de conta.</span>
+                  <span>Layout consistente para primeiro acesso, retorno e recuperação de conta.</span>
                 </li>
               </ul>
 
@@ -493,7 +493,7 @@ export default function Login() {
                   ) : null}
 
                   <div className="login-preview__tabs" role="tablist" aria-label="Escolher perfil">
-                    <Tab value="CLIENTE" title="Cliente" hint="Acompanhe seus agendamentos e historico." />
+                    <Tab value="CLIENTE" title="Cliente" hint="Acompanhe seus agendamentos e histórico." />
                     <Tab value="ESTABELECIMENTO" title="Estabelecimento" hint="Gerencie agenda, equipe e clientes." />
                   </div>
 
@@ -605,7 +605,7 @@ export default function Login() {
 
                     {capsLockOn || senhaInvalid ? (
                       <div className={`login-preview__hint${senhaInvalid ? ' is-error' : ' is-warn'}`}>
-                        {capsLockOn ? 'Caps Lock ativo.' : 'Minimo de 6 caracteres.'}
+                        {capsLockOn ? 'Caps Lock ativo.' : 'Mínimo de 6 caracteres.'}
                       </div>
                     ) : null}
                   </div>

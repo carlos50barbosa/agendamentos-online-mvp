@@ -60,6 +60,7 @@ import {
 } from '../lib/client_loyalty_subscriptions.js'
 import { pool } from '../lib/db.js'
 import { config } from '../lib/config.js'
+import { getClientIp } from '../lib/client_ip.js'
 import { BillingService } from '../lib/billing_service.js'
 import { listActiveWhatsAppPacks, findWhatsAppPack } from '../lib/addon_packs.js'
 import { verifyMercadoPagoWebhookSignature } from '../lib/mp_signature.js'
@@ -168,9 +169,7 @@ function parseSignatureHeaderForLog(header) {
 }
 
 function getClientIpForLog(req) {
-  const forwarded = String(req.headers['x-forwarded-for'] || '').trim()
-  if (forwarded) return forwarded
-  return String(req.ip || '').trim()
+  return getClientIp(req)
 }
 
 function shouldLogMismatchForIp(ip) {
@@ -4284,7 +4283,7 @@ router.post('/card/subscribe', auth, isEstabelecimento, async (req, res) => {
       })
       return res.status(409).json({
         error: 'subscription_create_blocked',
-        message: createGuard.user_message || 'Ja existe uma configuracao recente de assinatura no cartao. Aguarde antes de tentar novamente.',
+        message: createGuard.user_message || 'Já existe uma configuração recente de assinatura no cartão. Aguarde antes de tentar novamente.',
         details: createGuard,
         request_id: requestId,
       })
@@ -4425,7 +4424,7 @@ router.post('/card/update', auth, isEstabelecimento, async (req, res) => {
         })
         return res.status(409).json({
           error: 'subscription_create_blocked',
-          message: createGuard.user_message || 'Ja existe uma configuracao recente de assinatura no cartao. Aguarde antes de tentar novamente.',
+          message: createGuard.user_message || 'Já existe uma configuração recente de assinatura no cartão. Aguarde antes de tentar novamente.',
           details: createGuard,
           request_id: requestId,
         })
@@ -4650,8 +4649,8 @@ router.post('/card/recover', auth, isEstabelecimento, async (req, res) => {
           ? 'A cobrança pendente já foi quitada neste cartão.'
           : (paymentResult?.user_message || (
               pending
-                ? 'Ja existe uma cobranca em analise. Aguarde a confirmacao antes de tentar novamente.'
-                : 'A ultima tentativa no cartao nao foi aprovada. Voce pode tentar novamente ou gerar um PIX.'
+                ? 'Já existe uma cobrança em análise. Aguarde a confirmação antes de tentar novamente.'
+                : 'A última tentativa no cartão não foi aprovada. Você pode tentar novamente ou gerar um PIX.'
             )),
         plan_status: refreshedContext.computedState.resolvedStatus,
         access_state: refreshedContext.computedState.accessState,
@@ -4683,7 +4682,7 @@ router.post('/card/recover', auth, isEstabelecimento, async (req, res) => {
       })
       return res.status(409).json({
         error: recoveryGuard?.decision === 'defer' ? 'recovery_charge_deferred' : 'recovery_charge_blocked',
-        message: recoveryGuard?.user_message || 'Nao foi possivel iniciar a cobranca agora.',
+        message: recoveryGuard?.user_message || 'Não foi possível iniciar a cobrança agora.',
         recovery_guard: serializeRecoveryGuard(recoveryGuard),
         request_id: requestId,
       })
@@ -4786,8 +4785,8 @@ router.post('/card/recover', auth, isEstabelecimento, async (req, res) => {
       recovery_status: pending ? 'pending' : payment.rawStatus || 'rejected',
       message: paymentOutcome?.user_message || (
         pending
-          ? 'O pagamento esta em analise pelo Mercado Pago. Aguarde a confirmacao antes de tentar novamente.'
-          : 'O cartao foi validado, mas a cobranca pendente nao foi aprovada. Tente novamente ou gere um PIX.'
+          ? 'O pagamento está em análise pelo Mercado Pago. Aguarde a confirmação antes de tentar novamente.'
+          : 'O cartão foi validado, mas a cobrança pendente não foi aprovada. Tente novamente ou gere um PIX.'
       ),
       plan_status: finalized.effectiveContext.computedState.resolvedStatus,
       access_state: finalized.effectiveContext.computedState.accessState,

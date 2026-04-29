@@ -4664,7 +4664,7 @@ function ProfessionalAgendaView({
 
                 <label className="label">
 
-                  <span>Email</span>
+                  <span>E-mail</span>
 
                   <input
 

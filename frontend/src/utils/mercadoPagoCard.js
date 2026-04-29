@@ -49,17 +49,17 @@ export function isMercadoPagoCardTokenRefreshRequired(error) {
   )
 }
 
-export function getMercadoPagoCardErrorMessage(error, fallback = 'Nao foi possivel processar o cartao.') {
+export function getMercadoPagoCardErrorMessage(error, fallback = 'Não foi possível processar o cartão.') {
   if (isMercadoPagoCardTokenRefreshRequired(error)) {
-    return 'Os dados do cartao precisam ser confirmados novamente para gerar um novo token de seguranca.'
+    return 'Os dados do cartão precisam ser confirmados novamente para gerar um novo token de segurança.'
   }
 
   if (getErrorCode(error) === 'client_loyalty_card_retry_cooldown') {
-    return error?.data?.message || 'Nao foi possivel aprovar este cartao no momento. Tente PIX ou aguarde antes de tentar novamente.'
+    return error?.data?.message || 'Não foi possível aprovar este cartão no momento. Tente PIX ou aguarde antes de tentar novamente.'
   }
 
   if (getStatusDetail(error) === 'cc_rejected_high_risk') {
-    return 'Nao foi possivel aprovar este cartao no momento. Revise os dados do titular ou tente outro cartao.'
+    return 'Não foi possível aprovar este cartão no momento. Revise os dados do titular ou tente outro cartão.'
   }
 
   return error?.data?.message || error?.message || fallback

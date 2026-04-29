@@ -153,7 +153,7 @@ async function assertCapabilityAllowed(estabelecimentoId, capability) {
   }
   const allowed = DEPOSIT_ALLOWED_PLANS.has(String(planContext.plan || '').toLowerCase())
   if (!allowed) {
-    const error = new Error('Disponivel apenas para planos Pro ou Premium.')
+    const error = new Error('Disponível apenas para planos Pro ou Premium.')
     error.status = 403
     error.code = 'plan_not_allowed'
     throw error
@@ -174,10 +174,10 @@ async function handleConnectStart(req, res) {
     if (missing.length) {
       const exampleRedirectUri = buildMpRedirectUriExample()
       const message = [
-        'Configuracao incompleta do OAuth do Mercado Pago no backend.',
+        'Configuração incompleta do OAuth do Mercado Pago no backend.',
         missing.length ? `Preencha: ${missing.join(', ')}.` : '',
         missing.includes('MP_REDIRECT_URI') && exampleRedirectUri
-          ? `Sugestao para MP_REDIRECT_URI: ${exampleRedirectUri}.`
+          ? `Sugestão para MP_REDIRECT_URI: ${exampleRedirectUri}.`
           : '',
       ].filter(Boolean).join(' ')
       console.warn('[marketplace/mp][connect] config_missing', { missing, capability, return_to: returnTo })
@@ -208,7 +208,7 @@ async function handleConnectStart(req, res) {
   } catch (error) {
     const status = Number(error?.status || 500)
     const code = error?.code || 'mp_connect_error'
-    const message = error?.message || 'Nao foi possivel iniciar a conexao do Mercado Pago.'
+    const message = error?.message || 'Não foi possível iniciar a conexão do Mercado Pago.'
     console.error('[marketplace/mp][connect]', {
       estabelecimento_id: req.user?.id || null,
       capability,
@@ -243,7 +243,7 @@ async function handleAccountStatus(req, res) {
     return res.status(500).json({
       ok: false,
       error: 'mp_account_status_failed',
-      message: 'Nao foi possivel carregar a conta Mercado Pago.',
+      message: 'Não foi possível carregar a conta Mercado Pago.',
     })
   }
 }
@@ -260,7 +260,7 @@ async function handleDisconnect(req, res) {
     return res.status(500).json({
       ok: false,
       error: 'mp_disconnect_failed',
-      message: 'Nao foi possivel desconectar o Mercado Pago.',
+      message: 'Não foi possível desconectar o Mercado Pago.',
     })
   }
 }

@@ -43,7 +43,7 @@ export default function DefinirSenha() {
       } catch {}
       nav('/login', { replace: true });
     } catch (error) {
-      setErr(error?.message || 'Nao foi possivel redefinir sua senha.');
+      setErr(error?.message || 'Não foi possível redefinir sua senha.');
     } finally {
       setLoading(false);
     }
@@ -57,7 +57,7 @@ export default function DefinirSenha() {
       <main className="login-preview__main">
         <section className="login-preview__card">
           <div className="login-preview__grid">
-            <aside className="login-preview__aside" aria-label="Informacoes da redefinicao">
+            <aside className="login-preview__aside" aria-label="Informações da redefinição">
               <div className="auth-portal__brand">
                 <LogoAO size={40} className="login-preview__logo-mark" />
                 <div className="auth-portal__brand-copy">
@@ -69,7 +69,7 @@ export default function DefinirSenha() {
               <span className="auth-portal__aside-badge">Redefinicao protegida</span>
 
               <div>
-                <h2 className="auth-portal__aside-title">Finalize a recuperacao com uma senha nova e segura.</h2>
+                <h2 className="auth-portal__aside-title">Finalize a recuperação com uma senha nova e segura.</h2>
                 <p className="auth-portal__aside-copy">
                   Defina uma senha forte para voltar ao login com continuidade. O fluxo foi desenhado para ser simples e legivel em qualquer tela.
                 </p>
@@ -78,20 +78,20 @@ export default function DefinirSenha() {
               <ul className="auth-portal__list">
                 <li className="auth-portal__list-item">
                   <IconShield className="auth-portal__list-icon" />
-                  <span>Link de redefinicao validado antes do envio da nova senha.</span>
+                  <span>Link de redefinição validado antes do envio da nova senha.</span>
                 </li>
                 <li className="auth-portal__list-item">
                   <IconKey className="auth-portal__list-icon" />
-                  <span>Senha nova pronta para o proximo acesso com o perfil correto.</span>
+                  <span>Senha nova pronta para o próximo acesso com o perfil correto.</span>
                 </li>
                 <li className="auth-portal__list-item">
                   <IconSpark className="auth-portal__list-icon" />
-                  <span>Experiencia consistente com login, cadastro e recuperacao.</span>
+                  <span>Experiência consistente com login, cadastro e recuperação.</span>
                 </li>
               </ul>
 
               <div className="auth-portal__aside-footer">
-                Escolha uma senha exclusiva e com no minimo 6 caracteres para reforcar a seguranca do acesso.
+                Escolha uma senha exclusiva e com no mínimo 6 caracteres para reforçar a segurança do acesso.
               </div>
             </aside>
 
@@ -119,7 +119,7 @@ export default function DefinirSenha() {
                 <div className="login-preview__alert login-preview__alert--error" role="alert">
                   <span className="login-preview__alert-dot" aria-hidden="true" />
                   <div>
-                    <div className="login-preview__alert-title">Nao foi possivel salvar</div>
+                    <div className="login-preview__alert-title">Não foi possível salvar</div>
                     <div className="login-preview__alert-text">{err}</div>
                   </div>
                 </div>
@@ -182,7 +182,7 @@ export default function DefinirSenha() {
                         type="button"
                         className="login-preview__toggle"
                         onClick={() => setShowConfirm((value) => !value)}
-                        aria-label={showConfirm ? 'Ocultar confirmacao' : 'Mostrar confirmacao'}
+                        aria-label={showConfirm ? 'Ocultar confirmação' : 'Mostrar confirmação'}
                       >
                         {showConfirm ? <IconEyeOff /> : <IconEye />}
                         <span className="auth-portal__toggle-label">{showConfirm ? 'Ocultar' : 'Mostrar'}</span>
@@ -220,7 +220,7 @@ export default function DefinirSenha() {
               <div className="auth-portal__support-links auth-portal__support-links--inline">
                 <span className="auth-portal__support-link is-static">
                   <IconCheck />
-                  <span>Fluxo de redefinicao concluido no mesmo shell visual do login.</span>
+                  <span>Fluxo de redefinição concluído no mesmo shell visual do login.</span>
                 </span>
               </div>
             </div>

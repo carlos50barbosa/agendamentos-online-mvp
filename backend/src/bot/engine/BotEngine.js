@@ -23,7 +23,7 @@ const ACTION_DEDUPE_MS = 15000;
 
 function menuText() {
   return [
-    'Escolha uma opcao:',
+    'Escolha uma opção:',
     '1) Agendar',
     '2) Remarcar',
     '3) Cancelar',
@@ -481,7 +481,7 @@ class BotEngine {
           if (!stillFree) {
             ctx.hourOptions = free;
             ctx.hourPage = 0;
-            await use(STATES.AGENDAR_HORA, { ...check, text: 'Esse horario acabou de ser ocupado. Escolha outro horario.' }, 'CONFLICT');
+            await use(STATES.AGENDAR_HORA, { ...check, text: 'Esse horário acabou de ser ocupado. Escolha outro horário.' }, 'CONFLICT');
           } else {
             const create = await this.actions.createAgendamento(tenantId, fromPhone, ctx.servicoId, ctx.profissionalId, ctx.slotSelecionado);
             if (create.ok && create.status === 201) {
@@ -575,7 +575,7 @@ class BotEngine {
           const result = await this.actions.remarcarAgendamento(tenantId, ctx.agendamentoId, ctx.slotSelecionado);
           if (result.ok) {
             nextState = STATES.DONE;
-            replyText = `Remarcacao concluida!\\nNovo horario: ${toDateTimeLabel(ctx.slotSelecionado)}\\nDigite 0 para menu.`;
+            replyText = `Remarcação concluída!\\nNovo horário: ${toDateTimeLabel(ctx.slotSelecionado)}\\nDigite 0 para menu.`;
             action = 'REMARCAR_OK';
             endpointCalled = result.endpoint;
             endpointResult = { status: result.status, latency_ms: result.elapsedMs || null };
@@ -651,7 +651,7 @@ class BotEngine {
       }
     } else if (prevState === STATES.HUMANO_OPEN) {
       nextState = STATES.HUMANO_OPEN;
-      replyText = 'Seu atendimento humano esta em andamento. Se quiser voltar ao bot, digite 0.';
+      replyText = 'Seu atendimento humano está em andamento. Se quiser voltar ao bot, digite 0.';
       action = 'HANDOFF_WAIT';
     } else {
       nextState = STATES.START;

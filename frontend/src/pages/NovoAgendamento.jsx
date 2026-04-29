@@ -47,7 +47,7 @@ const BOOKING_BRAND = Object.freeze({
   name: "Agendamentos Online",
   tagline: "",
   heroEyebrow: "",
-  heroHeading: "Onde voce quer agendar?",
+  heroHeading: "Onde você quer agendar?",
   heroSubtitle: "",
   contactLabel: "Falar com atendimento",
   contactMeta: "Suporte comercial",
@@ -2431,7 +2431,7 @@ const EstablishmentCard = ({ est, selected, onSelect, distanceKm = null }) => {
 
   if (Number.isFinite(distanceKm) && distanceKm <= 3) {
 
-    badges.push({ label: 'Perto de voce', tone: 'neutral' });
+    badges.push({ label: 'Perto de você', tone: 'neutral' });
 
   }
 
@@ -7409,7 +7409,7 @@ useEffect(() => {
 
     if (discoverySort === 'rating') {
 
-      return 'Ordenado por avaliacao.';
+      return 'Ordenado por avaliação.';
 
     }
 
@@ -7707,7 +7707,7 @@ useEffect(() => {
           <div className="novo-agendamento__loyalty-banner novo-agendamento__loyalty-banner--subtle">
             <div>
               <strong>Sem plano ativo neste estabelecimento</strong>
-              <p>Se quiser, voce pode assinar um plano antes de concluir o agendamento.</p>
+              <p>Se quiser, você pode assinar um plano antes de concluir o agendamento.</p>
             </div>
             <Link className="btn btn--outline btn--sm" to={`/planos-fidelidade/${establishmentId}`}>
               Ver planos

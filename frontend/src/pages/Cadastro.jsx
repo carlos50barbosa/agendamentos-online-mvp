@@ -644,7 +644,7 @@ export default function Cadastro() {
 
                   <div className="auth-portal__brand-title">Agendamentos Online</div>
 
-                  <div className="auth-portal__brand-subtitle">Cadastro premium para clientes e operacoes</div>
+                  <div className="auth-portal__brand-subtitle">Cadastro premium para clientes e operações</div>
 
                 </div>
 
@@ -770,7 +770,7 @@ export default function Cadastro() {
 
                     <div className="login-preview__tab-body">
                       <div className="login-preview__tab-title">Sou Cliente</div>
-                      <div className="login-preview__tab-hint">Acesse seus agendamentos e historico</div>
+                      <div className="login-preview__tab-hint">Acesse seus agendamentos e histórico</div>
                     </div>
 
                   </button>
@@ -797,7 +797,7 @@ export default function Cadastro() {
 
                     <div className="login-preview__tab-body">
                       <div className="login-preview__tab-title">Sou Estabelecimento</div>
-                      <div className="login-preview__tab-hint">Gerencie agenda, servicos e clientes</div>
+                      <div className="login-preview__tab-hint">Gerencie agenda, serviços e clientes</div>
                     </div>
 
                   </button>
@@ -995,7 +995,7 @@ export default function Cadastro() {
 
                     ) : (
 
-                      <div className="login-preview__hint">Use no minimo 8 caracteres e 1 especial.</div>
+                      <div className="login-preview__hint">Use no mínimo 8 caracteres e 1 especial.</div>
 
                     )}
 

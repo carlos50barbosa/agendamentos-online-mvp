@@ -2487,7 +2487,7 @@ router.put('/:id/plan', auth, isEstabelecimento, async (req, res) => {
     } else if (req.body?.trialDays) {
       let days = Number(req.body.trialDays);
       if (!Number.isFinite(days) || days <= 0) {
-        return res.status(400).json({ error: 'invalid_trial', message: 'trialDays deve ser um numero positivo.' });
+        return res.status(400).json({ error: 'invalid_trial', message: 'trialDays deve ser um número positivo.' });
       }
       // Politica: teste gratis de 7 dias
       if (days > 7) days = 7;
@@ -2861,7 +2861,7 @@ router.post('/:id/images', auth, isEstabelecimento, async (req, res) => {
 
       if (err?.code === 'GALLERY_IMAGE_TOO_LARGE') {
 
-        return res.status(400).json({ error: 'gallery_image_large', message: 'A imagem deve ter no maximo 3MB.' });
+        return res.status(400).json({ error: 'gallery_image_large', message: 'A imagem deve ter no máximo 3MB.' });
 
       }
 
@@ -2935,7 +2935,7 @@ router.delete('/:id/images/:imageId', auth, isEstabelecimento, async (req, res) 
 
     if (!Number.isFinite(imageId)) {
 
-      return res.status(400).json({ error: 'invalid_image', message: 'Imagem invalida.' });
+      return res.status(400).json({ error: 'invalid_image', message: 'Imagem inválida.' });
 
     }
 

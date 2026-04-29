@@ -40,7 +40,7 @@ test('summarizeMercadoPagoGatewayResult maps insufficient data rejections to rev
   assert.equal(result.status_group, 'rejected')
   assert.equal(result.normalized_reason, 'insufficient_data')
   assert.equal(result.action_recommendation, 'review_card_data')
-  assert.equal(result.user_message, 'Nao foi possivel processar o pagamento. Revise os dados do cartao e do titular.')
+  assert.equal(result.user_message, 'Não foi possível processar o pagamento. Revise os dados do cartão e do titular.')
   assert.equal(result.payment_id, '901')
 })
 

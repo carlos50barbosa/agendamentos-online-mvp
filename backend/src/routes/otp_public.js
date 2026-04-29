@@ -5,6 +5,7 @@ import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 import { pool } from '../lib/db.js';
 import { notifyEmail, notifyWhatsapp } from '../lib/notifications.js';
+import { getClientIp } from '../lib/client_ip.js';
 
 const router = Router();
 
@@ -25,7 +26,7 @@ router.post('/request', async (req, res) => {
     const hash = await bcrypt.hash(code, 8);
     const requestId = crypto.randomBytes(16).toString('hex');
     const expires = new Date(Date.now() + 10 * 60 * 1000);
-    const ip = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').toString().slice(0,64);
+    const ip = getClientIp(req).slice(0,64);
 
     await pool.query(
       'INSERT INTO otp_codes (request_id, channel, value, code_hash, expires_at, ip_addr) VALUES (?,?,?,?,?,?)',

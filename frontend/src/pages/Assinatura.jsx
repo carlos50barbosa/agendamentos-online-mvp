@@ -295,7 +295,7 @@ function MappedFinancialEventRow({ item }) {
         <strong>{item?.display_subtitle || 'Movimentacao financeira registrada.'}</strong>
         {item?.display_message ? <span className="muted">{item.display_message}</span> : null}
         <div className="subscription-page__history-meta">
-          <span className="subscription-page__history-method">{item?.payment_method_label || 'Nao definido'}</span>
+          <span className="subscription-page__history-method">{item?.payment_method_label || 'Não definido'}</span>
           {item?.reference_value ? (
             <span className="muted">{item?.reference_label || 'Ref'}: {item.reference_value}</span>
           ) : null}
@@ -340,7 +340,7 @@ function CreditEntryRow({ item }) {
   const targetLabel = PLAN_META[normalizePlanKey(item?.target_plan)]?.label || 'Plano novo';
   const confirmationMethodLabel = PAYMENT_METHOD_LABELS[String(item?.payment_method || '').toLowerCase()] || null;
   const statusMap = {
-    available: { label: 'Disponivel', tone: 'success' },
+    available: { label: 'Disponível', tone: 'success' },
     partially_reserved: { label: 'Parcialmente reservado', tone: 'info' },
     reserved: { label: 'Reservado', tone: 'info' },
     partially_consumed: { label: 'Parcialmente consumido', tone: 'warning' },
@@ -351,15 +351,15 @@ function CreditEntryRow({ item }) {
     <li className="subscription-page__history-item">
       <div>
         <span className="subscription-page__history-eyebrow">{`Upgrade realizado: ${sourceLabel} -> ${targetLabel}`}</span>
-        <strong>{`Credito proporcional gerado: ${formatCurrencyFromCents(item?.generated_credit_cents)}`}</strong>
+        <strong>{`Crédito proporcional gerado: ${formatCurrencyFromCents(item?.generated_credit_cents)}`}</strong>
         <span className="muted">
-          {`Disponivel: ${formatCurrencyFromCents(item?.remaining_credit_cents)} • Consumido: ${formatCurrencyFromCents(item?.consumed_credit_cents)}`}
+          {`Disponível: ${formatCurrencyFromCents(item?.remaining_credit_cents)} • Consumido: ${formatCurrencyFromCents(item?.consumed_credit_cents)}`}
         </span>
         <span className="muted">
           {`Nominal: ${sourceLabel} ${formatCurrencyFromCents(item?.original_plan_amount_cents)} -> ${targetLabel} ${formatCurrencyFromCents(item?.target_plan_amount_cents)}`}
         </span>
         <span className="muted">
-          {`Ciclo original: ${formatDateLong(item?.source_cycle_started_at)} ate ${formatDateLong(item?.source_cycle_ends_at)}`}
+          {`Ciclo original: ${formatDateLong(item?.source_cycle_started_at)} até ${formatDateLong(item?.source_cycle_ends_at)}`}
         </span>
         {confirmationMethodLabel ? (
           <span className="muted">{`Confirmado via ${confirmationMethodLabel}`}</span>
@@ -576,14 +576,14 @@ export default function Assinatura() {
     if (currentPaymentMethod === 'credit_card' && (hasDelinquentStatus || planStatusKey === 'pending_payment')) {
       return {
         mode: 'update',
-        label: hasDelinquentStatus ? 'Atualizar cartao da assinatura' : 'Atualizar cartao',
+        label: hasDelinquentStatus ? 'Atualizar cartão da assinatura' : 'Atualizar cartão',
       };
     }
     if (currentPaymentMethod === 'credit_card') {
-      return { mode: 'update', label: 'Trocar cartao' };
+      return { mode: 'update', label: 'Trocar cartão' };
     }
     if (hasDelinquentStatus) {
-      return { mode: 'subscribe', label: 'Atualizar cartao da assinatura' };
+      return { mode: 'subscribe', label: 'Atualizar cartão da assinatura' };
     }
     if (currentPaymentMethod === 'credit_card' && (hasDelinquentStatus || planStatusKey === 'pending_payment')) {
       return {
@@ -673,18 +673,18 @@ export default function Assinatura() {
   const consumedCreditCents = Number(creditSummary?.consumed_credit_cents || 0) || 0;
   const hasCreditData = availableCreditCents > 0 || reservedCreditCents > 0 || creditEntries.length > 0;
   const creditPreviewMessage = useMemo(() => {
-    if (!creditPreview) return 'Quando existir saldo de credito, o abatimento aparecera aqui automaticamente.';
+    if (!creditPreview) return 'Quando existir saldo de crédito, o abatimento aparecerá aqui automaticamente.';
     if (creditPreview.next_renewal_covered_fully) {
       const fullCycles = Number(creditPreview.scheduled_full_cycles || 0) || 0;
       if (fullCycles === 1) {
-        return 'A proxima renovacao esta coberta pelo credito. A proxima cobranca paga sera recalculada automaticamente.';
+        return 'A próxima renovação está coberta pelo crédito. A próxima cobrança paga será recalculada automaticamente.';
       }
-      return `As proximas ${fullCycles} renovacoes estao cobertas pelo credito. A proxima cobranca paga sera recalculada automaticamente.`;
+      return `As próximas ${fullCycles} renovações estão cobertas pelo crédito. A próxima cobrança paga será recalculada automaticamente.`;
     }
     if (Number(creditPreview.next_charge_credit_cents || 0) > 0) {
-      return `Na proxima cobranca prevista, ${formatCurrencyFromCents(creditPreview.next_charge_credit_cents)} sera abatido automaticamente.`;
+      return `Na próxima cobrança prevista, ${formatCurrencyFromCents(creditPreview.next_charge_credit_cents)} será abatido automaticamente.`;
     }
-    return 'O saldo disponivel sera abatido automaticamente nas proximas cobrancas.';
+    return 'O saldo disponível será abatido automaticamente nas próximas cobranças.';
   }, [creditPreview]);
 
   const nextDueLabel = renewalRequired
@@ -859,7 +859,7 @@ export default function Assinatura() {
             type: 'warning',
             message: getPaymentResultMessage(
               response,
-              'O pagamento estÃ¡ em anÃ¡lise pelo Mercado Pago. Aguarde a confirmaÃ§Ã£o antes de tentar novamente.',
+              'O pagamento está em análise pelo Mercado Pago. Aguarde a confirmação antes de tentar novamente.',
             ),
           });
           return false;
@@ -867,7 +867,7 @@ export default function Assinatura() {
         setCardRecoveryReady(response?.payment_result?.manual_retry_allowed !== false);
         const fallbackMessage = getPaymentResultMessage(
           response,
-          'A cobranca pendente nao foi aprovada. Gere um PIX ou tente outro cartao.',
+          'A cobrança pendente não foi aprovada. Gere um PIX ou tente outro cartão.',
         );
         const message = response?.message || 'A cobrança pendente não foi aprovada. Gere um PIX ou tente outro cartão.';
         setCardState((current) => ({ ...current, error: fallbackMessage }));
@@ -940,7 +940,7 @@ export default function Assinatura() {
       };
 
       if (!payload.card_token) {
-        throw new Error('Nao foi possivel tokenizar o cartao.');
+        throw new Error('Não foi possível tokenizar o cartão.');
       }
 
       if (submitIntent === 'recover') {
@@ -954,7 +954,7 @@ export default function Assinatura() {
           resetCardFormForNewToken();
           setNotice({
             type: 'success',
-            message: 'Pagamento aprovado. A assinatura foi reativada e a renovacao automatica segue no cartao.',
+            message: 'Pagamento aprovado. A assinatura foi reativada e a renovação automática segue no cartão.',
           });
           return true;
         }
@@ -969,7 +969,7 @@ export default function Assinatura() {
             type: 'warning',
             message: getPaymentResultMessage(
               response,
-              'O pagamento esta em analise pelo Mercado Pago. Aguarde a confirmacao antes de tentar novamente.',
+              'O pagamento está em análise pelo Mercado Pago. Aguarde a confirmação antes de tentar novamente.',
             ),
           });
           return false;
@@ -980,7 +980,7 @@ export default function Assinatura() {
         setCardRecoveryNeedsNewToken(manualRetryAllowed);
         const message = getPaymentResultMessage(
           response,
-          'Nao foi possivel concluir a cobranca agora. Tente novamente em instantes.',
+          'Não foi possível concluir a cobrança agora. Tente novamente em instantes.',
         );
         setCardState((current) => ({ ...current, error: message }));
         setNotice({ type: 'error', message });
@@ -1001,8 +1001,8 @@ export default function Assinatura() {
         setNotice({
           type: 'warning',
           message: recoveryAllowed
-            ? 'Cartao da assinatura atualizado. Para cobrar a pendencia agora, confirme novamente os dados do cartao para gerar um novo token de seguranca.'
-            : 'Cartao da assinatura atualizado. A pendencia continua em aberto e sera necessario confirmar novamente os dados do cartao quando a cobranca manual estiver disponivel.',
+            ? 'Cartão da assinatura atualizado. Para cobrar a pendência agora, confirme novamente os dados do cartão para gerar um novo token de segurança.'
+            : 'Cartão da assinatura atualizado. A pendência continua em aberto e será necessário confirmar novamente os dados do cartão quando a cobrança manual estiver disponível.',
         });
       } else {
         setCardRecoveryReady(false);
@@ -1010,14 +1010,14 @@ export default function Assinatura() {
         setNotice({
           type: 'success',
           message: cardAction.mode === 'update'
-            ? 'Cartao atualizado. Vamos sincronizar a cobranca recorrente automaticamente.'
-            : `Assinatura do plano ${PLAN_META[normalizePlanKey(cardTargetPlan)]?.label || 'selecionado'} enviada no cartao. A renovacao automatica passa a ser o fluxo principal.`,
+            ? 'Cartão atualizado. Vamos sincronizar a cobrança recorrente automaticamente.'
+            : `Assinatura do plano ${PLAN_META[normalizePlanKey(cardTargetPlan)]?.label || 'selecionado'} enviada no cartão. A renovação automática passa a ser o fluxo principal.`,
         });
       }
       return true;
     } catch (requestError) {
       const requiresNewToken = isMercadoPagoCardTokenRefreshRequired(requestError);
-      const message = getMercadoPagoCardErrorMessage(requestError, 'Falha ao processar o cartao agora.');
+      const message = getMercadoPagoCardErrorMessage(requestError, 'Falha ao processar o cartão agora.');
 
       if (requiresNewToken) {
         resetCardFormForNewToken();
@@ -1402,8 +1402,8 @@ export default function Assinatura() {
         <section className="settings-module-card subscription-page__history-card">
           <div className="subscription-page__section-head">
             <div>
-              <h3>Credito proporcional</h3>
-              <p className="muted">Saldo financeiro gerado por upgrades antecipados e abatimento previsto nas proximas cobrancas.</p>
+              <h3>Crédito proporcional</h3>
+              <p className="muted">Saldo financeiro gerado por upgrades antecipados e abatimento previsto nas próximas cobranças.</p>
             </div>
             <div className="subscription-page__status-chip subscription-page__status-chip--success">
               {formatCurrencyFromCents(availableCreditCents)}
@@ -1412,21 +1412,21 @@ export default function Assinatura() {
           <div className="subscription-page__financial-overview">
             <FinancialOverviewCard
               eyebrow="Saldo"
-              title={`Credito disponivel: ${formatCurrencyFromCents(availableCreditCents)}`}
-              statusLabel={reservedCreditCents > 0 ? 'Agendado' : 'Disponivel'}
+              title={`Crédito disponível: ${formatCurrencyFromCents(availableCreditCents)}`}
+              statusLabel={reservedCreditCents > 0 ? 'Agendado' : 'Disponível'}
               statusTone={reservedCreditCents > 0 ? 'info' : 'success'}
               message={
                 reservedCreditCents > 0
-                  ? `${formatCurrencyFromCents(reservedCreditCents)} ja estao reservados para abatimentos futuros.`
-                  : 'Esse saldo sera abatido automaticamente nas proximas cobrancas elegiveis.'
+                  ? `${formatCurrencyFromCents(reservedCreditCents)} já estão reservados para abatimentos futuros.`
+                  : 'Esse saldo será abatido automaticamente nas próximas cobranças elegíveis.'
               }
             />
             {creditPreview ? (
               <FinancialOverviewCard
-                eyebrow="Proxima cobranca"
+                eyebrow="Próxima cobrança"
                 title={creditPreview.next_renewal_covered_fully
-                  ? 'A proxima renovacao sera coberta pelo credito'
-                  : `Proxima cobranca prevista: ${formatCurrencyFromCents(creditPreview.next_charge_amount_cents)}`}
+                  ? 'A próxima renovação será coberta pelo crédito'
+                  : `Próxima cobrança prevista: ${formatCurrencyFromCents(creditPreview.next_charge_amount_cents)}`}
                 statusLabel={creditPreview.next_renewal_covered_fully ? 'Coberta' : 'Com abatimento'}
                 statusTone={creditPreview.next_renewal_covered_fully ? 'success' : 'info'}
                 message={creditPreviewMessage}
@@ -1435,11 +1435,11 @@ export default function Assinatura() {
             ) : null}
             {consumedCreditCents > 0 ? (
               <FinancialOverviewCard
-                eyebrow="Historico"
-                title={`Credito consumido: ${formatCurrencyFromCents(consumedCreditCents)}`}
+                eyebrow="Histórico"
+                title={`Crédito consumido: ${formatCurrencyFromCents(consumedCreditCents)}`}
                 statusLabel="Auditavel"
                 statusTone="neutral"
-                message="Cada geracao, reserva e consumo fica registrado no historico financeiro da assinatura."
+                message="Cada geração, reserva e consumo fica registrado no histórico financeiro da assinatura."
               />
             ) : null}
           </div>
@@ -1608,11 +1608,11 @@ export default function Assinatura() {
               <div className="subscription-page__callout">
                 <strong>
                   {String(latestCardAttempt.status_group || '').toLowerCase() === 'pending'
-                    ? 'Existe uma tentativa com cartao em analise.'
-                    : 'A ultima tentativa com cartao nao foi aprovada.'}
+                    ? 'Existe uma tentativa com cartão em análise.'
+                    : 'A última tentativa com cartão não foi aprovada.'}
                 </strong>
                 <p className="muted">
-                  {latestCardAttempt.display_message || 'Revise os dados do cartao ou tente outra forma de pagamento.'}
+                  {latestCardAttempt.display_message || 'Revise os dados do cartão ou tente outra forma de pagamento.'}
                 </p>
               </div>
             ) : null}
@@ -1648,14 +1648,14 @@ export default function Assinatura() {
             {cardState.error ? <span className="muted" style={{ color: '#b91c1c' }}>{cardState.error}</span> : null}
             {cardRecoveryNeedsNewToken && hasDelinquentStatus ? (
               <p className="muted">
-                Os dados do cartao precisam ser confirmados novamente para gerar um novo token de seguranca antes da cobranca manual.
+                Os dados do cartão precisam ser confirmados novamente para gerar um novo token de segurança antes da cobrança manual.
               </p>
             ) : null}
             {recoveryBlocked ? (
               <div className="subscription-page__callout">
-                <strong>Regularizacao temporariamente indisponivel no cartao.</strong>
+                <strong>Regularização temporariamente indisponível no cartão.</strong>
                 <p className="muted">
-                  {recoveryGuard?.user_message || 'Ja existe uma tentativa recente de cobranca em processamento ou recusada. Aguarde alguns minutos antes de tentar novamente.'}
+                  {recoveryGuard?.user_message || 'Já existe uma tentativa recente de cobrança em processamento ou recusada. Aguarde alguns minutos antes de tentar novamente.'}
                 </p>
                 <div className="subscription-page__payment-actions">
                   <button
@@ -1749,8 +1749,8 @@ export default function Assinatura() {
         </div>
         {financialHistory.has_open_pix_and_rejected_card ? (
           <div className="subscription-page__callout">
-            <strong>Ha um PIX em aberto aguardando pagamento.</strong>
-            <p className="muted">A ultima tentativa com cartao de credito nao foi aprovada.</p>
+            <strong>Há um PIX em aberto aguardando pagamento.</strong>
+            <p className="muted">A última tentativa com cartão de crédito não foi aprovada.</p>
           </div>
         ) : null}
         <div className="subscription-page__financial-overview">
@@ -1776,7 +1776,7 @@ export default function Assinatura() {
           ) : null}
           {latestCardAttempt ? (
             <FinancialOverviewCard
-              eyebrow="Ultima tentativa com cartao"
+              eyebrow="Última tentativa com cartão"
               title={latestCardAttempt.display_title}
               statusLabel={latestCardAttempt.display_badge?.label}
               statusTone={latestCardAttempt.display_badge?.tone}

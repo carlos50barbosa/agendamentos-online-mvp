@@ -1503,7 +1503,7 @@ export default function NovoAgendamentoModals(props) {
 
                       <label className="booking-modal__field">
 
-                        <span className="booking-modal__label">Email</span>
+                        <span className="booking-modal__label">E-mail</span>
 
                         <input
 

@@ -2993,7 +2993,7 @@ function _l() {
                       e.jsxs("label", {
                         className: "label config-profile-form__field",
                         children: [
-                          e.jsx("span", { children: "Email" }),
+                          e.jsx("span", { children: "E-mail" }),
                           e.jsx("input", {
                             className: "input",
                             type: "email",
@@ -4507,7 +4507,7 @@ function _l() {
                         }),
                         e.jsx("p", {
                           children:
-                            "Clientes vao ver essas cores no topo, nos destaques e nas chamadas principais do fluxo de agendamento.",
+                            "Clientes vão ver essas cores no topo, nos destaques e nas chamadas principais do fluxo de agendamento.",
                         }),
                         e.jsxs("div", {
                           className: "public-profile__theme-preview-actions",

@@ -164,7 +164,7 @@ router.post('/register', async (req, res) => {
     const dataNascimentoRaw = data_nascimento ?? dataNascimento;
     const dataNascimentoValue = normalizeBirthdate(dataNascimentoRaw);
     if (dataNascimentoRaw && String(dataNascimentoRaw).trim() && !dataNascimentoValue) {
-      return res.status(400).json({ error: 'data_nascimento_invalida', message: 'Informe uma data de nascimento valida.' });
+      return res.status(400).json({ error: 'data_nascimento_invalida', message: 'Informe uma data de nascimento válida.' });
     }
 
     const cpfCnpjRaw = req.body?.cpf_cnpj ?? req.body?.cpfCnpj;
@@ -299,7 +299,7 @@ router.post('/register', async (req, res) => {
         <p>Seu cadastro foi criado com sucesso.</p>
         <ul>
           ${isEstabelecimento ? `<li>Plano: ${planLabel} (teste grátis habilitado para estabelecimentos)</li>` : ''}
-          <li>Email: ${emailTrim}</li>
+          <li>E-mail: ${emailTrim}</li>
           <li>Telefone: ${telefoneDisplay}</li>
         </ul>
         ${
@@ -321,7 +321,7 @@ router.post('/register', async (req, res) => {
         <p>Um novo usuário se cadastrou.</p>
         <ul>
           <li>Nome: ${nomeTrim}</li>
-          <li>Email: ${emailTrim}</li>
+          <li>E-mail: ${emailTrim}</li>
           <li>Telefone: ${telefoneTrim || '-'}</li>
           <li>Tipo: ${tipo}</li>
           <li>CEP: ${cepDigits || '-'}</li>
@@ -364,7 +364,7 @@ router.post('/login', async (req, res) => {
     const emailRaw = req.body?.email;
     const senha = req.body?.senha;
     if (!emailRaw || !senha) {
-      return res.status(400).json({ error: 'missing_fields', message: 'Informe email e senha.' });
+      return res.status(400).json({ error: 'missing_fields', message: 'Informe e-mail e senha.' });
     }
     const email = String(emailRaw).trim().toLowerCase();
     if (await enforceAuthRateLimit(req, res, {
@@ -485,7 +485,7 @@ router.put('/me', auth, async (req, res) => {
     const dataNascimentoValue = normalizeBirthdate(dataNascimentoRaw);
     const hasDataNascimento = String(dataNascimentoRaw || '').trim().length > 0;
     if (hasDataNascimento && !dataNascimentoValue) {
-      return res.status(400).json({ error: 'data_nascimento_invalida', message: 'Informe uma data de nascimento valida.' });
+      return res.status(400).json({ error: 'data_nascimento_invalida', message: 'Informe uma data de nascimento válida.' });
     }
     const cpfCnpjRaw = req.body?.cpf_cnpj ?? req.body?.cpfCnpj;
     const cpfCnpjInfo = normalizeCpfCnpj(cpfCnpjRaw);
@@ -568,7 +568,7 @@ router.put('/me', auth, async (req, res) => {
 
     const [emailRows] = await pool.query('SELECT id FROM usuarios WHERE LOWER(email)=? AND id<>? LIMIT 1', [emailNorm, userId]);
     if (emailRows.length) {
-      return res.status(400).json({ error: 'email_exists', message: 'Este email já esta em uso.' });
+      return res.status(400).json({ error: 'email_exists', message: 'Este e-mail já está em uso.' });
     }
 
     const atual = String(senhaAtual || '').trim();
@@ -609,7 +609,7 @@ router.put('/me', auth, async (req, res) => {
         nextAvatar = await saveAvatarFromDataUrl(avatarRaw, userId, previousForSave);
       } catch (err) {
         if (err?.code === 'AVATAR_TOO_LARGE') {
-          return res.status(400).json({ error: 'avatar_grande', message: 'A imagem deve ter no maximo 2MB.' });
+          return res.status(400).json({ error: 'avatar_grande', message: 'A imagem deve ter no máximo 2MB.' });
         }
         if (err?.code === 'AVATAR_INVALID') {
           return res.status(400).json({ error: 'avatar_invalido', message: 'Envie uma imagem PNG, JPG ou WEBP.' });
@@ -825,7 +825,7 @@ router.post('/forgot', async (req, res) => {
           <p>Olá, ${user.nome?.split(' ')[0] || 'usuário'}.</p>
           <p>Para redefinir sua senha, acesse o link abaixo:</p>
           <p><a href="${link}" style="color:#5c5ccc">Redefinir senha</a></p>
-          <p style="color:#555;font-size:12px">Se você não solicitou, ignore este email.</p>
+          <p style="color:#555;font-size:12px">Se você não solicitou, ignore este e-mail.</p>
         </div>`;
       try{
         await notifyEmail(email, subject, html);
@@ -834,7 +834,7 @@ router.post('/forgot', async (req, res) => {
         console.error('[auth/forgot] notifyEmail falhou:', e?.message || e);
       }
     } else {
-      console.log('[auth/forgot] pedido para email inexistente (não informado ao cliente)');
+      console.log('[auth/forgot] pedido para e-mail inexistente (não informado ao cliente)');
     }
 
     // Resposta neutra

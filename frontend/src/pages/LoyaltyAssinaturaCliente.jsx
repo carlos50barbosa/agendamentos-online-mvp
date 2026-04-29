@@ -231,7 +231,7 @@ export default function LoyaltyAssinaturaCliente() {
   const handlePixSubscribe = useCallback(async () => {
     if (!estabelecimentoId || !selectedPlanId) return
     if (!sellerConnected) {
-      setNotice({ type: 'error', message: 'Este estabelecimento ainda nao conectou uma conta Mercado Pago.' })
+      setNotice({ type: 'error', message: 'Este estabelecimento ainda não conectou uma conta Mercado Pago.' })
       return
     }
     setSubmitting(true)
@@ -323,7 +323,7 @@ export default function LoyaltyAssinaturaCliente() {
       payerPhone: user?.telefone || user?.phone || '',
     })
     if (!payerValidation.valid) {
-      const message = payerValidation.message || 'Confira os dados do titular do cartao antes de continuar.'
+      const message = payerValidation.message || 'Confira os dados do titular do cartão antes de continuar.'
       setCardState((current) => ({ ...current, error: message }))
       setNotice({ type: 'error', message })
       return false
@@ -471,7 +471,7 @@ export default function LoyaltyAssinaturaCliente() {
 
       {!sellerConnected && estabelecimentoId ? (
         <div className="loyalty-alert loyalty-alert--warn">
-          Este estabelecimento ainda nao conectou uma conta Mercado Pago. A fidelidade mensal nao pode ser contratada no momento.
+          Este estabelecimento ainda não conectou uma conta Mercado Pago. A fidelidade mensal não pode ser contratada no momento.
         </div>
       ) : null}
 
@@ -505,27 +505,27 @@ export default function LoyaltyAssinaturaCliente() {
             <div className="loyalty-payment-state-box">
               <strong>{paymentStateDisplay.title}</strong>
               {paymentStateDisplay.description ? <span>{paymentStateDisplay.description}</span> : null}
-              {latestPaymentSnapshot?.status ? <span>Ultimo status do payment: {latestPaymentSnapshot.status}</span> : null}
-              {latestPaymentSnapshot?.status_detail ? <span>Ultimo status_detail do payment: {latestPaymentSnapshot.status_detail}</span> : null}
+              {latestPaymentSnapshot?.status ? <span>Último status do payment: {latestPaymentSnapshot.status}</span> : null}
+              {latestPaymentSnapshot?.status_detail ? <span>Último status_detail do payment: {latestPaymentSnapshot.status_detail}</span> : null}
             </div>
           ) : null}
 
           {failureDisplay.technicalCode ? (
             <div className="loyalty-failure-box">
-              <strong>Cobranca pendente de regularizacao</strong>
+              <strong>Cobrança pendente de regularização</strong>
               <span>Status da assinatura: {currentDetails?.subscription_status || currentStatus || '-'}</span>
-              <span>Ultima falha tecnica: {failureDisplay.technicalCode}</span>
+              <span>Última falha técnica: {failureDisplay.technicalCode}</span>
               {failureDisplay.technicalMessage ? <span>{failureDisplay.technicalMessage}</span> : null}
-              {failureDisplay.occurredAt ? <span>Ultima tentativa registrada em: {formatDate(failureDisplay.occurredAt)}</span> : null}
-              {latestFailure?.payment_method_id ? <span>Metodo da ultima tentativa: {latestFailure.payment_method_id}</span> : null}
-              {latestPaymentSnapshot?.status ? <span>Ultimo status do payment: {latestPaymentSnapshot.status}</span> : null}
-              {latestPaymentSnapshot?.status_detail ? <span>Ultimo status_detail do payment: {latestPaymentSnapshot.status_detail}</span> : null}
+              {failureDisplay.occurredAt ? <span>Última tentativa registrada em: {formatDate(failureDisplay.occurredAt)}</span> : null}
+              {latestFailure?.payment_method_id ? <span>Método da última tentativa: {latestFailure.payment_method_id}</span> : null}
+              {latestPaymentSnapshot?.status ? <span>Último status do payment: {latestPaymentSnapshot.status}</span> : null}
+              {latestPaymentSnapshot?.status_detail ? <span>Último status_detail do payment: {latestPaymentSnapshot.status_detail}</span> : null}
               {retryDisplay.showRecovery ? (
                 <>
                   {retryDisplay.title ? <span>{retryDisplay.title}</span> : null}
                   {retryDisplay.description ? <span>{retryDisplay.description}</span> : null}
                   {retryDisplay.cardCooldownActive ? (
-                    <span>Cartao temporariamente em cooldown: {formatCooldown(retryDisplay.cardCooldownRemainingMs)}.</span>
+                    <span>Cartão temporariamente em cooldown: {formatCooldown(retryDisplay.cardCooldownRemainingMs)}.</span>
                   ) : null}
                   <div className="loyalty-card__actions">
                     <button
@@ -573,7 +573,7 @@ export default function LoyaltyAssinaturaCliente() {
             </div>
 
             <div className="loyalty-card loyalty-card--nested">
-              <h3>Ultimos eventos</h3>
+              <h3>Últimos eventos</h3>
               {(currentDetails.events || []).slice(0, 6).map((event) => (
                 <div key={event.id} className="loyalty-event-row">
                   <span>{event.tipo_evento}</span>
@@ -686,8 +686,8 @@ export default function LoyaltyAssinaturaCliente() {
                   {cardRetryBlocked ? (
                     <p className="loyalty-inline-error">
                       {retryDisplay.cardCooldownActive
-                        ? `Por seguranca, novas tentativas com cartao ficam indisponiveis por ${formatCooldown(retryDisplay.cardCooldownRemainingMs)}. PIX continua disponivel.`
-                        : 'Nao foi possivel aprovar este cartao no momento. Tente PIX ou outro cartao.'}
+                        ? `Por segurança, novas tentativas com cartão ficam indisponíveis por ${formatCooldown(retryDisplay.cardCooldownRemainingMs)}. PIX continua disponível.`
+                        : 'Não foi possível aprovar este cartão no momento. Tente PIX ou outro cartão.'}
                     </p>
                   ) : null}
                   <form key={cardFormResetKey} id="client-loyalty-card-form" className="loyalty-card-form">
@@ -711,7 +711,7 @@ export default function LoyaltyAssinaturaCliente() {
               )}
             </>
           ) : (
-            <p className="loyalty-empty">{loading ? 'Carregando planos...' : 'Nenhum plano disponivel para este estabelecimento.'}</p>
+            <p className="loyalty-empty">{loading ? 'Carregando planos...' : 'Nenhum plano disponível para este estabelecimento.'}</p>
           )}
         </section>
       ) : (
@@ -729,7 +729,7 @@ export default function LoyaltyAssinaturaCliente() {
       <section className="card loyalty-card">
         <div className="loyalty-card__header">
           <div>
-            <h2>Historico</h2>
+            <h2>Histórico</h2>
             <p>{history.length} assinatura(s) encontrada(s)</p>
           </div>
         </div>

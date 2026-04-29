@@ -69,7 +69,7 @@ test('client loyalty failure summary prefers payment status_detail over newer au
 
   assert.equal(summary?.source, 'payment')
   assert.equal(summary?.code, 'cc_rejected_high_risk')
-  assert.equal(summary?.friendly_message, 'A ultima tentativa de cobranca foi recusada por analise de risco do cartao.')
+  assert.equal(summary?.friendly_message, 'A última tentativa de cobrança foi recusada por análise de risco do cartão.')
   assert.equal(summary?.created_at, '2026-04-25T08:00:00.000Z')
   assert.equal(summary?.payment_method_id, 'master')
   assert.equal(summary?.payment_type_id, 'credit_card')
