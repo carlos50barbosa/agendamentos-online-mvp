@@ -4,8 +4,13 @@ import assert from 'node:assert/strict'
 const {
   getLoyaltyFailureFriendlyMessage,
   resolveLoyaltyFailureDisplay,
+  resolveLoyaltyPaymentStateDisplay,
   resolveLoyaltyRetryDisplay,
 } = await import('../../frontend/src/utils/loyaltyFailure.js')
+const {
+  buildLoyaltyRiskContext,
+  validateLoyaltyCardPayerData,
+} = await import('../../frontend/src/utils/loyaltyPaymentValidation.js')
 
 test('loyalty failure display keeps subscription status separate from technical failure code', () => {
   const display = resolveLoyaltyFailureDisplay({
@@ -63,7 +68,111 @@ test('loyalty retry display exposes PIX fallback for high risk declines', () => 
 
   assert.equal(display.showRecovery, true)
   assert.equal(display.title, 'Nao foi possivel aprovar este cartao no momento.')
-  assert.equal(display.description, 'Tente outro cartao ou pague por PIX.')
+  assert.equal(display.description, 'Voce pode tentar outro cartao ou pagar por PIX. Por seguranca, novas tentativas com este cartao podem ficar indisponiveis por alguns minutos.')
   assert.equal(display.cardCooldownActive, true)
   assert.equal(display.pixEnabled, true)
+  assert.equal(display.pixActionLabel, 'Pagar por PIX agora')
+})
+
+test('loyalty failure display does not show manual review as technical failure', () => {
+  const display = resolveLoyaltyFailureDisplay({
+    subscription_status: 'pending_payment',
+    latest_failure: {
+      status: 'in-process',
+      status_detail: 'pending_review_manual',
+      friendly_message: 'Pagamento em analise.',
+    },
+  })
+
+  assert.equal(display.subscriptionStatus, 'pending_payment')
+  assert.equal(display.technicalCode, null)
+  assert.equal(display.technicalMessage, '')
+})
+
+test('loyalty payment state display describes manual review and scheduled payments', () => {
+  const review = resolveLoyaltyPaymentStateDisplay({
+    subscription: {
+      status: 'pending_payment',
+      payment_method: 'credit_card',
+      latest_payment_snapshot: {
+        status: 'in-process',
+        status_detail: 'pending_review_manual',
+      },
+    },
+  })
+
+  assert.equal(review.show, true)
+  assert.equal(review.kind, 'pending_review')
+  assert.equal(review.statusLabel, 'Pagamento em analise')
+
+  const scheduled = resolveLoyaltyPaymentStateDisplay({
+    subscription_status: 'pending_payment',
+    latest_payment_snapshot: {
+      status: 'scheduled',
+      status_detail: null,
+    },
+  })
+
+  assert.equal(scheduled.show, true)
+  assert.equal(scheduled.kind, 'scheduled')
+  assert.equal(scheduled.statusLabel, 'Cobranca agendada')
+})
+
+test('loyalty payment state display keeps real expiration separate from pending payment states', () => {
+  const display = resolveLoyaltyPaymentStateDisplay({
+    subscription: {
+      status: 'expired',
+      payment_method: 'credit_card',
+    },
+    latest_payment_snapshot: {
+      status: 'expired',
+      status_detail: null,
+    },
+  })
+
+  assert.equal(display.show, false)
+  assert.equal(display.statusLabel, '')
+})
+
+test('loyalty card payer validation blocks weak UI data before gateway retry', () => {
+  const invalid = validateLoyaltyCardPayerData({
+    payerEmail: 'cliente',
+    cardholderName: 'Jo',
+    identificationType: 'CPF',
+    identificationNumber: '111.111.111-11',
+  })
+
+  assert.equal(invalid.valid, false)
+  assert.equal(Boolean(invalid.errors.payer_email), true)
+  assert.equal(Boolean(invalid.errors.cardholder_name), true)
+  assert.equal(Boolean(invalid.errors.identification_number), true)
+})
+
+test('loyalty risk context captures Mercado Pago device session id when available', () => {
+  const previousWindow = global.window
+  const previousDocument = global.document
+  global.window = {
+    MP_DEVICE_SESSION_ID: 'device-session-123',
+    navigator: {
+      userAgent: 'node-test-agent',
+      language: 'pt-BR',
+      deviceMemory: 8,
+      hardwareConcurrency: 4,
+    },
+    screen: {
+      width: 1440,
+      height: 900,
+    },
+  }
+  global.document = { getElementById: () => null }
+
+  const context = buildLoyaltyRiskContext({ payment_method: 'credit_card' })
+
+  assert.equal(context.mp_device_session_id, 'device-session-123')
+  assert.equal(context.payment_method, 'credit_card')
+  assert.equal(context.user_agent, 'node-test-agent')
+  assert.equal(context.screen_width, 1440)
+
+  global.window = previousWindow
+  global.document = previousDocument
 })

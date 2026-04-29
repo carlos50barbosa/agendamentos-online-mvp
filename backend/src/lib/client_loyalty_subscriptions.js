@@ -159,7 +159,7 @@ export function computeClientLoyaltySubscriptionState(subscription, { referenceD
   if (['active', 'past_due', 'unpaid', 'canceled'].includes(status) && end && reference.getTime() > end.getTime()) {
     resolvedStatus = 'expired'
   }
-  if ((status === 'pending_payment' || status === 'pending_pix') && end && reference.getTime() > end.getTime()) {
+  if (status === 'pending_pix' && end && reference.getTime() > end.getTime()) {
     resolvedStatus = 'expired'
   }
 

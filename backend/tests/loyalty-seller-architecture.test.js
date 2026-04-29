@@ -8,6 +8,7 @@ process.env.DB_NAME ??= 'test'
 process.env.JWT_SECRET ??= 'test-secret'
 
 const {
+  computeClientLoyaltySubscriptionState,
   normalizeClientLoyaltyOwnerType,
   serializeClientLoyaltySubscription,
 } = await import('../src/lib/client_loyalty_subscriptions.js')
@@ -61,6 +62,35 @@ test('serializeClientLoyaltySubscription exposes seller ownership and MP fields'
   assert.equal(serialized.mp_payer_id, 'payer_123')
   assert.equal(serialized.mp_preapproval_id, 'preapp_456')
   assert.equal(serialized.started_at, '2026-04-24T12:00:00.000Z')
+})
+
+test('client loyalty pending card payment does not serialize as expired only because period ended', () => {
+  const state = computeClientLoyaltySubscriptionState({
+    status: 'pending_payment',
+    paymentMethod: 'credit_card',
+    currentPeriodStart: new Date('2026-03-24T12:00:00.000Z'),
+    currentPeriodEnd: new Date('2026-04-24T12:00:00.000Z'),
+    autoRenew: true,
+  }, {
+    referenceDate: new Date('2026-04-25T12:00:00.000Z'),
+  })
+
+  assert.equal(state.resolvedStatus, 'pending_payment')
+  assert.equal(state.benefitsActive, false)
+})
+
+test('client loyalty pending PIX still expires when its period is over', () => {
+  const state = computeClientLoyaltySubscriptionState({
+    status: 'pending_pix',
+    paymentMethod: 'pix',
+    currentPeriodStart: new Date('2026-03-24T12:00:00.000Z'),
+    currentPeriodEnd: new Date('2026-04-24T12:00:00.000Z'),
+    autoRenew: true,
+  }, {
+    referenceDate: new Date('2026-04-25T12:00:00.000Z'),
+  })
+
+  assert.equal(state.resolvedStatus, 'expired')
 })
 
 test('summarizeMpAccount returns disconnected defaults when there is no seller account', () => {

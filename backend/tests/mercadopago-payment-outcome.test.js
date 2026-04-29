@@ -60,6 +60,37 @@ test('summarizeMercadoPagoGatewayResult keeps pending_review_manual as pending w
   assert.equal(result.should_activate_subscription, false)
 })
 
+test('summarizeMercadoPagoGatewayResult keeps scheduled authorized payments pending', () => {
+  const result = summarizeMercadoPagoGatewayResult({
+    id: 904,
+    status: 'scheduled',
+    status_detail: null,
+    payment_method_id: 'visa',
+    payment_type_id: 'credit_card',
+  })
+
+  assert.equal(result.status_group, 'pending')
+  assert.equal(result.normalized_reason, 'scheduled')
+  assert.equal(result.decision, 'pending')
+  assert.equal(result.wait_for_webhook, true)
+  assert.equal(result.should_activate_subscription, false)
+})
+
+test('summarizeMercadoPagoGatewayResult accepts hyphenated in-process as pending', () => {
+  const result = summarizeMercadoPagoGatewayResult({
+    id: 905,
+    status: 'in-process',
+    status_detail: 'pending_review_manual',
+    payment_method_id: 'elo',
+    payment_type_id: 'credit_card',
+  })
+
+  assert.equal(result.status_group, 'pending')
+  assert.equal(result.status, 'in-process')
+  assert.equal(result.normalized_reason, 'manual_review')
+  assert.equal(result.should_activate_subscription, false)
+})
+
 test('summarizeMercadoPagoGatewayResult maps approved payments to activation', () => {
   const result = summarizeMercadoPagoGatewayResult({
     id: 903,

@@ -46,6 +46,41 @@ function normalizeId(value) {
   return Number.isFinite(num) && num > 0 ? Math.trunc(num) : null
 }
 
+function normalizeText(value) {
+  return String(value || '').trim()
+}
+
+function buildClientLoyaltyRequestContext(req, requestId, route) {
+  const body = req.body || {}
+  const riskContext = body.risk_context && typeof body.risk_context === 'object'
+    ? body.risk_context
+    : {}
+  return {
+    requestId,
+    route,
+    ip: req.ip || req.headers['x-forwarded-for'] || null,
+    user_agent: req.headers['user-agent'] || null,
+    mpDeviceSessionId:
+      normalizeText(body.mp_device_session_id) ||
+      normalizeText(body.device_session_id) ||
+      normalizeText(riskContext.mp_device_session_id) ||
+      normalizeText(req.headers['x-meli-session-id']) ||
+      null,
+    riskContext,
+  }
+}
+
+function buildClientLoyaltyFallbackContext(body = {}) {
+  const reason = normalizeText(body.fallback_reason || body.fallbackReason)
+  if (!reason) return null
+  return {
+    reason,
+    source: normalizeText(body.fallback_source || body.fallbackSource) || null,
+    previousFailureCode: normalizeText(body.previous_failure_code || body.previousFailureCode) || null,
+    previousSubscriptionId: normalizeId(body.previous_subscription_id || body.previousSubscriptionId),
+  }
+}
+
 function parseServiceIds(value) {
   if (Array.isArray(value)) {
     return value.map(normalizeId).filter(Boolean)
@@ -238,9 +273,10 @@ router.post('/subscribe', auth, isCliente, async (req, res) => {
         issuerId: req.body?.issuer_id || null,
         identificationType: req.body?.identification_type || null,
         identificationNumber: req.body?.identification_number || null,
+        cardholderName: req.body?.cardholder_name || req.body?.cardholderName || null,
+        payerPhone: req.body?.payer_phone || req.body?.payerPhone || req.user.telefone || null,
         requestContext: {
-          requestId,
-          route: '/client-loyalty/subscribe',
+          ...buildClientLoyaltyRequestContext(req, requestId, '/client-loyalty/subscribe'),
           operation: 'client_loyalty_card_subscription_create',
         },
       })
@@ -256,6 +292,7 @@ router.post('/subscribe', auth, isCliente, async (req, res) => {
       clienteId: req.user.id,
       estabelecimentoId,
       loyaltyPlanId,
+      fallbackContext: buildClientLoyaltyFallbackContext(req.body),
     })
     return res.status(201).json({
       ok: true,
@@ -290,6 +327,7 @@ router.post('/pay/pix', auth, isCliente, async (req, res) => {
       clienteId: req.user.id,
       estabelecimentoId,
       loyaltyPlanId,
+      fallbackContext: buildClientLoyaltyFallbackContext(req.body),
     })
     return res.status(201).json({
       ok: true,
@@ -329,9 +367,10 @@ router.post('/pay/card', auth, isCliente, async (req, res) => {
       issuerId: req.body?.issuer_id || null,
       identificationType: req.body?.identification_type || null,
       identificationNumber: req.body?.identification_number || null,
+      cardholderName: req.body?.cardholder_name || req.body?.cardholderName || null,
+      payerPhone: req.body?.payer_phone || req.body?.payerPhone || req.user.telefone || null,
       requestContext: {
-        requestId,
-        route: '/client-loyalty/pay/card',
+        ...buildClientLoyaltyRequestContext(req, requestId, '/client-loyalty/pay/card'),
         operation: 'client_loyalty_card_subscription_create',
       },
     })

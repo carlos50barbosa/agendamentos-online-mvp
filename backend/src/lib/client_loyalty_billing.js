@@ -44,6 +44,14 @@ const CLIENT_LOYALTY_HIGH_RISK_COOLDOWN_MS = Math.max(
   Number(process.env.CLIENT_LOYALTY_HIGH_RISK_COOLDOWN_MS || 60 * 60 * 1000) || (60 * 60 * 1000),
   60000
 )
+const CLIENT_LOYALTY_CARD_DUPLICATE_RETRY_WINDOW_MS = Math.max(
+  Number(process.env.CLIENT_LOYALTY_CARD_DUPLICATE_RETRY_WINDOW_MS || 15 * 60 * 1000) || (15 * 60 * 1000),
+  60000
+)
+const CLIENT_LOYALTY_CARD_DUPLICATE_RETRY_THRESHOLD = Math.max(
+  Number(process.env.CLIENT_LOYALTY_CARD_DUPLICATE_RETRY_THRESHOLD || 2) || 2,
+  2
+)
 const DAY_MS = 86400000
 
 function createError(message, status = 400, code = 'bad_request', details = null) {
@@ -58,6 +66,124 @@ function toDate(value) {
   if (!value) return null
   const parsed = value instanceof Date ? value : new Date(value)
   return Number.isFinite(parsed.getTime()) ? parsed : null
+}
+
+function safeJsonParse(value) {
+  if (value == null) return null
+  if (typeof value === 'object') return value
+  try {
+    return JSON.parse(value)
+  } catch {
+    return null
+  }
+}
+
+function normalizeText(value) {
+  return String(value || '').trim()
+}
+
+function normalizeSpaces(value) {
+  return normalizeText(value).replace(/\s+/g, ' ')
+}
+
+function digitsOnly(value) {
+  return normalizeText(value).replace(/\D/g, '')
+}
+
+function isValidEmail(value) {
+  const email = normalizeText(value)
+  return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)
+}
+
+function isValidCpf(value) {
+  const cpf = digitsOnly(value)
+  if (cpf.length !== 11 || /^(\d)\1{10}$/.test(cpf)) return false
+
+  let sum = 0
+  for (let i = 0; i < 9; i += 1) sum += Number(cpf[i]) * (10 - i)
+  let digit = (sum * 10) % 11
+  if (digit === 10) digit = 0
+  if (digit !== Number(cpf[9])) return false
+
+  sum = 0
+  for (let i = 0; i < 10; i += 1) sum += Number(cpf[i]) * (11 - i)
+  digit = (sum * 10) % 11
+  if (digit === 10) digit = 0
+  return digit === Number(cpf[10])
+}
+
+function hasMeaningfulFullName(value) {
+  const name = normalizeSpaces(value)
+  const parts = name.split(' ').filter(Boolean)
+  return name.length >= 5 && parts.length >= 2 && parts.every((part) => part.length >= 2)
+}
+
+function normalizeBrazilPhone(value) {
+  const digits = digitsOnly(value)
+  if (!digits) return null
+  const normalized = digits.startsWith('55') && digits.length >= 12 ? digits.slice(2) : digits
+  return normalized.length >= 10 && normalized.length <= 11 ? normalized : null
+}
+
+export function validateClientLoyaltyCardPayerData({
+  payerEmail = null,
+  cardholderName = null,
+  identificationType = null,
+  identificationNumber = null,
+  payerPhone = null,
+} = {}) {
+  const normalized = {
+    payerEmail: normalizeText(payerEmail).toLowerCase(),
+    cardholderName: normalizeSpaces(cardholderName),
+    identificationType: normalizeText(identificationType).toUpperCase(),
+    identificationNumber: digitsOnly(identificationNumber),
+    payerPhone: normalizeBrazilPhone(payerPhone),
+  }
+  const errors = {}
+  const warnings = {}
+
+  if (!isValidEmail(normalized.payerEmail)) {
+    errors.payer_email = 'Informe um e-mail valido para a cobranca.'
+  }
+  if (!hasMeaningfulFullName(normalized.cardholderName)) {
+    errors.cardholder_name = 'Informe o nome completo do titular do cartao.'
+  }
+  if (!normalized.identificationType) {
+    errors.identification_type = 'Informe o tipo do documento do titular.'
+  }
+  if (!normalized.identificationNumber) {
+    errors.identification_number = 'Informe o CPF do titular.'
+  } else if (normalized.identificationType === 'CPF' && !isValidCpf(normalized.identificationNumber)) {
+    errors.identification_number = 'Informe um CPF valido para o titular.'
+  } else if (normalized.identificationType !== 'CPF' && normalized.identificationNumber.length < 5) {
+    errors.identification_number = 'Informe um documento valido para o titular.'
+  }
+  if (!normalized.payerPhone) {
+    warnings.payer_phone = 'Telefone ausente no contexto do pagador.'
+  }
+
+  return {
+    valid: !Object.keys(errors).length,
+    errors,
+    warnings,
+    normalized,
+  }
+}
+
+function assertClientLoyaltyCardPayerData(input = {}) {
+  const validation = validateClientLoyaltyCardPayerData(input)
+  if (!validation.valid) {
+    throw createError(
+      'Confira os dados do titular do cartao antes de continuar.',
+      400,
+      'client_loyalty_card_payer_data_invalid',
+      {
+        fields: validation.errors,
+        warnings: validation.warnings,
+      }
+    )
+  }
+  return validation
 }
 
 function addMonths(dateValue, months = 1) {
@@ -145,12 +271,200 @@ function normalizeGatewayPaymentStatus(value) {
   return String(value || '').trim().toLowerCase()
 }
 
+function normalizeGatewayPaymentStatusKey(value) {
+  return normalizeGatewayPaymentStatus(value).replace(/-/g, '_')
+}
+
 function isApprovedGatewayPaymentStatus(status) {
-  return status === 'approved' || status === 'paid'
+  const key = normalizeGatewayPaymentStatusKey(status)
+  return key === 'approved' || key === 'paid'
 }
 
 function isFailedGatewayPaymentStatus(status) {
-  return ['expired', 'canceled', 'cancelled', 'rejected', 'failed', 'refunded', 'charged_back'].includes(status)
+  return ['expired', 'canceled', 'cancelled', 'rejected', 'failed', 'refunded', 'charged_back']
+    .includes(normalizeGatewayPaymentStatusKey(status))
+}
+
+const AUTHORIZED_PAYMENT_PENDING_STATUS_KEYS = new Set([
+  'scheduled',
+  'pending',
+  'pending_payment',
+  'in_process',
+  'processing',
+  'authorized',
+  'created',
+])
+
+const AUTHORIZED_PAYMENT_FAILED_STATUS_KEYS = new Set([
+  'rejected',
+  'failed',
+  'refunded',
+  'charged_back',
+])
+
+const AUTHORIZED_PAYMENT_PENDING_DETAIL_KEYS = new Set([
+  'pending_review_manual',
+  'pending_contingency',
+  'offline_process',
+  'deferred_retry',
+  'pending_capture',
+])
+
+function getAuthorizedPaymentRawRecord(rawPayment = null) {
+  return rawPayment?.payment || rawPayment?.authorized_payment || rawPayment || null
+}
+
+function resolveAuthorizedPaymentPendingRule(statusKey, statusDetailKey) {
+  if (statusDetailKey === 'pending_review_manual') return 'authorized_payment_pending_review'
+  if (statusKey === 'scheduled') return 'authorized_payment_scheduled_pending'
+  if (statusKey === 'in_process') return 'authorized_payment_in_process_pending'
+  return 'authorized_payment_pending'
+}
+
+function resolveAuthorizedPaymentPendingOutcome(statusKey, statusDetailKey) {
+  if (statusDetailKey === 'pending_review_manual' || statusKey === 'in_process') return 'pending_review'
+  return 'pending'
+}
+
+function resolveAuthorizedPaymentPendingEventName(statusKey, statusDetailKey) {
+  if (statusDetailKey === 'pending_review_manual' || statusKey === 'in_process') return 'authorized_payment_in_process'
+  return 'authorized_payment_pending'
+}
+
+function resolveAuthorizedPaymentPendingSubscriptionStatus(currentSubscription = null) {
+  const currentStatus = normalizeGatewayPaymentStatus(currentSubscription?.status)
+  if (!currentStatus) return 'pending_payment'
+
+  const currentState = computeClientLoyaltySubscriptionState(currentSubscription)
+  if (
+    currentState.benefitsActive &&
+    ['active', 'past_due', 'unpaid', 'canceled'].includes(currentStatus)
+  ) {
+    return currentStatus
+  }
+
+  return 'pending_payment'
+}
+
+export function interpretClientLoyaltyAuthorizedPaymentStatus(authorizedPayment = null, {
+  rawPayment = null,
+  currentSubscription = null,
+} = {}) {
+  const record = getAuthorizedPaymentRawRecord(rawPayment)
+  const rawStatus =
+    authorizedPayment?.rawStatus ||
+    record?.status ||
+    authorizedPayment?.paymentResult?.status ||
+    null
+  const rawStatusKey = normalizeGatewayPaymentStatusKey(rawStatus)
+  const mappedStatus = authorizedPayment?.status || null
+  const mappedStatusKey = normalizeGatewayPaymentStatusKey(mappedStatus)
+  const statusKey = rawStatusKey || mappedStatusKey
+  const statusDetail =
+    authorizedPayment?.statusDetail ||
+    record?.status_detail ||
+    record?.statusDetail ||
+    authorizedPayment?.paymentResult?.status_detail ||
+    null
+  const statusDetailKey = normalizeGatewayPaymentStatusKey(statusDetail)
+  const paymentResult = authorizedPayment?.paymentResult || null
+  const statusForLog = rawStatus || mappedStatus || null
+
+  if (
+    mappedStatusKey === 'active' ||
+    paymentResult?.should_activate_subscription === true ||
+    ['approved', 'paid'].includes(statusKey)
+  ) {
+    return {
+      interpretedOutcome: 'approved',
+      nextSubscriptionStatus: 'active',
+      transitionRule: 'authorized_payment_approved',
+      eventName: 'authorized_payment_approved',
+      status: statusForLog,
+      statusDetail,
+      isFailure: false,
+      isPending: false,
+      isFinal: false,
+    }
+  }
+
+  if (statusKey === 'expired') {
+    return {
+      interpretedOutcome: 'expired',
+      nextSubscriptionStatus: 'expired',
+      transitionRule: 'authorized_payment_expired',
+      eventName: 'authorized_payment_expired',
+      status: statusForLog,
+      statusDetail,
+      isFailure: false,
+      isPending: false,
+      isFinal: true,
+    }
+  }
+
+  if (statusKey === 'canceled' || statusKey === 'cancelled') {
+    return {
+      interpretedOutcome: 'canceled',
+      nextSubscriptionStatus: 'canceled',
+      transitionRule: 'authorized_payment_canceled',
+      eventName: 'authorized_payment_canceled',
+      status: statusForLog,
+      statusDetail,
+      isFailure: false,
+      isPending: false,
+      isFinal: true,
+    }
+  }
+
+  if (
+    AUTHORIZED_PAYMENT_FAILED_STATUS_KEYS.has(statusKey) ||
+    paymentResult?.status_group === 'rejected' ||
+    (!rawStatusKey && mappedStatusKey === 'past_due')
+  ) {
+    return {
+      interpretedOutcome: 'failed',
+      nextSubscriptionStatus: 'past_due',
+      transitionRule: statusKey === 'rejected'
+        ? 'authorized_payment_rejected_past_due'
+        : 'authorized_payment_failed_past_due',
+      eventName: 'authorized_payment_failed',
+      status: statusForLog,
+      statusDetail,
+      isFailure: true,
+      isPending: false,
+      isFinal: false,
+    }
+  }
+
+  if (
+    AUTHORIZED_PAYMENT_PENDING_STATUS_KEYS.has(statusKey) ||
+    AUTHORIZED_PAYMENT_PENDING_DETAIL_KEYS.has(statusDetailKey) ||
+    paymentResult?.status_group === 'pending'
+  ) {
+    return {
+      interpretedOutcome: resolveAuthorizedPaymentPendingOutcome(statusKey, statusDetailKey),
+      nextSubscriptionStatus: resolveAuthorizedPaymentPendingSubscriptionStatus(currentSubscription),
+      transitionRule: resolveAuthorizedPaymentPendingRule(statusKey, statusDetailKey),
+      eventName: resolveAuthorizedPaymentPendingEventName(statusKey, statusDetailKey),
+      status: statusForLog,
+      statusDetail,
+      isFailure: false,
+      isPending: true,
+      isFinal: false,
+    }
+  }
+
+  return {
+    interpretedOutcome: 'pending',
+    nextSubscriptionStatus: resolveAuthorizedPaymentPendingSubscriptionStatus(currentSubscription),
+    transitionRule: 'authorized_payment_observed',
+    eventName: 'authorized_payment_pending',
+    status: statusForLog,
+    statusDetail,
+    isFailure: false,
+    isPending: true,
+    isFinal: false,
+  }
 }
 
 function resolveCycleStart(subscription, paymentDate) {
@@ -278,6 +592,25 @@ function resolveClientLoyaltyFailureSource(event) {
   return 'payment'
 }
 
+const CLIENT_LOYALTY_NON_FAILURE_STATUS_DETAIL_KEYS = new Set([
+  'pending_review_manual',
+  'pending_contingency',
+  'offline_process',
+  'deferred_retry',
+  'pending_capture',
+])
+
+function isClientLoyaltyExplicitFailureCandidate(extracted = null) {
+  const statusKey = normalizeGatewayPaymentStatusKey(extracted?.status)
+  const detailKey = normalizeGatewayPaymentStatusKey(extracted?.status_detail || extracted?.code)
+
+  if (CLIENT_LOYALTY_NON_FAILURE_STATUS_DETAIL_KEYS.has(detailKey)) return false
+  if (detailKey.startsWith('cc_rejected') || detailKey.startsWith('rejected_')) return true
+  if (AUTHORIZED_PAYMENT_FAILED_STATUS_KEYS.has(statusKey)) return true
+  if (AUTHORIZED_PAYMENT_PENDING_STATUS_KEYS.has(statusKey)) return false
+  return false
+}
+
 function extractClientLoyaltyFailureGatewayRecord(event) {
   const payload = event?.payload_json || null
   const raw = payload?.raw || payload || null
@@ -288,6 +621,7 @@ function extractClientLoyaltyFailureGatewayRecord(event) {
 function buildClientLoyaltyFailureCandidate(event) {
   const extracted = extractClientLoyaltyFailureFromEvent(event)
   if (!extracted) return null
+  if (!isClientLoyaltyExplicitFailureCandidate(extracted)) return null
   const gatewayRecord = extractClientLoyaltyFailureGatewayRecord(event)
   const technicalCode = String(extracted.status_detail || '').trim() || null
   return {
@@ -444,10 +778,59 @@ async function recordClientLoyaltyPaymentSnapshotTx(subscriptionId, {
   return snapshot
 }
 
+function logClientLoyaltyAuthorizedPaymentInterpretation({
+  subscriptionId = null,
+  authorizedPaymentId = null,
+  gatewaySubscriptionId = null,
+  interpretation = null,
+  nextSubscriptionStatus = null,
+  failureDetails = null,
+} = {}) {
+  const logger = interpretation?.isFailure ? console.warn : console.info
+  const payload = {
+    subscription_id: subscriptionId,
+    authorized_payment_id: authorizedPaymentId,
+    gateway_subscription_id: gatewaySubscriptionId,
+    event_name: interpretation?.eventName || null,
+    status: interpretation?.status || failureDetails?.status || null,
+    status_detail: interpretation?.statusDetail || failureDetails?.status_detail || null,
+    interpreted_outcome: interpretation?.interpretedOutcome || null,
+    next_subscription_status: nextSubscriptionStatus || interpretation?.nextSubscriptionStatus || null,
+    transition_rule: interpretation?.transitionRule || null,
+    failure_code: failureDetails?.code || null,
+    failure_message: failureDetails?.message || failureDetails?.description || null,
+  }
+  logger('[client-loyalty][authorized-payment] interpreted', payload)
+  if (interpretation?.eventName) {
+    logger(`[client-loyalty][${interpretation.eventName}]`, payload)
+  }
+}
+
+function logClientLoyaltySubscriptionStatusTransition(subscriptionId, {
+  snapshot = null,
+  previousSubscriptionStatus = null,
+  nextSubscriptionStatus = null,
+  transitionRule = null,
+  mpTopic = null,
+} = {}) {
+  console.info('[client-loyalty] subscription_status_transition', {
+    subscription_id: subscriptionId,
+    mp_topic: mpTopic || null,
+    payment_target: snapshot?.payment_target || null,
+    payment_id: snapshot?.payment_id || null,
+    status: snapshot?.status || null,
+    status_detail: snapshot?.status_detail || null,
+    previous_subscription_status: previousSubscriptionStatus || null,
+    next_subscription_status: nextSubscriptionStatus || null,
+    transition_rule: transitionRule || null,
+  })
+}
+
 async function recordClientLoyaltyPaymentStatusTransitionTx(subscriptionId, {
   snapshot = null,
   previousSubscriptionStatus = null,
   nextSubscriptionStatus = null,
+  transitionRule = null,
   mpTopic = null,
   eventContext = null,
   paymentType = null,
@@ -460,7 +843,15 @@ async function recordClientLoyaltyPaymentStatusTransitionTx(subscriptionId, {
     mp_topic: mpTopic || null,
     previous_subscription_status: previousSubscriptionStatus || null,
     next_subscription_status: nextSubscriptionStatus || null,
+    transition_rule: transitionRule || null,
     ...snapshot,
+  })
+  logClientLoyaltySubscriptionStatusTransition(subscriptionId, {
+    snapshot,
+    previousSubscriptionStatus,
+    nextSubscriptionStatus,
+    transitionRule,
+    mpTopic,
   })
 
   await appendClientLoyaltySubscriptionEvent(subscriptionId, {
@@ -468,6 +859,7 @@ async function recordClientLoyaltyPaymentStatusTransitionTx(subscriptionId, {
     gatewayEventId: buildClientLoyaltyPaymentAuditEventId('payment_status_transition', snapshot, [
       previousSubscriptionStatus,
       nextSubscriptionStatus,
+      transitionRule,
     ]),
     mpTopic,
     ...(eventContext || {}),
@@ -482,6 +874,7 @@ async function recordClientLoyaltyPaymentStatusTransitionTx(subscriptionId, {
     payload: {
       previous_subscription_status: previousSubscriptionStatus || null,
       next_subscription_status: nextSubscriptionStatus || null,
+      transition_rule: transitionRule || null,
       snapshot,
       raw: rawPayload,
     },
@@ -513,10 +906,175 @@ export function resolveLatestClientLoyaltyPaymentSnapshot(events = []) {
     .find(hasClientLoyaltyPaymentSnapshot) || null
 }
 
+function getClientLoyaltyRiskEventCreatedAt(event = null) {
+  return toDate(event?.created_at || event?.createdAt || event?.payload_json?.date_created || null)
+}
+
+function resolveClientLoyaltyRiskEventPaymentId(event = null) {
+  const payload = event?.payload_json || null
+  const snapshot = payload?.snapshot || payload?.payment_snapshot || null
+  const raw = payload?.raw || payload || null
+  const payment = raw?.payment || raw?.authorized_payment || raw || null
+  return String(
+    event?.mp_payment_id ||
+    snapshot?.payment_id ||
+    payment?.id ||
+    event?.gateway_event_id ||
+    event?.id ||
+    ''
+  ).trim() || null
+}
+
+function isClientLoyaltyCardAttemptEvent(event = null) {
+  const eventType = String(event?.tipo_evento || '').trim().toLowerCase()
+  if (![
+    'payment_failed',
+    'payment_pending',
+    'payment_snapshot',
+    'payment_status_transition',
+    'card_subscription_created',
+    'card_subscription_create_failed',
+  ].includes(eventType)) {
+    return false
+  }
+
+  const method = String(event?.payment_method || '').trim().toLowerCase()
+  const type = String(event?.payment_type || '').trim().toLowerCase()
+  const topic = String(event?.mp_topic || '').trim().toLowerCase()
+  if (method === 'pix' || type === 'pix') return false
+  return (
+    method === 'credit_card' ||
+    type === 'credit_card' ||
+    type === 'subscription_authorized_payment' ||
+    type === 'subscription_payment' ||
+    topic === 'automatic-payments' ||
+    eventType.startsWith('card_subscription')
+  )
+}
+
+export function resolveClientLoyaltyRecentCardAttemptSummary(events = [], {
+  amountCents = null,
+  referenceDate = new Date(),
+  windowMs = CLIENT_LOYALTY_CARD_DUPLICATE_RETRY_WINDOW_MS,
+  duplicateThreshold = CLIENT_LOYALTY_CARD_DUPLICATE_RETRY_THRESHOLD,
+} = {}) {
+  const reference = toDate(referenceDate) || new Date()
+  const safeWindowMs = Math.max(Number(windowMs || 0) || CLIENT_LOYALTY_CARD_DUPLICATE_RETRY_WINDOW_MS, 60000)
+  const minCreatedAt = reference.getTime() - safeWindowMs
+  const expectedAmount = amountCents == null ? null : Number(amountCents)
+  const attemptKeys = new Set()
+  let latestAttemptAt = null
+
+  for (const event of Array.isArray(events) ? events : []) {
+    if (!isClientLoyaltyCardAttemptEvent(event)) continue
+    const createdAt = getClientLoyaltyRiskEventCreatedAt(event)
+    if (!createdAt || createdAt.getTime() < minCreatedAt || createdAt.getTime() > reference.getTime()) continue
+    if (
+      expectedAmount != null &&
+      event?.amount_cents != null &&
+      Number(event.amount_cents) !== expectedAmount
+    ) {
+      continue
+    }
+
+    const key = resolveClientLoyaltyRiskEventPaymentId(event)
+    if (key) attemptKeys.add(key)
+    if (!latestAttemptAt || createdAt.getTime() > latestAttemptAt.getTime()) {
+      latestAttemptAt = createdAt
+    }
+  }
+
+  const retryCountRecent = attemptKeys.size
+  const latestAgeMs = latestAttemptAt
+    ? Math.max(reference.getTime() - latestAttemptAt.getTime(), 0)
+    : null
+  const cooldownRemainingMs =
+    retryCountRecent >= duplicateThreshold && latestAgeMs != null
+      ? Math.max(safeWindowMs - latestAgeMs, 0)
+      : 0
+
+  return {
+    retry_count_recent: retryCountRecent,
+    same_buyer_recent_attempts: retryCountRecent,
+    same_card_recent_attempts: null,
+    same_card_recent_attempts_available: false,
+    duplicate_threshold: duplicateThreshold,
+    window_ms: safeWindowMs,
+    latest_attempt_at: latestAttemptAt ? latestAttemptAt.toISOString() : null,
+    cooldown_active: cooldownRemainingMs > 0,
+    cooldown_remaining_ms: cooldownRemainingMs,
+    cooldown_reason: cooldownRemainingMs > 0 ? 'recent_similar_attempts' : null,
+  }
+}
+
+async function listRecentClientLoyaltyCardRiskEvents({
+  clienteId = null,
+  estabelecimentoId = null,
+  loyaltyPlanId = null,
+  db = pool,
+  limit = 80,
+} = {}) {
+  if (!clienteId || !estabelecimentoId || !loyaltyPlanId) return []
+  const safeLimit = Math.max(1, Math.min(Number(limit || 80) || 80, 200))
+  const [rows] = await db.query(
+    `SELECT ev.id,
+            ev.client_loyalty_subscription_id,
+            ev.tipo_evento,
+            ev.gateway_event_id,
+            ev.mp_topic,
+            ev.owner_type,
+            ev.owner_id,
+            ev.estabelecimento_id,
+            ev.mp_user_id,
+            ev.mp_collector_id,
+            ev.mp_payment_id,
+            ev.payment_status,
+            ev.payment_method,
+            ev.payment_type,
+            ev.amount_cents,
+            ev.action_taken,
+            ev.ignored_reason,
+            ev.payload_json,
+            ev.created_at
+       FROM client_loyalty_subscription_events ev
+       JOIN client_loyalty_subscriptions cls
+         ON cls.id = ev.client_loyalty_subscription_id
+      WHERE cls.cliente_id=?
+        AND cls.estabelecimento_id=?
+        AND cls.loyalty_plan_id=?
+        AND cls.payment_method='credit_card'
+      ORDER BY ev.created_at DESC, ev.id DESC
+      LIMIT ${safeLimit}`,
+    [clienteId, estabelecimentoId, loyaltyPlanId]
+  )
+  return rows.map((row) => ({
+    id: Number(row.id),
+    client_loyalty_subscription_id: Number(row.client_loyalty_subscription_id),
+    tipo_evento: row.tipo_evento || '',
+    gateway_event_id: row.gateway_event_id || null,
+    mp_topic: row.mp_topic || null,
+    owner_type: row.owner_type || null,
+    owner_id: row.owner_id == null ? null : Number(row.owner_id),
+    estabelecimento_id: row.estabelecimento_id == null ? null : Number(row.estabelecimento_id),
+    mp_user_id: row.mp_user_id || null,
+    mp_collector_id: row.mp_collector_id || null,
+    mp_payment_id: row.mp_payment_id || null,
+    payment_status: row.payment_status || null,
+    payment_method: row.payment_method || null,
+    payment_type: row.payment_type || null,
+    amount_cents: row.amount_cents == null ? null : Number(row.amount_cents),
+    action_taken: row.action_taken || null,
+    ignored_reason: row.ignored_reason || null,
+    payload_json: safeJsonParse(row.payload_json),
+    created_at: row.created_at ? new Date(row.created_at).toISOString() : null,
+  }))
+}
+
 export function resolveClientLoyaltyRetryOptions({
   subscriptionStatus = null,
   latestFailure = null,
   referenceDate = new Date(),
+  recentAttemptSummary = null,
 } = {}) {
   const normalizedStatus = String(subscriptionStatus || '').trim().toLowerCase()
   const failureCode = String(latestFailure?.code || latestFailure?.status_detail || '').trim().toLowerCase() || null
@@ -530,19 +1088,32 @@ export function resolveClientLoyaltyRetryOptions({
   const cooldownRemainingMs = highRiskCooldownActive
     ? Math.max(CLIENT_LOYALTY_HIGH_RISK_COOLDOWN_MS - failureAgeMs, 0)
     : 0
+  const recentCooldownActive = recentAttemptSummary?.cooldown_active === true
+  const effectiveCooldownActive = highRiskCooldownActive || recentCooldownActive
+  const effectiveCooldownRemainingMs = highRiskCooldownActive
+    ? cooldownRemainingMs
+    : Math.max(Number(recentAttemptSummary?.cooldown_remaining_ms || 0), 0)
+  const cooldownReason = highRiskCooldownActive
+    ? 'cc_rejected_high_risk'
+    : (recentCooldownActive ? recentAttemptSummary?.cooldown_reason || 'recent_similar_attempts' : null)
   const recoverySuggested = ['pending_payment', 'past_due', 'unpaid', 'expired'].includes(normalizedStatus)
 
   return {
     suggested: recoverySuggested,
-    recommended_method: failureCode === 'cc_rejected_high_risk' ? 'pix' : 'credit_card',
+    recommended_method: failureCode === 'cc_rejected_high_risk' || effectiveCooldownActive ? 'pix' : 'credit_card',
+    retry_count_recent: recentAttemptSummary?.retry_count_recent ?? null,
+    same_buyer_recent_attempts: recentAttemptSummary?.same_buyer_recent_attempts ?? null,
+    same_card_recent_attempts: recentAttemptSummary?.same_card_recent_attempts ?? null,
+    cooldown_reason: cooldownReason,
     card: {
       available: recoverySuggested,
-      enabled: recoverySuggested && !highRiskCooldownActive,
+      enabled: recoverySuggested && !effectiveCooldownActive,
       action: 'try_other_card',
-      cooldown_active: highRiskCooldownActive,
-      cooldown_remaining_ms: cooldownRemainingMs,
-      message: highRiskCooldownActive
-        ? 'Por seguranca, aguarde um pouco antes de tentar novamente no cartao. Se preferir, pague por PIX agora.'
+      cooldown_active: effectiveCooldownActive,
+      cooldown_remaining_ms: effectiveCooldownRemainingMs,
+      cooldown_reason: cooldownReason,
+      message: effectiveCooldownActive
+        ? 'Por seguranca, novas tentativas com cartao ficam indisponiveis por alguns minutos. Se preferir, pague por PIX agora.'
         : recoverySuggested
           ? 'Voce pode tentar outro cartao para reativar a assinatura.'
           : null,
@@ -559,27 +1130,72 @@ export function resolveClientLoyaltyRetryOptions({
 async function assertClientLoyaltyCardRetryAllowed(subscription, {
   db = pool,
   referenceDate = new Date(),
+  amountCents = null,
 } = {}) {
   if (!subscription?.id) return { latestFailure: null, retryOptions: resolveClientLoyaltyRetryOptions() }
 
-  const events = await listClientLoyaltySubscriptionEvents(subscription.id, { db, limit: 30 })
+  const events = await listRecentClientLoyaltyCardRiskEvents({
+    clienteId: subscription.clienteId,
+    estabelecimentoId: subscription.estabelecimentoId,
+    loyaltyPlanId: subscription.loyaltyPlanId,
+    db,
+    limit: 80,
+  })
   const latestFailure = resolveLatestClientLoyaltyFailureSummary(events, {
     subscriptionStatus: subscription.status || null,
+  })
+  const recentAttemptSummary = resolveClientLoyaltyRecentCardAttemptSummary(events, {
+    amountCents,
+    referenceDate,
   })
   const retryOptions = resolveClientLoyaltyRetryOptions({
     subscriptionStatus: subscription.status || null,
     latestFailure,
     referenceDate,
+    recentAttemptSummary,
   })
 
   if (retryOptions?.card?.cooldown_active) {
     const cooldownRemainingMs = Math.max(Number(retryOptions.card.cooldown_remaining_ms || 0), 0)
+    const cooldownReason = retryOptions.card.cooldown_reason || retryOptions.cooldown_reason || 'card_retry_cooldown'
+    const auditPayload = {
+      subscription_id: subscription.id || null,
+      cliente_id: subscription.clienteId || null,
+      estabelecimento_id: subscription.estabelecimentoId || null,
+      loyalty_plan_id: subscription.loyaltyPlanId || null,
+      status: latestFailure?.status || null,
+      status_detail: latestFailure?.code || latestFailure?.status_detail || null,
+      retry_count_recent: retryOptions.retry_count_recent,
+      same_buyer_recent_attempts: retryOptions.same_buyer_recent_attempts,
+      same_card_recent_attempts: retryOptions.same_card_recent_attempts,
+      cooldown_applied: true,
+      cooldown_reason: cooldownReason,
+      cooldown_remaining_ms: cooldownRemainingMs,
+      suggested_fallback: 'pix',
+    }
+    console.warn('[client-loyalty][risk] card_retry_blocked', auditPayload)
+    await appendClientLoyaltySubscriptionEvent(subscription.id, {
+      eventType: 'card_retry_blocked',
+      mpTopic: 'client-loyalty',
+      ownerType: subscription.ownerType || 'establishment',
+      ownerId: subscription.estabelecimentoId || null,
+      estabelecimentoId: subscription.estabelecimentoId || null,
+      paymentMethod: 'credit_card',
+      paymentType: 'credit_card',
+      amountCents,
+      actionTaken: 'blocked',
+      ignoredReason: cooldownReason,
+      payload: auditPayload,
+    }, { db })
     throw createError(
-      'Nao foi possivel aprovar este cartao no momento. Tente PIX ou aguarde um pouco antes de tentar outro cartao.',
+      cooldownReason === 'recent_similar_attempts'
+        ? 'Muitas tentativas parecidas em poucos minutos. Use PIX agora ou aguarde antes de tentar cartao novamente.'
+        : 'Nao foi possivel aprovar este cartao no momento. Tente PIX ou aguarde um pouco antes de tentar outro cartao.',
       409,
       'client_loyalty_card_retry_cooldown',
       {
         cooldown_active: true,
+        cooldown_reason: cooldownReason,
         cooldown_remaining_ms: cooldownRemainingMs,
         retry_after_sec: Math.max(1, Math.ceil(cooldownRemainingMs / 1000)),
         action_recommendation: 'use_pix_or_wait_before_retry',
@@ -588,6 +1204,9 @@ async function assertClientLoyaltyCardRetryAllowed(subscription, {
         last_failure_source: latestFailure?.source || null,
         suggested_payment_method: 'pix',
         alternative_payment_method: 'credit_card',
+        retry_count_recent: retryOptions.retry_count_recent,
+        same_buyer_recent_attempts: retryOptions.same_buyer_recent_attempts,
+        same_card_recent_attempts: retryOptions.same_card_recent_attempts,
       }
     )
   }
@@ -834,6 +1453,7 @@ async function markSubscriptionPastDueTx(subscriptionId, {
   eventContext = null,
   paymentType = null,
   amountCents = null,
+  transitionRule = null,
 }, { db = pool } = {}) {
   await lockSubscriptionRow(subscriptionId, { db })
   const current = await getClientLoyaltySubscriptionById(subscriptionId, { db })
@@ -841,8 +1461,9 @@ async function markSubscriptionPastDueTx(subscriptionId, {
     throw createError('Assinatura de fidelidade não encontrada.', 404, 'client_loyalty_subscription_not_found')
   }
 
-  const state = computeClientLoyaltySubscriptionState(current)
-  const nextStatus = state.withinCurrentPeriod ? 'past_due' : 'expired'
+  const paymentStatusKey = normalizeGatewayPaymentStatusKey(paymentStatus)
+  const expirationConfirmed = ['expired', 'canceled', 'cancelled'].includes(paymentStatusKey)
+  const nextStatus = expirationConfirmed ? 'expired' : 'past_due'
   const graceUntil = nextStatus === 'past_due'
     ? new Date(Date.now() + CLIENT_LOYALTY_GRACE_DAYS * DAY_MS)
     : null
@@ -879,9 +1500,67 @@ async function markSubscriptionPastDueTx(subscriptionId, {
       payment_status_message: failureDetails?.message || null,
       payment_rejection_code: failureDetails?.code || null,
       payment_rejection_description: failureDetails?.description || null,
+      transition_rule: transitionRule || null,
       raw: rawPayload,
     },
   }, { db })
+
+  if (current.paymentMethod === 'credit_card' || String(paymentType || '').includes('subscription')) {
+    const snapshot = buildClientLoyaltyPaymentSnapshot(rawPayload, {
+      paymentId: gatewayPaymentId || null,
+      paymentTarget: String(paymentType || '').includes('authorized') ? 'authorized_payment' : 'payment',
+    })
+    const recentEvents = await listRecentClientLoyaltyCardRiskEvents({
+      clienteId: current.clienteId,
+      estabelecimentoId: current.estabelecimentoId,
+      loyaltyPlanId: current.loyaltyPlanId,
+      db,
+      limit: 80,
+    })
+    const recentAttemptSummary = resolveClientLoyaltyRecentCardAttemptSummary(recentEvents, {
+      amountCents,
+    })
+    const failureCode = failureDetails?.status_detail || failureDetails?.code || null
+    const highRisk = String(failureCode || '').toLowerCase() === 'cc_rejected_high_risk'
+    const riskAudit = {
+      subscription_id: subscriptionId,
+      cliente_id: current.clienteId || null,
+      estabelecimento_id: current.estabelecimentoId || null,
+      payment_id: gatewayPaymentId || snapshot?.payment_id || null,
+      status: failureDetails?.status || paymentStatus || null,
+      status_detail: failureDetails?.status_detail || null,
+      payment_method_id: snapshot?.payment_method_id || null,
+      payment_type_id: snapshot?.payment_type_id || paymentType || null,
+      transaction_amount: snapshot?.transaction_amount || null,
+      external_reference: externalReference || snapshot?.external_reference || current.externalReference || null,
+      retry_count_recent: recentAttemptSummary.retry_count_recent,
+      same_card_recent_attempts: recentAttemptSummary.same_card_recent_attempts,
+      same_buyer_recent_attempts: recentAttemptSummary.same_buyer_recent_attempts,
+      cooldown_applied: highRisk,
+      cooldown_reason: highRisk ? 'cc_rejected_high_risk' : null,
+      cooldown_ms: highRisk ? CLIENT_LOYALTY_HIGH_RISK_COOLDOWN_MS : 0,
+      suggested_fallback: highRisk ? 'pix' : 'try_other_card_or_pix',
+      transition_rule: transitionRule || null,
+    }
+    console.info('[client-loyalty][risk] payment_failure_audit', riskAudit)
+    const riskGatewayEventId = gatewayEventId || gatewayPaymentId || null
+    await appendClientLoyaltySubscriptionEvent(subscriptionId, {
+      eventType: 'risk_audit',
+      gatewayEventId: riskGatewayEventId
+        ? `risk:${riskGatewayEventId}:${failureCode || 'failure'}`
+        : null,
+      mpTopic,
+      ...(eventContext || buildSellerEventContext(null, current.estabelecimentoId, {})),
+      mpPaymentId: gatewayPaymentId || null,
+      paymentStatus: paymentStatus || null,
+      paymentMethod: current.paymentMethod || null,
+      paymentType,
+      amountCents,
+      actionTaken: 'payment_failure_audit',
+      ignoredReason: highRisk ? 'cc_rejected_high_risk' : null,
+      payload: riskAudit,
+    }, { db })
+  }
 
   return updated
 }
@@ -896,6 +1575,8 @@ export async function startClientLoyaltyCardSubscription({
   issuerId = null,
   identificationType = null,
   identificationNumber = null,
+  cardholderName = null,
+  payerPhone = null,
   db = pool,
   requestContext = {},
 } = {}) {
@@ -909,6 +1590,14 @@ export async function startClientLoyaltyCardSubscription({
     loyaltyPlanId,
     { db }
   )
+  const payerValidation = assertClientLoyaltyCardPayerData({
+    payerEmail: payerEmail || cliente.email || null,
+    cardholderName,
+    identificationType,
+    identificationNumber,
+    payerPhone: payerPhone || cliente.telefone || null,
+  })
+  const normalizedPayer = payerValidation.normalized
   const current = await getPreferredClientLoyaltySubscription(clienteId, estabelecimentoId, { db })
   if (current) {
     const state = computeClientLoyaltySubscriptionState(current)
@@ -931,7 +1620,10 @@ export async function startClientLoyaltyCardSubscription({
         current.paymentMethod === 'credit_card' &&
         ['past_due', 'unpaid', 'expired', 'canceled'].includes(state.resolvedStatus)
       ) {
-        await assertClientLoyaltyCardRetryAllowed(current, { db })
+        await assertClientLoyaltyCardRetryAllowed(current, {
+          db,
+          amountCents: Number(plan.preco_centavos || 0),
+        })
       }
       await retireReplaceableClientLoyaltySubscription(current, {
         reason: 'replaced_by_new_card_checkout',
@@ -967,7 +1659,15 @@ export async function startClientLoyaltyCardSubscription({
       amountCents: Number(plan.preco_centavos || 0),
       billingCycle: 'mensal',
       cardToken,
-      payer: { email: payerEmail || cliente.email || null },
+      payer: {
+        email: normalizedPayer.payerEmail || cliente.email || null,
+        cardholderName: normalizedPayer.cardholderName || null,
+        identification: {
+          type: normalizedPayer.identificationType || null,
+          number: normalizedPayer.identificationNumber || null,
+        },
+        phone: normalizedPayer.payerPhone || null,
+      },
       reason: `${plan.nome} - ${estabelecimento.nome}`,
       backUrl: buildClientBackUrl(estabelecimentoId),
       externalReference,
@@ -976,6 +1676,7 @@ export async function startClientLoyaltyCardSubscription({
       requestContext: {
         ...requestContext,
         operation: requestContext?.operation || 'client_loyalty_card_subscription_create',
+        payer_validation_warnings: payerValidation.warnings,
       },
     })
   } catch (error) {
@@ -1040,6 +1741,7 @@ export async function createClientLoyaltyPixCheckout({
   estabelecimentoId,
   loyaltyPlanId,
   db = pool,
+  fallbackContext = null,
 } = {}) {
   const { plan, estabelecimento, cliente } = await resolveLoyaltyCheckoutContext(
     clienteId,
@@ -1093,6 +1795,9 @@ export async function createClientLoyaltyPixCheckout({
       cliente_id: String(clienteId),
       estabelecimento_id: String(estabelecimentoId),
       cycle_ref: cycleRef,
+      ...(fallbackContext?.reason ? { fallback_reason: fallbackContext.reason } : {}),
+      ...(fallbackContext?.source ? { fallback_source: fallbackContext.source } : {}),
+      ...(fallbackContext?.previousFailureCode ? { previous_failure_code: fallbackContext.previousFailureCode } : {}),
     },
     notificationUrl: resolveSellerWebhookUrl(),
     payerEmail: cliente.email || null,
@@ -1122,6 +1827,38 @@ export async function createClientLoyaltyPixCheckout({
     actionTaken: 'generated',
     payload: paymentResult.payment,
   }, { db })
+
+  if (fallbackContext?.reason) {
+    await appendClientLoyaltySubscriptionEvent(updated.id, {
+      eventType: 'payment_fallback_selected',
+      gatewayEventId: paymentResult?.payment?.id ? `fallback:${paymentResult.payment.id}` : null,
+      mpTopic: 'client-loyalty',
+      ...sellerEventContext,
+      mpPaymentId: paymentResult?.payment?.id ? String(paymentResult.payment.id) : null,
+      paymentStatus: paymentResult?.payment?.status || null,
+      paymentMethod: 'pix',
+      paymentType: 'pix',
+      amountCents: plan.preco_centavos || 0,
+      actionTaken: 'pix_selected',
+      ignoredReason: fallbackContext.reason,
+      payload: {
+        chosen_payment_method: 'pix',
+        fallback_reason: fallbackContext.reason,
+        fallback_source: fallbackContext.source || null,
+        previous_failure_code: fallbackContext.previousFailureCode || null,
+        previous_subscription_id: fallbackContext.previousSubscriptionId || null,
+      },
+    }, { db })
+    console.info('[client-loyalty][risk] fallback_selected', {
+      subscription_id: updated.id,
+      cliente_id: clienteId,
+      estabelecimento_id: estabelecimentoId,
+      chosen_payment_method: 'pix',
+      fallback_reason: fallbackContext.reason,
+      fallback_source: fallbackContext.source || null,
+      previous_failure_code: fallbackContext.previousFailureCode || null,
+    })
+  }
 
   return {
     subscription: updated,
@@ -1180,7 +1917,8 @@ function isLoyaltyExternalReference(externalReference) {
 }
 
 function isPendingGatewayPaymentStatus(status) {
-  return ['pending', 'in_process', 'in_mediation', 'authorized'].includes(String(status || '').trim().toLowerCase())
+  return ['pending', 'in_process', 'in_mediation', 'authorized', 'scheduled']
+    .includes(normalizeGatewayPaymentStatusKey(status))
 }
 
 async function resolveLocalLoyaltySubscriptionLinkFromPayment(payment, existing = null, {
@@ -1465,11 +2203,13 @@ export async function syncClientLoyaltyPixPaymentFromGateway(paymentId, {
         eventContext: sellerEventContext,
         paymentType,
         amountCents,
+        transitionRule: 'payment_rejected_past_due',
       }, { db: conn })
       await recordClientLoyaltyPaymentStatusTransitionTx(localSubscription.id, {
         snapshot: paymentSnapshot,
         previousSubscriptionStatus: locked.status || null,
         nextSubscriptionStatus: updated.status || null,
+        transitionRule: 'payment_rejected_past_due',
         mpTopic: 'payment',
         eventContext: sellerEventContext,
         paymentType,
@@ -1637,11 +2377,13 @@ async function syncClientLoyaltyCardPaymentFromGateway(paymentId, {
         eventContext: sellerEventContext,
         paymentType,
         amountCents,
+        transitionRule: 'payment_rejected_past_due',
       }, { db: conn })
       await recordClientLoyaltyPaymentStatusTransitionTx(localSubscription.id, {
         snapshot: paymentSnapshot,
         previousSubscriptionStatus: locked.status || null,
         nextSubscriptionStatus: updated.status || null,
+        transitionRule: 'payment_rejected_past_due',
         mpTopic: 'payment',
         eventContext: sellerEventContext,
         paymentType,
@@ -1934,7 +2676,22 @@ export async function syncClientLoyaltyAuthorizedPaymentFromGateway(authorizedPa
         subscription: gatewayResult.raw,
       },
     }, { db: conn })
-    if (authorizedPayment.status === 'active') {
+
+    const lockedSubscription = {
+      ...localSubscription,
+      status: locked.status || localSubscription.status,
+      paymentMethod: locked.payment_method || localSubscription.paymentMethod,
+      gatewayPaymentId: locked.gateway_payment_id || localSubscription.gatewayPaymentId,
+      gatewaySubscriptionId: locked.gateway_subscription_id || localSubscription.gatewaySubscriptionId,
+      currentPeriodStart: toDate(locked.current_period_start) || localSubscription.currentPeriodStart || null,
+      currentPeriodEnd: toDate(locked.current_period_end) || localSubscription.currentPeriodEnd || null,
+    }
+    const interpretation = interpretClientLoyaltyAuthorizedPaymentStatus(authorizedPayment, {
+      rawPayment: paymentResult.raw,
+      currentSubscription: lockedSubscription,
+    })
+
+    if (interpretation.interpretedOutcome === 'approved') {
       const activated = await activateSubscriptionCycleTx(localSubscription.id, {
         paymentDate: authorizedPayment.paidAt || new Date(),
         gatewayPaymentId: authorizedPayment.id || null,
@@ -1956,6 +2713,7 @@ export async function syncClientLoyaltyAuthorizedPaymentFromGateway(authorizedPa
         snapshot: paymentSnapshot,
         previousSubscriptionStatus: locked.status || null,
         nextSubscriptionStatus: 'active',
+        transitionRule: interpretation.transitionRule,
         mpTopic: 'automatic-payments',
         eventContext: sellerEventContext,
         paymentType: 'subscription_authorized_payment',
@@ -1964,6 +2722,13 @@ export async function syncClientLoyaltyAuthorizedPaymentFromGateway(authorizedPa
           subscription: gatewayResult.raw,
         },
       }, { db: conn })
+      logClientLoyaltyAuthorizedPaymentInterpretation({
+        subscriptionId: localSubscription.id,
+        authorizedPaymentId: authorizedPayment.id || authorizedPaymentId,
+        gatewaySubscriptionId,
+        interpretation,
+        nextSubscriptionStatus: 'active',
+      })
       await appendClientLoyaltySubscriptionEvent(localSubscription.id, {
         eventType: 'subscription_renewed',
         gatewayEventId: `renewal:${authorizedPayment.id || authorizedPaymentId}`,
@@ -1984,23 +2749,145 @@ export async function syncClientLoyaltyAuthorizedPaymentFromGateway(authorizedPa
       return { ok: true, handled: true, status: 'active', subscription: activated }
     }
 
+    if (interpretation.isPending) {
+      const nextPendingStatus = interpretation.nextSubscriptionStatus || 'pending_payment'
+      const updated = await updateClientLoyaltySubscription(localSubscription.id, {
+        ownerType: 'establishment',
+        sellerMpAccountId: resolvedSellerAccount?.id || localSubscription.sellerMpAccountId || null,
+        status: nextPendingStatus,
+        paymentMethod: 'credit_card',
+        gatewayPaymentId: authorizedPayment.id || localSubscription.gatewayPaymentId || null,
+        gatewaySubscriptionId,
+        mpPreapprovalId: gatewaySubscriptionId,
+        gatewayCustomerId: gatewayResult?.subscription?.gatewayCustomerId || localSubscription.gatewayCustomerId || null,
+        mpPayerId: gatewayResult?.subscription?.gatewayCustomerId || localSubscription.mpPayerId || localSubscription.gatewayCustomerId || null,
+        externalReference: gatewayResult?.subscription?.externalReference || localSubscription.externalReference || null,
+        nextBillingAt: gatewayResult?.subscription?.nextBillingAt || localSubscription.nextBillingAt || null,
+      }, { db: conn })
+      logClientLoyaltyAuthorizedPaymentInterpretation({
+        subscriptionId: localSubscription.id,
+        authorizedPaymentId: authorizedPayment.id || authorizedPaymentId,
+        gatewaySubscriptionId,
+        interpretation,
+        nextSubscriptionStatus: updated.status || nextPendingStatus,
+      })
+      await recordClientLoyaltyPaymentStatusTransitionTx(localSubscription.id, {
+        snapshot: paymentSnapshot,
+        previousSubscriptionStatus: locked.status || null,
+        nextSubscriptionStatus: updated.status || nextPendingStatus,
+        transitionRule: interpretation.transitionRule,
+        mpTopic: 'automatic-payments',
+        eventContext: sellerEventContext,
+        paymentType: 'subscription_authorized_payment',
+        rawPayload: {
+          payment: paymentResult.raw,
+          subscription: gatewayResult.raw,
+          interpreted_outcome: interpretation.interpretedOutcome,
+          transition_rule: interpretation.transitionRule,
+        },
+      }, { db: conn })
+      await appendClientLoyaltySubscriptionEvent(localSubscription.id, {
+        eventType: 'payment_pending',
+        gatewayEventId: gatewayEventId || authorizedPayment.id || authorizedPaymentId,
+        mpTopic: 'automatic-payments',
+        ...sellerEventContext,
+        mpPaymentId: authorizedPayment.id || null,
+        paymentStatus: interpretation.status || authorizedPayment.rawStatus || authorizedPayment.status || null,
+        paymentMethod: 'credit_card',
+        paymentType: 'subscription_authorized_payment',
+        amountCents,
+        actionTaken: interpretation.transitionRule,
+        payload: {
+          interpreted_outcome: interpretation.interpretedOutcome,
+          transition_rule: interpretation.transitionRule,
+          payment_status: interpretation.status || null,
+          payment_status_detail: interpretation.statusDetail || null,
+          payment: paymentResult.raw,
+          subscription: gatewayResult.raw,
+        },
+      }, { db: conn })
+      await conn.commit()
+      return {
+        ok: true,
+        handled: true,
+        status: updated.status || nextPendingStatus,
+        subscription: updated,
+        payment_interpretation: interpretation,
+      }
+    }
+
+    if (interpretation.isFinal) {
+      const updated = await updateClientLoyaltySubscription(localSubscription.id, {
+        ownerType: 'establishment',
+        sellerMpAccountId: resolvedSellerAccount?.id || localSubscription.sellerMpAccountId || null,
+        status: interpretation.nextSubscriptionStatus,
+        paymentMethod: 'credit_card',
+        gatewayPaymentId: authorizedPayment.id || localSubscription.gatewayPaymentId || null,
+        gatewaySubscriptionId,
+        mpPreapprovalId: gatewaySubscriptionId,
+        gatewayCustomerId: gatewayResult?.subscription?.gatewayCustomerId || localSubscription.gatewayCustomerId || null,
+        mpPayerId: gatewayResult?.subscription?.gatewayCustomerId || localSubscription.mpPayerId || localSubscription.gatewayCustomerId || null,
+        externalReference: gatewayResult?.subscription?.externalReference || localSubscription.externalReference || null,
+        nextBillingAt: gatewayResult?.subscription?.nextBillingAt || localSubscription.nextBillingAt || null,
+      }, { db: conn })
+      logClientLoyaltyAuthorizedPaymentInterpretation({
+        subscriptionId: localSubscription.id,
+        authorizedPaymentId: authorizedPayment.id || authorizedPaymentId,
+        gatewaySubscriptionId,
+        interpretation,
+        nextSubscriptionStatus: updated.status || interpretation.nextSubscriptionStatus,
+      })
+      await recordClientLoyaltyPaymentStatusTransitionTx(localSubscription.id, {
+        snapshot: paymentSnapshot,
+        previousSubscriptionStatus: locked.status || null,
+        nextSubscriptionStatus: updated.status || interpretation.nextSubscriptionStatus,
+        transitionRule: interpretation.transitionRule,
+        mpTopic: 'automatic-payments',
+        eventContext: sellerEventContext,
+        paymentType: 'subscription_authorized_payment',
+        rawPayload: {
+          payment: paymentResult.raw,
+          subscription: gatewayResult.raw,
+          interpreted_outcome: interpretation.interpretedOutcome,
+          transition_rule: interpretation.transitionRule,
+        },
+      }, { db: conn })
+      await appendClientLoyaltySubscriptionEvent(localSubscription.id, {
+        eventType: interpretation.nextSubscriptionStatus === 'canceled' ? 'subscription_canceled' : 'payment_expired',
+        gatewayEventId: gatewayEventId || authorizedPayment.id || authorizedPaymentId,
+        mpTopic: 'automatic-payments',
+        ...sellerEventContext,
+        mpPaymentId: authorizedPayment.id || null,
+        paymentStatus: interpretation.status || authorizedPayment.rawStatus || authorizedPayment.status || null,
+        paymentMethod: 'credit_card',
+        paymentType: 'subscription_authorized_payment',
+        amountCents,
+        actionTaken: interpretation.nextSubscriptionStatus,
+        payload: {
+          interpreted_outcome: interpretation.interpretedOutcome,
+          transition_rule: interpretation.transitionRule,
+          payment_status: interpretation.status || null,
+          payment_status_detail: interpretation.statusDetail || null,
+          payment: paymentResult.raw,
+          subscription: gatewayResult.raw,
+        },
+      }, { db: conn })
+      await conn.commit()
+      return {
+        ok: true,
+        handled: true,
+        status: updated.status || interpretation.nextSubscriptionStatus,
+        subscription: updated,
+        payment_interpretation: interpretation,
+      }
+    }
+
     const failureDetails = extractGatewayFailureDetails(
       { payment: paymentResult.raw, subscription: gatewayResult.raw },
       authorizedPayment.rawStatus || authorizedPayment.status || null
     )
-    console.warn('[client-loyalty][authorized-payment] failed', {
-      subscription_id: localSubscription.id,
-      authorized_payment_id: authorizedPayment.id || authorizedPaymentId,
-      gateway_subscription_id: gatewaySubscriptionId,
-      status: failureDetails?.status || authorizedPayment.rawStatus || authorizedPayment.status || null,
-      status_detail: failureDetails?.status_detail || authorizedPayment.statusDetail || null,
-      rejection_code: failureDetails?.code || null,
-      rejection_description: failureDetails?.description || null,
-      message: failureDetails?.message || null,
-    })
-
     const updated = await markSubscriptionPastDueTx(localSubscription.id, {
-      paymentStatus: authorizedPayment.status || null,
+      paymentStatus: interpretation.status || authorizedPayment.rawStatus || authorizedPayment.status || null,
       gatewayPaymentId: authorizedPayment.id || null,
       gatewaySubscriptionId,
       gatewayCustomerId: gatewayResult?.subscription?.gatewayCustomerId || null,
@@ -2014,11 +2901,13 @@ export async function syncClientLoyaltyAuthorizedPaymentFromGateway(authorizedPa
       eventContext: sellerEventContext,
       paymentType: 'subscription_authorized_payment',
       amountCents,
+      transitionRule: interpretation.transitionRule,
     }, { db: conn })
     await recordClientLoyaltyPaymentStatusTransitionTx(localSubscription.id, {
       snapshot: paymentSnapshot,
       previousSubscriptionStatus: locked.status || null,
       nextSubscriptionStatus: updated.status || null,
+      transitionRule: interpretation.transitionRule,
       mpTopic: 'automatic-payments',
       eventContext: sellerEventContext,
       paymentType: 'subscription_authorized_payment',
@@ -2027,8 +2916,23 @@ export async function syncClientLoyaltyAuthorizedPaymentFromGateway(authorizedPa
         subscription: gatewayResult.raw,
       },
     }, { db: conn })
+    logClientLoyaltyAuthorizedPaymentInterpretation({
+      subscriptionId: localSubscription.id,
+      authorizedPaymentId: authorizedPayment.id || authorizedPaymentId,
+      gatewaySubscriptionId,
+      interpretation,
+      nextSubscriptionStatus: updated.status || null,
+      failureDetails,
+    })
     await conn.commit()
-    return { ok: true, handled: true, status: updated.status, subscription: updated, failure: failureDetails }
+    return {
+      ok: true,
+      handled: true,
+      status: updated.status,
+      subscription: updated,
+      failure: failureDetails,
+      payment_interpretation: interpretation,
+    }
   } catch (error) {
     try { await conn.rollback() } catch {}
     throw error
@@ -2112,9 +3016,22 @@ export async function loadClientLoyaltySubscriptionDetails(subscriptionInput, {
     subscriptionStatus: serializedSubscription?.status || null,
   })
   const latestPaymentSnapshot = resolveLatestClientLoyaltyPaymentSnapshot(events)
+  const recentRiskEvents = serializedSubscription?.payment_method === 'credit_card'
+    ? await listRecentClientLoyaltyCardRiskEvents({
+        clienteId: subscription.clienteId,
+        estabelecimentoId: subscription.estabelecimentoId,
+        loyaltyPlanId: subscription.loyaltyPlanId,
+        db,
+        limit: 80,
+      })
+    : []
+  const recentAttemptSummary = resolveClientLoyaltyRecentCardAttemptSummary(recentRiskEvents, {
+    amountCents: plan?.preco_centavos ?? null,
+  })
   const retryOptions = resolveClientLoyaltyRetryOptions({
     subscriptionStatus: serializedSubscription?.status || null,
     latestFailure,
+    recentAttemptSummary,
   })
 
   return {

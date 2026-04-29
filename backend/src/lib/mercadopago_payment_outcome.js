@@ -2,6 +2,10 @@ function normalizeValue(value) {
   return String(value || '').trim().toLowerCase()
 }
 
+function normalizeStatusKey(value) {
+  return normalizeValue(value).replace(/-/g, '_')
+}
+
 function firstCause(value) {
   if (Array.isArray(value)) return value.find(Boolean) || null
   if (Array.isArray(value?.cause)) return value.cause.find(Boolean) || null
@@ -297,9 +301,10 @@ export function classifyMercadoPagoPaymentOutcome({
   transactionAmount = null,
 } = {}) {
   const normalizedStatus = normalizeValue(status)
+  const normalizedStatusKey = normalizeStatusKey(status)
   const normalizedDetail = normalizeValue(statusDetail)
 
-  if (['approved', 'paid'].includes(normalizedStatus)) {
+  if (['approved', 'paid'].includes(normalizedStatusKey)) {
     return buildOutcome({
       status: normalizedStatus || null,
       status_detail: normalizedDetail || null,
@@ -331,7 +336,7 @@ export function classifyMercadoPagoPaymentOutcome({
   }
 
   if (
-    ['pending', 'in_process', 'processing', 'authorized', 'created'].includes(normalizedStatus) ||
+    ['pending', 'in_process', 'processing', 'authorized', 'created', 'scheduled'].includes(normalizedStatusKey) ||
     Object.prototype.hasOwnProperty.call(PENDING_STATUS_DETAILS, normalizedDetail)
   ) {
     const detailConfig = PENDING_STATUS_DETAILS[normalizedDetail] || {}
@@ -342,7 +347,7 @@ export function classifyMercadoPagoPaymentOutcome({
       payment_type_id: paymentTypeId || null,
       live_mode: typeof liveMode === 'boolean' ? liveMode : null,
       status_group: 'pending',
-      normalized_reason: detailConfig.normalized_reason || normalizedDetail || normalizedStatus || 'pending',
+      normalized_reason: detailConfig.normalized_reason || normalizedDetail || normalizedStatusKey || 'pending',
       category: detailConfig.category || 'processing',
       decision: 'pending',
       action_recommendation: detailConfig.action_recommendation || 'wait_processing',
@@ -366,7 +371,7 @@ export function classifyMercadoPagoPaymentOutcome({
   }
 
   if (
-    ['rejected', 'cancelled', 'canceled', 'failed', 'refunded', 'charged_back'].includes(normalizedStatus) ||
+    ['rejected', 'cancelled', 'canceled', 'failed', 'refunded', 'charged_back'].includes(normalizedStatusKey) ||
     Object.prototype.hasOwnProperty.call(REJECTED_STATUS_DETAILS, normalizedDetail)
   ) {
     const detailConfig = REJECTED_STATUS_DETAILS[normalizedDetail] || {}

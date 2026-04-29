@@ -11918,6 +11918,25 @@ body.planos-no-scrollbar .container--wide::-webkit-scrollbar{
   line-height: 1.45;
 }
 
+.loyalty-payment-state-box {
+  display: grid;
+  gap: 6px;
+  padding: 14px 16px;
+  border-radius: 8px;
+  border: 1px solid rgba(37, 99, 235, 0.18);
+  background: rgba(239, 246, 255, 0.92);
+  color: #1e40af;
+}
+
+.loyalty-payment-state-box strong {
+  font-size: 14px;
+}
+
+.loyalty-payment-state-box span {
+  font-size: 14px;
+  line-height: 1.45;
+}
+
 .loyalty-plan-card__items,
 .loyalty-subscriber-list,
 .loyalty-plan-selector,

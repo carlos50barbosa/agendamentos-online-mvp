@@ -254,15 +254,34 @@ function summarizePayerForLog(payer = null) {
   if (!payer || typeof payer !== 'object') return null
   return {
     email_present: Boolean(payer.email),
+    cardholder_name_present: Boolean(payer.cardholderName || payer.cardholder_name || payer.fullName || payer.name),
     first_name_present: Boolean(payer.first_name),
     last_name_present: Boolean(payer.last_name),
-    identification_type: payer.identification?.type || null,
-    identification_masked: maskDocumentForLog(payer.identification?.number || null),
-    phone_present: Boolean(payer.phone?.number),
+    identification_type: payer.identification?.type || payer.identificationType || null,
+    identification_masked: maskDocumentForLog(payer.identification?.number || payer.identificationNumber || null),
+    phone_present: Boolean(payer.phone?.number || payer.phone || payer.telefone),
     zip_code_present: Boolean(payer.address?.zip_code),
     city_present: Boolean(payer.address?.city),
     federal_unit_present: Boolean(payer.address?.federal_unit),
   }
+}
+
+function resolveMercadoPagoDeviceSessionId(requestContext = {}) {
+  const riskContext = requestContext?.riskContext || requestContext?.risk_context || {}
+  const value = String(
+    requestContext?.mpDeviceSessionId ||
+    requestContext?.deviceSessionId ||
+    riskContext?.mp_device_session_id ||
+    riskContext?.device_session_id ||
+    ''
+  ).trim()
+  if (!value || value.length > 256) return null
+  return value
+}
+
+function buildMercadoPagoDeviceSessionHeaders(requestContext = {}) {
+  const deviceSessionId = resolveMercadoPagoDeviceSessionId(requestContext)
+  return deviceSessionId ? { 'X-meli-session-id': deviceSessionId } : {}
 }
 
 function mapPreapprovalResponse(data, { fallbackPlan = 'starter', fallbackCycle = 'mensal', fallbackStartDate = null } = {}) {
@@ -307,6 +326,7 @@ function mapPreapprovalResponse(data, { fallbackPlan = 'starter', fallbackCycle 
 function mapAuthorizedPaymentResponse(data) {
   if (!data) return null
   const paymentResult = summarizeMercadoPagoGatewayResult(data)
+  const rawStatus = String(data.status || '').trim().toLowerCase().replace(/-/g, '_')
 
   return {
     id: data.id || null,
@@ -317,7 +337,11 @@ function mapAuthorizedPaymentResponse(data) {
       ? 'active'
       : paymentResult?.status_group === 'pending'
         ? 'pending_payment'
-        : 'past_due',
+        : rawStatus === 'expired'
+          ? 'expired'
+          : rawStatus === 'canceled' || rawStatus === 'cancelled'
+            ? 'canceled'
+            : 'past_due',
     rawStatus: data.status || null,
     statusDetail: data.status_detail || null,
     paymentMethod: normalizePaymentMethod(data.payment_method_id || 'credit_card') || 'credit_card',
@@ -505,12 +529,22 @@ export async function createMercadoPagoCardPreapproval({
     ...tokenClaim.logMeta,
     credential_diagnostics: credentialDiagnostics,
   })
+  const deviceHeaders = buildMercadoPagoDeviceSessionHeaders(requestContext)
+  console.info('[mercadopago/subscriptions][preapproval] sending', {
+    amount_cents: amountCents,
+    external_reference: payload.external_reference || null,
+    request_id: requestContext?.requestId || null,
+    payer: summarizePayerForLog(payer),
+    device_session_id_present: Boolean(deviceHeaders['X-meli-session-id']),
+    payer_validation_warnings: requestContext?.payer_validation_warnings || null,
+  })
 
   validateFutureSubscriptionStartDate(payload.auto_recurring.start_date, { nowMs: Date.now() })
   try {
     const response = await mercadoPagoRequest('/preapproval', {
       method: 'POST',
       body: payload,
+      headers: deviceHeaders,
       accessToken,
     })
     markMercadoPagoDisposableCardTokenOutcome(cardToken, 'success', {
@@ -767,6 +801,7 @@ export async function createMercadoPagoCardRecoveryPayment({
     idempotency_key: idempotencyKey || null,
     request_id: requestContext?.requestId || null,
     payer: summarizePayerForLog(payer),
+    device_session_id_present: Boolean(resolveMercadoPagoDeviceSessionId(requestContext)),
   })
 
   const credentialDiagnostics = resolveCredentialDiagnostics(accessToken)
@@ -793,10 +828,14 @@ export async function createMercadoPagoCardRecoveryPayment({
   })
 
   try {
+    const deviceHeaders = buildMercadoPagoDeviceSessionHeaders(requestContext)
     const response = await mercadoPagoRequest('/v1/payments', {
       method: 'POST',
       body,
-      headers: idempotencyKey ? { 'X-Idempotency-Key': String(idempotencyKey) } : {},
+      headers: {
+        ...(idempotencyKey ? { 'X-Idempotency-Key': String(idempotencyKey) } : {}),
+        ...deviceHeaders,
+      },
       accessToken,
     })
     markMercadoPagoDisposableCardTokenOutcome(cardToken, 'success', {
