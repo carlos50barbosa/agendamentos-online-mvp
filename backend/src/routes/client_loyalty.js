@@ -4,9 +4,11 @@ import { auth, isCliente } from '../middleware/auth.js'
 import { pool } from '../lib/db.js'
 import { toMercadoPagoCardFlowError } from '../lib/mercadopago_card_tokens.js'
 import {
+  CLIENT_LOYALTY_CARDHOLDER_NAME_FIELD,
   cancelClientLoyaltySubscriptionForClient,
   createClientLoyaltyPixCheckout,
   loadClientLoyaltySubscriptionDetails,
+  resolveClientLoyaltyCardholderNameInput,
   startClientLoyaltyCardSubscription,
 } from '../services/loyaltySubscriptions.js'
 import { getMpAccountByEstabelecimentoId, getMpPublicKey, summarizeMpAccount } from '../services/mpAccounts.js'
@@ -48,6 +50,29 @@ function normalizeId(value) {
 
 function normalizeText(value) {
   return String(value || '').trim()
+}
+
+export function resolveClientLoyaltyCardholderNamePayload(body = {}) {
+  const resolved = resolveClientLoyaltyCardholderNameInput(body || {})
+  return {
+    value: resolved.normalized || null,
+    normalized: resolved.normalized,
+    sourceField: resolved.sourceField,
+    fieldPresent: resolved.fieldPresent,
+    analysis: resolved.analysis,
+  }
+}
+
+function logClientLoyaltyCardholderNamePayload(route, resolved) {
+  console.info('[loyalty][card-validation] cardholder_name_check', {
+    field_present: Boolean(resolved?.normalized),
+    length: resolved?.analysis?.length || 0,
+    word_count: resolved?.analysis?.wordCount || 0,
+    source_field: resolved?.sourceField || CLIENT_LOYALTY_CARDHOLDER_NAME_FIELD,
+    payload_field: CLIENT_LOYALTY_CARDHOLDER_NAME_FIELD,
+    route,
+    stage: 'backend_route',
+  })
 }
 
 function buildClientLoyaltyRequestContext(req, requestId, route) {
@@ -263,6 +288,8 @@ router.post('/subscribe', auth, isCliente, async (req, res) => {
     }
 
     if (paymentMethod === 'credit_card') {
+      const cardholderNamePayload = resolveClientLoyaltyCardholderNamePayload(req.body)
+      logClientLoyaltyCardholderNamePayload('/client-loyalty/subscribe', cardholderNamePayload)
       const result = await startClientLoyaltyCardSubscription({
         clienteId: req.user.id,
         estabelecimentoId,
@@ -273,11 +300,13 @@ router.post('/subscribe', auth, isCliente, async (req, res) => {
         issuerId: req.body?.issuer_id || null,
         identificationType: req.body?.identification_type || null,
         identificationNumber: req.body?.identification_number || null,
-        cardholderName: req.body?.cardholder_name || req.body?.cardholderName || null,
+        cardholderName: cardholderNamePayload.normalized || null,
         payerPhone: req.body?.payer_phone || req.body?.payerPhone || req.user.telefone || null,
         requestContext: {
           ...buildClientLoyaltyRequestContext(req, requestId, '/client-loyalty/subscribe'),
           operation: 'client_loyalty_card_subscription_create',
+          cardholder_name_source_field: cardholderNamePayload.sourceField || null,
+          cardholder_name_payload_field: CLIENT_LOYALTY_CARDHOLDER_NAME_FIELD,
         },
       })
       return res.status(201).json({
@@ -357,6 +386,8 @@ router.post('/pay/card', auth, isCliente, async (req, res) => {
       })
     }
 
+    const cardholderNamePayload = resolveClientLoyaltyCardholderNamePayload(req.body)
+    logClientLoyaltyCardholderNamePayload('/client-loyalty/pay/card', cardholderNamePayload)
     const result = await startClientLoyaltyCardSubscription({
       clienteId: req.user.id,
       estabelecimentoId,
@@ -367,11 +398,13 @@ router.post('/pay/card', auth, isCliente, async (req, res) => {
       issuerId: req.body?.issuer_id || null,
       identificationType: req.body?.identification_type || null,
       identificationNumber: req.body?.identification_number || null,
-      cardholderName: req.body?.cardholder_name || req.body?.cardholderName || null,
+      cardholderName: cardholderNamePayload.normalized || null,
       payerPhone: req.body?.payer_phone || req.body?.payerPhone || req.user.telefone || null,
       requestContext: {
         ...buildClientLoyaltyRequestContext(req, requestId, '/client-loyalty/pay/card'),
         operation: 'client_loyalty_card_subscription_create',
+        cardholder_name_source_field: cardholderNamePayload.sourceField || null,
+        cardholder_name_payload_field: CLIENT_LOYALTY_CARDHOLDER_NAME_FIELD,
       },
     })
     return res.status(201).json({

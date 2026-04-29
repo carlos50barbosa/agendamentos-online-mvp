@@ -1,8 +1,11 @@
 import { pool } from '../lib/db.js'
 import {
+  CLIENT_LOYALTY_CARDHOLDER_NAME_FIELD,
+  analyzeClientLoyaltyCardholderName,
   cancelClientLoyaltySubscriptionForClient,
   createClientLoyaltyPixCheckout,
   loadClientLoyaltySubscriptionDetails,
+  resolveClientLoyaltyCardholderNameInput,
   startClientLoyaltyCardSubscription,
   syncClientLoyaltyPaymentFromGateway,
   syncClientLoyaltyAuthorizedPaymentFromGateway,
@@ -196,9 +199,12 @@ function normalizeSellerWebhookResponse(result, defaults = {}) {
 }
 
 export {
+  CLIENT_LOYALTY_CARDHOLDER_NAME_FIELD,
+  analyzeClientLoyaltyCardholderName,
   cancelClientLoyaltySubscriptionForClient,
   createClientLoyaltyPixCheckout,
   loadClientLoyaltySubscriptionDetails,
+  resolveClientLoyaltyCardholderNameInput,
   startClientLoyaltyCardSubscription,
 }
 

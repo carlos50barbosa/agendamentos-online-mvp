@@ -8,14 +8,19 @@ process.env.DB_NAME ??= 'test'
 process.env.JWT_SECRET ??= 'test-secret'
 
 const {
+  CLIENT_LOYALTY_CARDHOLDER_NAME_FIELD,
   buildClientLoyaltyPaymentSnapshot,
   interpretClientLoyaltyAuthorizedPaymentStatus,
+  resolveClientLoyaltyCardholderNameInput,
   resolveClientLoyaltyRecentCardAttemptSummary,
   resolveClientLoyaltyRetryOptions,
   resolveLatestClientLoyaltyFailureSummary,
   resolveLatestClientLoyaltyPaymentSnapshot,
   validateClientLoyaltyCardPayerData,
 } = await import('../src/lib/client_loyalty_billing.js')
+const {
+  LOYALTY_CARDHOLDER_NAME_FIELD,
+} = await import('../../frontend/src/utils/loyaltyPaymentValidation.js')
 
 test('client loyalty failure summary prefers payment status_detail over newer authorized payment without detail', () => {
   const summary = resolveLatestClientLoyaltyFailureSummary([
@@ -390,4 +395,53 @@ test('client loyalty card payer validation rejects weak payer data and normalize
   assert.equal(valid.normalized.identificationType, 'CPF')
   assert.equal(valid.normalized.identificationNumber, '52998224725')
   assert.equal(valid.normalized.payerPhone, '11987654321')
+})
+
+test('client loyalty card payer validation accepts normalized full holder names', () => {
+  const base = {
+    payerEmail: 'cliente@example.com',
+    identificationType: 'CPF',
+    identificationNumber: '529.982.247-25',
+    payerPhone: '+55 (11) 98765-4321',
+  }
+  const cases = [
+    ['Maria Silva', 'Maria Silva'],
+    ['  Maria   Silva  ', 'Maria Silva'],
+    ['João Pedro', 'João Pedro'],
+    ["Ana-Maria D'Ávila", "Ana-Maria D'Ávila"],
+  ]
+
+  for (const [name, expected] of cases) {
+    const result = validateClientLoyaltyCardPayerData({
+      ...base,
+      [CLIENT_LOYALTY_CARDHOLDER_NAME_FIELD]: name,
+    })
+    assert.equal(result.valid, true, name)
+    assert.equal(result.normalized.cardholderName, expected)
+    assert.equal(result.sourceFields.cardholderName, CLIENT_LOYALTY_CARDHOLDER_NAME_FIELD)
+  }
+})
+
+test('client loyalty card payer validation rejects a single holder name', () => {
+  const result = validateClientLoyaltyCardPayerData({
+    payerEmail: 'cliente@example.com',
+    [CLIENT_LOYALTY_CARDHOLDER_NAME_FIELD]: 'Maria',
+    identificationType: 'CPF',
+    identificationNumber: '529.982.247-25',
+    payerPhone: '+55 (11) 98765-4321',
+  })
+
+  assert.equal(result.valid, false)
+  assert.equal(Boolean(result.errors.cardholder_name), true)
+})
+
+test('client loyalty cardholder field stays aligned with frontend payload key', () => {
+  const resolved = resolveClientLoyaltyCardholderNameInput({
+    [CLIENT_LOYALTY_CARDHOLDER_NAME_FIELD]: '  Maria   Silva  ',
+    payer_name: 'Nome Ignorado',
+  })
+
+  assert.equal(CLIENT_LOYALTY_CARDHOLDER_NAME_FIELD, LOYALTY_CARDHOLDER_NAME_FIELD)
+  assert.equal(resolved.normalized, 'Maria Silva')
+  assert.equal(resolved.sourceField, CLIENT_LOYALTY_CARDHOLDER_NAME_FIELD)
 })

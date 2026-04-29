@@ -86,6 +86,17 @@ function normalizeSpaces(value) {
   return normalizeText(value).replace(/\s+/g, ' ')
 }
 
+export const CLIENT_LOYALTY_CARDHOLDER_NAME_FIELD = 'cardholder_name'
+export const CLIENT_LOYALTY_CARDHOLDER_NAME_FIELDS = [
+  CLIENT_LOYALTY_CARDHOLDER_NAME_FIELD,
+  'cardholderName',
+  'payer_name',
+  'payerName',
+  'holder_name',
+  'holderName',
+  'name',
+]
+
 function digitsOnly(value) {
   return normalizeText(value).replace(/\D/g, '')
 }
@@ -112,10 +123,66 @@ function isValidCpf(value) {
   return digit === Number(cpf[10])
 }
 
+export function normalizeClientLoyaltyCardholderName(value) {
+  return normalizeSpaces(value)
+    .normalize('NFC')
+    .replace(/[\u2018\u2019\u0060\u00B4]/g, "'")
+    .replace(/[\u2010-\u2015\u2212]/g, '-')
+}
+
+function getNameParts(value) {
+  return normalizeClientLoyaltyCardholderName(value).split(' ').filter(Boolean)
+}
+
+function isNameLikePart(part) {
+  return /^\p{L}(?:[\p{L}\p{M}'-]*\p{L})?$/u.test(String(part || ''))
+}
+
+function isValidNameWord(part) {
+  return isNameLikePart(part) && String(part || '').replace(/[-']/g, '').length >= 2
+}
+
+export function analyzeClientLoyaltyCardholderName(value) {
+  const normalized = normalizeClientLoyaltyCardholderName(value)
+  const parts = getNameParts(normalized)
+  const validWordCount = parts.filter(isValidNameWord).length
+  const invalidPartCount = parts.filter((part) => !isNameLikePart(part)).length
+  return {
+    normalized,
+    length: normalized.length,
+    partCount: parts.length,
+    wordCount: validWordCount,
+    invalidPartCount,
+    valid: normalized.length >= 5 && parts.length >= 2 && validWordCount >= 2 && invalidPartCount === 0,
+  }
+}
+
 function hasMeaningfulFullName(value) {
-  const name = normalizeSpaces(value)
-  const parts = name.split(' ').filter(Boolean)
-  return name.length >= 5 && parts.length >= 2 && parts.every((part) => part.length >= 2)
+  return analyzeClientLoyaltyCardholderName(value).valid
+}
+
+export function resolveClientLoyaltyCardholderNameInput(input = {}, fields = CLIENT_LOYALTY_CARDHOLDER_NAME_FIELDS) {
+  const sourceField = fields.find((field) => normalizeClientLoyaltyCardholderName(input?.[field])) ||
+    fields.find((field) => Object.prototype.hasOwnProperty.call(input || {}, field)) ||
+    CLIENT_LOYALTY_CARDHOLDER_NAME_FIELD
+  const analysis = analyzeClientLoyaltyCardholderName(input?.[sourceField])
+  return {
+    value: input?.[sourceField] || '',
+    normalized: analysis.normalized,
+    sourceField,
+    fieldPresent: Boolean(analysis.normalized),
+    analysis,
+  }
+}
+
+function getClientLoyaltyCardholderNameDebugInfo(input = {}) {
+  const resolved = input?.analysis ? input : resolveClientLoyaltyCardholderNameInput(input)
+  return {
+    field_present: Boolean(resolved.normalized),
+    length: resolved.analysis?.length || 0,
+    word_count: resolved.analysis?.wordCount || 0,
+    source_field: resolved.sourceField || CLIENT_LOYALTY_CARDHOLDER_NAME_FIELD,
+  }
 }
 
 function normalizeBrazilPhone(value) {
@@ -125,16 +192,17 @@ function normalizeBrazilPhone(value) {
   return normalized.length >= 10 && normalized.length <= 11 ? normalized : null
 }
 
-export function validateClientLoyaltyCardPayerData({
-  payerEmail = null,
-  cardholderName = null,
-  identificationType = null,
-  identificationNumber = null,
-  payerPhone = null,
-} = {}) {
+export function validateClientLoyaltyCardPayerData(input = {}) {
+  const {
+    payerEmail = null,
+    identificationType = null,
+    identificationNumber = null,
+    payerPhone = null,
+  } = input || {}
+  const cardholderNameInput = resolveClientLoyaltyCardholderNameInput(input)
   const normalized = {
     payerEmail: normalizeText(payerEmail).toLowerCase(),
-    cardholderName: normalizeSpaces(cardholderName),
+    cardholderName: cardholderNameInput.normalized,
     identificationType: normalizeText(identificationType).toUpperCase(),
     identificationNumber: digitsOnly(identificationNumber),
     payerPhone: normalizeBrazilPhone(payerPhone),
@@ -167,11 +235,22 @@ export function validateClientLoyaltyCardPayerData({
     errors,
     warnings,
     normalized,
+    sourceFields: {
+      cardholderName: cardholderNameInput.sourceField,
+    },
+    debug: {
+      cardholderName: getClientLoyaltyCardholderNameDebugInfo(cardholderNameInput),
+    },
   }
 }
 
 function assertClientLoyaltyCardPayerData(input = {}) {
   const validation = validateClientLoyaltyCardPayerData(input)
+  console.info('[loyalty][card-validation] cardholder_name_check', {
+    ...validation.debug.cardholderName,
+    validation_field: validation.sourceFields.cardholderName,
+    stage: 'backend_validation',
+  })
   if (!validation.valid) {
     throw createError(
       'Confira os dados do titular do cartão antes de continuar.',
@@ -1576,6 +1655,12 @@ export async function startClientLoyaltyCardSubscription({
   identificationType = null,
   identificationNumber = null,
   cardholderName = null,
+  cardholder_name = null,
+  payerName = null,
+  payer_name = null,
+  holderName = null,
+  holder_name = null,
+  name = null,
   payerPhone = null,
   db = pool,
   requestContext = {},
@@ -1593,6 +1678,12 @@ export async function startClientLoyaltyCardSubscription({
   const payerValidation = assertClientLoyaltyCardPayerData({
     payerEmail: payerEmail || cliente.email || null,
     cardholderName,
+    cardholder_name,
+    payerName,
+    payer_name,
+    holderName,
+    holder_name,
+    name,
     identificationType,
     identificationNumber,
     payerPhone: payerPhone || cliente.telefone || null,

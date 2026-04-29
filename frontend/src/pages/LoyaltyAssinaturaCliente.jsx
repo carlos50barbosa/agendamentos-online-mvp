@@ -10,6 +10,10 @@ import {
 import { getMercadoPagoCardErrorMessage, isMercadoPagoCardTokenRefreshRequired } from '../utils/mercadoPagoCard.js'
 import {
   buildLoyaltyRiskContext,
+  buildLoyaltyCardPaymentPayload,
+  getLoyaltyCardholderNameDebugInfo,
+  LOYALTY_CARDHOLDER_NAME_FIELD,
+  resolveLoyaltyCardholderName,
   validateLoyaltyCardPayerData,
 } from '../utils/loyaltyPaymentValidation.js'
 
@@ -80,6 +84,12 @@ function getFailureFriendlyMessage(failure) {
     cc_rejected_other_reason: 'O banco emissor recusou o pagamento.',
   }
   return messages[detail] || ''
+}
+
+function getInputValueById(id) {
+  if (typeof document === 'undefined') return ''
+  const element = document.getElementById(id)
+  return typeof element?.value === 'string' ? element.value : ''
 }
 
 function formatFailureDetail(failure) {
@@ -315,9 +325,25 @@ export default function LoyaltyAssinaturaCliente() {
       setNotice({ type: 'error', message: 'Conta Mercado Pago desconectada ou sem permissao valida.' })
       return false
     }
+    const cardholderInputValue = getInputValueById('client-loyalty-card-holder')
+    const cardholderNameInput = resolveLoyaltyCardholderName({
+      [LOYALTY_CARDHOLDER_NAME_FIELD]: cardFormData?.cardholder_name,
+      cardholderName: cardFormData?.cardholderName || cardholderInputValue,
+      payer_name: cardFormData?.payer_name,
+      payerName: cardFormData?.payerName,
+      holder_name: cardFormData?.holder_name,
+      holderName: cardFormData?.holderName,
+      name: cardFormData?.name,
+    })
+    console.info('[loyalty][card-validation] cardholder_name_check', {
+      ...getLoyaltyCardholderNameDebugInfo(cardholderNameInput),
+      payload_field: LOYALTY_CARDHOLDER_NAME_FIELD,
+      validation_field: LOYALTY_CARDHOLDER_NAME_FIELD,
+      stage: 'frontend_submit',
+    })
     const payerValidation = validateLoyaltyCardPayerData({
       payerEmail: cardFormData.cardholderEmail || user?.email || '',
-      cardholderName: cardFormData.cardholderName || '',
+      [LOYALTY_CARDHOLDER_NAME_FIELD]: cardholderNameInput.normalized,
       identificationType: cardFormData.identificationType || '',
       identificationNumber: cardFormData.identificationNumber || '',
       payerPhone: user?.telefone || user?.phone || '',
@@ -339,20 +365,14 @@ export default function LoyaltyAssinaturaCliente() {
         retry_recovery_visible: retryDisplay.showRecovery,
         card_cooldown_active: retryDisplay.cardCooldownActive,
       })
-      await Api.clientLoyaltyPayCard({
-        estabelecimento_id: Number(estabelecimentoId),
-        loyalty_plan_id: Number(selectedPlanId),
-        card_token: cardFormData.token,
-        payer_email: payerValidation.normalized.payerEmail,
-        cardholder_name: payerValidation.normalized.cardholderName,
-        payer_phone: payerValidation.normalized.payerPhone || user?.telefone || user?.phone || null,
-        payment_method_id: cardFormData.paymentMethodId || null,
-        issuer_id: cardFormData.issuerId || null,
-        identification_type: payerValidation.normalized.identificationType || null,
-        identification_number: payerValidation.normalized.identificationNumber || null,
-        mp_device_session_id: riskContext.mp_device_session_id || null,
-        risk_context: riskContext,
-      })
+      await Api.clientLoyaltyPayCard(buildLoyaltyCardPaymentPayload({
+        estabelecimentoId,
+        loyaltyPlanId: selectedPlanId,
+        cardFormData,
+        payerValidation,
+        user,
+        riskContext,
+      }))
       setCardState((current) => ({ ...current, error: '' }))
       setNotice({ type: 'success', message: 'Cartão validado. A primeira cobrança será confirmada pelo Mercado Pago. Esse processo pode levar até cerca de 1 hora.' })
       await loadData()
@@ -695,7 +715,7 @@ export default function LoyaltyAssinaturaCliente() {
                       <div id="client-loyalty-card-number" className="input loyalty-card-form__field" />
                       <div id="client-loyalty-card-expiration" className="input loyalty-card-form__field" />
                       <div id="client-loyalty-card-cvv" className="input loyalty-card-form__field" />
-                      <input id="client-loyalty-card-holder" className="input loyalty-card-form__field" placeholder="Titular do cartão" />
+                      <input id="client-loyalty-card-holder" name="cardholderName" className="input loyalty-card-form__field" placeholder="Titular do cartão" autoComplete="cc-name" />
                       <input id="client-loyalty-card-email" className="input loyalty-card-form__field" type="email" placeholder="E-mail" defaultValue={user?.email || ''} />
                       <select id="client-loyalty-card-doc-type" className="input loyalty-card-form__field" defaultValue="" />
                       <input id="client-loyalty-card-doc-number" className="input loyalty-card-form__field" placeholder="Número do documento" />

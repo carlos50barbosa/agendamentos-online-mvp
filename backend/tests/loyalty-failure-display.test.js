@@ -8,7 +8,10 @@ const {
   resolveLoyaltyRetryDisplay,
 } = await import('../../frontend/src/utils/loyaltyFailure.js')
 const {
+  LOYALTY_CARDHOLDER_NAME_FIELD,
+  buildLoyaltyCardPaymentPayload,
   buildLoyaltyRiskContext,
+  resolveLoyaltyCardholderName,
   validateLoyaltyCardPayerData,
 } = await import('../../frontend/src/utils/loyaltyPaymentValidation.js')
 
@@ -146,6 +149,80 @@ test('loyalty card payer validation blocks weak UI data before gateway retry', (
   assert.equal(Boolean(invalid.errors.payer_email), true)
   assert.equal(Boolean(invalid.errors.cardholder_name), true)
   assert.equal(Boolean(invalid.errors.identification_number), true)
+})
+
+test('loyalty card payer validation accepts complete names with flexible characters', () => {
+  const base = {
+    payerEmail: 'cliente@example.com',
+    identificationType: 'CPF',
+    identificationNumber: '529.982.247-25',
+    payerPhone: '+55 (11) 98765-4321',
+  }
+  const cases = [
+    ['Maria Silva', 'Maria Silva'],
+    ['  Maria   Silva  ', 'Maria Silva'],
+    ['João Pedro', 'João Pedro'],
+    ["Ana-Maria D'Ávila", "Ana-Maria D'Ávila"],
+  ]
+
+  for (const [name, expected] of cases) {
+    const result = validateLoyaltyCardPayerData({
+      ...base,
+      [LOYALTY_CARDHOLDER_NAME_FIELD]: name,
+    })
+    assert.equal(result.valid, true, name)
+    assert.equal(result.normalized.cardholderName, expected)
+    assert.equal(result.sourceFields.cardholderName, LOYALTY_CARDHOLDER_NAME_FIELD)
+  }
+})
+
+test('loyalty card payer validation rejects a single holder name', () => {
+  const result = validateLoyaltyCardPayerData({
+    payerEmail: 'cliente@example.com',
+    [LOYALTY_CARDHOLDER_NAME_FIELD]: 'Maria',
+    identificationType: 'CPF',
+    identificationNumber: '529.982.247-25',
+    payerPhone: '+55 (11) 98765-4321',
+  })
+
+  assert.equal(result.valid, false)
+  assert.equal(Boolean(result.errors.cardholder_name), true)
+})
+
+test('loyalty card payload uses the same holder-name key validated by the UI', () => {
+  const payerValidation = validateLoyaltyCardPayerData({
+    payerEmail: 'cliente@example.com',
+    [LOYALTY_CARDHOLDER_NAME_FIELD]: '  Maria   Silva  ',
+    identificationType: 'CPF',
+    identificationNumber: '529.982.247-25',
+    payerPhone: '+55 (11) 98765-4321',
+  })
+  const payload = buildLoyaltyCardPaymentPayload({
+    estabelecimentoId: '26',
+    loyaltyPlanId: '7',
+    cardFormData: {
+      token: 'card-token',
+      paymentMethodId: 'visa',
+      issuerId: '25',
+    },
+    payerValidation,
+    riskContext: {
+      mp_device_session_id: 'device-session-123',
+    },
+  })
+
+  assert.equal(payload[LOYALTY_CARDHOLDER_NAME_FIELD], payerValidation.normalized.cardholderName)
+  assert.equal(payload.cardholderName, undefined)
+})
+
+test('loyalty cardholder resolver accepts SDK aliases before validation', () => {
+  const resolved = resolveLoyaltyCardholderName({
+    holder_name: "  João   D'Ávila  ",
+  })
+
+  assert.equal(resolved.normalized, "João D'Ávila")
+  assert.equal(resolved.sourceField, 'holder_name')
+  assert.equal(resolved.analysis.wordCount, 2)
 })
 
 test('loyalty risk context captures Mercado Pago device session id when available', () => {

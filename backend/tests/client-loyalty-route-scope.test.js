@@ -9,6 +9,7 @@ process.env.JWT_SECRET ??= 'test-secret'
 
 const {
   filterClientLoyaltyDetailsForAuthenticatedClient,
+  resolveClientLoyaltyCardholderNamePayload,
 } = await import('../src/routes/client_loyalty.js')
 
 test('client loyalty route filter keeps same-establishment history isolated by authenticated client', () => {
@@ -57,4 +58,25 @@ test('client loyalty route filter returns empty list when the authenticated clie
   })
 
   assert.deepEqual(filtered, [])
+})
+
+test('client loyalty card route resolves the canonical cardholder payload key', () => {
+  const resolved = resolveClientLoyaltyCardholderNamePayload({
+    cardholder_name: '  Maria   Silva  ',
+    payer_name: 'Nome Ignorado',
+  })
+
+  assert.equal(resolved.normalized, 'Maria Silva')
+  assert.equal(resolved.sourceField, 'cardholder_name')
+  assert.equal(resolved.analysis.wordCount, 2)
+})
+
+test('client loyalty card route accepts known cardholder aliases', () => {
+  const resolved = resolveClientLoyaltyCardholderNamePayload({
+    holder_name: "Ana-Maria D'Ávila",
+  })
+
+  assert.equal(resolved.normalized, "Ana-Maria D'Ávila")
+  assert.equal(resolved.sourceField, 'holder_name')
+  assert.equal(resolved.analysis.valid, true)
 })
