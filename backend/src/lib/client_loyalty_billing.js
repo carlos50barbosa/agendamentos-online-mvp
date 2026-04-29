@@ -365,6 +365,19 @@ function isFailedGatewayPaymentStatus(status) {
     .includes(normalizeGatewayPaymentStatusKey(status))
 }
 
+function isFinalRealGatewayPaymentStatus(status) {
+  const key = normalizeGatewayPaymentStatusKey(status)
+  return isApprovedGatewayPaymentStatus(key) || isFailedGatewayPaymentStatus(key)
+}
+
+function resolveFinalRealPaymentSubscriptionStatus(status) {
+  const key = normalizeGatewayPaymentStatusKey(status)
+  if (isApprovedGatewayPaymentStatus(key)) return 'active'
+  if (['expired', 'canceled', 'cancelled'].includes(key)) return 'expired'
+  if (isFailedGatewayPaymentStatus(key)) return 'past_due'
+  return null
+}
+
 const AUTHORIZED_PAYMENT_PENDING_STATUS_KEYS = new Set([
   'scheduled',
   'pending',
@@ -409,6 +422,15 @@ function resolveAuthorizedPaymentPendingOutcome(statusKey, statusDetailKey) {
 function resolveAuthorizedPaymentPendingEventName(statusKey, statusDetailKey) {
   if (statusDetailKey === 'pending_review_manual' || statusKey === 'in_process') return 'authorized_payment_in_process'
   return 'authorized_payment_pending'
+}
+
+function resolveAuthorizedPaymentAttemptedNextStatus(interpretation = null) {
+  if (!interpretation) return null
+  if (interpretation.interpretedOutcome === 'approved') return 'active'
+  if (interpretation.nextSubscriptionStatus) return interpretation.nextSubscriptionStatus
+  if (interpretation.isFailure) return 'past_due'
+  if (interpretation.isPending) return 'pending_payment'
+  return null
 }
 
 function resolveAuthorizedPaymentPendingSubscriptionStatus(currentSubscription = null) {
@@ -933,6 +955,136 @@ function logClientLoyaltySubscriptionStatusTransition(subscriptionId, {
   })
 }
 
+function logClientLoyaltyDominantPaymentSelected({
+  subscriptionId = null,
+  gatewaySubscriptionId = null,
+  authorizedPaymentId = null,
+  dominantPayment = null,
+  currentSubscriptionStatus = null,
+  attemptedNextStatus = null,
+  priorityRule = 'real_payment_final_status_wins',
+} = {}) {
+  if (!dominantPayment) return
+  console.info('[client-loyalty] dominant_payment_selected', {
+    subscription_id: subscriptionId,
+    gateway_subscription_id: gatewaySubscriptionId || null,
+    authorized_payment_id: authorizedPaymentId || null,
+    current_subscription_status: currentSubscriptionStatus || null,
+    attempted_next_status: attemptedNextStatus || null,
+    dominant_source: 'payment',
+    dominant_payment_id: dominantPayment.payment_id || null,
+    dominant_status: dominantPayment.status || null,
+    dominant_status_detail: dominantPayment.status_detail || null,
+    priority_rule: priorityRule,
+  })
+}
+
+function logClientLoyaltyAuthorizedPaymentTransitionSuppressed({
+  subscriptionId = null,
+  gatewaySubscriptionId = null,
+  authorizedPaymentId = null,
+  interpretation = null,
+  priority = null,
+} = {}) {
+  const dominantPayment = priority?.dominantPayment || null
+  console.info('[client-loyalty] authorized_payment_transition_suppressed', {
+    subscription_id: subscriptionId,
+    gateway_subscription_id: gatewaySubscriptionId || null,
+    authorized_payment_id: authorizedPaymentId || null,
+    authorized_payment_status: interpretation?.status || null,
+    authorized_payment_status_detail: interpretation?.statusDetail || null,
+    attempted_next_status: priority?.attemptedNextStatus || null,
+    preserved_subscription_status: priority?.preservedSubscriptionStatus || null,
+    dominant_source: 'payment',
+    dominant_payment_id: dominantPayment?.payment_id || null,
+    dominant_payment_status: dominantPayment?.status || null,
+    dominant_payment_status_detail: dominantPayment?.status_detail || null,
+    priority_rule: priority?.priorityRule || 'real_payment_final_status_wins',
+  })
+}
+
+function logClientLoyaltyConflictingPaymentSources({
+  subscriptionId = null,
+  gatewaySubscriptionId = null,
+  authorizedPaymentId = null,
+  interpretation = null,
+  priority = null,
+} = {}) {
+  if (!priority?.conflict) return
+  const dominantPayment = priority?.dominantPayment || null
+  console.warn('[client-loyalty] conflicting_payment_sources', {
+    subscription_id: subscriptionId,
+    gateway_subscription_id: gatewaySubscriptionId || null,
+    authorized_payment_id: authorizedPaymentId || null,
+    authorized_payment_status: interpretation?.status || null,
+    authorized_payment_status_detail: interpretation?.statusDetail || null,
+    attempted_next_status: priority?.attemptedNextStatus || null,
+    dominant_source: 'payment',
+    dominant_payment_id: dominantPayment?.payment_id || null,
+    dominant_status: dominantPayment?.status || null,
+    dominant_status_detail: dominantPayment?.status_detail || null,
+    dominant_subscription_status: dominantPayment?.subscription_status || null,
+    priority_rule: priority?.priorityRule || 'real_payment_final_status_wins',
+  })
+}
+
+async function recordClientLoyaltyAuthorizedPaymentAuxiliaryTx(subscriptionId, {
+  authorizedPayment = null,
+  authorizedPaymentId = null,
+  gatewayEventId = null,
+  gatewaySubscriptionId = null,
+  interpretation = null,
+  priority = null,
+  sellerEventContext = null,
+  amountCents = null,
+  paymentResult = null,
+  gatewayResult = null,
+  db = pool,
+} = {}) {
+  const dominantPayment = priority?.dominantPayment || null
+  await appendClientLoyaltySubscriptionEvent(subscriptionId, {
+    eventType: 'authorized_payment_auxiliary',
+    gatewayEventId: gatewayEventId || authorizedPayment?.id || authorizedPaymentId || null,
+    mpTopic: 'automatic-payments',
+    ...(sellerEventContext || {}),
+    mpPaymentId: authorizedPayment?.id || authorizedPaymentId || null,
+    paymentStatus: interpretation?.status || authorizedPayment?.rawStatus || authorizedPayment?.status || null,
+    paymentMethod: 'credit_card',
+    paymentType: 'subscription_authorized_payment',
+    amountCents,
+    actionTaken: 'recorded_as_auxiliary',
+    ignoredReason: priority?.priorityRule || 'real_payment_final_status_wins',
+    payload: {
+      interpreted_outcome: interpretation?.interpretedOutcome || null,
+      transition_rule: interpretation?.transitionRule || null,
+      attempted_next_status: priority?.attemptedNextStatus || null,
+      preserved_subscription_status: priority?.preservedSubscriptionStatus || null,
+      priority_rule: priority?.priorityRule || 'real_payment_final_status_wins',
+      dominant_source: 'payment',
+      dominant_payment_id: dominantPayment?.payment_id || null,
+      dominant_payment_status: dominantPayment?.status || null,
+      dominant_payment_status_detail: dominantPayment?.status_detail || null,
+      payment_status: interpretation?.status || null,
+      payment_status_detail: interpretation?.statusDetail || null,
+      payment: paymentResult?.raw || null,
+      subscription: gatewayResult?.raw || null,
+    },
+  }, { db })
+
+  console.info('[client-loyalty] authorized_payment_recorded_as_auxiliary', {
+    subscription_id: subscriptionId,
+    gateway_subscription_id: gatewaySubscriptionId || null,
+    authorized_payment_id: authorizedPayment?.id || authorizedPaymentId || null,
+    current_subscription_status: priority?.preservedSubscriptionStatus || null,
+    attempted_next_status: priority?.attemptedNextStatus || null,
+    dominant_source: 'payment',
+    dominant_payment_id: dominantPayment?.payment_id || null,
+    dominant_status: dominantPayment?.status || null,
+    dominant_status_detail: dominantPayment?.status_detail || null,
+    priority_rule: priority?.priorityRule || 'real_payment_final_status_wins',
+  })
+}
+
 async function recordClientLoyaltyPaymentStatusTransitionTx(subscriptionId, {
   snapshot = null,
   previousSubscriptionStatus = null,
@@ -1007,10 +1159,72 @@ function extractClientLoyaltyPaymentSnapshotFromEvent(event) {
   })
 }
 
-export function resolveLatestClientLoyaltyPaymentSnapshot(events = []) {
+function isRealPaymentEvent(event = null, snapshot = null) {
+  const target = String(snapshot?.payment_target || '').trim().toLowerCase()
+  const topic = String(event?.mp_topic || '').trim().toLowerCase()
+  const type = String(event?.payment_type || '').trim().toLowerCase()
+  if (target && target !== 'payment') return false
+  if (topic === 'automatic-payments') return false
+  if (type === 'subscription_authorized_payment') return false
+  return true
+}
+
+function buildClientLoyaltyRealPaymentCandidate(event = null) {
+  const snapshot = extractClientLoyaltyPaymentSnapshotFromEvent(event)
+  if (!hasClientLoyaltyPaymentSnapshot(snapshot)) return null
+  if (!isRealPaymentEvent(event, snapshot)) return null
+  if (!isFinalRealGatewayPaymentStatus(snapshot.status || event?.payment_status)) return null
+
+  const paymentId = String(
+    event?.mp_payment_id ||
+      snapshot.payment_id ||
+      event?.gateway_event_id ||
+      ''
+  ).trim() || null
+  if (!paymentId) return null
+
+  return {
+    source: 'payment',
+    payment_id: paymentId,
+    status: snapshot.status || event?.payment_status || null,
+    status_detail: snapshot.status_detail || null,
+    subscription_status: resolveFinalRealPaymentSubscriptionStatus(snapshot.status || event?.payment_status),
+    payment_method_id: snapshot.payment_method_id || event?.payment_method || null,
+    payment_type_id: snapshot.payment_type_id || event?.payment_type || null,
+    transaction_amount: snapshot.transaction_amount ?? null,
+    external_reference: snapshot.external_reference || null,
+    gateway_event_id: event?.gateway_event_id || null,
+    event_type: event?.tipo_evento || null,
+    created_at: event?.created_at || null,
+    snapshot,
+  }
+}
+
+export function resolveDominantClientLoyaltyFinalRealPayment(events = [], {
+  gatewayPaymentId = null,
+} = {}) {
+  const expectedPaymentId = String(gatewayPaymentId || '').trim()
+  if (!expectedPaymentId) return null
+
   return (Array.isArray(events) ? events : [])
-    .map(extractClientLoyaltyPaymentSnapshotFromEvent)
-    .find(hasClientLoyaltyPaymentSnapshot) || null
+    .map(buildClientLoyaltyRealPaymentCandidate)
+    .filter(Boolean)
+    .find((candidate) => String(candidate.payment_id || '') === expectedPaymentId) || null
+}
+
+export function resolveLatestClientLoyaltyPaymentSnapshot(events = []) {
+  const normalizedEvents = Array.isArray(events) ? events : []
+  const snapshots = normalizedEvents
+    .map((event) => ({
+      event,
+      snapshot: extractClientLoyaltyPaymentSnapshotFromEvent(event),
+    }))
+    .filter((entry) => hasClientLoyaltyPaymentSnapshot(entry.snapshot))
+  const dominantRealPayment = snapshots.find((entry) => (
+    isRealPaymentEvent(entry.event, entry.snapshot) &&
+    isFinalRealGatewayPaymentStatus(entry.snapshot.status)
+  ))
+  return dominantRealPayment?.snapshot || snapshots[0]?.snapshot || null
 }
 
 function getClientLoyaltyRiskEventCreatedAt(event = null) {
@@ -1175,6 +1389,54 @@ async function listRecentClientLoyaltyCardRiskEvents({
     payload_json: safeJsonParse(row.payload_json),
     created_at: row.created_at ? new Date(row.created_at).toISOString() : null,
   }))
+}
+
+async function findDominantClientLoyaltyFinalRealPaymentTx(subscriptionId, {
+  gatewayPaymentId = null,
+  db = pool,
+  limit = 80,
+} = {}) {
+  if (!subscriptionId || !gatewayPaymentId) return null
+  const events = await listClientLoyaltySubscriptionEvents(subscriptionId, { db, limit })
+  return resolveDominantClientLoyaltyFinalRealPayment(events, { gatewayPaymentId })
+}
+
+export function resolveClientLoyaltyAuthorizedPaymentPriority({
+  interpretation = null,
+  dominantPayment = null,
+  currentSubscriptionStatus = null,
+} = {}) {
+  if (!dominantPayment) {
+    return {
+      dominantSource: 'authorized_payment',
+      suppressTransition: false,
+      conflict: false,
+      attemptedNextStatus: resolveAuthorizedPaymentAttemptedNextStatus(interpretation),
+      preservedSubscriptionStatus: currentSubscriptionStatus || null,
+      priorityRule: 'authorized_payment_used_when_no_final_real_payment',
+      dominantPayment: null,
+    }
+  }
+
+  const attemptedNextStatus = resolveAuthorizedPaymentAttemptedNextStatus(interpretation)
+  const dominantSubscriptionStatus =
+    dominantPayment.subscription_status ||
+    resolveFinalRealPaymentSubscriptionStatus(dominantPayment.status)
+  const preservedSubscriptionStatus = currentSubscriptionStatus || dominantSubscriptionStatus || null
+
+  return {
+    dominantSource: 'payment',
+    suppressTransition: true,
+    conflict: Boolean(
+      attemptedNextStatus &&
+      dominantSubscriptionStatus &&
+      attemptedNextStatus !== dominantSubscriptionStatus
+    ),
+    attemptedNextStatus,
+    preservedSubscriptionStatus,
+    priorityRule: 'real_payment_final_status_wins',
+    dominantPayment,
+  }
 }
 
 export function resolveClientLoyaltyRetryOptions({
@@ -2809,6 +3071,72 @@ export async function syncClientLoyaltyAuthorizedPaymentFromGateway(authorizedPa
       rawPayment: paymentResult.raw,
       currentSubscription: lockedSubscription,
     })
+    const dominantFinalRealPayment = await findDominantClientLoyaltyFinalRealPaymentTx(localSubscription.id, {
+      gatewayPaymentId: locked.gateway_payment_id || localSubscription.gatewayPaymentId || null,
+      db: conn,
+    })
+    const authorizedPaymentPriority = resolveClientLoyaltyAuthorizedPaymentPriority({
+      interpretation,
+      dominantPayment: dominantFinalRealPayment,
+      currentSubscriptionStatus: locked.status || localSubscription.status || null,
+    })
+    logClientLoyaltyDominantPaymentSelected({
+      subscriptionId: localSubscription.id,
+      gatewaySubscriptionId,
+      authorizedPaymentId: authorizedPayment.id || authorizedPaymentId,
+      dominantPayment: dominantFinalRealPayment,
+      currentSubscriptionStatus: locked.status || localSubscription.status || null,
+      attemptedNextStatus: authorizedPaymentPriority.attemptedNextStatus,
+      priorityRule: authorizedPaymentPriority.priorityRule,
+    })
+    logClientLoyaltyConflictingPaymentSources({
+      subscriptionId: localSubscription.id,
+      gatewaySubscriptionId,
+      authorizedPaymentId: authorizedPayment.id || authorizedPaymentId,
+      interpretation,
+      priority: authorizedPaymentPriority,
+    })
+    if (authorizedPaymentPriority.suppressTransition) {
+      logClientLoyaltyAuthorizedPaymentInterpretation({
+        subscriptionId: localSubscription.id,
+        authorizedPaymentId: authorizedPayment.id || authorizedPaymentId,
+        gatewaySubscriptionId,
+        interpretation,
+        nextSubscriptionStatus: authorizedPaymentPriority.preservedSubscriptionStatus || locked.status || null,
+      })
+      logClientLoyaltyAuthorizedPaymentTransitionSuppressed({
+        subscriptionId: localSubscription.id,
+        gatewaySubscriptionId,
+        authorizedPaymentId: authorizedPayment.id || authorizedPaymentId,
+        interpretation,
+        priority: authorizedPaymentPriority,
+      })
+      await recordClientLoyaltyAuthorizedPaymentAuxiliaryTx(localSubscription.id, {
+        authorizedPayment,
+        authorizedPaymentId,
+        gatewayEventId,
+        gatewaySubscriptionId,
+        interpretation,
+        priority: authorizedPaymentPriority,
+        sellerEventContext,
+        amountCents,
+        paymentResult,
+        gatewayResult,
+        db: conn,
+      })
+      const preserved = await getClientLoyaltySubscriptionById(localSubscription.id, { db: conn })
+      await conn.commit()
+      return {
+        ok: true,
+        handled: true,
+        status: preserved?.status || authorizedPaymentPriority.preservedSubscriptionStatus || locked.status || null,
+        subscription: preserved,
+        payment_interpretation: interpretation,
+        dominant_payment: dominantFinalRealPayment,
+        priority_rule: authorizedPaymentPriority.priorityRule,
+        transition_suppressed: true,
+      }
+    }
 
     if (interpretation.interpretedOutcome === 'approved') {
       const activated = await activateSubscriptionCycleTx(localSubscription.id, {

@@ -11,6 +11,8 @@ const {
   CLIENT_LOYALTY_CARDHOLDER_NAME_FIELD,
   buildClientLoyaltyPaymentSnapshot,
   interpretClientLoyaltyAuthorizedPaymentStatus,
+  resolveClientLoyaltyAuthorizedPaymentPriority,
+  resolveDominantClientLoyaltyFinalRealPayment,
   resolveClientLoyaltyCardholderNameInput,
   resolveClientLoyaltyRecentCardAttemptSummary,
   resolveClientLoyaltyRetryOptions,
@@ -444,4 +446,216 @@ test('client loyalty cardholder field stays aligned with frontend payload key', 
   assert.equal(CLIENT_LOYALTY_CARDHOLDER_NAME_FIELD, LOYALTY_CARDHOLDER_NAME_FIELD)
   assert.equal(resolved.normalized, 'Maria Silva')
   assert.equal(resolved.sourceField, CLIENT_LOYALTY_CARDHOLDER_NAME_FIELD)
+})
+
+test('client loyalty prioritizes rejected real payment over scheduled authorized payment', () => {
+  const events = [
+    {
+      id: 30,
+      tipo_evento: 'payment_snapshot',
+      mp_topic: 'automatic-payments',
+      payment_type: 'subscription_authorized_payment',
+      mp_payment_id: '7027639889',
+      payload_json: {
+        snapshot: {
+          payment_target: 'authorized_payment',
+          payment_id: '7027639889',
+          status: 'scheduled',
+          status_detail: 'cc_rejected_high_risk',
+        },
+      },
+      created_at: '2026-04-29T12:02:00.000Z',
+    },
+    {
+      id: 29,
+      tipo_evento: 'payment_failed',
+      mp_topic: 'payment',
+      payment_type: 'credit_card',
+      mp_payment_id: '156205780317',
+      payment_status: 'rejected',
+      payload_json: {
+        payment_status: 'rejected',
+        payment_status_detail: 'cc_rejected_high_risk',
+        raw: {
+          payment: {
+            id: '156205780317',
+            status: 'rejected',
+            status_detail: 'cc_rejected_high_risk',
+            payment_method_id: 'master',
+            payment_type_id: 'credit_card',
+            external_reference: 'loyalty:sub:20:est:26:cli:1:plan:1:uuid:test',
+            date_created: '2026-04-29T12:00:00.000Z',
+          },
+        },
+      },
+      created_at: '2026-04-29T12:01:00.000Z',
+    },
+    {
+      id: 28,
+      tipo_evento: 'payment_snapshot',
+      mp_topic: 'payment',
+      payment_type: 'credit_card',
+      mp_payment_id: '156205780317',
+      payload_json: {
+        snapshot: {
+          payment_target: 'payment',
+          payment_id: '156205780317',
+          status: 'rejected',
+          status_detail: 'cc_rejected_high_risk',
+          payment_method_id: 'master',
+          payment_type_id: 'credit_card',
+          external_reference: 'loyalty:sub:20:est:26:cli:1:plan:1:uuid:test',
+        },
+      },
+      created_at: '2026-04-29T12:00:30.000Z',
+    },
+  ]
+  const interpretation = interpretClientLoyaltyAuthorizedPaymentStatus({
+    id: '7027639889',
+    rawStatus: 'scheduled',
+    statusDetail: 'cc_rejected_high_risk',
+    paymentResult: { status_group: 'pending' },
+  }, {
+    currentSubscription: {
+      status: 'past_due',
+      paymentMethod: 'credit_card',
+    },
+  })
+  const dominant = resolveDominantClientLoyaltyFinalRealPayment(events, {
+    gatewayPaymentId: '156205780317',
+  })
+  const priority = resolveClientLoyaltyAuthorizedPaymentPriority({
+    interpretation,
+    dominantPayment: dominant,
+    currentSubscriptionStatus: 'past_due',
+  })
+  const latestSnapshot = resolveLatestClientLoyaltyPaymentSnapshot(events)
+  const latestFailure = resolveLatestClientLoyaltyFailureSummary(events, {
+    subscriptionStatus: 'past_due',
+  })
+
+  assert.equal(dominant?.payment_id, '156205780317')
+  assert.equal(priority.suppressTransition, true)
+  assert.equal(priority.preservedSubscriptionStatus, 'past_due')
+  assert.equal(priority.priorityRule, 'real_payment_final_status_wins')
+  assert.equal(latestSnapshot?.payment_target, 'payment')
+  assert.equal(latestSnapshot?.status, 'rejected')
+  assert.equal(latestFailure?.code, 'cc_rejected_high_risk')
+  assert.equal(latestFailure?.source, 'payment')
+})
+
+test('client loyalty does not downgrade approved real payment when authorized payment is scheduled', () => {
+  const events = [
+    {
+      tipo_evento: 'payment_approved',
+      mp_topic: 'payment',
+      payment_type: 'credit_card',
+      mp_payment_id: '156205780318',
+      payment_status: 'approved',
+      payload_json: {
+        payment: {
+          id: '156205780318',
+          status: 'approved',
+          payment_type_id: 'credit_card',
+        },
+      },
+      created_at: '2026-04-29T12:00:00.000Z',
+    },
+  ]
+  const interpretation = interpretClientLoyaltyAuthorizedPaymentStatus({
+    id: '7027639890',
+    rawStatus: 'scheduled',
+    paymentResult: { status_group: 'pending' },
+  }, {
+    currentSubscription: {
+      status: 'active',
+      paymentMethod: 'credit_card',
+      currentPeriodStart: new Date('2026-04-29T12:00:00.000Z'),
+      currentPeriodEnd: new Date('2026-05-29T12:00:00.000Z'),
+    },
+  })
+  const priority = resolveClientLoyaltyAuthorizedPaymentPriority({
+    interpretation,
+    dominantPayment: resolveDominantClientLoyaltyFinalRealPayment(events, {
+      gatewayPaymentId: '156205780318',
+    }),
+    currentSubscriptionStatus: 'active',
+  })
+
+  assert.equal(priority.suppressTransition, true)
+  assert.equal(priority.preservedSubscriptionStatus, 'active')
+  assert.equal(priority.conflict, false)
+})
+
+test('client loyalty keeps authorized payment pending behavior when there is no final real payment', () => {
+  const scheduled = interpretClientLoyaltyAuthorizedPaymentStatus({
+    id: '7027639891',
+    rawStatus: 'scheduled',
+    paymentResult: { status_group: 'pending' },
+  }, {
+    currentSubscription: {
+      status: 'pending_payment',
+      paymentMethod: 'credit_card',
+    },
+  })
+  const inProcess = interpretClientLoyaltyAuthorizedPaymentStatus({
+    id: '7027639892',
+    rawStatus: 'in_process',
+    statusDetail: 'pending_review_manual',
+    paymentResult: {
+      status_group: 'pending',
+      status_detail: 'pending_review_manual',
+    },
+  }, {
+    currentSubscription: {
+      status: 'pending_payment',
+      paymentMethod: 'credit_card',
+    },
+  })
+
+  assert.equal(resolveClientLoyaltyAuthorizedPaymentPriority({
+    interpretation: scheduled,
+    dominantPayment: null,
+    currentSubscriptionStatus: 'pending_payment',
+  }).suppressTransition, false)
+  assert.equal(scheduled.nextSubscriptionStatus, 'pending_payment')
+
+  assert.equal(resolveClientLoyaltyAuthorizedPaymentPriority({
+    interpretation: inProcess,
+    dominantPayment: null,
+    currentSubscriptionStatus: 'pending_payment',
+  }).suppressTransition, false)
+  assert.equal(inProcess.interpretedOutcome, 'pending_review')
+})
+
+test('client loyalty logs priority conflict when authorized approved conflicts with rejected real payment', () => {
+  const interpretation = interpretClientLoyaltyAuthorizedPaymentStatus({
+    id: '7027639893',
+    rawStatus: 'approved',
+    paymentResult: {
+      status_group: 'approved',
+      should_activate_subscription: true,
+    },
+  }, {
+    currentSubscription: {
+      status: 'past_due',
+      paymentMethod: 'credit_card',
+    },
+  })
+  const priority = resolveClientLoyaltyAuthorizedPaymentPriority({
+    interpretation,
+    dominantPayment: {
+      source: 'payment',
+      payment_id: '156205780317',
+      status: 'rejected',
+      status_detail: 'cc_rejected_high_risk',
+      subscription_status: 'past_due',
+    },
+    currentSubscriptionStatus: 'past_due',
+  })
+
+  assert.equal(priority.suppressTransition, true)
+  assert.equal(priority.conflict, true)
+  assert.equal(priority.attemptedNextStatus, 'active')
+  assert.equal(priority.preservedSubscriptionStatus, 'past_due')
 })
