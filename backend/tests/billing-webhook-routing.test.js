@@ -199,6 +199,65 @@ test('billing payment webhook accepts connected seller loyalty payments after de
   assert.equal(result.responseBody.processed, true)
 })
 
+test('billing payment webhook ignores connected seller card validation payments as auxiliary', async () => {
+  let depositCalls = 0
+  let loyaltyCalls = 0
+  const result = await resolveBillingPaymentWebhookAction({
+    resourceId: '155488227017',
+    syncEvent: {},
+    syncDecision: { topic: 'payment', chosenSyncTarget: 'payment', chosenByRule: 'body_topic' },
+    bodyUserId: 1055436081,
+    resolveConnectedAccount: async () => ({ id: 9, estabelecimento_id: 26, mp_user_id: '1055436081' }),
+    sellerPaymentFlowMatcher: async () => ({
+      paymentFetched: true,
+      accessToken: 'seller-token',
+      sellerAccount: { id: 9, estabelecimento_id: 26, mp_user_id: '1055436081' },
+      payment: {
+        id: '155488227017',
+        status: 'approved',
+        operation_type: 'card_validation',
+        transaction_amount: 0,
+      },
+      paymentStatus: 'approved',
+      operationType: 'card_validation',
+      transactionAmount: 0,
+      externalReference: null,
+      metadataPreapprovalId: null,
+      poiType: 'UNSPECIFIED',
+      subscriptionId: null,
+      cardValidationMatch: true,
+      depositMatch: false,
+      depositReason: 'card_validation_payment',
+      loyaltyMatch: false,
+      loyaltyReason: 'card_validation_payment',
+      matchedFlow: 'card_validation',
+      matchRule: 'operation_type_card_validation',
+      loyaltyMatchContext: null,
+    }),
+    depositHandler: async () => {
+      depositCalls += 1
+      return { handled: true, status: 'approved' }
+    },
+    loyaltyPaymentHandler: async () => {
+      loyaltyCalls += 1
+      return { ok: true, handled: true, status: 'active' }
+    },
+  })
+
+  assert.equal(result.kind, 'seller_card_validation_ignored')
+  assert.equal(result.ownerType, 'establishment')
+  assert.equal(result.matchedFlow, 'card_validation')
+  assert.equal(result.responseBody.ignored, true)
+  assert.equal(result.responseBody.reason, 'card_validation_payment')
+  assert.equal(result.responseBody.matched_flow, 'card_validation')
+  assert.equal(result.responseBody.action_taken, 'ignored_card_validation')
+  assert.equal(result.responseBody.ignored_reason, 'card_validation_payment')
+  assert.equal(result.depositResult, null)
+  assert.equal(result.loyaltyResult, null)
+  assert.equal(depositCalls, 0)
+  assert.equal(loyaltyCalls, 0)
+})
+
 test('billing payment webhook ignores unknown foreign users', async () => {
   const result = await resolveBillingPaymentWebhookAction({
     resourceId: '155488227017',
@@ -323,6 +382,81 @@ test('connected seller payment flow match fetches payment.created and classifies
   assert.equal(result.metadataPreapprovalId, '87b2057170144ef3a7b8f13bfc5150e3')
   assert.equal(result.externalReference, 'loyalty:sub:17:est:26:cli:158:plan:1:uuid:test')
   assert.equal(result.poiType, 'SUBSCRIPTIONS')
+})
+
+test('connected seller payment flow match classifies operation_type card_validation before loyalty matching', async () => {
+  let loyaltyCalls = 0
+  const result = await resolveConnectedSellerPaymentFlowMatch({
+    resourceId: '155488227017',
+    connectedAccount: { id: 9, estabelecimento_id: 26, mp_user_id: '1055436081' },
+    bodyUserId: 1055436081,
+    resolveEstablishmentAccessToken: async () => ({
+      accessToken: 'seller-token',
+      account: { id: 9, estabelecimento_id: 26, mp_user_id: '1055436081' },
+    }),
+    fetchPayment: async (_paymentId, options) => {
+      assert.equal(options.accessToken, 'seller-token')
+      return {
+        id: '155488227017',
+        status: 'approved',
+        operation_type: 'card_validation',
+        transaction_amount: 0,
+        external_reference: null,
+        metadata: {},
+        point_of_interaction: { type: 'UNSPECIFIED', transaction_data: {} },
+      }
+    },
+    loyaltyPaymentMatcher: async () => {
+      loyaltyCalls += 1
+      return { matched: false, reason: 'not_loyalty_payment' }
+    },
+  })
+
+  assert.equal(result.paymentFetched, true)
+  assert.equal(result.cardValidationMatch, true)
+  assert.equal(result.depositMatch, false)
+  assert.equal(result.loyaltyMatch, false)
+  assert.equal(result.matchedFlow, 'card_validation')
+  assert.equal(result.matchRule, 'operation_type_card_validation')
+  assert.equal(result.paymentStatus, 'approved')
+  assert.equal(result.operationType, 'card_validation')
+  assert.equal(result.transactionAmount, 0)
+  assert.equal(result.externalReference, null)
+  assert.equal(result.metadataPreapprovalId, null)
+  assert.equal(result.subscriptionId, null)
+  assert.equal(loyaltyCalls, 0)
+})
+
+test('connected seller payment flow match classifies zero amount approved payment without linkage as card validation', async () => {
+  const result = await resolveConnectedSellerPaymentFlowMatch({
+    resourceId: '155488227018',
+    connectedAccount: { id: 9, estabelecimento_id: 26, mp_user_id: '1055436081' },
+    bodyUserId: 1055436081,
+    resolveEstablishmentAccessToken: async () => ({
+      accessToken: 'seller-token',
+      account: { id: 9, estabelecimento_id: 26, mp_user_id: '1055436081' },
+    }),
+    fetchPayment: async () => ({
+      id: '155488227018',
+      status: 'approved',
+      operation_type: 'regular_payment',
+      transaction_amount: '0.00',
+      external_reference: '',
+      metadata: {},
+      point_of_interaction: { type: 'UNSPECIFIED', transaction_data: {} },
+    }),
+    loyaltyPaymentMatcher: async () => {
+      throw new Error('loyalty matcher should not run for card validation payments')
+    },
+  })
+
+  assert.equal(result.paymentFetched, true)
+  assert.equal(result.cardValidationMatch, true)
+  assert.equal(result.matchedFlow, 'card_validation')
+  assert.equal(result.matchRule, 'approved_zero_amount_without_business_linkage')
+  assert.equal(result.transactionAmount, 0)
+  assert.equal(result.depositReason, 'card_validation_payment')
+  assert.equal(result.loyaltyReason, 'card_validation_payment')
 })
 
 test('client loyalty payment matcher recognizes recurring seller payments by subscription linkage', async () => {

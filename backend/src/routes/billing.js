@@ -452,6 +452,75 @@ function logSellerPaymentMatchFailures(payload = {}, flowMatch = null) {
   }
 }
 
+function normalizeMercadoPagoPaymentString(value) {
+  const normalized = String(value ?? '').trim()
+  return normalized || null
+}
+
+function normalizeMercadoPagoPaymentAmount(value) {
+  if (value === null || value === undefined || value === '') return null
+  const amount = Number(value)
+  return Number.isFinite(amount) ? amount : null
+}
+
+function resolveMercadoPagoPaymentMetadataPreapprovalId(payment = {}) {
+  const metadata = payment?.metadata || {}
+  return normalizeMercadoPagoPaymentString(
+    metadata.preapproval_id ||
+    metadata.preapprovalId ||
+    metadata.mp_preapproval_id ||
+    metadata.mpPreapprovalId ||
+    metadata.subscription_id ||
+    metadata.subscriptionId ||
+    payment?.preapproval_id ||
+    payment?.preapprovalId
+  )
+}
+
+function resolveMercadoPagoPaymentSubscriptionId(payment = {}) {
+  const transactionData = payment?.point_of_interaction?.transaction_data || {}
+  return normalizeMercadoPagoPaymentString(
+    payment?.subscription_id ||
+    payment?.subscriptionId ||
+    transactionData.subscription_id ||
+    transactionData.subscriptionId
+  )
+}
+
+function resolveMercadoPagoCardValidationMatch({
+  paymentStatus = null,
+  operationType = null,
+  transactionAmount = null,
+  externalReference = null,
+  metadataPreapprovalId = null,
+  subscriptionId = null,
+} = {}) {
+  if (operationType === 'card_validation') {
+    return {
+      matched: true,
+      matchRule: 'operation_type_card_validation',
+    }
+  }
+
+  if (
+    paymentStatus === 'approved' &&
+    transactionAmount === 0 &&
+    !externalReference &&
+    !metadataPreapprovalId &&
+    !subscriptionId
+  ) {
+    return {
+      matched: true,
+      matchRule: 'approved_zero_amount_without_business_linkage',
+    }
+  }
+
+  return {
+    matched: false,
+    matchRule: null,
+  }
+}
+
 function buildBillingWebhookOwnerResolutionPayload({
   requestId = null,
   resourceId = null,
@@ -1617,8 +1686,50 @@ async function resolveConnectedSellerPaymentFlowMatch({
     }
   }
 
-  const metadataType = String(payment?.metadata?.type || payment?.metadata?.kind || '').toLowerCase()
+  const paymentStatus = String(payment?.status || '').trim().toLowerCase() || null
+  const operationType = String(payment?.operation_type || payment?.operationType || '').trim().toLowerCase() || null
+  const transactionAmount = normalizeMercadoPagoPaymentAmount(payment?.transaction_amount)
   const externalReference = String(payment?.external_reference || '').trim() || null
+  const metadataPreapprovalId = resolveMercadoPagoPaymentMetadataPreapprovalId(payment)
+  const poiType = String(payment?.point_of_interaction?.type || '').trim().toUpperCase() || null
+  const subscriptionId = resolveMercadoPagoPaymentSubscriptionId(payment)
+  const cardValidationMatch = resolveMercadoPagoCardValidationMatch({
+    paymentStatus,
+    operationType,
+    transactionAmount,
+    externalReference,
+    metadataPreapprovalId,
+    subscriptionId,
+  })
+
+  if (cardValidationMatch.matched) {
+    return {
+      paymentFetched: true,
+      accessToken,
+      sellerAccount,
+      payment,
+      paymentStatus,
+      operationType,
+      transactionAmount,
+      externalReference,
+      metadataPreapprovalId,
+      poiType,
+      subscriptionId,
+      cardValidationMatch: true,
+      depositMatch: false,
+      depositReason: 'card_validation_payment',
+      loyaltyMatch: false,
+      loyaltyReason: 'card_validation_payment',
+      matchedFlow: 'card_validation',
+      matchRule: cardValidationMatch.matchRule,
+      conflict: false,
+      loyaltyMatchContext: null,
+      estabelecimentoId,
+      bodyUserId,
+    }
+  }
+
+  const metadataType = String(payment?.metadata?.type || payment?.metadata?.kind || '').toLowerCase()
   const depositMatch = metadataType === 'deposit' || /^dep:ag:\d+:pay:\d+:est:\d+/i.test(externalReference || '')
   const depositReason = depositMatch
     ? (metadataType === 'deposit' ? 'metadata_type_deposit' : 'external_reference_deposit')
@@ -1638,12 +1749,13 @@ async function resolveConnectedSellerPaymentFlowMatch({
     accessToken,
     sellerAccount,
     payment,
-    paymentStatus: String(payment?.status || '').trim().toLowerCase() || null,
-    operationType: String(payment?.operation_type || payment?.operationType || '').trim().toLowerCase() || null,
+    paymentStatus,
+    operationType,
+    transactionAmount,
     externalReference,
-    metadataPreapprovalId: loyaltyMatchContext?.preapprovalId || null,
-    poiType: String(payment?.point_of_interaction?.type || '').trim().toUpperCase() || null,
-    subscriptionId: loyaltyMatchContext?.subscriptionId || null,
+    metadataPreapprovalId: loyaltyMatchContext?.preapprovalId || metadataPreapprovalId,
+    poiType,
+    subscriptionId: loyaltyMatchContext?.subscriptionId || subscriptionId,
     depositMatch,
     depositReason,
     loyaltyMatch,
@@ -1706,6 +1818,26 @@ async function resolveBillingPaymentWebhookAction({
           ok: true,
           ignored: true,
           reason: 'conflicting_connected_seller_flow',
+        },
+      }
+    }
+
+    if (flowMatch?.paymentFetched && flowMatch?.matchedFlow === 'card_validation') {
+      return {
+        kind: 'seller_card_validation_ignored',
+        ownerType: 'establishment',
+        matchedFlow: 'card_validation',
+        connectedAccount,
+        flowMatch,
+        depositResult: null,
+        loyaltyResult: null,
+        responseBody: {
+          ok: true,
+          ignored: true,
+          reason: 'card_validation_payment',
+          matched_flow: 'card_validation',
+          action_taken: 'ignored_card_validation',
+          ignored_reason: 'card_validation_payment',
         },
       }
     }
@@ -5080,6 +5212,28 @@ router.post('/webhook', async (req, res) => {
         syncDecision,
         bodyUserId,
       })
+
+      if (paymentAction.kind === 'seller_card_validation_ignored') {
+        const estabelecimentoId =
+          paymentAction.connectedAccount?.estabelecimento_id ||
+          paymentAction.connectedAccount?.estabelecimentoId ||
+          paymentAction.flowMatch?.estabelecimentoId ||
+          null
+        console.info('[billing:webhook] seller_card_validation_ignored', {
+          request_id: requestId || null,
+          resource_id: resourceId || null,
+          body_user_id: bodyUserId ?? null,
+          estabelecimento_id: estabelecimentoId,
+          owner_type: 'establishment',
+          matched_flow: 'card_validation',
+          payment_status: paymentAction.flowMatch?.paymentStatus || null,
+          operation_type: paymentAction.flowMatch?.operationType || null,
+          transaction_amount: paymentAction.flowMatch?.transactionAmount ?? null,
+          action_taken: 'ignored_card_validation',
+          ignored_reason: 'card_validation_payment',
+        })
+        return res.status(200).json(paymentAction.responseBody)
+      }
 
       if (
         paymentAction.connectedAccount &&
