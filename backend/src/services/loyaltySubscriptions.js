@@ -11,6 +11,7 @@ import {
   syncClientLoyaltyAuthorizedPaymentFromGateway,
   syncClientLoyaltyCardSubscriptionFromGateway,
 } from '../lib/client_loyalty_billing.js'
+import { resolveClientLoyaltyIgnoredReasonForStorage } from '../lib/client_loyalty_subscriptions.js'
 import { disconnectMpAccount, getMpAccountBySellerIdentifier } from './mpAccounts.js'
 
 function safeJsonStringify(value) {
@@ -155,6 +156,7 @@ async function finalizeWebhookDelivery(id, {
   ignoredReason = null,
 } = {}) {
   if (!id) return
+  const ignoredReasonResolution = resolveClientLoyaltyIgnoredReasonForStorage(ignoredReason)
   try {
     await pool.query(
       `UPDATE mercadopago_webhook_events
@@ -178,7 +180,7 @@ async function finalizeWebhookDelivery(id, {
         externalReference || null,
         loyaltySubscriptionId || null,
         actionTaken || null,
-        ignoredReason || null,
+        ignoredReasonResolution.normalizedReason || null,
         id,
       ]
     )

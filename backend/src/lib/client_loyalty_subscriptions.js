@@ -18,6 +18,8 @@ export const CLIENT_LOYALTY_PAYMENT_METHODS = new Set(['credit_card', 'pix'])
 export const CLIENT_LOYALTY_OWNER_TYPES = new Set(['platform', 'establishment'])
 export const CLIENT_LOYALTY_GATEWAY_EVENT_ID_DB_LENGTH = 191
 export const CLIENT_LOYALTY_GATEWAY_EVENT_ID_SAFE_LENGTH = 120
+export const CLIENT_LOYALTY_IGNORED_REASON_DB_LENGTH = 191
+export const CLIENT_LOYALTY_IGNORED_REASON_SAFE_LENGTH = 80
 
 const COLUMN_MAP = {
   clienteId: 'cliente_id',
@@ -68,6 +70,64 @@ function safeJsonParse(value) {
 function stableHash(value, length = 32) {
   const input = typeof value === 'string' ? value : JSON.stringify(value ?? null)
   return createHash('sha256').update(input || '').digest('hex').slice(0, length)
+}
+
+function normalizeReasonToken(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+}
+
+export function resolveClientLoyaltyIgnoredReasonForStorage(value, {
+  maxLength = CLIENT_LOYALTY_IGNORED_REASON_SAFE_LENGTH,
+} = {}) {
+  const originalReason = value == null ? '' : String(value).trim()
+  if (!originalReason) {
+    return {
+      originalReason: null,
+      normalizedReason: null,
+      originalLength: 0,
+      changed: false,
+      strategy: 'empty',
+    }
+  }
+
+  const normalizedText = originalReason.toLowerCase()
+  if (/card token was generated without cvv validation/i.test(originalReason) ||
+      /without cvv validation/i.test(originalReason) ||
+      normalizedText === 'card_token_without_cvv_validation') {
+    return {
+      originalReason,
+      normalizedReason: 'card_token_without_cvv_validation',
+      originalLength: originalReason.length,
+      changed: originalReason !== 'card_token_without_cvv_validation',
+      strategy: 'known_gateway_error',
+    }
+  }
+
+  const token = normalizeReasonToken(originalReason) || 'ignored'
+  if (token.length <= maxLength) {
+    return {
+      originalReason,
+      normalizedReason: token,
+      originalLength: originalReason.length,
+      changed: token !== originalReason,
+      strategy: 'normalized_token',
+    }
+  }
+
+  const hash = stableHash(originalReason, 8)
+  const normalizedReason = `${token.slice(0, Math.max(1, maxLength - 9))}_${hash}`
+  return {
+    originalReason,
+    normalizedReason,
+    originalLength: originalReason.length,
+    changed: true,
+    strategy: 'normalized_token_hash_suffix',
+  }
 }
 
 function normalizeIdToken(value, fallback = '') {
@@ -228,6 +288,26 @@ function withGatewayEventIdNormalizationPayload(payload, resolution) {
   return {
     value: payload ?? null,
     event_id_normalization: metadata,
+  }
+}
+
+function withIgnoredReasonNormalizationPayload(payload, resolution) {
+  if (!resolution?.changed) return payload
+  const metadata = {
+    original_reason: resolution.originalReason || null,
+    original_length: resolution.originalLength || 0,
+    normalized_reason: resolution.normalizedReason || null,
+    strategy: resolution.strategy || null,
+  }
+  if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
+    return {
+      ...payload,
+      ignored_reason_normalization: metadata,
+    }
+  }
+  return {
+    value: payload ?? null,
+    ignored_reason_normalization: metadata,
   }
 }
 
@@ -636,6 +716,8 @@ export async function appendClientLoyaltySubscriptionEvent(
     mpTopic,
     paymentType,
   })
+  const ignoredReasonResolution = resolveClientLoyaltyIgnoredReasonForStorage(ignoredReason)
+  const normalizedIgnoredReason = ignoredReasonResolution.normalizedReason
 
   if (normalizedGatewayEventId) {
     const [existing] = await db.query(
@@ -650,7 +732,8 @@ export async function appendClientLoyaltySubscriptionEvent(
     if (existing?.length) return { duplicated: true, id: existing[0].id }
   }
   const payloadWithEventId = withGatewayEventIdNormalizationPayload(payload, gatewayEventIdResolution)
-  const safePayload = payloadWithEventId == null ? null : sanitizeMercadoPagoSensitivePayload(payloadWithEventId)
+  const payloadWithIgnoredReason = withIgnoredReasonNormalizationPayload(payloadWithEventId, ignoredReasonResolution)
+  const safePayload = payloadWithIgnoredReason == null ? null : sanitizeMercadoPagoSensitivePayload(payloadWithIgnoredReason)
   const [result] = await db.query(
     `INSERT INTO client_loyalty_subscription_events
       (
@@ -689,7 +772,7 @@ export async function appendClientLoyaltySubscriptionEvent(
       paymentType == null ? null : String(paymentType),
       amountCents == null ? null : Number(amountCents),
       actionTaken == null ? null : String(actionTaken),
-      ignoredReason == null ? null : String(ignoredReason),
+      normalizedIgnoredReason,
       safePayload == null ? null : JSON.stringify(safePayload),
     ]
   )

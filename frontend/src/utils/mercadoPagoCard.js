@@ -25,6 +25,7 @@ export function isMercadoPagoCardTokenRefreshRequired(error) {
     'card_token_already_consumed',
     'card_token_invalid_format',
     'card_token_required',
+    'card_token_without_cvv_validation',
   ].includes(code)) {
     return true
   }
@@ -45,11 +46,17 @@ export function isMercadoPagoCardTokenRefreshRequired(error) {
 
   return (
     message.includes('invalid card_token_id') ||
+    message.includes('without cvv validation') ||
+    message.includes('sem validacao de cvv') ||
     message.includes('token do cartao')
   )
 }
 
 export function getMercadoPagoCardErrorMessage(error, fallback = 'Não foi possível processar o cartão.') {
+  if (getErrorCode(error) === 'card_token_without_cvv_validation') {
+    return 'Informe novamente o c\u00f3digo de seguran\u00e7a do cart\u00e3o. Por seguran\u00e7a, gere um novo token do cart\u00e3o.'
+  }
+
   if (isMercadoPagoCardTokenRefreshRequired(error)) {
     return 'Os dados do cartão precisam ser confirmados novamente para gerar um novo token de segurança.'
   }

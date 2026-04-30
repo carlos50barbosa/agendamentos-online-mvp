@@ -11,9 +11,11 @@ import { getMercadoPagoCardErrorMessage, isMercadoPagoCardTokenRefreshRequired }
 import {
   buildLoyaltyRiskContext,
   buildLoyaltyCardPaymentPayload,
+  buildLoyaltyCardTokenSubmitContext,
   getLoyaltyCardholderNameDebugInfo,
   LOYALTY_CARDHOLDER_NAME_FIELD,
   resolveLoyaltyCardholderName,
+  validateLoyaltyCardTokenSubmitContext,
   validateLoyaltyCardPayerData,
 } from '../utils/loyaltyPaymentValidation.js'
 
@@ -90,6 +92,11 @@ function getInputValueById(id) {
   if (typeof document === 'undefined') return ''
   const element = document.getElementById(id)
   return typeof element?.value === 'string' ? element.value : ''
+}
+
+function hasElementById(id) {
+  if (typeof document === 'undefined') return false
+  return Boolean(document.getElementById(id))
 }
 
 function formatFailureDetail(failure) {
@@ -319,10 +326,31 @@ export default function LoyaltyAssinaturaCliente() {
     }))
   }, [])
 
-  const handleCardSubmit = useCallback(async (cardFormData) => {
-    if (!estabelecimentoId || !selectedPlanId || !cardFormData?.token || cardSubmittingRef.current) return false
+  const handleCardSubmit = useCallback(async (cardFormData, submitContext = {}) => {
+    if (!estabelecimentoId || !selectedPlanId || cardSubmittingRef.current) return false
     if (!sellerConnected) {
       setNotice({ type: 'error', message: 'Conta Mercado Pago desconectada ou sem permissao valida.' })
+      return false
+    }
+    const cardTokenContext = buildLoyaltyCardTokenSubmitContext({
+      cardFormData,
+      submittedAtMs: submitContext.submittedAtMs,
+      tokenGeneratedAtMs: submitContext.tokenGeneratedAtMs,
+      cvvFieldPresent: submitContext.cvvFieldPresent,
+      tokenSource: submitContext.tokenSource || 'cardform_submit',
+    })
+    console.info('[loyalty][card-token] submit_context', {
+      cvv_field_present: cardTokenContext.cvvFieldPresent,
+      token_generated_at_submit: cardTokenContext.tokenGeneratedAtSubmit,
+      token_age_ms: cardTokenContext.tokenAgeMs,
+      token_source: cardTokenContext.tokenSource,
+      retry_with_new_token: false,
+    })
+    const tokenValidation = validateLoyaltyCardTokenSubmitContext(cardTokenContext)
+    if (!tokenValidation.valid) {
+      const message = tokenValidation.message || 'Informe novamente os dados do cartÃ£o.'
+      setCardState((current) => ({ ...current, error: message }))
+      setNotice({ type: 'error', message })
       return false
     }
     const cardholderInputValue = getInputValueById('client-loyalty-card-holder')
@@ -372,6 +400,7 @@ export default function LoyaltyAssinaturaCliente() {
         payerValidation,
         user,
         riskContext,
+        cardTokenContext,
       }))
       setCardState((current) => ({ ...current, error: '' }))
       setNotice({ type: 'success', message: 'Cartão validado. A primeira cobrança será confirmada pelo Mercado Pago. Esse processo pode levar até cerca de 1 hora.' })
@@ -380,6 +409,13 @@ export default function LoyaltyAssinaturaCliente() {
     } catch (error) {
       const message = getMercadoPagoCardErrorMessage(error, 'Não foi possível processar o cartão.')
       if (isMercadoPagoCardTokenRefreshRequired(error)) {
+        console.info('[loyalty][card-token] retry_new_token_required', {
+          cvv_field_present: cardTokenContext.cvvFieldPresent,
+          token_generated_at_submit: cardTokenContext.tokenGeneratedAtSubmit,
+          token_age_ms: cardTokenContext.tokenAgeMs,
+          token_source: cardTokenContext.tokenSource,
+          retry_with_new_token: true,
+        })
         resetCardFormForNewToken()
       }
       setCardState((current) => ({ ...current, error: message }))
@@ -448,8 +484,14 @@ export default function LoyaltyAssinaturaCliente() {
             },
             onSubmit: async (event) => {
               event.preventDefault()
+              const submittedAtMs = Date.now()
               const data = cardForm.getCardFormData()
-              await handleCardSubmit(data)
+              await handleCardSubmit(data, {
+                submittedAtMs,
+                tokenGeneratedAtMs: submittedAtMs,
+                cvvFieldPresent: hasElementById('client-loyalty-card-cvv'),
+                tokenSource: 'cardform_submit',
+              })
             },
           },
         })

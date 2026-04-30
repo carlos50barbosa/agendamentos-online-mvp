@@ -29,16 +29,20 @@ function createInternalRequestId(req) {
 
 function handleRouteError(res, error, requestId = null) {
   const normalized = toMercadoPagoCardFlowError(error) || error
+  const retryWithNewToken = normalized?.details?.retry_with_new_token === true ||
+    normalized?.retry_with_new_token === true
   console.error('[client-loyalty] route_failed', {
     request_id: requestId || null,
     error: normalized?.code || 'internal_error',
     message: normalized?.message || 'Falha ao processar assinatura de fidelidade.',
     details: normalized?.details || null,
+    retry_with_new_token: retryWithNewToken,
   })
   return res.status(Number(normalized?.status || 500)).json({
     error: normalized?.code || 'internal_error',
     message: normalized?.message || 'Falha ao processar assinatura de fidelidade.',
     details: normalized?.details || null,
+    retry_with_new_token: retryWithNewToken,
     request_id: requestId || null,
   })
 }
@@ -80,6 +84,16 @@ function buildClientLoyaltyRequestContext(req, requestId, route) {
   const riskContext = body.risk_context && typeof body.risk_context === 'object'
     ? body.risk_context
     : {}
+  const cardTokenTelemetry = {
+    cvv_field_present: body.cvv_field_present ?? riskContext.cvv_field_present ?? null,
+    token_generated_at_submit: body.token_generated_at_submit ?? riskContext.token_generated_at_submit ?? null,
+    token_age_ms: body.token_age_ms ?? riskContext.token_age_ms ?? null,
+    card_token_source: normalizeText(
+      body.card_token_source ||
+      riskContext.card_token_source ||
+      riskContext.token_source
+    ) || null,
+  }
   return {
     requestId,
     route,
@@ -92,6 +106,10 @@ function buildClientLoyaltyRequestContext(req, requestId, route) {
       normalizeText(req.headers['x-meli-session-id']) ||
       null,
     riskContext,
+    cvv_field_present: cardTokenTelemetry.cvv_field_present,
+    token_generated_at_submit: cardTokenTelemetry.token_generated_at_submit,
+    token_age_ms: cardTokenTelemetry.token_age_ms,
+    card_token_source: cardTokenTelemetry.card_token_source,
   }
 }
 

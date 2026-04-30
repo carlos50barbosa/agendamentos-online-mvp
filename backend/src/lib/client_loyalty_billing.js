@@ -2078,6 +2078,8 @@ export async function startClientLoyaltyCardSubscription({
       payload: {
         message: error?.message || String(error),
         code: error?.code || null,
+        retry_with_new_token: error?.details?.retry_with_new_token === true,
+        gateway_error: error?.details || null,
       },
     }, { db })
     throw error

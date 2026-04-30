@@ -10,10 +10,16 @@ const {
 const {
   LOYALTY_CARDHOLDER_NAME_FIELD,
   buildLoyaltyCardPaymentPayload,
+  buildLoyaltyCardTokenSubmitContext,
   buildLoyaltyRiskContext,
   resolveLoyaltyCardholderName,
+  validateLoyaltyCardTokenSubmitContext,
   validateLoyaltyCardPayerData,
 } = await import('../../frontend/src/utils/loyaltyPaymentValidation.js')
+const {
+  getMercadoPagoCardErrorMessage,
+  isMercadoPagoCardTokenRefreshRequired,
+} = await import('../../frontend/src/utils/mercadoPagoCard.js')
 
 test('loyalty failure display keeps subscription status separate from technical failure code', () => {
   const display = resolveLoyaltyFailureDisplay({
@@ -213,6 +219,66 @@ test('loyalty card payload uses the same holder-name key validated by the UI', (
 
   assert.equal(payload[LOYALTY_CARDHOLDER_NAME_FIELD], payerValidation.normalized.cardholderName)
   assert.equal(payload.cardholderName, undefined)
+})
+
+test('loyalty card payload carries safe submit-time token telemetry', () => {
+  const payerValidation = validateLoyaltyCardPayerData({
+    payerEmail: 'cliente@example.com',
+    [LOYALTY_CARDHOLDER_NAME_FIELD]: 'Maria Silva',
+    identificationType: 'CPF',
+    identificationNumber: '529.982.247-25',
+    payerPhone: '+55 (11) 98765-4321',
+  })
+  const payload = buildLoyaltyCardPaymentPayload({
+    estabelecimentoId: '26',
+    loyaltyPlanId: '7',
+    cardFormData: {
+      token: 'card-token',
+      paymentMethodId: 'visa',
+    },
+    payerValidation,
+    cardTokenContext: {
+      cvvFieldPresent: true,
+      tokenSource: 'cardform_submit',
+      tokenGeneratedAtMs: Date.now(),
+    },
+  })
+
+  assert.equal(payload.card_token, 'card-token')
+  assert.equal(payload.cvv_field_present, true)
+  assert.equal(payload.token_generated_at_submit, true)
+  assert.equal(payload.card_token_source, 'cardform_submit')
+  assert.equal(payload.risk_context.cvv_field_present, true)
+  assert.equal(payload.security_code, undefined)
+  assert.equal(payload.cvv, undefined)
+})
+
+test('loyalty card token submit validation blocks missing CVV tokenization', () => {
+  const context = buildLoyaltyCardTokenSubmitContext({
+    cardFormData: { token: '' },
+    cvvFieldPresent: true,
+    tokenSource: 'cardform_submit',
+    tokenGeneratedAtMs: Date.now(),
+  })
+  const result = validateLoyaltyCardTokenSubmitContext(context)
+
+  assert.equal(result.valid, false)
+  assert.match(result.message, /c[oó]digo de seguran/i)
+})
+
+test('Mercado Pago CVV-validation token error forces a new card token in the frontend', () => {
+  const error = {
+    data: {
+      error: 'card_token_without_cvv_validation',
+      retry_with_new_token: true,
+      details: {
+        gateway_message: 'Card token was generated without CVV validation',
+      },
+    },
+  }
+
+  assert.equal(isMercadoPagoCardTokenRefreshRequired(error), true)
+  assert.match(getMercadoPagoCardErrorMessage(error), /c[oó]digo de seguran/i)
 })
 
 test('loyalty cardholder resolver accepts SDK aliases before validation', () => {

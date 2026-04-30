@@ -2,6 +2,20 @@ function normalizeValue(value) {
   return String(value || '').trim()
 }
 
+function normalizeBoolean(value) {
+  if (value === true || value === false) return value
+  const normalized = normalizeValue(value).toLowerCase()
+  if (['true', '1', 'yes', 'sim'].includes(normalized)) return true
+  if (['false', '0', 'no', 'nao'].includes(normalized)) return false
+  return false
+}
+
+function normalizeNonNegativeNumber(value) {
+  if (value === null || value === undefined || value === '') return null
+  const number = Number(value)
+  return Number.isFinite(number) && number >= 0 ? Math.trunc(number) : null
+}
+
 function normalizeSpaces(value) {
   return normalizeValue(value).replace(/\s+/g, ' ')
 }
@@ -177,8 +191,13 @@ export function buildLoyaltyCardPaymentPayload({
   payerValidation = {},
   user = {},
   riskContext = {},
+  cardTokenContext = {},
 } = {}) {
   const normalized = payerValidation.normalized || {}
+  const tokenContext = buildLoyaltyCardTokenSubmitContext({
+    cardFormData,
+    ...cardTokenContext,
+  })
   return {
     estabelecimento_id: Number(estabelecimentoId),
     loyalty_plan_id: Number(loyaltyPlanId),
@@ -191,7 +210,69 @@ export function buildLoyaltyCardPaymentPayload({
     identification_type: normalized.identificationType || null,
     identification_number: normalized.identificationNumber || null,
     mp_device_session_id: riskContext.mp_device_session_id || null,
-    risk_context: riskContext,
+    card_token_source: tokenContext.tokenSource,
+    token_generated_at_submit: tokenContext.tokenGeneratedAtSubmit,
+    token_age_ms: tokenContext.tokenAgeMs,
+    cvv_field_present: tokenContext.cvvFieldPresent,
+    risk_context: {
+      ...riskContext,
+      card_token_source: tokenContext.tokenSource,
+      token_generated_at_submit: tokenContext.tokenGeneratedAtSubmit,
+      token_age_ms: tokenContext.tokenAgeMs,
+      cvv_field_present: tokenContext.cvvFieldPresent,
+    },
+  }
+}
+
+export function buildLoyaltyCardTokenSubmitContext({
+  cardFormData = {},
+  submittedAtMs = Date.now(),
+  tokenGeneratedAtMs = null,
+  cvvFieldPresent = false,
+  tokenSource = 'cardform_submit',
+} = {}) {
+  const token = normalizeValue(cardFormData?.token)
+  const generatedAtMs = normalizeNonNegativeNumber(tokenGeneratedAtMs) || normalizeNonNegativeNumber(submittedAtMs) || Date.now()
+  const ageMs = Math.max(0, Date.now() - generatedAtMs)
+  const source = normalizeValue(tokenSource) || 'cardform_submit'
+  return {
+    cardTokenPresent: Boolean(token),
+    cvvFieldPresent: normalizeBoolean(cvvFieldPresent),
+    tokenGeneratedAtSubmit: Boolean(token && source === 'cardform_submit'),
+    tokenAgeMs: ageMs,
+    tokenSource: source,
+  }
+}
+
+export function validateLoyaltyCardTokenSubmitContext(context = {}) {
+  const normalized = {
+    cardTokenPresent: Boolean(context.cardTokenPresent),
+    cvvFieldPresent: normalizeBoolean(context.cvvFieldPresent),
+    tokenGeneratedAtSubmit: normalizeBoolean(context.tokenGeneratedAtSubmit),
+    tokenAgeMs: normalizeNonNegativeNumber(context.tokenAgeMs),
+    tokenSource: normalizeValue(context.tokenSource) || 'unknown',
+  }
+
+  if (!normalized.cvvFieldPresent) {
+    return {
+      valid: false,
+      message: 'N\u00e3o foi poss\u00edvel carregar o campo de c\u00f3digo de seguran\u00e7a do cart\u00e3o. Recarregue o formul\u00e1rio e tente novamente.',
+      normalized,
+    }
+  }
+
+  if (!normalized.cardTokenPresent || !normalized.tokenGeneratedAtSubmit || normalized.tokenSource !== 'cardform_submit') {
+    return {
+      valid: false,
+      message: 'Informe novamente o c\u00f3digo de seguran\u00e7a do cart\u00e3o para gerar um novo token.',
+      normalized,
+    }
+  }
+
+  return {
+    valid: true,
+    message: '',
+    normalized,
   }
 }
 

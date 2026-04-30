@@ -70,6 +70,44 @@ function logMercadoPagoCardOperation(level, tag, payload) {
   logger(`[mercadopago/card-token] ${tag}`, sanitizeMercadoPagoSensitivePayload(payload))
 }
 
+function normalizeBooleanTelemetry(value) {
+  if (value === true || value === false) return value
+  const normalized = String(value ?? '').trim().toLowerCase()
+  if (['true', '1', 'yes', 'sim'].includes(normalized)) return true
+  if (['false', '0', 'no', 'nao'].includes(normalized)) return false
+  return null
+}
+
+function normalizeNumberTelemetry(value) {
+  if (value === null || value === undefined || value === '') return null
+  const normalized = Number(value)
+  return Number.isFinite(normalized) && normalized >= 0 ? Math.trunc(normalized) : null
+}
+
+function resolveMercadoPagoCardTokenTelemetry(requestContext = {}) {
+  const riskContext = requestContext?.riskContext && typeof requestContext.riskContext === 'object'
+    ? requestContext.riskContext
+    : {}
+  const source = String(
+    requestContext?.card_token_source ||
+    riskContext.card_token_source ||
+    riskContext.token_source ||
+    ''
+  ).trim() || null
+  return {
+    cvv_field_present: normalizeBooleanTelemetry(
+      requestContext?.cvv_field_present ?? riskContext.cvv_field_present
+    ),
+    token_generated_at_submit: normalizeBooleanTelemetry(
+      requestContext?.token_generated_at_submit ?? riskContext.token_generated_at_submit
+    ),
+    token_age_ms: normalizeNumberTelemetry(
+      requestContext?.token_age_ms ?? riskContext.token_age_ms
+    ),
+    token_source: source,
+  }
+}
+
 function amountToGatewayValue(amountCents) {
   return Number((Number(amountCents || 0) / 100).toFixed(2))
 }
@@ -525,9 +563,12 @@ export async function createMercadoPagoCardPreapproval({
     externalReference: payload.external_reference || null,
     requestId: requestContext?.requestId || null,
   })
+  const cardTokenTelemetry = resolveMercadoPagoCardTokenTelemetry(requestContext)
   logMercadoPagoCardOperation('info', 'consume', {
     ...tokenClaim.logMeta,
     credential_diagnostics: credentialDiagnostics,
+    ...cardTokenTelemetry,
+    retry_with_new_token: false,
   })
   const deviceHeaders = buildMercadoPagoDeviceSessionHeaders(requestContext)
   console.info('[mercadopago/subscriptions][preapproval] sending', {
@@ -537,6 +578,7 @@ export async function createMercadoPagoCardPreapproval({
     payer: summarizePayerForLog(payer),
     device_session_id_present: Boolean(deviceHeaders['X-meli-session-id']),
     payer_validation_warnings: requestContext?.payer_validation_warnings || null,
+    card_token_telemetry: cardTokenTelemetry,
   })
 
   validateFutureSubscriptionStartDate(payload.auto_recurring.start_date, { nowMs: Date.now() })
@@ -562,6 +604,7 @@ export async function createMercadoPagoCardPreapproval({
     }
   } catch (error) {
     const snapshot = extractMercadoPagoErrorSnapshot(error)
+    const cardFlowError = toMercadoPagoCardFlowError(error)
     markMercadoPagoDisposableCardTokenOutcome(cardToken, 'error', {
       gateway_status: snapshot.status,
       gateway_error: snapshot.gateway_error,
@@ -570,9 +613,11 @@ export async function createMercadoPagoCardPreapproval({
     logMercadoPagoCardOperation('error', 'gateway_failure', {
       ...tokenClaim.logMeta,
       credential_diagnostics: credentialDiagnostics,
+      ...cardTokenTelemetry,
       gateway_error: snapshot,
+      retry_with_new_token: Boolean(cardFlowError?.details?.retry_with_new_token),
     })
-    throw toMercadoPagoCardFlowError(error) || error
+    throw cardFlowError || error
   }
 }
 

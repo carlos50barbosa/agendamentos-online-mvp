@@ -278,12 +278,40 @@ export function isMercadoPagoInvalidCardTokenError(error) {
   )
 }
 
+export function isMercadoPagoCardTokenWithoutCvvValidationError(error) {
+  const snapshot = extractMercadoPagoErrorSnapshot(error)
+  const message = [
+    snapshot.gateway_message,
+    snapshot.gateway_cause_description,
+    error?.message,
+  ].filter(Boolean).join(' ')
+  return /card token was generated without cvv validation/i.test(message) ||
+    /without cvv validation/i.test(message)
+}
+
 export function toMercadoPagoCardFlowError(error) {
   if (!error) return null
 
   if (error?.code === 'card_token_required') return error
   if (error?.code === 'card_token_invalid_format') return error
   if (error?.code === 'card_token_already_consumed') return error
+  if (error?.code === 'card_token_without_cvv_validation') return error
+
+  if (isMercadoPagoCardTokenWithoutCvvValidationError(error)) {
+    const snapshot = extractMercadoPagoErrorSnapshot(error)
+    return createMercadoPagoCardFlowError(
+      'card_token_without_cvv_validation',
+      'Informe novamente o c\u00f3digo de seguran\u00e7a do cart\u00e3o. Por seguran\u00e7a, gere um novo token do cart\u00e3o.',
+      {
+        status: 409,
+        details: {
+          ...snapshot,
+          retry_with_new_token: true,
+        },
+        cause: error,
+      }
+    )
+  }
 
   if (isMercadoPagoInvalidCardTokenError(error)) {
     const snapshot = extractMercadoPagoErrorSnapshot(error)
@@ -334,7 +362,7 @@ export function sanitizeMercadoPagoSensitivePayload(value, seen = new WeakSet())
       continue
     }
 
-    if (['security_code', 'securitycode', 'cvv'].includes(normalizedKey)) {
+    if (['security_code', 'securitycode', 'security_code_id', 'securitycodeid', 'cvv'].includes(normalizedKey)) {
       next[key] = CVV_REDACTED
       continue
     }

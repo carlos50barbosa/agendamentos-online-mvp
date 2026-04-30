@@ -3,7 +3,9 @@ import test from 'node:test'
 
 import {
   claimMercadoPagoDisposableCardToken,
+  markMercadoPagoDisposableCardTokenOutcome,
   resetMercadoPagoDisposableCardTokenRegistryForTests,
+  toMercadoPagoCardFlowError,
 } from '../src/lib/mercadopago_card_tokens.js'
 
 test.beforeEach(() => {
@@ -57,6 +59,60 @@ test('claimMercadoPagoDisposableCardToken blocks reuse across different operatio
       assert.equal(error?.details?.first_token_preapproval_id, 'preapp_123')
       assert.equal(error?.details?.first_token_external_reference, 'subscription:266:update')
       assert.equal(error?.details?.first_token_endpoint, '/preapproval/preapp_123')
+      return true
+    }
+  )
+})
+
+test('toMercadoPagoCardFlowError maps missing CVV validation to retry with new token', () => {
+  const gatewayError = new Error('mercadopago_subscription_error:POST:/preapproval')
+  gatewayError.status = 400
+  gatewayError.responseData = {
+    message: 'Card token was generated without CVV validation',
+    error: 'bad_request',
+    status: 400,
+  }
+
+  const result = toMercadoPagoCardFlowError(gatewayError)
+
+  assert.equal(result?.code, 'card_token_without_cvv_validation')
+  assert.equal(result?.status, 409)
+  assert.equal(result?.details?.retry_with_new_token, true)
+  assert.equal(result?.details?.gateway_message, 'Card token was generated without CVV validation')
+  assert.match(result?.message, /c[oó]digo de seguran/i)
+})
+
+test('card token cannot be reused after a failed gateway attempt', () => {
+  const token = 'tok_test_failed_attempt_1234567890'
+
+  claimMercadoPagoDisposableCardToken({
+    token,
+    operation: 'client_loyalty_card_subscription_create',
+    endpoint: '/preapproval',
+    environment: 'production',
+    externalReference: 'loyalty:sub:22:est:26:cli:1:plan:1:uuid:test',
+    subscriptionId: '22',
+    requestId: 'req-1',
+  })
+  markMercadoPagoDisposableCardTokenOutcome(token, 'error', {
+    gateway_status: 400,
+    gateway_error: 'bad_request',
+  })
+
+  assert.throws(
+    () => claimMercadoPagoDisposableCardToken({
+      token,
+      operation: 'client_loyalty_card_subscription_create',
+      endpoint: '/preapproval',
+      environment: 'production',
+      externalReference: 'loyalty:sub:23:est:26:cli:1:plan:1:uuid:test',
+      subscriptionId: '23',
+      requestId: 'req-2',
+    }),
+    (error) => {
+      assert.equal(error?.code, 'card_token_already_consumed')
+      assert.equal(error?.details?.retry_with_new_token, true)
+      assert.equal(error?.details?.first_token_outcome, 'error')
       return true
     }
   )
