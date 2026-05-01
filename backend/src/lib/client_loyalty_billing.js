@@ -1956,7 +1956,12 @@ export async function startClientLoyaltyCardSubscription({
   requestContext = {},
 } = {}) {
   if (!cardToken) {
-    throw createError('Token do cartão não informado.', 400, 'card_token_required')
+    throw createError(
+      'Informe novamente o c\u00f3digo de seguran\u00e7a do cart\u00e3o.',
+      400,
+      'card_token_required',
+      { retry_with_new_token: true }
+    )
   }
 
   const { plan, estabelecimento, cliente } = await resolveLoyaltyCheckoutContext(

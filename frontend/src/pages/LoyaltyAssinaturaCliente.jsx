@@ -7,7 +7,17 @@ import {
   resolveLoyaltyPaymentStateDisplay,
   resolveLoyaltyRetryDisplay,
 } from '../utils/loyaltyFailure.js'
-import { getMercadoPagoCardErrorMessage, isMercadoPagoCardTokenRefreshRequired } from '../utils/mercadoPagoCard.js'
+import {
+  buildClientLoyaltyMercadoPagoCardSubmitContext,
+  buildClientLoyaltyMercadoPagoCardFormConfig,
+  clearMercadoPagoHiddenCardTokens,
+  CLIENT_LOYALTY_MP_CARD_FORM_IDS,
+  getMercadoPagoCardErrorMessage,
+  getMercadoPagoCardFormBindingDiagnostics,
+  getMercadoPagoHiddenCardToken,
+  isMercadoPagoCardTokenRefreshRequired,
+  waitForMercadoPagoCardFormBindingDiagnostics,
+} from '../utils/mercadoPagoCard.js'
 import {
   buildLoyaltyRiskContext,
   buildLoyaltyCardPaymentPayload,
@@ -94,11 +104,6 @@ function getInputValueById(id) {
   return typeof element?.value === 'string' ? element.value : ''
 }
 
-function hasElementById(id) {
-  if (typeof document === 'undefined') return false
-  return Boolean(document.getElementById(id))
-}
-
 function formatFailureDetail(failure) {
   if (!failure) return ''
   const parts = [
@@ -167,6 +172,8 @@ export default function LoyaltyAssinaturaCliente() {
   const planFromQuery = searchParams.get('plano') || ''
   const cardFormRef = useRef(null)
   const cardSubmittingRef = useRef(false)
+  const cardSubmitAttemptRef = useRef(null)
+  const lastCardTokenRef = useRef('')
 
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
@@ -316,7 +323,9 @@ export default function LoyaltyAssinaturaCliente() {
     try {
       cardFormRef.current?.unmount?.()
     } catch {}
+    clearMercadoPagoHiddenCardTokens(CLIENT_LOYALTY_MP_CARD_FORM_IDS.form)
     cardFormRef.current = null
+    cardSubmitAttemptRef.current = null
     cardSubmittingRef.current = false
     setCardFormResetKey((current) => current + 1)
     setCardState((current) => ({
@@ -337,14 +346,36 @@ export default function LoyaltyAssinaturaCliente() {
       submittedAtMs: submitContext.submittedAtMs,
       tokenGeneratedAtMs: submitContext.tokenGeneratedAtMs,
       cvvFieldPresent: submitContext.cvvFieldPresent,
-      tokenSource: submitContext.tokenSource || 'cardform_submit',
+      cvvDomValuePresent: submitContext.cvvDomValuePresent,
+      cvvFieldBoundToMpForm: submitContext.cvvFieldBoundToMpForm,
+      securityCodeIframePresent: submitContext.securityCodeIframePresent,
+      tokenFromMpSdkSubmit: submitContext.tokenFromMpSdkSubmit,
+      mpCardformFieldsConfigured: submitContext.mpCardformFieldsConfigured,
+      securityCodeFieldId: submitContext.securityCodeFieldId,
+      hiddenTokenPresentBeforeSubmit: submitContext.hiddenTokenPresentBeforeSubmit,
+      hiddenTokenPresentAfterSubmit: submitContext.hiddenTokenPresentAfterSubmit,
+      hiddenTokensCleared: submitContext.hiddenTokensCleared,
+      hiddenTokenReused: submitContext.hiddenTokenReused,
+      previousSubmittedTokenReused: submitContext.previousSubmittedTokenReused,
+      retryWithNewToken: submitContext.retryWithNewToken,
+      tokenSource: submitContext.tokenSource || 'unknown',
     })
     console.info('[loyalty][card-token] submit_context', {
-      cvv_field_present: cardTokenContext.cvvFieldPresent,
+      cvv_dom_value_present: cardTokenContext.cvvDomValuePresent,
+      cvv_field_bound_to_mp_form: cardTokenContext.cvvFieldBoundToMpForm,
+      security_code_iframe_present: cardTokenContext.securityCodeIframePresent,
       token_generated_at_submit: cardTokenContext.tokenGeneratedAtSubmit,
+      token_from_mp_sdk_submit: cardTokenContext.tokenFromMpSdkSubmit,
       token_age_ms: cardTokenContext.tokenAgeMs,
       token_source: cardTokenContext.tokenSource,
-      retry_with_new_token: false,
+      mp_cardform_fields_configured: cardTokenContext.mpCardformFieldsConfigured,
+      security_code_field_id: cardTokenContext.securityCodeFieldId,
+      hidden_token_present_before_submit: cardTokenContext.hiddenTokenPresentBeforeSubmit,
+      hidden_token_present_after_submit: cardTokenContext.hiddenTokenPresentAfterSubmit,
+      hidden_tokens_cleared: cardTokenContext.hiddenTokensCleared,
+      hidden_token_reused: cardTokenContext.hiddenTokenReused,
+      previous_token_reused: cardTokenContext.previousSubmittedTokenReused,
+      retry_with_new_token: cardTokenContext.retryWithNewToken,
     })
     const tokenValidation = validateLoyaltyCardTokenSubmitContext(cardTokenContext)
     if (!tokenValidation.valid) {
@@ -410,10 +441,20 @@ export default function LoyaltyAssinaturaCliente() {
       const message = getMercadoPagoCardErrorMessage(error, 'Não foi possível processar o cartão.')
       if (isMercadoPagoCardTokenRefreshRequired(error)) {
         console.info('[loyalty][card-token] retry_new_token_required', {
-          cvv_field_present: cardTokenContext.cvvFieldPresent,
+          cvv_dom_value_present: cardTokenContext.cvvDomValuePresent,
+          cvv_field_bound_to_mp_form: cardTokenContext.cvvFieldBoundToMpForm,
+          security_code_iframe_present: cardTokenContext.securityCodeIframePresent,
           token_generated_at_submit: cardTokenContext.tokenGeneratedAtSubmit,
+          token_from_mp_sdk_submit: cardTokenContext.tokenFromMpSdkSubmit,
           token_age_ms: cardTokenContext.tokenAgeMs,
           token_source: cardTokenContext.tokenSource,
+          mp_cardform_fields_configured: cardTokenContext.mpCardformFieldsConfigured,
+          security_code_field_id: cardTokenContext.securityCodeFieldId,
+          hidden_token_present_before_submit: cardTokenContext.hiddenTokenPresentBeforeSubmit,
+          hidden_token_present_after_submit: cardTokenContext.hiddenTokenPresentAfterSubmit,
+          hidden_tokens_cleared: cardTokenContext.hiddenTokensCleared,
+          hidden_token_reused: cardTokenContext.hiddenTokenReused,
+          previous_token_reused: cardTokenContext.previousSubmittedTokenReused,
           retry_with_new_token: true,
         })
         resetCardFormForNewToken()
@@ -441,6 +482,16 @@ export default function LoyaltyAssinaturaCliente() {
     user?.telefone,
   ])
 
+  const handleCardFormSubmitCapture = useCallback(() => {
+    const hiddenTokenBeforeSubmit = getMercadoPagoHiddenCardToken(CLIENT_LOYALTY_MP_CARD_FORM_IDS.form)
+    const hiddenTokensCleared = clearMercadoPagoHiddenCardTokens(CLIENT_LOYALTY_MP_CARD_FORM_IDS.form)
+    cardSubmitAttemptRef.current = {
+      submittedAtMs: Date.now(),
+      hiddenTokenBeforeSubmit,
+      hiddenTokensCleared,
+    }
+  }, [])
+
   useEffect(() => {
     if (!gatewayPublicKey || !sellerConnected || paymentMethod !== 'credit_card' || !selectedPlan) {
       setCardState({ loading: false, ready: false, error: '' })
@@ -458,21 +509,8 @@ export default function LoyaltyAssinaturaCliente() {
         } catch {}
         const mp = new MercadoPagoCtor(gatewayPublicKey, { locale: 'pt-BR' })
         const amount = (Number(selectedPlan.preco_centavos || 0) / 100).toFixed(2)
-        const cardForm = mp.cardForm({
+        const cardFormConfig = buildClientLoyaltyMercadoPagoCardFormConfig({
           amount,
-          iframe: true,
-          form: {
-            id: 'client-loyalty-card-form',
-            cardNumber: { id: 'client-loyalty-card-number', placeholder: 'Número do cartão' },
-            expirationDate: { id: 'client-loyalty-card-expiration', placeholder: 'MM/AA' },
-            securityCode: { id: 'client-loyalty-card-cvv', placeholder: 'CVV' },
-            cardholderName: { id: 'client-loyalty-card-holder', placeholder: 'Titular do cartão' },
-            issuer: { id: 'client-loyalty-card-issuer', placeholder: 'Banco emissor' },
-            installments: { id: 'client-loyalty-card-installments', placeholder: 'Parcelas' },
-            identificationType: { id: 'client-loyalty-card-doc-type', placeholder: 'Documento' },
-            identificationNumber: { id: 'client-loyalty-card-doc-number', placeholder: 'Número do documento' },
-            cardholderEmail: { id: 'client-loyalty-card-email', placeholder: 'E-mail' },
-          },
           callbacks: {
             onFormMounted: (error) => {
               if (cancelled) return
@@ -480,21 +518,59 @@ export default function LoyaltyAssinaturaCliente() {
                 setCardState({ loading: false, ready: false, error: 'Não foi possível montar o formulário do cartão.' })
                 return
               }
-              setCardState({ loading: false, ready: true, error: '' })
+              void waitForMercadoPagoCardFormBindingDiagnostics({
+                formConfig: cardFormConfig,
+              }).then((bindingDiagnostics) => {
+                if (cancelled) return
+                console.info('[loyalty][card-token] cardform_binding_check', {
+                  cvv_dom_value_present: bindingDiagnostics.cvv_dom_value_present,
+                  cvv_field_bound_to_mp_form: bindingDiagnostics.cvv_field_bound_to_mp_form,
+                  mp_cardform_fields_configured: bindingDiagnostics.mp_cardform_fields_configured,
+                  security_code_field_id: bindingDiagnostics.security_code_field_id,
+                  security_code_iframe_present: bindingDiagnostics.security_code_iframe_present,
+                  retry_with_new_token: false,
+                })
+                if (!bindingDiagnostics.cvv_field_bound_to_mp_form) {
+                  setCardState({
+                    loading: false,
+                    ready: false,
+                    error: 'NÃ£o foi possÃ­vel carregar o campo de cÃ³digo de seguranÃ§a do cartÃ£o. Recarregue o formulÃ¡rio e tente novamente.',
+                  })
+                  return
+                }
+                setCardState({ loading: false, ready: true, error: '' })
+              })
             },
             onSubmit: async (event) => {
               event.preventDefault()
-              const submittedAtMs = Date.now()
+              const attempt = cardSubmitAttemptRef.current || {
+                submittedAtMs: Date.now(),
+                hiddenTokenBeforeSubmit: '',
+                hiddenTokensCleared: 0,
+              }
               const data = cardForm.getCardFormData()
-              await handleCardSubmit(data, {
-                submittedAtMs,
-                tokenGeneratedAtMs: submittedAtMs,
-                cvvFieldPresent: hasElementById('client-loyalty-card-cvv'),
-                tokenSource: 'cardform_submit',
+              const token = String(data?.token || '').trim()
+              const hiddenTokenAfterSubmit = getMercadoPagoHiddenCardToken(CLIENT_LOYALTY_MP_CARD_FORM_IDS.form)
+              const bindingDiagnostics = getMercadoPagoCardFormBindingDiagnostics({
+                formConfig: cardFormConfig,
               })
+              const submitContext = buildClientLoyaltyMercadoPagoCardSubmitContext({
+                cardFormData: data,
+                bindingDiagnostics,
+                submittedAtMs: attempt.submittedAtMs,
+                tokenGeneratedAtMs: Date.now(),
+                hiddenTokenBeforeSubmit: attempt.hiddenTokenBeforeSubmit,
+                hiddenTokenAfterSubmit,
+                hiddenTokensCleared: attempt.hiddenTokensCleared,
+                previousSubmittedToken: lastCardTokenRef.current,
+              })
+              await handleCardSubmit(data, submitContext)
+              if (token) lastCardTokenRef.current = token
+              cardSubmitAttemptRef.current = null
             },
           },
         })
+        const cardForm = mp.cardForm(cardFormConfig)
         cardFormRef.current = cardForm
       } catch {
         if (!cancelled) {
@@ -510,6 +586,7 @@ export default function LoyaltyAssinaturaCliente() {
         cardFormRef.current?.unmount?.()
       } catch {}
       cardFormRef.current = null
+      cardSubmitAttemptRef.current = null
     }
   }, [cardFormResetKey, gatewayPublicKey, handleCardSubmit, paymentMethod, selectedPlan, sellerConnected])
 
@@ -752,11 +829,16 @@ export default function LoyaltyAssinaturaCliente() {
                         : 'Não foi possível aprovar este cartão no momento. Tente PIX ou outro cartão.'}
                     </p>
                   ) : null}
-                  <form key={cardFormResetKey} id="client-loyalty-card-form" className="loyalty-card-form">
+                  <form
+                    key={cardFormResetKey}
+                    id={CLIENT_LOYALTY_MP_CARD_FORM_IDS.form}
+                    className="loyalty-card-form"
+                    onSubmitCapture={handleCardFormSubmitCapture}
+                  >
                     <div className="loyalty-card-form__grid">
-                      <div id="client-loyalty-card-number" className="input loyalty-card-form__field" />
-                      <div id="client-loyalty-card-expiration" className="input loyalty-card-form__field" />
-                      <div id="client-loyalty-card-cvv" className="input loyalty-card-form__field" />
+                      <div id={CLIENT_LOYALTY_MP_CARD_FORM_IDS.cardNumber} className="input loyalty-card-form__field" />
+                      <div id={CLIENT_LOYALTY_MP_CARD_FORM_IDS.expirationDate} className="input loyalty-card-form__field" />
+                      <div id={CLIENT_LOYALTY_MP_CARD_FORM_IDS.securityCode} className="input loyalty-card-form__field" />
                       <input id="client-loyalty-card-holder" name="cardholderName" className="input loyalty-card-form__field" placeholder="Titular do cartão" autoComplete="cc-name" />
                       <input id="client-loyalty-card-email" className="input loyalty-card-form__field" type="email" placeholder="E-mail" defaultValue={user?.email || ''} />
                       <select id="client-loyalty-card-doc-type" className="input loyalty-card-form__field" defaultValue="" />

@@ -214,12 +214,36 @@ export function buildLoyaltyCardPaymentPayload({
     token_generated_at_submit: tokenContext.tokenGeneratedAtSubmit,
     token_age_ms: tokenContext.tokenAgeMs,
     cvv_field_present: tokenContext.cvvFieldPresent,
+    cvv_dom_value_present: tokenContext.cvvDomValuePresent,
+    cvv_field_bound_to_mp_form: tokenContext.cvvFieldBoundToMpForm,
+    token_from_mp_sdk_submit: tokenContext.tokenFromMpSdkSubmit,
+    mp_cardform_fields_configured: tokenContext.mpCardformFieldsConfigured,
+    security_code_field_id: tokenContext.securityCodeFieldId,
+    security_code_iframe_present: tokenContext.securityCodeIframePresent,
+    hidden_token_present_before_submit: tokenContext.hiddenTokenPresentBeforeSubmit,
+    hidden_token_present_after_submit: tokenContext.hiddenTokenPresentAfterSubmit,
+    hidden_tokens_cleared: tokenContext.hiddenTokensCleared,
+    hidden_token_reused: tokenContext.hiddenTokenReused,
+    previous_token_reused: tokenContext.previousSubmittedTokenReused,
+    retry_with_new_token: tokenContext.retryWithNewToken,
     risk_context: {
       ...riskContext,
       card_token_source: tokenContext.tokenSource,
       token_generated_at_submit: tokenContext.tokenGeneratedAtSubmit,
       token_age_ms: tokenContext.tokenAgeMs,
       cvv_field_present: tokenContext.cvvFieldPresent,
+      cvv_dom_value_present: tokenContext.cvvDomValuePresent,
+      cvv_field_bound_to_mp_form: tokenContext.cvvFieldBoundToMpForm,
+      token_from_mp_sdk_submit: tokenContext.tokenFromMpSdkSubmit,
+      mp_cardform_fields_configured: tokenContext.mpCardformFieldsConfigured,
+      security_code_field_id: tokenContext.securityCodeFieldId,
+      security_code_iframe_present: tokenContext.securityCodeIframePresent,
+      hidden_token_present_before_submit: tokenContext.hiddenTokenPresentBeforeSubmit,
+      hidden_token_present_after_submit: tokenContext.hiddenTokenPresentAfterSubmit,
+      hidden_tokens_cleared: tokenContext.hiddenTokensCleared,
+      hidden_token_reused: tokenContext.hiddenTokenReused,
+      previous_token_reused: tokenContext.previousSubmittedTokenReused,
+      retry_with_new_token: tokenContext.retryWithNewToken,
     },
   }
 }
@@ -229,18 +253,45 @@ export function buildLoyaltyCardTokenSubmitContext({
   submittedAtMs = Date.now(),
   tokenGeneratedAtMs = null,
   cvvFieldPresent = false,
-  tokenSource = 'cardform_submit',
+  cvvDomValuePresent = false,
+  cvvFieldBoundToMpForm = false,
+  securityCodeIframePresent = false,
+  tokenFromMpSdkSubmit = false,
+  mpCardformFieldsConfigured = [],
+  securityCodeFieldId = '',
+  hiddenTokenPresentBeforeSubmit = false,
+  hiddenTokenPresentAfterSubmit = false,
+  hiddenTokensCleared = 0,
+  hiddenTokenReused = false,
+  previousSubmittedTokenReused = false,
+  retryWithNewToken = false,
+  tokenSource = 'unknown',
 } = {}) {
   const token = normalizeValue(cardFormData?.token)
   const generatedAtMs = normalizeNonNegativeNumber(tokenGeneratedAtMs) || normalizeNonNegativeNumber(submittedAtMs) || Date.now()
   const ageMs = Math.max(0, Date.now() - generatedAtMs)
-  const source = normalizeValue(tokenSource) || 'cardform_submit'
+  const source = normalizeValue(tokenSource) || 'unknown'
+  const fromMpSdkSubmit = normalizeBoolean(tokenFromMpSdkSubmit)
   return {
     cardTokenPresent: Boolean(token),
     cvvFieldPresent: normalizeBoolean(cvvFieldPresent),
-    tokenGeneratedAtSubmit: Boolean(token && source === 'cardform_submit'),
+    cvvDomValuePresent: normalizeBoolean(cvvDomValuePresent),
+    cvvFieldBoundToMpForm: normalizeBoolean(cvvFieldBoundToMpForm),
+    securityCodeIframePresent: normalizeBoolean(securityCodeIframePresent),
+    tokenFromMpSdkSubmit: fromMpSdkSubmit,
+    tokenGeneratedAtSubmit: Boolean(token && fromMpSdkSubmit && source === 'cardform_submit'),
     tokenAgeMs: ageMs,
     tokenSource: source,
+    mpCardformFieldsConfigured: Array.isArray(mpCardformFieldsConfigured)
+      ? mpCardformFieldsConfigured.map(normalizeValue).filter(Boolean)
+      : [],
+    securityCodeFieldId: normalizeValue(securityCodeFieldId),
+    hiddenTokenPresentBeforeSubmit: normalizeBoolean(hiddenTokenPresentBeforeSubmit),
+    hiddenTokenPresentAfterSubmit: normalizeBoolean(hiddenTokenPresentAfterSubmit),
+    hiddenTokensCleared: normalizeNonNegativeNumber(hiddenTokensCleared) || 0,
+    hiddenTokenReused: normalizeBoolean(hiddenTokenReused),
+    previousSubmittedTokenReused: normalizeBoolean(previousSubmittedTokenReused),
+    retryWithNewToken: normalizeBoolean(retryWithNewToken),
   }
 }
 
@@ -248,12 +299,26 @@ export function validateLoyaltyCardTokenSubmitContext(context = {}) {
   const normalized = {
     cardTokenPresent: Boolean(context.cardTokenPresent),
     cvvFieldPresent: normalizeBoolean(context.cvvFieldPresent),
+    cvvDomValuePresent: normalizeBoolean(context.cvvDomValuePresent),
+    cvvFieldBoundToMpForm: normalizeBoolean(context.cvvFieldBoundToMpForm),
+    securityCodeIframePresent: normalizeBoolean(context.securityCodeIframePresent),
+    tokenFromMpSdkSubmit: normalizeBoolean(context.tokenFromMpSdkSubmit),
     tokenGeneratedAtSubmit: normalizeBoolean(context.tokenGeneratedAtSubmit),
     tokenAgeMs: normalizeNonNegativeNumber(context.tokenAgeMs),
     tokenSource: normalizeValue(context.tokenSource) || 'unknown',
+    mpCardformFieldsConfigured: Array.isArray(context.mpCardformFieldsConfigured)
+      ? context.mpCardformFieldsConfigured.map(normalizeValue).filter(Boolean)
+      : [],
+    securityCodeFieldId: normalizeValue(context.securityCodeFieldId),
+    hiddenTokenPresentBeforeSubmit: normalizeBoolean(context.hiddenTokenPresentBeforeSubmit),
+    hiddenTokenPresentAfterSubmit: normalizeBoolean(context.hiddenTokenPresentAfterSubmit),
+    hiddenTokensCleared: normalizeNonNegativeNumber(context.hiddenTokensCleared) || 0,
+    hiddenTokenReused: normalizeBoolean(context.hiddenTokenReused),
+    previousSubmittedTokenReused: normalizeBoolean(context.previousSubmittedTokenReused),
+    retryWithNewToken: normalizeBoolean(context.retryWithNewToken),
   }
 
-  if (!normalized.cvvFieldPresent) {
+  if (!normalized.cvvFieldPresent || !normalized.cvvFieldBoundToMpForm) {
     return {
       valid: false,
       message: 'N\u00e3o foi poss\u00edvel carregar o campo de c\u00f3digo de seguran\u00e7a do cart\u00e3o. Recarregue o formul\u00e1rio e tente novamente.',
@@ -261,7 +326,20 @@ export function validateLoyaltyCardTokenSubmitContext(context = {}) {
     }
   }
 
-  if (!normalized.cardTokenPresent || !normalized.tokenGeneratedAtSubmit || normalized.tokenSource !== 'cardform_submit') {
+  if (normalized.hiddenTokenReused || normalized.previousSubmittedTokenReused) {
+    return {
+      valid: false,
+      message: 'Informe novamente o c\u00f3digo de seguran\u00e7a do cart\u00e3o para gerar um novo token.',
+      normalized,
+    }
+  }
+
+  if (
+    !normalized.cardTokenPresent ||
+    !normalized.tokenFromMpSdkSubmit ||
+    !normalized.tokenGeneratedAtSubmit ||
+    normalized.tokenSource !== 'cardform_submit'
+  ) {
     return {
       valid: false,
       message: 'Informe novamente o c\u00f3digo de seguran\u00e7a do cart\u00e3o para gerar um novo token.',

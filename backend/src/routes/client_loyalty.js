@@ -86,6 +86,18 @@ function buildClientLoyaltyRequestContext(req, requestId, route) {
     : {}
   const cardTokenTelemetry = {
     cvv_field_present: body.cvv_field_present ?? riskContext.cvv_field_present ?? null,
+    cvv_dom_value_present: body.cvv_dom_value_present ?? riskContext.cvv_dom_value_present ?? null,
+    cvv_field_bound_to_mp_form: body.cvv_field_bound_to_mp_form ?? riskContext.cvv_field_bound_to_mp_form ?? null,
+    token_from_mp_sdk_submit: body.token_from_mp_sdk_submit ?? riskContext.token_from_mp_sdk_submit ?? null,
+    mp_cardform_fields_configured: body.mp_cardform_fields_configured ?? riskContext.mp_cardform_fields_configured ?? null,
+    security_code_field_id: normalizeText(body.security_code_field_id || riskContext.security_code_field_id) || null,
+    security_code_iframe_present: body.security_code_iframe_present ?? riskContext.security_code_iframe_present ?? null,
+    hidden_token_present_before_submit: body.hidden_token_present_before_submit ?? riskContext.hidden_token_present_before_submit ?? null,
+    hidden_token_present_after_submit: body.hidden_token_present_after_submit ?? riskContext.hidden_token_present_after_submit ?? null,
+    hidden_tokens_cleared: body.hidden_tokens_cleared ?? riskContext.hidden_tokens_cleared ?? null,
+    hidden_token_reused: body.hidden_token_reused ?? riskContext.hidden_token_reused ?? null,
+    previous_token_reused: body.previous_token_reused ?? riskContext.previous_token_reused ?? null,
+    retry_with_new_token: body.retry_with_new_token ?? riskContext.retry_with_new_token ?? null,
     token_generated_at_submit: body.token_generated_at_submit ?? riskContext.token_generated_at_submit ?? null,
     token_age_ms: body.token_age_ms ?? riskContext.token_age_ms ?? null,
     card_token_source: normalizeText(
@@ -107,6 +119,18 @@ function buildClientLoyaltyRequestContext(req, requestId, route) {
       null,
     riskContext,
     cvv_field_present: cardTokenTelemetry.cvv_field_present,
+    cvv_dom_value_present: cardTokenTelemetry.cvv_dom_value_present,
+    cvv_field_bound_to_mp_form: cardTokenTelemetry.cvv_field_bound_to_mp_form,
+    token_from_mp_sdk_submit: cardTokenTelemetry.token_from_mp_sdk_submit,
+    mp_cardform_fields_configured: cardTokenTelemetry.mp_cardform_fields_configured,
+    security_code_field_id: cardTokenTelemetry.security_code_field_id,
+    security_code_iframe_present: cardTokenTelemetry.security_code_iframe_present,
+    hidden_token_present_before_submit: cardTokenTelemetry.hidden_token_present_before_submit,
+    hidden_token_present_after_submit: cardTokenTelemetry.hidden_token_present_after_submit,
+    hidden_tokens_cleared: cardTokenTelemetry.hidden_tokens_cleared,
+    hidden_token_reused: cardTokenTelemetry.hidden_token_reused,
+    previous_token_reused: cardTokenTelemetry.previous_token_reused,
+    retry_with_new_token: cardTokenTelemetry.retry_with_new_token,
     token_generated_at_submit: cardTokenTelemetry.token_generated_at_submit,
     token_age_ms: cardTokenTelemetry.token_age_ms,
     card_token_source: cardTokenTelemetry.card_token_source,
@@ -306,13 +330,22 @@ router.post('/subscribe', auth, isCliente, async (req, res) => {
     }
 
     if (paymentMethod === 'credit_card') {
+      const cardToken = String(req.body?.card_token || '').trim()
+      if (!cardToken) {
+        return res.status(400).json({
+          error: 'card_token_required',
+          message: 'Informe novamente o c\u00f3digo de seguran\u00e7a do cart\u00e3o.',
+          retry_with_new_token: true,
+          request_id: requestId,
+        })
+      }
       const cardholderNamePayload = resolveClientLoyaltyCardholderNamePayload(req.body)
       logClientLoyaltyCardholderNamePayload('/client-loyalty/subscribe', cardholderNamePayload)
       const result = await startClientLoyaltyCardSubscription({
         clienteId: req.user.id,
         estabelecimentoId,
         loyaltyPlanId,
-        cardToken: String(req.body?.card_token || '').trim(),
+        cardToken,
         payerEmail: req.body?.payer_email || req.user.email || '',
         paymentMethodId: req.body?.payment_method_id || null,
         issuerId: req.body?.issuer_id || null,
@@ -397,10 +430,19 @@ router.post('/pay/card', auth, isCliente, async (req, res) => {
   try {
     const estabelecimentoId = normalizeId(req.body?.estabelecimento_id || req.body?.establishment_id)
     const loyaltyPlanId = normalizeId(req.body?.loyalty_plan_id || req.body?.plan_id)
-    if (!estabelecimentoId || !loyaltyPlanId || !String(req.body?.card_token || '').trim()) {
+    const cardToken = String(req.body?.card_token || '').trim()
+    if (!estabelecimentoId || !loyaltyPlanId) {
       return res.status(400).json({
         error: 'invalid_payload',
-        message: 'Informe estabelecimento_id, loyalty_plan_id e card_token.',
+        message: 'Informe estabelecimento_id e loyalty_plan_id.',
+      })
+    }
+    if (!cardToken) {
+      return res.status(400).json({
+        error: 'card_token_required',
+        message: 'Informe novamente o c\u00f3digo de seguran\u00e7a do cart\u00e3o.',
+        retry_with_new_token: true,
+        request_id: requestId,
       })
     }
 
@@ -410,7 +452,7 @@ router.post('/pay/card', auth, isCliente, async (req, res) => {
       clienteId: req.user.id,
       estabelecimentoId,
       loyaltyPlanId,
-      cardToken: String(req.body?.card_token || '').trim(),
+      cardToken,
       payerEmail: req.body?.payer_email || req.user.email || '',
       paymentMethodId: req.body?.payment_method_id || null,
       issuerId: req.body?.issuer_id || null,

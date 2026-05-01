@@ -84,6 +84,15 @@ function normalizeNumberTelemetry(value) {
   return Number.isFinite(normalized) && normalized >= 0 ? Math.trunc(normalized) : null
 }
 
+function normalizeStringListTelemetry(value) {
+  if (Array.isArray(value)) {
+    return value.map((entry) => String(entry || '').trim()).filter(Boolean)
+  }
+  const raw = String(value || '').trim()
+  if (!raw) return []
+  return raw.split(',').map((entry) => entry.trim()).filter(Boolean)
+}
+
 function resolveMercadoPagoCardTokenTelemetry(requestContext = {}) {
   const riskContext = requestContext?.riskContext && typeof requestContext.riskContext === 'object'
     ? requestContext.riskContext
@@ -98,6 +107,15 @@ function resolveMercadoPagoCardTokenTelemetry(requestContext = {}) {
     cvv_field_present: normalizeBooleanTelemetry(
       requestContext?.cvv_field_present ?? riskContext.cvv_field_present
     ),
+    cvv_dom_value_present: normalizeBooleanTelemetry(
+      requestContext?.cvv_dom_value_present ?? riskContext.cvv_dom_value_present
+    ),
+    cvv_field_bound_to_mp_form: normalizeBooleanTelemetry(
+      requestContext?.cvv_field_bound_to_mp_form ?? riskContext.cvv_field_bound_to_mp_form
+    ),
+    token_from_mp_sdk_submit: normalizeBooleanTelemetry(
+      requestContext?.token_from_mp_sdk_submit ?? riskContext.token_from_mp_sdk_submit
+    ),
     token_generated_at_submit: normalizeBooleanTelemetry(
       requestContext?.token_generated_at_submit ?? riskContext.token_generated_at_submit
     ),
@@ -105,6 +123,35 @@ function resolveMercadoPagoCardTokenTelemetry(requestContext = {}) {
       requestContext?.token_age_ms ?? riskContext.token_age_ms
     ),
     token_source: source,
+    mp_cardform_fields_configured: normalizeStringListTelemetry(
+      requestContext?.mp_cardform_fields_configured ?? riskContext.mp_cardform_fields_configured
+    ),
+    security_code_field_id: String(
+      requestContext?.security_code_field_id ||
+      riskContext.security_code_field_id ||
+      ''
+    ).trim() || null,
+    security_code_iframe_present: normalizeBooleanTelemetry(
+      requestContext?.security_code_iframe_present ?? riskContext.security_code_iframe_present
+    ),
+    hidden_token_present_before_submit: normalizeBooleanTelemetry(
+      requestContext?.hidden_token_present_before_submit ?? riskContext.hidden_token_present_before_submit
+    ),
+    hidden_token_present_after_submit: normalizeBooleanTelemetry(
+      requestContext?.hidden_token_present_after_submit ?? riskContext.hidden_token_present_after_submit
+    ),
+    hidden_tokens_cleared: normalizeNumberTelemetry(
+      requestContext?.hidden_tokens_cleared ?? riskContext.hidden_tokens_cleared
+    ),
+    hidden_token_reused: normalizeBooleanTelemetry(
+      requestContext?.hidden_token_reused ?? riskContext.hidden_token_reused
+    ),
+    previous_token_reused: normalizeBooleanTelemetry(
+      requestContext?.previous_token_reused ?? riskContext.previous_token_reused
+    ),
+    retry_with_new_token: normalizeBooleanTelemetry(
+      requestContext?.retry_with_new_token ?? riskContext.retry_with_new_token
+    ),
   }
 }
 

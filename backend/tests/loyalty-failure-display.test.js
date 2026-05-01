@@ -17,7 +17,12 @@ const {
   validateLoyaltyCardPayerData,
 } = await import('../../frontend/src/utils/loyaltyPaymentValidation.js')
 const {
+  buildClientLoyaltyMercadoPagoCardSubmitContext,
+  buildClientLoyaltyMercadoPagoCardFormConfig,
+  clearMercadoPagoHiddenCardTokens,
+  CLIENT_LOYALTY_MP_CARD_FORM_IDS,
   getMercadoPagoCardErrorMessage,
+  getMercadoPagoCardFormBindingDiagnostics,
   isMercadoPagoCardTokenRefreshRequired,
 } = await import('../../frontend/src/utils/mercadoPagoCard.js')
 
@@ -221,6 +226,68 @@ test('loyalty card payload uses the same holder-name key validated by the UI', (
   assert.equal(payload.cardholderName, undefined)
 })
 
+test('loyalty Mercado Pago CardForm config binds the securityCode field to the expected SDK container', () => {
+  const config = buildClientLoyaltyMercadoPagoCardFormConfig({
+    amount: '9.90',
+    callbacks: {},
+  })
+
+  assert.equal(config.iframe, true)
+  assert.equal(config.form.id, CLIENT_LOYALTY_MP_CARD_FORM_IDS.form)
+  assert.equal(config.form.securityCode.id, CLIENT_LOYALTY_MP_CARD_FORM_IDS.securityCode)
+  assert.equal(config.form.cardNumber.id, CLIENT_LOYALTY_MP_CARD_FORM_IDS.cardNumber)
+  assert.equal(config.form.expirationDate.id, CLIENT_LOYALTY_MP_CARD_FORM_IDS.expirationDate)
+  assert.equal(config.form.cardholderName.id, CLIENT_LOYALTY_MP_CARD_FORM_IDS.cardholderName)
+  assert.equal(config.form.identificationType.id, CLIENT_LOYALTY_MP_CARD_FORM_IDS.identificationType)
+  assert.equal(config.form.identificationNumber.id, CLIENT_LOYALTY_MP_CARD_FORM_IDS.identificationNumber)
+})
+
+test('loyalty Mercado Pago diagnostics require an SDK iframe inside securityCode container', () => {
+  const previousDocument = global.document
+  const config = buildClientLoyaltyMercadoPagoCardFormConfig({ amount: '9.90' })
+  global.document = {
+    getElementById: (id) => (
+      id === CLIENT_LOYALTY_MP_CARD_FORM_IDS.securityCode
+        ? { querySelector: (selector) => (selector === 'iframe' ? { tagName: 'IFRAME' } : null) }
+        : null
+    ),
+    querySelectorAll: () => [],
+  }
+
+  const diagnostics = getMercadoPagoCardFormBindingDiagnostics({ formConfig: config })
+
+  assert.equal(diagnostics.cvv_field_present, true)
+  assert.equal(diagnostics.cvv_dom_value_present, false)
+  assert.equal(diagnostics.cvv_field_bound_to_mp_form, true)
+  assert.equal(diagnostics.security_code_iframe_present, true)
+  assert.equal(diagnostics.security_code_field_id, CLIENT_LOYALTY_MP_CARD_FORM_IDS.securityCode)
+  assert.equal(diagnostics.mp_cardform_fields_configured.includes('securityCode'), true)
+
+  global.document = previousDocument
+})
+
+test('loyalty Mercado Pago retry cleanup removes old hidden CardForm tokens', () => {
+  const previousDocument = global.document
+  let removed = 0
+  const hiddenToken = {
+    value: 'old-token',
+    remove: () => { removed += 1 },
+  }
+  const form = {
+    querySelector: () => hiddenToken,
+    querySelectorAll: () => [hiddenToken],
+  }
+  global.document = {
+    getElementById: () => form,
+    querySelectorAll: () => [hiddenToken],
+  }
+
+  assert.equal(clearMercadoPagoHiddenCardTokens(CLIENT_LOYALTY_MP_CARD_FORM_IDS.form), 1)
+  assert.equal(removed, 1)
+
+  global.document = previousDocument
+})
+
 test('loyalty card payload carries safe submit-time token telemetry', () => {
   const payerValidation = validateLoyaltyCardPayerData({
     payerEmail: 'cliente@example.com',
@@ -239,6 +306,17 @@ test('loyalty card payload carries safe submit-time token telemetry', () => {
     payerValidation,
     cardTokenContext: {
       cvvFieldPresent: true,
+      cvvDomValuePresent: false,
+      cvvFieldBoundToMpForm: true,
+      securityCodeIframePresent: true,
+      tokenFromMpSdkSubmit: true,
+      mpCardformFieldsConfigured: ['cardNumber', 'expirationDate', 'securityCode'],
+      securityCodeFieldId: CLIENT_LOYALTY_MP_CARD_FORM_IDS.securityCode,
+      hiddenTokenPresentBeforeSubmit: false,
+      hiddenTokenPresentAfterSubmit: true,
+      hiddenTokensCleared: 1,
+      hiddenTokenReused: false,
+      previousSubmittedTokenReused: false,
       tokenSource: 'cardform_submit',
       tokenGeneratedAtMs: Date.now(),
     },
@@ -246,9 +324,20 @@ test('loyalty card payload carries safe submit-time token telemetry', () => {
 
   assert.equal(payload.card_token, 'card-token')
   assert.equal(payload.cvv_field_present, true)
+  assert.equal(payload.cvv_dom_value_present, false)
+  assert.equal(payload.cvv_field_bound_to_mp_form, true)
+  assert.equal(payload.token_from_mp_sdk_submit, true)
   assert.equal(payload.token_generated_at_submit, true)
   assert.equal(payload.card_token_source, 'cardform_submit')
   assert.equal(payload.risk_context.cvv_field_present, true)
+  assert.equal(payload.security_code_field_id, CLIENT_LOYALTY_MP_CARD_FORM_IDS.securityCode)
+  assert.equal(payload.security_code_iframe_present, true)
+  assert.equal(payload.hidden_token_present_before_submit, false)
+  assert.equal(payload.hidden_token_present_after_submit, true)
+  assert.equal(payload.hidden_tokens_cleared, 1)
+  assert.equal(payload.hidden_token_reused, false)
+  assert.equal(payload.previous_token_reused, false)
+  assert.equal(payload.retry_with_new_token, false)
   assert.equal(payload.security_code, undefined)
   assert.equal(payload.cvv, undefined)
 })
@@ -257,6 +346,9 @@ test('loyalty card token submit validation blocks missing CVV tokenization', () 
   const context = buildLoyaltyCardTokenSubmitContext({
     cardFormData: { token: '' },
     cvvFieldPresent: true,
+    cvvFieldBoundToMpForm: true,
+    securityCodeIframePresent: true,
+    tokenFromMpSdkSubmit: false,
     tokenSource: 'cardform_submit',
     tokenGeneratedAtMs: Date.now(),
   })
@@ -264,6 +356,88 @@ test('loyalty card token submit validation blocks missing CVV tokenization', () 
 
   assert.equal(result.valid, false)
   assert.match(result.message, /c[oó]digo de seguran/i)
+})
+
+test('loyalty card token submit validation rejects cached tokens outside the current MP submit callback', () => {
+  const context = buildLoyaltyCardTokenSubmitContext({
+    cardFormData: { token: 'cached-token' },
+    cvvFieldPresent: true,
+    cvvFieldBoundToMpForm: true,
+    tokenFromMpSdkSubmit: false,
+    tokenSource: 'cached',
+    tokenGeneratedAtMs: Date.now() - 2000,
+  })
+  const result = validateLoyaltyCardTokenSubmitContext(context)
+
+  assert.equal(context.tokenGeneratedAtSubmit, false)
+  assert.equal(result.valid, false)
+  assert.match(result.message, /novo token/i)
+})
+
+test('loyalty CardForm submit context marks current SDK tokens and blocks hidden token reuse', () => {
+  const bindingDiagnostics = {
+    cvv_field_present: true,
+    cvv_dom_value_present: false,
+    cvv_field_bound_to_mp_form: true,
+    security_code_iframe_present: true,
+    mp_cardform_fields_configured: ['cardNumber', 'expirationDate', 'securityCode'],
+    security_code_field_id: CLIENT_LOYALTY_MP_CARD_FORM_IDS.securityCode,
+  }
+
+  const freshContext = buildClientLoyaltyMercadoPagoCardSubmitContext({
+    cardFormData: { token: 'fresh-token-1234567890' },
+    bindingDiagnostics,
+    hiddenTokenBeforeSubmit: '',
+    hiddenTokenAfterSubmit: 'fresh-token-1234567890',
+    hiddenTokensCleared: 1,
+    previousSubmittedToken: '',
+  })
+
+  assert.equal(freshContext.tokenFromMpSdkSubmit, true)
+  assert.equal(freshContext.tokenSource, 'cardform_submit')
+  assert.equal(freshContext.hiddenTokenReused, false)
+  assert.equal(freshContext.previousSubmittedTokenReused, false)
+
+  const reusedHiddenContext = buildClientLoyaltyMercadoPagoCardSubmitContext({
+    cardFormData: { token: 'old-token-1234567890' },
+    bindingDiagnostics,
+    hiddenTokenBeforeSubmit: 'old-token-1234567890',
+    hiddenTokenAfterSubmit: 'old-token-1234567890',
+    hiddenTokensCleared: 1,
+    previousSubmittedToken: '',
+  })
+
+  assert.equal(reusedHiddenContext.tokenFromMpSdkSubmit, false)
+  assert.equal(reusedHiddenContext.hiddenTokenReused, true)
+  assert.equal(reusedHiddenContext.tokenSource, 'hidden_token_before_submit')
+})
+
+test('loyalty retry requires new token instead of reusing the previous submit token', () => {
+  const bindingDiagnostics = {
+    cvv_field_present: true,
+    cvv_dom_value_present: false,
+    cvv_field_bound_to_mp_form: true,
+    security_code_iframe_present: true,
+    mp_cardform_fields_configured: ['cardNumber', 'expirationDate', 'securityCode'],
+    security_code_field_id: CLIENT_LOYALTY_MP_CARD_FORM_IDS.securityCode,
+  }
+  const submitContext = buildClientLoyaltyMercadoPagoCardSubmitContext({
+    cardFormData: { token: 'same-token-1234567890' },
+    bindingDiagnostics,
+    previousSubmittedToken: 'same-token-1234567890',
+    retryWithNewToken: true,
+  })
+  const tokenContext = buildLoyaltyCardTokenSubmitContext({
+    cardFormData: { token: 'same-token-1234567890' },
+    ...submitContext,
+  })
+  const result = validateLoyaltyCardTokenSubmitContext(tokenContext)
+
+  assert.equal(submitContext.previousSubmittedTokenReused, true)
+  assert.equal(submitContext.tokenFromMpSdkSubmit, false)
+  assert.equal(result.valid, false)
+  assert.equal(result.normalized.retryWithNewToken, true)
+  assert.match(result.message, /novo token/i)
 })
 
 test('Mercado Pago CVV-validation token error forces a new card token in the frontend', () => {
@@ -278,7 +452,7 @@ test('Mercado Pago CVV-validation token error forces a new card token in the fro
   }
 
   assert.equal(isMercadoPagoCardTokenRefreshRequired(error), true)
-  assert.match(getMercadoPagoCardErrorMessage(error), /c[oó]digo de seguran/i)
+  assert.equal(getMercadoPagoCardErrorMessage(error), 'Informe novamente o c\u00f3digo de seguran\u00e7a do cart\u00e3o.')
 })
 
 test('loyalty cardholder resolver accepts SDK aliases before validation', () => {

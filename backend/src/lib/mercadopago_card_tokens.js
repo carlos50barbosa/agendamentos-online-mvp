@@ -301,7 +301,7 @@ export function toMercadoPagoCardFlowError(error) {
     const snapshot = extractMercadoPagoErrorSnapshot(error)
     return createMercadoPagoCardFlowError(
       'card_token_without_cvv_validation',
-      'Informe novamente o c\u00f3digo de seguran\u00e7a do cart\u00e3o. Por seguran\u00e7a, gere um novo token do cart\u00e3o.',
+      'Informe novamente o c\u00f3digo de seguran\u00e7a do cart\u00e3o.',
       {
         status: 409,
         details: {

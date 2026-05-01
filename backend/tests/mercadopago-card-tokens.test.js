@@ -79,7 +79,7 @@ test('toMercadoPagoCardFlowError maps missing CVV validation to retry with new t
   assert.equal(result?.status, 409)
   assert.equal(result?.details?.retry_with_new_token, true)
   assert.equal(result?.details?.gateway_message, 'Card token was generated without CVV validation')
-  assert.match(result?.message, /c[oó]digo de seguran/i)
+  assert.equal(result?.message, 'Informe novamente o c\u00f3digo de seguran\u00e7a do cart\u00e3o.')
 })
 
 test('card token cannot be reused after a failed gateway attempt', () => {
