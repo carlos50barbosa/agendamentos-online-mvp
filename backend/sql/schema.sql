@@ -638,7 +638,7 @@ CREATE TABLE IF NOT EXISTS mercadopago_webhook_events (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
   request_id VARCHAR(120) NULL,
   delivery_key VARCHAR(191) NOT NULL,
-  owner_type ENUM('platform','establishment') NOT NULL,
+  owner_type ENUM('platform','establishment','unresolved') NOT NULL,
   owner_id BIGINT NULL,
   estabelecimento_id INT NULL,
   mp_user_id VARCHAR(64) NULL,

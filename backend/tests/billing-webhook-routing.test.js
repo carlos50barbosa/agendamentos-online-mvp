@@ -8,7 +8,9 @@ process.env.DB_NAME ??= 'test'
 process.env.JWT_SECRET ??= 'test-secret'
 
 const {
+  buildBillingWebhookOwnerResolutionPayload,
   normalizeBillingWebhookTopic,
+  recordUnresolvedAuthorizedPaymentWebhookAudit,
   resolveAuthorizedPaymentWebhookOwnerContext,
   resolveBillingAuthorizedPaymentWebhookAction,
   resolveConnectedSellerPaymentFlowMatch,
@@ -794,6 +796,7 @@ test('authorized payment webhook uses establishment token and skips platform fal
 })
 
 test('authorized payment webhook blocks silent fallback to platform when owner is unresolved', async () => {
+  let loyaltyCalls = 0
   let platformCalls = 0
   const result = await resolveBillingAuthorizedPaymentWebhookAction({
     resourceId: '7027488798',
@@ -810,7 +813,10 @@ test('authorized payment webhook blocks silent fallback to platform when owner i
       fallbackBlocked: true,
       accessToken: null,
     }),
-    loyaltyAuthorizedPaymentHandler: async () => ({ ok: true, handled: true, status: 'active' }),
+    loyaltyAuthorizedPaymentHandler: async () => {
+      loyaltyCalls += 1
+      return { ok: true, handled: true, status: 'active' }
+    },
     platformAuthorizedPaymentHandler: async () => {
       platformCalls += 1
       return { ok: true }
@@ -819,8 +825,132 @@ test('authorized payment webhook blocks silent fallback to platform when owner i
 
   assert.equal(result.kind, 'ignored_unresolved_authorized_payment_owner')
   assert.equal(result.responseBody.ignored, true)
-  assert.equal(result.responseBody.reason, 'unresolved_authorized_payment_owner')
+  assert.equal(result.responseBody.reason, 'unresolved_authorized_payment_ignored')
+  assert.equal(result.responseBody.resolution_reason, 'unresolved_owner_for_authorized_payment')
+  assert.equal(loyaltyCalls, 0)
   assert.equal(platformCalls, 0)
+})
+
+test('unresolved authorized payment audit records required fields and logs ignored event', async () => {
+  let insert = null
+  const logs = []
+  const ownerResolutionPayload = buildBillingWebhookOwnerResolutionPayload({
+    requestId: 'req-7027485215',
+    resourceId: '7027485215',
+    syncDecision: {
+      topic: 'subscription_authorized_payment',
+      chosenSyncTarget: 'authorized_payment',
+      chosenEndpoint: '/authorized_payments/{id}',
+    },
+    bodyType: 'subscription_authorized_payment',
+    bodyAction: 'updated',
+    bodyUserId: null,
+    event: { type: 'subscription_authorized_payment', action: 'updated' },
+    ownerResolution: {
+      ok: false,
+      ownerType: null,
+      matchedFlow: null,
+      tokenSource: null,
+      resolutionRule: 'no_confident_owner',
+      reason: 'unresolved_owner_for_authorized_payment',
+      fallbackBlocked: true,
+      failedLookups: [
+        { lookupBy: 'authorized_payment_id', reason: 'subscription_not_found' },
+        { lookupBy: 'event_linkage', reason: 'subscription_not_found' },
+        { lookupBy: 'webhook_linkage', reason: 'subscription_not_found' },
+        {
+          lookupBy: 'loyalty_subscription_linkage',
+          reason: 'authorized_payment_not_accessible_with_known_seller_tokens',
+        },
+      ],
+    },
+  })
+
+  const result = await recordUnresolvedAuthorizedPaymentWebhookAudit({
+    ownerResolutionPayload,
+    db: {
+      async query(sql, values = []) {
+        insert = { sql, values }
+        return [{ insertId: 321 }]
+      },
+    },
+    logger: {
+      info(message, payload) {
+        logs.push({ message, payload })
+      },
+    },
+  })
+
+  assert.equal(result.eventName, 'unresolved_authorized_payment_ignored')
+  assert.equal(result.persisted, true)
+  assert.match(insert.sql, /INSERT INTO mercadopago_webhook_events/)
+  assert.equal(insert.values[0], 'req-7027485215')
+  assert.equal(insert.values[2], 'unresolved')
+  assert.equal(insert.values[7], 'subscription_authorized_payment')
+  assert.equal(insert.values[8], 'updated')
+  assert.equal(insert.values[9], '7027485215')
+  assert.equal(insert.values[12], 'unresolved_authorized_payment_ignored')
+  assert.equal(insert.values[13], 'unresolved_authorized_payment_ignored')
+
+  const rawPayload = JSON.parse(insert.values[14])
+  assert.equal(rawPayload.resource_id, '7027485215')
+  assert.equal(rawPayload.topic, 'subscription_authorized_payment')
+  assert.equal(rawPayload.body_action, 'updated')
+  assert.equal(rawPayload.resolution_reason, 'unresolved_owner_for_authorized_payment')
+  assert.equal(rawPayload.platform_user_id, 281768531)
+  assert.equal(rawPayload.body_user_id, null)
+  assert.equal(rawPayload.body_user_estabelecimento_id, null)
+  assert.equal(rawPayload.request_id, 'req-7027485215')
+  assert.deepEqual(rawPayload.failed_lookups, [
+    { lookupBy: 'authorized_payment_id', reason: 'subscription_not_found' },
+    { lookupBy: 'event_linkage', reason: 'subscription_not_found' },
+    { lookupBy: 'webhook_linkage', reason: 'subscription_not_found' },
+    {
+      lookupBy: 'loyalty_subscription_linkage',
+      reason: 'authorized_payment_not_accessible_with_known_seller_tokens',
+    },
+  ])
+
+  assert.equal(logs.length, 1)
+  assert.equal(logs[0].message, '[billing:webhook] unresolved_authorized_payment_ignored')
+  assert.equal(logs[0].payload.audit_persisted, true)
+  assert.equal(logs[0].payload.resource_id, '7027485215')
+})
+
+test('unresolved authorized payment audit logs cleanly when storage is unavailable', async () => {
+  const logs = []
+  const result = await recordUnresolvedAuthorizedPaymentWebhookAudit({
+    ownerResolutionPayload: {
+      request_id: 'req-no-table',
+      resource_id: '7027485215',
+      topic: 'subscription_authorized_payment',
+      body_action: 'updated',
+      failed_lookups: [{ lookupBy: 'authorized_payment_id', reason: 'subscription_not_found' }],
+      resolution_reason: 'unresolved_owner_for_authorized_payment',
+      platform_user_id: 281768531,
+      body_user_id: null,
+      body_user_estabelecimento_id: null,
+    },
+    db: {
+      async query() {
+        const error = new Error('Table does not exist')
+        error.code = 'ER_NO_SUCH_TABLE'
+        error.errno = 1146
+        throw error
+      },
+    },
+    logger: {
+      info(message, payload) {
+        logs.push({ message, payload })
+      },
+    },
+  })
+
+  assert.equal(result.persisted, false)
+  assert.equal(logs.length, 1)
+  assert.equal(logs[0].message, '[billing:webhook] unresolved_authorized_payment_ignored')
+  assert.equal(logs[0].payload.audit_persisted, false)
+  assert.equal(logs[0].payload.audit_storage_error.code, 'ER_NO_SUCH_TABLE')
 })
 
 test('preapproval owner resolution finds loyalty seller by internal preapproval linkage', async () => {

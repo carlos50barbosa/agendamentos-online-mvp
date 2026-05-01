@@ -3037,17 +3037,26 @@ a:hover { opacity: 1; text-decoration: underline; }
 }
 .subscription-page__financial-overview{
   display:grid;
-  grid-template-columns:repeat(auto-fit, minmax(220px, 1fr));
+  grid-template-columns:repeat(auto-fit, minmax(min(100%, 220px), 1fr));
   gap:10px;
   margin:0 0 14px;
 }
 .subscription-page__financial-card{
   display:grid;
   gap:8px;
+  min-width:0;
   padding:14px;
   border-radius:16px;
   border:1px solid rgba(148,163,184,.22);
   background:#fff;
+}
+.subscription-page__financial-card > *{
+  min-width:0;
+  max-width:100%;
+}
+.subscription-page__financial-card strong,
+.subscription-page__financial-card .muted{
+  overflow-wrap:anywhere;
 }
 .subscription-page__financial-card p{
   margin:0;
@@ -3077,17 +3086,23 @@ a:hover { opacity: 1; text-decoration: underline; }
   display:inline-flex;
   align-items:center;
   gap:6px;
+  max-width:100%;
+  min-width:0;
   font-size:11px;
   font-weight:800;
   letter-spacing:.04em;
+  line-height:1.25;
   text-transform:uppercase;
   color:#0f766e;
+  white-space:normal;
+  overflow-wrap:anywhere;
 }
 .subscription-page__history-meta{
   display:flex;
   align-items:center;
   gap:8px;
   flex-wrap:wrap;
+  min-width:0;
 }
 .subscription-page__history-method{
   display:inline-flex;
@@ -3112,13 +3127,18 @@ a:hover { opacity: 1; text-decoration: underline; }
   display:inline-flex;
   align-items:center;
   justify-content:center;
+  max-width:100%;
   min-height:30px;
-  padding:0 12px;
+  padding:6px 12px;
   border-radius:999px;
   font-size:11px;
   font-weight:800;
   letter-spacing:.06em;
+  line-height:1.2;
   text-transform:uppercase;
+  text-align:center;
+  white-space:normal;
+  overflow-wrap:anywhere;
   border:1px solid transparent;
 }
 .subscription-page__status-chip--success{

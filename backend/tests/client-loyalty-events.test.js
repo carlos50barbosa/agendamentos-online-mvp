@@ -63,8 +63,11 @@ test('client loyalty event insert keeps long ignored_reason out of the indexed c
 test('schema and migration allow ignored_reason headroom while code still stores short values', () => {
   const schema = readFileSync(new URL('../sql/schema.sql', import.meta.url), 'utf8')
   const migration = readFileSync(new URL('../sql/2026-04-30-expand-loyalty-ignored-reason.sql', import.meta.url), 'utf8')
+  const ownerMigration = readFileSync(new URL('../sql/2026-05-01-allow-unresolved-mercadopago-webhook-owner.sql', import.meta.url), 'utf8')
 
   assert.match(schema, /ignored_reason VARCHAR\(191\) NULL/)
   assert.match(migration, /client_loyalty_subscription_events\s+[\s\S]*ignored_reason VARCHAR\(191\) NULL/)
   assert.match(migration, /mercadopago_webhook_events\s+[\s\S]*ignored_reason VARCHAR\(191\) NULL/)
+  assert.match(schema, /mercadopago_webhook_events\s+[\s\S]*owner_type ENUM\('platform','establishment','unresolved'\) NOT NULL/)
+  assert.match(ownerMigration, /owner_type ENUM\('platform','establishment','unresolved'\) NOT NULL/)
 })

@@ -110,6 +110,7 @@ const MP_COLLECTOR_ID = Number(process.env.MERCADOPAGO_COLLECTOR_ID || 281768531
 const WEBHOOK_MISMATCH_WINDOW_MS = 60000
 const webhookMismatchLogByIp = new Map()
 const CARD_RECOVERY_STATUSES = new Set(['past_due', 'unpaid', 'expired'])
+const UNRESOLVED_AUTHORIZED_PAYMENT_IGNORED_EVENT = 'unresolved_authorized_payment_ignored'
 
 function requireBillingWebhookHealthAccess(req, res, next) {
   const access = resolveRouteTokenAccess(req, {
@@ -575,6 +576,145 @@ function normalizeOwnerResolutionFailedLookups(failedLookups = []) {
     normalized.push({ lookupBy, reason })
   }
   return normalized
+}
+
+function safeStringifyBillingWebhookAuditPayload(value) {
+  if (value == null) return null
+  try {
+    return JSON.stringify(value)
+  } catch {
+    return null
+  }
+}
+
+function buildUnresolvedAuthorizedPaymentWebhookDeliveryKey(payload = {}) {
+  const parts = [
+    'billing',
+    UNRESOLVED_AUTHORIZED_PAYMENT_IGNORED_EVENT,
+    payload.topic || 'subscription_authorized_payment',
+    payload.body_action || '',
+    payload.resource_id || '',
+    payload.body_user_id ?? '',
+    payload.body_user_estabelecimento_id ?? '',
+  ].map((item) => String(item ?? '').trim().replace(/\s+/g, '_'))
+  const base = parts.join(':')
+  if (base.length <= 191) return base
+  const digest = createHmac('sha256', 'billing:webhook:unresolved_authorized_payment')
+    .update(base)
+    .digest('hex')
+    .slice(0, 24)
+  return `${base.slice(0, 166)}:${digest}`
+}
+
+function buildUnresolvedAuthorizedPaymentAuditPayload(ownerResolutionPayload = {}) {
+  return {
+    audit_event: UNRESOLVED_AUTHORIZED_PAYMENT_IGNORED_EVENT,
+    request_id: ownerResolutionPayload.request_id || null,
+    resource_id: ownerResolutionPayload.resource_id || null,
+    topic: ownerResolutionPayload.topic || 'subscription_authorized_payment',
+    body_action: ownerResolutionPayload.body_action || null,
+    body_type: ownerResolutionPayload.body_type || null,
+    failed_lookups: normalizeOwnerResolutionFailedLookups(ownerResolutionPayload.failed_lookups),
+    resolution_reason: ownerResolutionPayload.resolution_reason || null,
+    resolution_rule: ownerResolutionPayload.resolution_rule || null,
+    platform_user_id: ownerResolutionPayload.platform_user_id || MP_COLLECTOR_ID,
+    body_user_id: ownerResolutionPayload.body_user_id ?? null,
+    body_user_estabelecimento_id: ownerResolutionPayload.body_user_estabelecimento_id || null,
+    matched_flow: ownerResolutionPayload.matched_flow || null,
+    token_source: ownerResolutionPayload.token_source || null,
+    fallback_to_platform_blocked: true,
+    action_taken: UNRESOLVED_AUTHORIZED_PAYMENT_IGNORED_EVENT,
+  }
+}
+
+async function recordUnresolvedAuthorizedPaymentWebhookAudit({
+  ownerResolutionPayload = {},
+  db = pool,
+  logger = console,
+} = {}) {
+  const auditPayload = buildUnresolvedAuthorizedPaymentAuditPayload(ownerResolutionPayload)
+  const deliveryKey = buildUnresolvedAuthorizedPaymentWebhookDeliveryKey(auditPayload)
+  let persisted = false
+  let duplicated = false
+  let auditError = null
+
+  if (db?.query && deliveryKey) {
+    try {
+      await db.query(
+        `INSERT INTO mercadopago_webhook_events
+          (
+            request_id,
+            delivery_key,
+            owner_type,
+            owner_id,
+            estabelecimento_id,
+            mp_user_id,
+            mp_collector_id,
+            topic,
+            action_name,
+            resource_id,
+            external_reference,
+            loyalty_subscription_id,
+            action_taken,
+            ignored_reason,
+            raw_payload
+          )
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        [
+          auditPayload.request_id,
+          deliveryKey,
+          'unresolved',
+          null,
+          null,
+          auditPayload.body_user_id == null ? null : String(auditPayload.body_user_id),
+          auditPayload.platform_user_id == null ? null : String(auditPayload.platform_user_id),
+          auditPayload.topic,
+          auditPayload.body_action,
+          auditPayload.resource_id,
+          ownerResolutionPayload.external_reference || null,
+          null,
+          UNRESOLVED_AUTHORIZED_PAYMENT_IGNORED_EVENT,
+          UNRESOLVED_AUTHORIZED_PAYMENT_IGNORED_EVENT,
+          safeStringifyBillingWebhookAuditPayload(auditPayload),
+        ]
+      )
+      persisted = true
+    } catch (error) {
+      if (error?.code === 'ER_DUP_ENTRY') {
+        persisted = true
+        duplicated = true
+      } else {
+        auditError = {
+          code: error?.code || null,
+          errno: error?.errno || null,
+          message: error?.message || String(error),
+        }
+      }
+    }
+  }
+
+  const logPayload = {
+    ...auditPayload,
+    audit_persisted: persisted,
+    audit_duplicate: duplicated,
+    audit_storage_error: auditError,
+  }
+  logger.info?.(`[billing:webhook] ${UNRESOLVED_AUTHORIZED_PAYMENT_IGNORED_EVENT}`, logPayload)
+  return {
+    eventName: UNRESOLVED_AUTHORIZED_PAYMENT_IGNORED_EVENT,
+    persisted,
+    duplicated,
+    auditPayload,
+    logPayload,
+  }
+}
+
+function isExpectedUnresolvedAuthorizedPaymentOwner(ownerResolution = null) {
+  return (
+    ownerResolution?.ok === false &&
+    !ownerResolution?.ownerType &&
+    ownerResolution?.reason === 'unresolved_owner_for_authorized_payment'
+  )
 }
 
 function decorateWebhookOwnerResolution(resolution, {
@@ -1520,7 +1660,8 @@ async function resolveBillingAuthorizedPaymentWebhookAction({
       responseBody: {
         ok: true,
         ignored: true,
-        reason: 'unresolved_authorized_payment_owner',
+        reason: UNRESOLVED_AUTHORIZED_PAYMENT_IGNORED_EVENT,
+        resolution_reason: resolvedOwner?.reason || null,
       },
     }
   }
@@ -5376,6 +5517,11 @@ router.post('/webhook', async (req, res) => {
       console.info('[billing:webhook] owner_resolution_authorized_payment', ownerResolutionPayload)
 
       if (authorizedPaymentAction.kind === 'ignored_unresolved_authorized_payment_owner') {
+        if (isExpectedUnresolvedAuthorizedPaymentOwner(ownerResolution)) {
+          await recordUnresolvedAuthorizedPaymentWebhookAudit({ ownerResolutionPayload })
+          return res.status(200).json(authorizedPaymentAction.responseBody)
+        }
+
         logAuthorizedPaymentLookupFailures(ownerResolutionPayload, ownerResolution)
         if (ownerResolution?.reason === 'seller_account_found_but_no_valid_token') {
           console.warn('[billing:webhook] seller_account_found_but_no_valid_token', ownerResolutionPayload)
@@ -5963,7 +6109,9 @@ router.get('/renew/pix/status', auth, isEstabelecimento, async (req, res) => {
 })
 
 export {
+  buildBillingWebhookOwnerResolutionPayload,
   normalizeBillingWebhookTopic,
+  recordUnresolvedAuthorizedPaymentWebhookAudit,
   resolveAuthorizedPaymentWebhookOwnerContext,
   resolveBillingAuthorizedPaymentWebhookAction,
   resolveBillingSubscriptionWebhookAction,
