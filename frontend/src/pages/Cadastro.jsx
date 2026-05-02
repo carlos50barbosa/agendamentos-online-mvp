@@ -177,7 +177,10 @@ export default function Cadastro() {
 
   }, [loc.search]);
 
-  const nextParam = useMemo(() => new URLSearchParams(loc.search).get('next') || '', [loc.search]);
+  const nextParam = useMemo(() => {
+    const params = new URLSearchParams(loc.search);
+    return params.get('next') || params.get('redirect') || '';
+  }, [loc.search]);
 
 
 
@@ -342,6 +345,7 @@ export default function Cadastro() {
     if (normalized === 'cliente') {
 
       setForm((prev) => ({ ...prev, tipo: 'cliente' }));
+      setHasChosen(true);
 
       return;
 
@@ -350,6 +354,7 @@ export default function Cadastro() {
     if (['estab', 'estabelecimento', 'empresa', 'business'].includes(normalized)) {
 
       setForm((prev) => ({ ...prev, tipo: 'estabelecimento' }));
+      setHasChosen(true);
 
     }
 

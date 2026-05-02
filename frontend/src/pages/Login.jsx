@@ -9,73 +9,42 @@ import {
   IconLock,
   IconMail,
   IconShield,
-  IconSpark,
   IconUser,
 } from '../components/AuthIcons.jsx';
-import LogoAO from '../components/LogoAO.jsx';
 import { Api } from '../utils/api';
 import { clearPlanCache, saveToken, saveUser } from '../utils/auth';
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-const ESTAB_THEME_DEFAULTS = Object.freeze({
-  accent: '#0f766e',
-  accentStrong: '#164e63',
-});
-
-function normalizeHexColor(value) {
-  const raw = String(value || '').trim();
-  if (!raw) return '';
-  const prefixed = raw.startsWith('#') ? raw : `#${raw}`;
-  if (!/^#([\da-f]{3}|[\da-f]{6})$/i.test(prefixed)) return '';
-  if (prefixed.length === 4) {
-    return `#${prefixed[1]}${prefixed[1]}${prefixed[2]}${prefixed[2]}${prefixed[3]}${prefixed[3]}`.toLowerCase();
-  }
-  return prefixed.toLowerCase();
-}
-
-function hexToRgb(hex) {
-  const normalized = normalizeHexColor(hex);
-  if (!normalized) return null;
-  const value = normalized.slice(1);
-  return {
-    r: Number.parseInt(value.slice(0, 2), 16),
-    g: Number.parseInt(value.slice(2, 4), 16),
-    b: Number.parseInt(value.slice(4, 6), 16),
-  };
-}
-
-function toRgba(hex, alpha) {
-  const rgb = hexToRgb(hex);
-  if (!rgb) return '';
-  const safeAlpha = Math.max(0, Math.min(1, alpha));
-  return `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${safeAlpha})`;
-}
-
-function mixColors(hexA, hexB, weight = 0.5) {
-  const colorA = hexToRgb(hexA);
-  const colorB = hexToRgb(hexB);
-  if (!colorA || !colorB) return normalizeHexColor(hexA) || normalizeHexColor(hexB) || '';
-
-  const safeWeight = Math.max(0, Math.min(1, weight));
-  const mixChannel = (channel) => Math.round((colorA[channel] * safeWeight) + (colorB[channel] * (1 - safeWeight)));
-  const mixed = [mixChannel('r'), mixChannel('g'), mixChannel('b')]
-    .map((value) => value.toString(16).padStart(2, '0'))
-    .join('');
-
-  return `#${mixed}`;
-}
-
 function ProfileGlyph({ isCliente = false }) {
   return isCliente ? <IconUser /> : <IconBuilding />;
 }
+
+const PROFILE_OPTIONS = [
+  {
+    value: 'CLIENTE',
+    title: 'Cliente',
+    description: 'Acompanhe seus agendamentos e histórico.',
+  },
+  {
+    value: 'ESTABELECIMENTO',
+    title: 'Estabelecimento',
+    description: 'Gerencie agenda, equipe, serviços e clientes.',
+  },
+];
+
+const OPERATION_HIGHLIGHTS = [
+  'Agenda inteligente',
+  'Clientes organizados',
+  'Gestão de serviços',
+  'Notificações automáticas',
+];
 
 export default function Login() {
   const nav = useNavigate();
   const loc = useLocation();
 
   const [tipo, setTipo] = useState('');
-  const [lastProfile, setLastProfile] = useState('');
   const [email, setEmail] = useState('');
   const [senha, setSenha] = useState('');
   const [showPass, setShowPass] = useState(false);
@@ -89,17 +58,9 @@ export default function Login() {
   const emailRef = useRef(null);
   const passRef = useRef(null);
 
-  const nextParam = useMemo(() => new URLSearchParams(loc.search).get('next') || '', [loc.search]);
-  const tipoParam = useMemo(() => new URLSearchParams(loc.search).get('tipo') || '', [loc.search]);
-
-  const normalizedTipoParam = useMemo(() => {
-    const normalized = String(tipoParam || '').toLowerCase();
-    if (normalized === 'cliente') return 'cliente';
-    if (['estab', 'estabelecimento', 'empresa', 'business'].includes(normalized)) {
-      return 'estabelecimento';
-    }
-    return '';
-  }, [tipoParam]);
+  const searchParams = useMemo(() => new URLSearchParams(loc.search), [loc.search]);
+  const nextParam = useMemo(() => searchParams.get('next') || searchParams.get('redirect') || '', [searchParams]);
+  const tipoParam = useMemo(() => searchParams.get('tipo') || '', [searchParams]);
 
   const storedNext = useMemo(() => {
     if (typeof window === 'undefined') return '';
@@ -116,10 +77,17 @@ export default function Login() {
   }, [nextParam, storedNext, tipo]);
 
   const cadastroTarget = useMemo(() => {
-    if (tipo === 'ESTABELECIMENTO') return '/cadastro?tipo=estabelecimento';
-    if (tipo === 'CLIENTE') return '/cadastro?tipo=cliente';
-    return '/cadastro';
-  }, [tipo]);
+    const params = new URLSearchParams(loc.search);
+
+    if (tipo === 'ESTABELECIMENTO') {
+      params.set('tipo', 'estabelecimento');
+    } else if (tipo === 'CLIENTE') {
+      params.set('tipo', 'cliente');
+    }
+
+    const query = params.toString();
+    return query ? `/cadastro?${query}` : '/cadastro';
+  }, [loc.search, tipo]);
 
   useEffect(() => {
     try {
@@ -132,22 +100,11 @@ export default function Login() {
   }, []);
 
   useEffect(() => {
-    if (typeof window === 'undefined') return;
-    try {
-      const stored = localStorage.getItem('ao:last_profile');
-      if (stored === 'cliente' || stored === 'estabelecimento') {
-        setLastProfile(stored);
-      }
-    } catch {}
-  }, [tipoParam]);
-
-  useEffect(() => {
     const normalized = String(tipoParam || '').toLowerCase();
     if (!normalized) return;
 
     if (normalized === 'cliente') {
       setTipo('CLIENTE');
-      setLastProfile('cliente');
       try {
         localStorage.setItem('ao:last_profile', 'cliente');
       } catch {}
@@ -156,7 +113,6 @@ export default function Login() {
 
     if (['estab', 'estabelecimento', 'empresa', 'business'].includes(normalized)) {
       setTipo('ESTABELECIMENTO');
-      setLastProfile('estabelecimento');
       try {
         localStorage.setItem('ao:last_profile', 'estabelecimento');
       } catch {}
@@ -174,81 +130,8 @@ export default function Login() {
     return true;
   }, [email, senha]);
 
-  const lastProfileValue = useMemo(() => {
-    if (lastProfile === 'estabelecimento') return 'ESTABELECIMENTO';
-    if (lastProfile === 'cliente') return 'CLIENTE';
-    return '';
-  }, [lastProfile]);
-
-  const lastProfileLabel = useMemo(() => {
-    if (!lastProfileValue) return '';
-    return lastProfileValue === 'ESTABELECIMENTO' ? 'Estabelecimento' : 'Cliente';
-  }, [lastProfileValue]);
-
-  const effectiveTipo = useMemo(() => {
-    if (tipo) return tipo;
-    if (normalizedTipoParam === 'estabelecimento') return 'ESTABELECIMENTO';
-    if (normalizedTipoParam === 'cliente') return 'CLIENTE';
-    return '';
-  }, [normalizedTipoParam, tipo]);
-
-  const isEstablishmentContext = effectiveTipo === 'ESTABELECIMENTO';
-
-  const establishmentThemeStyle = useMemo(() => {
-    const params = new URLSearchParams(loc.search);
-    const accent = normalizeHexColor(params.get('accent') || params.get('cor')) || ESTAB_THEME_DEFAULTS.accent;
-    const accentStrong =
-      normalizeHexColor(params.get('accentStrong') || params.get('corStrong')) ||
-      mixColors(accent, ESTAB_THEME_DEFAULTS.accentStrong, 0.42);
-
-    return {
-      '--estab-accent': accent,
-      '--estab-accent-strong': accentStrong,
-      '--estab-accent-soft': toRgba(accent, 0.1),
-      '--estab-accent-soft-strong': toRgba(accent, 0.18),
-      '--estab-accent-border': toRgba(accent, 0.24),
-      '--estab-accent-ring': toRgba(accent, 0.2),
-      '--estab-accent-shadow': toRgba(accentStrong, 0.18),
-      '--estab-surface-top': mixColors(accent, '#ffffff', 0.1),
-      '--estab-surface-bottom': mixColors(accentStrong, '#ffffff', 0.06),
-      '--estab-badge-bg': mixColors(accent, '#ffffff', 0.14),
-      '--estab-badge-border': toRgba(accent, 0.18),
-    };
-  }, [loc.search]);
-
   const headerTitle = 'Acesse sua conta';
-  const headerDescription =
-    effectiveTipo === 'ESTABELECIMENTO'
-      ? 'Entre para acompanhar agenda, equipe, servi\u00e7os e clientes com uma experi\u00eancia mais profissional.'
-      : effectiveTipo === 'CLIENTE'
-        ? 'Use seu e-mail e sua senha para continuar com seus agendamentos.'
-        : 'Escolha se deseja entrar como cliente ou estabelecimento.';
-
-  const asideBadge = isEstablishmentContext ? 'Workspace premium' : 'Plataforma confiável';
-  const asideTitle = isEstablishmentContext
-    ? 'A rotina do estabelecimento começa com clareza, segurança e contexto.'
-    : 'Acesse sua conta com a mesma consistência de um produto premium.';
-  const asideCopy = isEstablishmentContext
-    ? 'Tenha agenda, equipe, serviços e clientes no mesmo fluxo, com uma experiência preparada para operações profissionais.'
-    : 'Um fluxo objetivo para entrar, retomar sessao e seguir seu dia sem ruido visual ou etapas desnecessarias.';
-
-  const hasRedirectTarget = Boolean(nextParam || storedNext);
-
-  const redirectHint = useMemo(() => {
-    const raw = nextParam || storedNext || '';
-    if (!raw) return '';
-
-    let value = String(raw || '');
-
-    try {
-      if (/^https?:\/\//i.test(value)) {
-        const parsed = new URL(value);
-        value = `${parsed.pathname || '/'}${parsed.search || ''}`;
-      }
-    } catch {}
-
-    return value.length > 46 ? `${value.slice(0, 43)}...` : value;
-  }, [nextParam, storedNext]);
+  const headerDescription = 'Escolha seu perfil para acessar sua conta com segurança.';
 
   const buildLoginSearch = (value) => {
     const params = new URLSearchParams(loc.search);
@@ -256,9 +139,9 @@ export default function Login() {
     if (value) params.set('tipo', value === 'ESTABELECIMENTO' ? 'estabelecimento' : 'cliente');
     else params.delete('tipo');
 
-    const nextValue = params.get('next') || nextParam || storedNext;
-    if (nextValue) params.set('next', nextValue);
-    else params.delete('next');
+    if (!params.get('next') && !params.get('redirect') && storedNext) {
+      params.set('next', storedNext);
+    }
 
     const query = params.toString();
     return query ? `/login?${query}` : '/login';
@@ -272,21 +155,12 @@ export default function Login() {
     setSuccessMsg('');
 
     const stored = value === 'ESTABELECIMENTO' ? 'estabelecimento' : 'cliente';
-    setLastProfile(stored);
 
     try {
       localStorage.setItem('ao:last_profile', stored);
     } catch {}
 
     nav(buildLoginSearch(value), { replace: true });
-  };
-
-  const handleTipoReset = () => {
-    setTipo('');
-    setErrorMsg('');
-    setSuccessMsg('');
-    setCapsLockOn(false);
-    nav(buildLoginSearch(''), { replace: true });
   };
 
   async function handleSubmit(event) {
@@ -355,7 +229,7 @@ export default function Login() {
     return () => clearTimeout(timeoutId);
   }, [tipo]);
 
-  const Tab = ({ value, title, hint }) => {
+  const Tab = ({ value, title, description }) => {
     const active = tipo === value;
     const isCliente = value === 'CLIENTE';
 
@@ -367,23 +241,23 @@ export default function Login() {
         role="tab"
         aria-selected={active}
         aria-label={`Selecionar perfil ${title}`}
-        tabIndex={active || !hasTipo ? 0 : -1}
+        tabIndex={0}
       >
         <span className="login-preview__tab-icon" aria-hidden="true">
           <ProfileGlyph isCliente={isCliente} />
         </span>
         <span className="login-preview__tab-body">
           <span className="login-preview__tab-title">{title}</span>
-          {hint ? <span className="login-preview__tab-hint">{hint}</span> : null}
+          <span className="login-preview__tab-hint">{description}</span>
         </span>
+        {active ? <span className="login-preview__tab-state">Selecionado</span> : null}
       </button>
     );
   };
 
   return (
     <div
-      className={`login-preview auth-portal auth-portal--login${isEstablishmentContext ? ' auth-portal--estab' : ''}`}
-      style={establishmentThemeStyle}
+      className="login-preview auth-portal auth-portal--login"
     >
       <div className="login-preview__bg" aria-hidden="true" />
       <div className="login-preview__pattern" aria-hidden="true" />
@@ -391,125 +265,54 @@ export default function Login() {
       <main className="login-preview__main">
         <section className="login-preview__card">
           <div className="login-preview__grid">
-            <aside className="login-preview__aside" aria-label="Destaques do acesso">
-              <div className="auth-portal__brand">
-                <LogoAO size={40} className="login-preview__logo-mark" />
-                <div className="auth-portal__brand-copy">
-                  <div className="auth-portal__brand-title">Agendamentos Online</div>
-                  <div className="auth-portal__brand-subtitle">Entrada segura para clientes e operações</div>
-                </div>
+            <aside className="login-preview__aside login-preview__info-panel" aria-label="Destaques da plataforma">
+              <div className="login-preview__info-icon" aria-hidden="true">
+                <IconShield />
               </div>
 
-              <span className="auth-portal__aside-badge">{asideBadge}</span>
-
-              <div>
-                <h2 className="auth-portal__aside-title">{asideTitle}</h2>
-                <p className="auth-portal__aside-copy">{asideCopy}</p>
+              <div className="login-preview__info-copy">
+                <h2 className="login-preview__info-title">Tudo para gerenciar sua operação</h2>
+                <p className="login-preview__info-text">
+                  Organize agenda, clientes, serviços e notificações em uma plataforma simples e segura.
+                </p>
               </div>
 
-              <div className="auth-portal__stats">
-                <div className="auth-portal__stat">
-                  <span className="auth-portal__stat-label">Sessoes</span>
-                  <strong className="auth-portal__stat-value">Protegidas</strong>
-                </div>
-                <div className="auth-portal__stat">
-                  <span className="auth-portal__stat-label">Experiencia</span>
-                  <strong className="auth-portal__stat-value">Desktop + mobile</strong>
-                </div>
-              </div>
-
-              <ul className="auth-portal__list">
-                <li className="auth-portal__list-item">
-                  <IconShield className="auth-portal__list-icon" />
-                  <span>Protecao de acesso e mensagens claras em cada etapa.</span>
-                </li>
-                <li className="auth-portal__list-item">
-                  <IconSpark className="auth-portal__list-icon" />
-                  <span>{isEstablishmentContext ? 'Fluxo profissional para agenda, equipe e clientes.' : 'Entrada rápida para acompanhar agendamentos e histórico.'}</span>
-                </li>
-                <li className="auth-portal__list-item">
-                  <IconCheck className="auth-portal__list-icon" />
-                  <span>Layout consistente para primeiro acesso, retorno e recuperação de conta.</span>
-                </li>
+              <ul className="login-preview__info-list">
+                {OPERATION_HIGHLIGHTS.map((item) => (
+                  <li key={item} className="login-preview__info-item">
+                    <span className="login-preview__info-check" aria-hidden="true">
+                      <IconCheck />
+                    </span>
+                    <span>{item}</span>
+                  </li>
+                ))}
               </ul>
-
-              <div className="auth-portal__aside-footer">
-                Dados sensiveis e autenticacao tratados com o mesmo cuidado visual de um produto SaaS premium.
-              </div>
             </aside>
 
             <div className="login-preview__panel">
-              <span className="auth-portal__panel-badge">
-                {isEstablishmentContext ? 'Acesso profissional' : 'Acesso seguro'}
-              </span>
+              <span className="auth-portal__panel-badge">ACESSO SEGURO</span>
 
               <header className="login-preview__header">
                 <h1>{headerTitle}</h1>
                 <p>{headerDescription}</p>
               </header>
 
-              {tipo ? (
-                <div
-                  className={`login-preview__selected-simple login-preview__selected-simple--${tipo === 'ESTABELECIMENTO' ? 'estab' : 'cliente'}`}
-                  role="status"
-                >
-                  <div className="login-preview__selected-simple-label">
-                    Perfil: <strong>{tipo === 'ESTABELECIMENTO' ? 'Estabelecimento' : 'Cliente'}</strong>
-                  </div>
-                  <button type="button" className="login-preview__selected-simple-change" onClick={handleTipoReset}>
-                    Trocar
-                  </button>
+              <div className="login-preview__chooser">
+                <div className="login-preview__chooser-head">
+                  <h2 className="login-preview__chooser-title">Escolha seu tipo de acesso</h2>
                 </div>
-              ) : null}
 
-              {!tipo ? (
-                <div className="login-preview__chooser">
-                  {lastProfileValue ? (
-                    <div className="login-preview__continue">
-                      <button
-                        type="button"
-                        className="login-preview__continue-card"
-                        onClick={() => handleTipoSelect(lastProfileValue)}
-                        aria-label={`Continuar como ${lastProfileLabel}`}
-                      >
-                        <div className="auth-portal__continue-summary">
-                          <span className="auth-portal__continue-label">Continuar:</span>
-                          <span
-                            className={`login-preview__continue-highlight login-preview__continue-highlight--${lastProfileValue === 'ESTABELECIMENTO' ? 'estab' : 'cliente'} auth-portal__continue-value`}
-                          >
-                            {lastProfileLabel}
-                          </span>
-                        </div>
-                      </button>
-
-                      <button
-                        type="button"
-                        className="login-preview__continue-link"
-                        onClick={handleTipoReset}
-                      >
-                        Trocar perfil
-                      </button>
-                    </div>
-                  ) : null}
-
-                  <div className="login-preview__tabs" role="tablist" aria-label="Escolher perfil">
-                    <Tab value="CLIENTE" title="Cliente" hint="Acompanhe seus agendamentos e histórico." />
-                    <Tab value="ESTABELECIMENTO" title="Estabelecimento" hint="Gerencie agenda, equipe e clientes." />
-                  </div>
-
-                  <div className="login-preview__actions">
-                    <Link to={cadastroTarget} className="login-preview__ghost">
-                      Criar conta
-                    </Link>
-                  </div>
+                <div className="login-preview__tabs" role="tablist" aria-label="Escolher tipo de acesso">
+                  {PROFILE_OPTIONS.map((option) => (
+                    <Tab
+                      key={option.value}
+                      value={option.value}
+                      title={option.title}
+                      description={option.description}
+                    />
+                  ))}
                 </div>
-              ) : null}
-
-              {hasRedirectTarget ? (
-                <div className="login-preview__redirect" role="status" aria-live="polite">
-                  Redirecionamento: <strong>{redirectHint}</strong>.
-                </div>
-              ) : null}
+              </div>
 
               {sessionMsg ? (
                 <div className="login-preview__alert login-preview__alert--info" role="status">
@@ -636,12 +439,16 @@ export default function Login() {
                         Entrando...
                       </span>
                     ) : (
-                      'Entrar'
+                      tipo === 'ESTABELECIMENTO' ? 'Entrar como estabelecimento' : 'Entrar como cliente'
                     )}
                   </button>
 
                   <div className="login-preview__actions">
-                    <Link to={cadastroTarget} className="login-preview__ghost">
+                    <Link
+                      to={cadastroTarget}
+                      className="login-preview__ghost"
+                      aria-label={`Criar conta como ${tipo === 'ESTABELECIMENTO' ? 'estabelecimento' : 'cliente'}`}
+                    >
                       Criar conta
                     </Link>
                   </div>
