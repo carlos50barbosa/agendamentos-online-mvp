@@ -1,17 +1,57 @@
 // src/pages/Planos.jsx
 import React, { Suspense, useEffect, useState } from 'react';
 import { useNavigate, Link, useLocation } from 'react-router-dom';
+import {
+  IconBell,
+  IconChart,
+  IconHome,
+  IconList,
+  IconMoney,
+  IconPhone,
+  IconStar,
+  IconUsers,
+  IconWrench,
+} from '../components/Icons.jsx';
 import { getUser } from '../utils/auth';
 import { Api } from '../utils/api';
 
-const PlanosUpperExtras = React.lazy(() => import('./PlanosUpperExtras.jsx'));
 const PlanosLowerExtras = React.lazy(() => import('./PlanosLowerExtras.jsx'));
 
-function Feature({ icon = '-', children }) {
+function PlanCheckIcon(props) {
   return (
-    <li className="feature-line">
-      <span className="feature-line__icon" aria-hidden>{icon}</span>
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
+      <path d="M20 6 9 17l-5-5" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function PlanMinusIcon(props) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
+      <path d="M6 12h12" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function Feature({ icon = null, tone = '', children }) {
+  const Icon = typeof icon === 'function' ? icon : null;
+  return (
+    <li className={`feature-line${tone ? ` feature-line--${tone}` : ''}`}>
+      <span className="feature-line__icon" aria-hidden>
+        {Icon ? <Icon /> : icon || (tone === 'muted' ? <PlanMinusIcon /> : <PlanCheckIcon />)}
+      </span>
       <span>{children}</span>
+    </li>
+  );
+}
+
+function IncludedBenefit({ icon: Icon = PlanCheckIcon, label }) {
+  return (
+    <li className="pricing-included__item">
+      <span className="pricing-included__icon" aria-hidden>
+        <Icon />
+      </span>
+      <span>{label}</span>
     </li>
   );
 }
@@ -36,40 +76,48 @@ const BILLING_CYCLES = {
   anual: { label: 'Anual', periodLabel: '/ano' },
 };
 
-const WHATSAPP_LIMIT_FOOTNOTE = '* Ao atingir o limite de WhatsApp, o envio continua por e-mail e painel.';
+const WHATSAPP_LIMIT_NOTICE = 'Ao atingir o limite de WhatsApp, os avisos continuam por e-mail e pelo painel. Também é possível comprar pacotes extras via PIX.';
 const WHATSAPP_TOOLTIP = {
-  title: 'Como funciona?',
+  title: 'Mensagens automáticas',
   items: [
-    'As mensagens do WhatsApp são usadas para confirmações, lembretes e avisos do agendamento.',
-    'Cada agendamento pode enviar até 5 mensagens.',
-    'Ao atingir o limite mensal do plano, você pode seguir por e-mail e painel ou comprar pacotes extras.',
+    'Usadas para confirmações, lembretes e avisos do agendamento.',
+    'Cada agendamento pode enviar até 5 mensagens automáticas.',
+    WHATSAPP_LIMIT_NOTICE,
   ],
 };
+
+const INCLUDED_BENEFITS = [
+  { icon: IconWrench, label: 'Serviços e agendamentos ilimitados' },
+  { icon: IconHome, label: 'Página pública de agendamento personalizada' },
+  { icon: IconPhone, label: 'Link exclusivo para divulgar no WhatsApp, Instagram e Google' },
+  { icon: IconBell, label: 'Confirmações e lembretes automáticos' },
+  { icon: IconUsers, label: 'Cadastro e histórico de clientes' },
+  { icon: IconList, label: 'Agenda online responsiva para celular, tablet e computador' },
+  { icon: IconChart, label: 'Painel de controle do estabelecimento' },
+  { icon: IconStar, label: 'Controle de status dos agendamentos' },
+  { icon: IconMoney, label: 'Pacotes extras de WhatsApp via PIX' },
+];
 
 
 const PRICING_PLANS = [
   {
     key: 'starter',
     title: 'Starter',
-    subtitle: 'Para começar com o essencial',
-    badge: 'Serviços e agendamentos ilimitados',
+    subtitle: 'Ideal para começar online',
     prices: { mensal: '14,90', anual: '149,00' },
     annualEquivalent: '12,40',
     features: [
-      { key: 'starter-services', label: 'Serviços e agendamentos ilimitados no sistema' },
       { key: 'starter-pros', label: 'Até 2 profissionais' },
       { key: 'starter-gallery', label: 'Galeria pública com até 5 imagens' },
       {
         key: 'starter-whatsapp',
-        label: 'WhatsApp incluso: 250 mensagens/mês (confirmações, lembretes e avisos)*',
+        label: '250 mensagens automáticas de WhatsApp por mês',
         tooltip: WHATSAPP_TOOLTIP,
       },
-      { key: 'starter-extras', label: 'Pacotes extras de WhatsApp via PIX (opcional)' },
-      { key: 'starter-msgs', label: 'Até 5 mensagens por agendamento' },
       { key: 'starter-reports', label: 'Relatórios básicos' },
-      { key: 'starter-deposit', label: 'Sinal via PIX com Mercado Pago indisponível neste plano' },
+      { key: 'starter-ideal', label: 'Ideal para profissionais e pequenos negócios que querem começar online' },
+      { key: 'starter-deposit', label: 'Sinal via PIX com Mercado Pago indisponível neste plano', tone: 'muted' },
     ],
-    footnote: WHATSAPP_LIMIT_FOOTNOTE,
     annualNote: 'Economize o equivalente a 2 meses no plano anual.',
     ctaVariant: 'btn',
     ctaLabel: 'Assinar Starter',
@@ -78,25 +126,22 @@ const PRICING_PLANS = [
   {
     key: 'pro',
     title: 'Pro',
-    subtitle: 'O melhor custo-benefício',
-    badge: 'Serviços e agendamentos ilimitados',
+    subtitle: 'Para negócios em crescimento',
+    badge: 'Mais escolhido',
     prices: { mensal: '29,90', anual: '299,00' },
     annualEquivalent: '24,90',
     features: [
-      { key: 'pro-services', label: 'Serviços e agendamentos ilimitados no sistema' },
       { key: 'pro-pros', label: 'Até 5 profissionais' },
       { key: 'pro-gallery', label: 'Galeria pública com até 15 imagens' },
       {
         key: 'pro-whatsapp',
-        label: 'WhatsApp incluso: 500 mensagens/mês (confirmações, lembretes e avisos)*',
+        label: '500 mensagens automáticas de WhatsApp por mês',
         tooltip: WHATSAPP_TOOLTIP,
       },
-      { key: 'pro-extras', label: 'Pacotes extras de WhatsApp via PIX (opcional)' },
-      { key: 'pro-msgs', label: 'Até 5 mensagens por agendamento' },
-      { key: 'pro-reports', label: 'Relatórios avançados com filtros e intervalo personalizado' },
+      { key: 'pro-reports', label: 'Relatórios avançados com filtros por período, serviço e profissional' },
       { key: 'pro-deposit', label: 'Sinal via PIX com conexão Mercado Pago' },
+      { key: 'pro-ideal', label: 'Ideal para negócios em crescimento' },
     ],
-    footnote: WHATSAPP_LIMIT_FOOTNOTE,
     annualNote: 'Economize o equivalente a 2 meses no plano anual.',
     ctaVariant: 'btn btn--primary',
     ctaLabel: 'Testar grátis por 7 dias',
@@ -107,24 +152,21 @@ const PRICING_PLANS = [
     key: 'premium',
     title: 'Premium',
     subtitle: 'Para alto volume e operações maiores',
-    badge: 'Serviços e agendamentos ilimitados',
     prices: { mensal: '99,90', anual: '999,00' },
     annualEquivalent: '83,25',
     features: [
-      { key: 'premium-services', label: 'Serviços e agendamentos ilimitados no sistema' },
       { key: 'premium-pros', label: 'Até 10 profissionais' },
       { key: 'premium-gallery', label: 'Galeria pública sem limite de imagens' },
       {
         key: 'premium-whatsapp',
-        label: 'WhatsApp incluso: 1.500 mensagens/mês (confirmações, lembretes e avisos)*',
+        label: '1.500 mensagens automáticas de WhatsApp por mês',
         tooltip: WHATSAPP_TOOLTIP,
       },
-      { key: 'premium-extras', label: 'Pacotes extras de WhatsApp via PIX (opcional)' },
-      { key: 'premium-msgs', label: 'Até 5 mensagens por agendamento' },
-      { key: 'premium-reports', label: 'Relatórios avançados com filtros e intervalo personalizado' },
+      { key: 'premium-reports', label: 'Relatórios completos para alto volume' },
       { key: 'premium-deposit', label: 'Sinal via PIX com conexão Mercado Pago' },
+      { key: 'premium-control', label: 'Controle avançado para equipes maiores' },
+      { key: 'premium-ideal', label: 'Ideal para alto volume e operações maiores' },
     ],
-    footnote: WHATSAPP_LIMIT_FOOTNOTE,
     annualNote: 'Economize o equivalente a 2 meses no plano anual.',
     ctaVariant: 'btn btn--outline',
     ctaLabel: 'Assinar Premium',
@@ -302,25 +344,11 @@ export default function Planos() {
         </div>
       </section>
 
-      <section className="social-proof">
-        <div className="section-shell">
-          <span className="eyebrow">Resumo do que está em todos os planos</span>
-          <div className="logos">
-            <span>Serviços e agendamentos ilimitados no sistema</span>
-            <span>Cartão com cobrança recorrente</span>
-            <span>PIX para renovação manual e contingência</span>
-          </div>
-        </div>
-      </section>
-      <Suspense fallback={null}>
-        <PlanosUpperExtras onContactPremium={() => nav('/contato?plano=premium')} />
-      </Suspense>
-
       <section className="pricing" id="planos">
         <div className="section-shell">
           <header className="section-header">
             <h2>Planos e preços</h2>
-            <p>Compare limites, recursos e a regra de cobrança: cartão recomendado com renovação automática e PIX manual quando você preferir pagar avulso.</p>
+            <p>Escolha pelo tamanho da equipe, volume de WhatsApp e profundidade dos relatórios. Os recursos comuns ficam logo abaixo dos cards.</p>
           </header>
           {hasPlanContext && (
             <div
@@ -437,7 +465,7 @@ export default function Planos() {
                       }
                       const label = item?.label || '';
                       return (
-                        <Feature key={item?.key || label}>
+                        <Feature key={item?.key || label} tone={item?.tone || ''}>
                           <span className="feature-item">
                             <span className="feature-item__label">
                               {label}{item?.tooltip ? (
@@ -482,10 +510,27 @@ export default function Planos() {
               );
             })}
           </div>
+          <div className="pricing-note" role="note">
+            <strong>WhatsApp:</strong> {WHATSAPP_LIMIT_NOTICE}
+            <span>Limite de até 5 mensagens por agendamento.</span>
+          </div>
+          <section className="pricing-included" aria-labelledby="included-plans-heading">
+            <div className="pricing-included__header">
+              <span className="eyebrow">Benefícios comuns</span>
+              <h3 id="included-plans-heading">Todos os planos incluem</h3>
+              <p>Recursos essenciais para operar a agenda online, atender melhor e acompanhar o dia a dia do estabelecimento.</p>
+            </div>
+            <ul className="pricing-included__grid">
+              {INCLUDED_BENEFITS.map((benefit) => (
+                <IncludedBenefit key={benefit.label} {...benefit} />
+              ))}
+            </ul>
+          </section>
           <div className="pricing-extras">
-            <h3>Pacotes extras de WhatsApp (opcional)</h3>
+            <h3>Pacotes extras de WhatsApp</h3>
+            <p>Quando a franquia mensal acabar, você pode adicionar mensagens via PIX sem trocar de plano.</p>
             <ul>
-              <li>Quando o limite do plano termina, você pode adicionar mensagens via PIX.</li>
+              <li>Quando o limite mensal acabar, o cliente pode adicionar mensagens via PIX.</li>
               <li>O saldo extra passa a ser usado depois que a franquia mensal acabar.</li>
               <li>A compra e a confirmação acontecem no próprio fluxo de cobrança.</li>
             </ul>

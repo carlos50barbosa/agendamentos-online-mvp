@@ -16,12 +16,12 @@ const FAQS = [
     answer: 'Starter: até 2 profissionais. Pro: até 5. Premium: até 10.',
   },
   {
-    question: 'Como funciona o WhatsApp incluído?',
-    answer: 'Cada plano inclui um volume mensal de mensagens: Starter 250, Pro 500 e Premium 1.500. Em todos, são até 5 mensagens por agendamento (confirmações, lembretes e avisos).',
+    question: 'Como funcionam as mensagens automáticas de WhatsApp?',
+    answer: 'Starter tem 250 mensagens automáticas de WhatsApp por mês, Pro tem 500 e Premium tem 1.500. Em todos, existe limite de até 5 mensagens por agendamento.',
   },
   {
-    question: 'O que acontece ao atingir o limite de WhatsApp no Starter?',
-    answer: 'No limite, o WhatsApp pausa. Avisos seguem por e-mail; o painel continua para acompanhar os agendamentos.',
+    question: 'O que acontece ao atingir o limite de WhatsApp?',
+    answer: 'Ao atingir o limite de WhatsApp, os avisos continuam por e-mail e pelo painel. Também é possível comprar pacotes extras via PIX.',
   },
   {
     question: 'Posso trocar de plano ou de ciclo?',
