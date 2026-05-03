@@ -1,7 +1,7 @@
 ﻿// backend/src/routes/billing.js
 import { Router } from 'express'
 import { createHmac, timingSafeEqual, randomUUID } from 'node:crypto'
-import { auth, isEstabelecimento } from '../middleware/auth.js'
+import { auth, isEstabelecimento, tryAuthenticateRequest } from '../middleware/auth.js'
 import {
   createMercadoPagoPixCheckout,
   createMercadoPagoPixTopupCheckout,
@@ -103,6 +103,13 @@ import {
   syncClientLoyaltyCardSubscriptionFromGateway,
 } from '../lib/client_loyalty_billing.js'
 import { cancelPendingPaymentAppointmentTx } from '../lib/appointment_loyalty.js'
+import {
+  IMPLEMENTATION_AMOUNT_CENTS,
+  IMPLEMENTATION_PRODUCT,
+  createImplementationCheckout,
+  getImplementationPaymentByPublicId,
+  syncImplementationPaymentFromGateway,
+} from '../lib/implementation_billing.js'
 
 const router = Router()
 const DAY_MS = 86400000
@@ -1920,6 +1927,7 @@ async function resolveBillingPaymentWebhookAction({
   loyaltyPaymentHandler = syncClientLoyaltyPaymentFromGateway,
   sellerPaymentFlowMatcher = resolveConnectedSellerPaymentFlowMatch,
   recoveryHandler = syncCardRecoveryPaymentFromGateway,
+  implementationPaymentHandler = syncImplementationPaymentFromGateway,
   platformPaymentHandler = syncMercadoPagoPayment,
 } = {}) {
   const normalizedUserId = bodyUserId != null ? Number(bodyUserId) : null
@@ -2230,6 +2238,27 @@ async function resolveBillingPaymentWebhookAction({
         recovery: true,
         status: recoveryResult?.status || null,
         reason: recoveryResult?.reason || null,
+      },
+    }
+  }
+
+  const implementationResult = await implementationPaymentHandler(resourceId, {
+    gatewayEventId: resourceId,
+    event: syncEvent,
+  })
+  if (implementationResult?.ok && implementationResult?.handled) {
+    return {
+      kind: 'platform_implementation',
+      ownerType: 'platform',
+      matchedFlow: 'platform_saas',
+      implementationResult,
+      responseBody: {
+        ok: true,
+        processed: true,
+        implementation: true,
+        paid: implementationResult.paid === true,
+        status: implementationResult.status || null,
+        public_id: implementationResult.public_id || null,
       },
     }
   }
@@ -4200,6 +4229,84 @@ async function handleDepositPaymentWebhook({
   }
 }
 
+router.post('/implementation/checkout', async (req, res) => {
+  try {
+    const payload = req.body || {}
+    const produto = String(payload.produto || IMPLEMENTATION_PRODUCT).trim()
+    const tipo = String(payload.tipo || 'one_time').trim()
+    const valorCentavos = Number(payload.valor_centavos ?? IMPLEMENTATION_AMOUNT_CENTS)
+
+    if (produto !== IMPLEMENTATION_PRODUCT) {
+      return res.status(400).json({ error: 'invalid_product', message: 'Produto de implantação inválido.' })
+    }
+    if (tipo !== 'one_time') {
+      return res.status(400).json({ error: 'invalid_type', message: 'Tipo de cobrança inválido.' })
+    }
+    if (valorCentavos !== IMPLEMENTATION_AMOUNT_CENTS) {
+      return res.status(400).json({ error: 'invalid_amount', message: 'Valor de implantação inválido.' })
+    }
+
+    const authResult = await tryAuthenticateRequest(req)
+    const user = authResult.user?.tipo === 'estabelecimento' ? authResult.user : null
+    const checkout = await createImplementationCheckout({
+      user,
+      payer: {
+        nome: payload.nome || payload.name || null,
+        email: payload.email || null,
+        telefone: payload.telefone || payload.phone || null,
+      },
+      planHint: payload.plan_hint || payload.plan || null,
+    })
+
+    console.info('[billing/implementation/checkout]', {
+      user_id: user?.id || null,
+      user_email: user?.email || payload.email || null,
+      public_id: checkout.public_id,
+      preference_id: checkout.preference_id || null,
+      valor_centavos: IMPLEMENTATION_AMOUNT_CENTS,
+    })
+
+    return res.json({
+      ok: true,
+      checkout_url: checkout.checkout_url,
+      public_id: checkout.public_id,
+      amount_cents: checkout.amount_cents,
+      produto: checkout.produto,
+      tipo: checkout.tipo,
+    })
+  } catch (error) {
+    const missingConfig = String(error?.message || '').includes('access token is not configured')
+    const status = missingConfig ? 503 : 500
+    console.error('POST /billing/implementation/checkout', error?.message || error)
+    return res.status(status).json({
+      error: missingConfig ? 'mercadopago_not_configured' : 'implementation_checkout_failed',
+      message: missingConfig
+        ? 'Checkout Mercado Pago indisponível no momento.'
+        : 'Não foi possível iniciar o checkout da implantação.',
+    })
+  }
+})
+
+router.get('/implementation/status', async (req, res) => {
+  try {
+    const order = String(req.query.order || req.query.public_id || req.query.implementation_order || '').trim()
+    const payment = await getImplementationPaymentByPublicId(order)
+    if (!payment) return res.status(404).json({ error: 'implementation_payment_not_found' })
+    return res.json({
+      ok: true,
+      public_id: payment.public_id,
+      status: payment.status,
+      paid: payment.status === 'approved',
+      paid_at: payment.paid_at ? new Date(payment.paid_at).toISOString() : null,
+      amount_cents: payment.valor_centavos,
+      plan_hint: payment.plan_hint || null,
+    })
+  } catch (error) {
+    console.error('GET /billing/implementation/status', error?.message || error)
+    return res.status(500).json({ error: 'implementation_status_failed' })
+  }
+})
+
 router.get('/plans', auth, isEstabelecimento, async (_req, res) => {
   try {
     const plans = await BillingService.listPlans()
@@ -5481,6 +5588,16 @@ router.post('/webhook', async (req, res) => {
           status: recoveryResult?.status || null,
           normalized_reason: recoveryResult?.paymentResult?.normalized_reason || null,
           status_detail: recoveryResult?.paymentResult?.status_detail || null,
+        })
+        return res.status(200).json(paymentAction.responseBody)
+      }
+
+      if (paymentAction.kind === 'platform_implementation') {
+        const implementationResult = paymentAction.implementationResult
+        console.log('[billing:webhook] implementation_payment', resourceId, implementationResult?.paid ? 'paid' : 'updated', {
+          ok: !!implementationResult?.ok,
+          status: implementationResult?.status || null,
+          public_id: implementationResult?.public_id || null,
         })
         return res.status(200).json(paymentAction.responseBody)
       }

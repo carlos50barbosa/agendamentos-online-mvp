@@ -381,6 +381,12 @@ export const Api = {
 
   billingStatus: () => req('/billing/status'),
 
+  billingImplementationCheckout: (payload) =>
+    req('/billing/implementation/checkout', { method: 'POST', body: JSON.stringify(payload || {}) }),
+
+  billingImplementationStatus: (params = {}) =>
+    req(`/billing/implementation/status${toQuery(params)}`),
+
   billingCardSubscribe: (payload) => req('/billing/card/subscribe', { method: 'POST', body: JSON.stringify(payload || {}) }),
 
   billingCardUpdate: (payload) => req('/billing/card/update', { method: 'POST', body: JSON.stringify(payload || {}) }),

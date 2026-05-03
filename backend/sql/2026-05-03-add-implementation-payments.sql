@@ -1,0 +1,30 @@
+USE agendamentos;
+
+CREATE TABLE IF NOT EXISTS implementation_payments (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  public_id VARCHAR(64) NOT NULL UNIQUE,
+  user_id INT NULL,
+  nome VARCHAR(160) NULL,
+  email VARCHAR(160) NULL,
+  telefone VARCHAR(32) NULL,
+  produto VARCHAR(80) NOT NULL DEFAULT 'implantacao_agenda_online',
+  tipo VARCHAR(40) NOT NULL DEFAULT 'one_time',
+  valor_centavos INT NOT NULL,
+  currency CHAR(3) NOT NULL DEFAULT 'BRL',
+  status ENUM('pending','approved','failed','canceled','refunded') NOT NULL DEFAULT 'pending',
+  provider VARCHAR(32) NOT NULL DEFAULT 'mercadopago',
+  provider_preference_id VARCHAR(120) NULL,
+  provider_payment_id VARCHAR(120) NULL,
+  external_reference VARCHAR(191) NOT NULL,
+  checkout_url TEXT NULL,
+  plan_hint ENUM('starter','pro','premium') NULL,
+  paid_at DATETIME NULL,
+  raw_payload LONGTEXT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_implementation_payments_external_reference (external_reference),
+  INDEX idx_implementation_payments_user (user_id),
+  INDEX idx_implementation_payments_provider_payment (provider, provider_payment_id),
+  INDEX idx_implementation_payments_status (status, created_at),
+  CONSTRAINT fk_implementation_payments_user FOREIGN KEY (user_id) REFERENCES usuarios(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;

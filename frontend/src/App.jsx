@@ -55,6 +55,7 @@ const LoginEstabelecimento = React.lazy(() => import('./pages/LoginEstabelecimen
 const Login = React.lazy(() => import('./pages/Login.jsx'));
 const Cadastro = React.lazy(() => import('./pages/Cadastro.jsx'));
 const LandingPublica = React.lazy(() => import('./pages/LandingPublica.jsx'));
+const LandingImplantacao = React.lazy(() => import('./pages/LandingImplantacao.jsx'));
 const DashboardCliente = React.lazy(() => import('./pages/DashboardCliente.jsx'));
 const DashboardEstabelecimento = React.lazy(() => import('./pages/DashboardEstabelecimento.jsx'));
 const Clientes = React.lazy(() => import('./pages/Clientes.jsx'));
@@ -101,6 +102,7 @@ const Loading = React.lazy(() => import('./pages/Loading.jsx'));
 
 const APP_ROUTES = [
   { path: '/', element: <LandingPublica /> },
+  { path: '/implantacao', element: <LandingImplantacao /> },
   { path: '/login', element: <Login /> },
   { path: '/recuperar-senha', element: <RecuperarSenha /> },
 
@@ -843,7 +845,7 @@ export default function App() {
   const loc = useLocation();
   const navigate = useNavigate();
   const pathname = loc?.pathname || '';
-  const isLanding = (loc?.pathname || '') === '/';
+  const isLanding = pathname === '/' || pathname === '/implantacao';
   const isLoginRoute = pathname.startsWith('/login');
   const isAuthRoute =
     isLoginRoute ||
