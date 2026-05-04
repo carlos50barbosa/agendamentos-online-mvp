@@ -35,7 +35,11 @@ import LogoAO from '../components/LogoAO.jsx';
 import { Api } from '../utils/api.js';
 import './LandingImplantacao.css';
 
-export const WHATSAPP_NUMBER = '5500000000000';
+const DEFAULT_WHATSAPP_NUMBER = '5511915155349';
+
+export const WHATSAPP_NUMBER = String(
+  import.meta.env.VITE_IMPLANTACAO_WHATSAPP_NUMBER || DEFAULT_WHATSAPP_NUMBER,
+).replace(/\D/g, '');
 
 const WHATSAPP_MESSAGE = 'Olá, tenho interesse na implantação da agenda online.';
 const IMPLEMENTATION_PRODUCT = 'implantacao_agenda_online';
