@@ -11889,6 +11889,344 @@ body.planos-no-scrollbar .container--wide::-webkit-scrollbar{
   }
 }
 
+/* Public booking page: mobile-first layout tuned for in-app browsers. */
+.container--appointment-public{
+  max-width:480px;
+  margin-inline:auto;
+  padding-inline:12px;
+}
+.container--appointment-public .novo-agendamento,
+.container--appointment-public .establishments,
+.container--appointment-public .establishments__results{
+  width:100%;
+  max-width:480px;
+  margin-inline:auto;
+}
+.container--appointment-public .novo-agendamento{
+  gap:14px;
+  padding:12px 0 24px;
+}
+.container--appointment-public .novo-agendamento--brand::before{
+  position:fixed;
+  inset:0;
+  pointer-events:none;
+}
+.container--appointment-public .novo-agendamento__intro,
+.container--appointment-public .novo-agendamento__panel{
+  border-radius:16px;
+  padding:16px;
+  box-shadow:0 12px 28px rgba(15,23,42,.07);
+}
+.container--appointment-public .novo-agendamento__flow-head{
+  padding-bottom:12px;
+  text-align:center;
+}
+.container--appointment-public .novo-agendamento__flow-copy{
+  align-items:center;
+  gap:8px;
+}
+.container--appointment-public .novo-agendamento__flow-title{
+  font-size:1.35rem;
+  line-height:1.16;
+  letter-spacing:0;
+}
+.container--appointment-public .novo-agendamento__flow-subtitle{
+  max-width:34ch;
+  margin-inline:auto;
+  font-size:.9rem;
+  line-height:1.5;
+}
+.container--appointment-public .novo-agendamento__summary--establishment{
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  gap:12px;
+  text-align:center;
+}
+.container--appointment-public .novo-agendamento__summary-head{
+  grid-template-columns:40px minmax(0, 1fr) 40px;
+  align-items:start;
+}
+.container--appointment-public .novo-agendamento__summary-avatar{
+  width:80px;
+  height:80px;
+  border-radius:20px;
+  font-size:1.2rem;
+  box-shadow:0 12px 24px rgba(15,23,42,.08);
+}
+.container--appointment-public .novo-agendamento__summary-content{
+  width:100%;
+  align-items:center;
+  gap:6px;
+}
+.container--appointment-public .novo-agendamento__summary-name{
+  max-width:100%;
+  font-size:1.28rem;
+  font-weight:600;
+  line-height:1.2;
+  letter-spacing:0;
+  overflow-wrap:anywhere;
+}
+.container--appointment-public .novo-agendamento__summary-address{
+  max-width:34ch;
+  font-size:.88rem;
+  line-height:1.45;
+  color:#64748b;
+  overflow-wrap:anywhere;
+}
+.container--appointment-public .novo-agendamento__summary-actions{
+  display:flex;
+  flex-wrap:wrap;
+  justify-content:center;
+  gap:8px;
+  width:100%;
+  margin-top:6px;
+}
+.container--appointment-public .summary-action{
+  flex:1 1 calc(50% - 8px);
+  min-width:124px;
+  min-height:40px;
+  justify-content:center;
+  gap:6px;
+  padding:0 10px;
+  border-radius:12px;
+  font-size:.78rem;
+  line-height:1;
+  color:#1f2937;
+  background:#fff;
+  box-shadow:0 8px 18px rgba(15,23,42,.05);
+}
+.container--appointment-public .summary-action svg,
+.container--appointment-public .summary-action > span[aria-hidden]{
+  flex:0 0 auto;
+}
+.container--appointment-public .summary-status{
+  max-width:100%;
+  border-radius:12px;
+  line-height:1.35;
+}
+.container--appointment-public .novo-agendamento__results{
+  gap:14px;
+}
+.container--appointment-public .novo-agendamento__section-intro{
+  gap:8px;
+  padding-bottom:4px;
+}
+.container--appointment-public .novo-agendamento__section-title{
+  font-size:1.25rem;
+  line-height:1.16;
+  letter-spacing:0;
+}
+.container--appointment-public .novo-agendamento__section-description{
+  font-size:.9rem;
+  line-height:1.55;
+}
+.container--appointment-public .novo-agendamento__service-search{
+  margin-bottom:12px;
+}
+.container--appointment-public .novo-agendamento__service-search-field{
+  min-height:48px;
+  border-radius:14px;
+}
+.container--appointment-public .novo-agendamento__services{
+  gap:10px;
+}
+.container--appointment-public .novo-agendamento__services .mini-card{
+  min-width:0;
+  padding:12px;
+  border-radius:16px;
+  text-align:left;
+  box-shadow:0 10px 22px rgba(15,23,42,.06);
+}
+.container--appointment-public .novo-agendamento__services .mini-card--selected{
+  box-shadow:0 0 0 1px rgba(36,55,70,.2) inset, 0 14px 28px rgba(36,55,70,.1);
+}
+.container--appointment-public .mini-card__content{
+  display:flex;
+  align-items:stretch;
+  gap:12px;
+  width:100%;
+  min-width:0;
+}
+.container--appointment-public .mini-card__media{
+  flex:0 0 68px;
+  width:68px;
+  height:68px;
+  border-radius:14px;
+}
+.container--appointment-public .mini-card__main{
+  flex:1 1 auto;
+  min-width:0;
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+}
+.container--appointment-public .mini-card__header{
+  display:flex;
+  flex-direction:column;
+  align-items:flex-start;
+  gap:7px;
+}
+.container--appointment-public .mini-card__heading{
+  gap:5px;
+  width:100%;
+}
+.container--appointment-public .mini-card__eyebrow{
+  min-height:22px;
+  padding-inline:8px;
+  font-size:.62rem;
+  letter-spacing:.08em;
+}
+.container--appointment-public .mini-card__title{
+  width:100%;
+  font-size:.98rem;
+  font-weight:700;
+  line-height:1.25;
+  overflow-wrap:anywhere;
+}
+.container--appointment-public .mini-card__description{
+  padding-top:8px;
+  border-top:1px solid rgba(148,163,184,.16);
+  font-size:.84rem;
+  line-height:1.45;
+}
+.container--appointment-public .mini-card__meta-row{
+  margin-top:auto;
+  padding-top:8px;
+  border-top:1px solid rgba(148,163,184,.16);
+  gap:6px;
+}
+.container--appointment-public .mini-card__state,
+.container--appointment-public .mini-card__price,
+.container--appointment-public .mini-card__duration{
+  min-height:28px;
+  padding-inline:10px;
+  font-size:.72rem;
+}
+.container--appointment-public .mini-card__side{
+  display:none;
+}
+.container--appointment-public .novo-agendamento__section{
+  padding:14px;
+  border-radius:16px;
+  gap:12px;
+}
+.container--appointment-public .novo-agendamento__summary-row{
+  gap:10px !important;
+}
+.container--appointment-public .novo-agendamento__inline-summary{
+  padding:12px;
+  border-radius:14px;
+}
+.container--appointment-public .novo-agendamento__summary-actions-row{
+  gap:8px;
+}
+.container--appointment-public .novo-agendamento__change-service,
+.container--appointment-public .filters > summary{
+  min-height:42px;
+}
+.container--appointment-public .novo-agendamento__flow-footer{
+  position:sticky;
+  left:auto;
+  right:auto;
+  bottom:0;
+  z-index:20;
+  width:100%;
+  padding:8px 0 calc(8px + env(safe-area-inset-bottom));
+  margin-top:8px;
+  pointer-events:auto;
+}
+.container--appointment-public .novo-agendamento__flow-footer-inner{
+  width:100%;
+  max-width:480px;
+}
+.container--appointment-public .novo-agendamento__flow-footer-shell{
+  display:grid;
+  gap:10px;
+  padding:12px;
+  border-radius:16px;
+  background:rgba(255,255,255,.98);
+  box-shadow:0 14px 30px rgba(15,23,42,.14);
+}
+.container--appointment-public .novo-agendamento__flow-footer-head{
+  grid-template-columns:1fr;
+  gap:9px;
+}
+.container--appointment-public .novo-agendamento__flow-footer-copy{
+  text-align:center;
+}
+.container--appointment-public .novo-agendamento__flow-footer-summary{
+  font-size:.82rem;
+  line-height:1.35;
+  white-space:normal;
+}
+.container--appointment-public .novo-agendamento__flow-footer-hint{
+  display:none;
+}
+.container--appointment-public .appointment-progress-line{
+  width:100%;
+}
+.container--appointment-public .appointment-progress-line__label--full{
+  display:none;
+}
+.container--appointment-public .appointment-progress-line__label--short{
+  display:inline;
+}
+.container--appointment-public .appointment-progress-line__label{
+  font-size:.62rem;
+}
+.container--appointment-public .novo-agendamento__flow-footer-actions{
+  display:grid;
+  grid-template-columns:minmax(92px, .75fr) minmax(0, 1.25fr);
+  gap:8px;
+}
+.container--appointment-public .novo-agendamento__flow-footer-back,
+.container--appointment-public .novo-agendamento__flow-footer-continue{
+  width:100%;
+  min-width:0;
+  max-width:none;
+  min-height:46px;
+  border-radius:14px;
+  padding-inline:10px;
+}
+.container--appointment-public .novo-agendamento__flow-bottom-spacer,
+.container--appointment-public .novo-agendamento__services-bottom-spacer{
+  block-size:8px;
+}
+
+@media (max-width: 380px){
+  .container--appointment-public{
+    padding-inline:10px;
+  }
+  .container--appointment-public .novo-agendamento__intro,
+  .container--appointment-public .novo-agendamento__panel{
+    padding:14px;
+  }
+  .container--appointment-public .summary-action{
+    min-width:0;
+    flex-basis:calc(50% - 4px);
+    padding-inline:8px;
+    font-size:.73rem;
+  }
+  .container--appointment-public .mini-card__content{
+    gap:10px;
+  }
+  .container--appointment-public .mini-card__media{
+    flex-basis:62px;
+    width:62px;
+    height:62px;
+  }
+  .container--appointment-public .mini-card__state,
+  .container--appointment-public .mini-card__price,
+  .container--appointment-public .mini-card__duration{
+    font-size:.68rem;
+    padding-inline:8px;
+  }
+  .container--appointment-public .novo-agendamento__flow-footer-actions{
+    grid-template-columns:minmax(82px, .7fr) minmax(0, 1.3fr);
+  }
+}
+
 .loyalty-page {
   display: grid;
   gap: 20px;

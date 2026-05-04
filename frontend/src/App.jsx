@@ -854,6 +854,7 @@ export default function App() {
   const isAppointmentFlow =
     pathname.startsWith('/novo') ||
     pathname.startsWith('/novo-agendamento');
+  const isPublicAppointmentPage = /^\/novo\/[^/]+/.test(pathname);
   const [currentUser, setCurrentUser] = useState(() => getUser());
 
   const [billingStatus, setBillingStatus] = useState(null);
@@ -1350,7 +1351,7 @@ const topbarAlert = useMemo(() => {
     ? 'landing-shell'
     : isAuthRoute
       ? layoutStyles.authStage
-      : `container${isConfiguracoes ? ' container--wide' : ''}${isAppointmentFlow ? ' container--appointment' : ''}`;
+      : `container${isConfiguracoes ? ' container--wide' : ''}${isAppointmentFlow ? ' container--appointment' : ''}${isPublicAppointmentPage ? ' container--appointment-public' : ''}`;
 
   return (
     <>
