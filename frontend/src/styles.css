@@ -11976,29 +11976,47 @@ body.planos-no-scrollbar .container--wide::-webkit-scrollbar{
 }
 .container--appointment-public .novo-agendamento__summary-actions{
   display:flex;
-  flex-wrap:wrap;
-  justify-content:center;
-  gap:8px;
+  flex-wrap:nowrap;
+  justify-content:flex-start;
+  gap:4px;
   width:100%;
-  margin-top:6px;
+  max-width:100%;
+  margin-top:4px;
+  padding:1px 0 3px;
+  box-sizing:border-box;
+  overflow-x:auto;
+  overscroll-behavior-x:contain;
+  scrollbar-width:none;
+  -webkit-overflow-scrolling:touch;
+}
+.container--appointment-public .novo-agendamento__summary-actions::-webkit-scrollbar{
+  display:none;
 }
 .container--appointment-public .summary-action{
-  flex:1 1 calc(50% - 8px);
-  min-width:124px;
-  min-height:40px;
+  flex:0 0 auto;
+  min-width:0;
+  min-height:28px;
   justify-content:center;
-  gap:6px;
-  padding:0 10px;
-  border-radius:12px;
-  font-size:.78rem;
+  gap:3px;
+  padding:0 6px;
+  border-radius:999px;
+  font-size:.64rem;
   line-height:1;
   color:#1f2937;
   background:#fff;
-  box-shadow:0 8px 18px rgba(15,23,42,.05);
+  white-space:nowrap;
+  box-shadow:0 4px 10px rgba(15,23,42,.045);
 }
 .container--appointment-public .summary-action svg,
 .container--appointment-public .summary-action > span[aria-hidden]{
   flex:0 0 auto;
+}
+.container--appointment-public .summary-action svg{
+  width:11px !important;
+  height:11px !important;
+}
+.container--appointment-public .summary-action > span[aria-hidden]{
+  font-size:.75rem;
 }
 .container--appointment-public .summary-status{
   max-width:100%;
@@ -12029,81 +12047,122 @@ body.planos-no-scrollbar .container--wide::-webkit-scrollbar{
   border-radius:14px;
 }
 .container--appointment-public .novo-agendamento__services{
-  gap:10px;
+  gap:8px;
 }
-.container--appointment-public .novo-agendamento__services .mini-card{
+.container--appointment-public .novo-agendamento__services .mini-card--service{
   min-width:0;
-  padding:12px;
+  padding:10px;
   border-radius:16px;
   text-align:left;
-  box-shadow:0 10px 22px rgba(15,23,42,.06);
+  box-shadow:0 8px 18px rgba(15,23,42,.055);
 }
-.container--appointment-public .novo-agendamento__services .mini-card--selected{
-  box-shadow:0 0 0 1px rgba(36,55,70,.2) inset, 0 14px 28px rgba(36,55,70,.1);
+.container--appointment-public .novo-agendamento__services .mini-card--service:hover,
+.container--appointment-public .novo-agendamento__services .mini-card--service:focus-visible{
+  border-color:rgba(100,116,139,.24);
+  background:#fff;
+  box-shadow:0 10px 22px rgba(15,23,42,.07);
+  transform:none;
 }
-.container--appointment-public .mini-card__content{
+.container--appointment-public .novo-agendamento__services .mini-card--service.mini-card--selected{
+  box-shadow:0 0 0 1px rgba(36,55,70,.2) inset, 0 10px 22px rgba(36,55,70,.09);
+}
+.container--appointment-public .mini-card--service .mini-card__content{
   display:flex;
-  align-items:stretch;
-  gap:12px;
+  align-items:flex-start;
+  gap:10px;
   width:100%;
   min-width:0;
 }
-.container--appointment-public .mini-card__media{
-  flex:0 0 68px;
-  width:68px;
-  height:68px;
-  border-radius:14px;
+.container--appointment-public .mini-card--service .mini-card__media{
+  flex:0 0 72px;
+  width:72px;
+  height:72px;
+  border-radius:12px;
+  overflow:hidden;
 }
-.container--appointment-public .mini-card__main{
+.container--appointment-public .mini-card--service .mini-card__media img{
+  width:100%;
+  height:100%;
+  object-fit:cover;
+  display:block;
+}
+.container--appointment-public .mini-card--service .mini-card__main{
   flex:1 1 auto;
   min-width:0;
   display:flex;
   flex-direction:column;
-  gap:8px;
-}
-.container--appointment-public .mini-card__header{
-  display:flex;
-  flex-direction:column;
-  align-items:flex-start;
-  gap:7px;
-}
-.container--appointment-public .mini-card__heading{
-  gap:5px;
-  width:100%;
-}
-.container--appointment-public .mini-card__eyebrow{
-  min-height:22px;
-  padding-inline:8px;
-  font-size:.62rem;
-  letter-spacing:.08em;
-}
-.container--appointment-public .mini-card__title{
-  width:100%;
-  font-size:.98rem;
-  font-weight:700;
-  line-height:1.25;
-  overflow-wrap:anywhere;
-}
-.container--appointment-public .mini-card__description{
-  padding-top:8px;
-  border-top:1px solid rgba(148,163,184,.16);
-  font-size:.84rem;
-  line-height:1.45;
-}
-.container--appointment-public .mini-card__meta-row{
-  margin-top:auto;
-  padding-top:8px;
-  border-top:1px solid rgba(148,163,184,.16);
+  align-items:stretch;
   gap:6px;
+  text-align:left;
 }
-.container--appointment-public .mini-card__state,
-.container--appointment-public .mini-card__price,
-.container--appointment-public .mini-card__duration{
+.container--appointment-public .mini-card--service .mini-card__header{
+  display:flex;
+  flex-direction:row;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:8px;
+  width:100%;
+}
+.container--appointment-public .mini-card--service .mini-card__heading{
+  flex:1 1 auto;
+  min-width:0;
+  gap:0;
+}
+.container--appointment-public .mini-card--service .mini-card__eyebrow{
+  display:none;
+}
+.container--appointment-public .mini-card--service .mini-card__title{
+  width:100%;
+  font-size:.94rem;
+  font-weight:700;
+  line-height:1.22;
+  text-align:left;
+  overflow-wrap:anywhere;
+  display:-webkit-box;
+  -webkit-line-clamp:2;
+  -webkit-box-orient:vertical;
+  overflow:hidden;
+}
+.container--appointment-public .mini-card--service .mini-card__description{
+  padding:0;
+  border:0;
+  margin:0;
+  color:#64748b;
+  font-size:.82rem;
+  line-height:1.35;
+  text-align:left;
+  display:-webkit-box;
+  -webkit-line-clamp:2;
+  -webkit-box-orient:vertical;
+  overflow:hidden;
+}
+.container--appointment-public .mini-card--service .mini-card__meta-row{
+  display:flex;
+  justify-content:flex-start;
+  align-items:center;
+  gap:6px;
+  margin:0;
+  padding:0;
+  border:0;
+}
+.container--appointment-public .mini-card--service .mini-card__state{
+  flex:0 0 auto;
   min-height:28px;
-  padding-inline:10px;
-  font-size:.72rem;
+  padding:0 9px;
+  border-radius:999px;
+  font-size:.68rem;
+  font-weight:800;
+  line-height:1;
 }
-.container--appointment-public .mini-card__side{
+.container--appointment-public .mini-card--service .mini-card__price,
+.container--appointment-public .mini-card--service .mini-card__duration{
+  min-height:24px;
+  padding:0 8px;
+  border-radius:999px;
+  font-size:.68rem;
+  line-height:1;
+}
+.container--appointment-public .mini-card--service .mini-card__side{
   display:none;
 }
 .container--appointment-public .novo-agendamento__section{
@@ -12204,26 +12263,186 @@ body.planos-no-scrollbar .container--wide::-webkit-scrollbar{
   }
   .container--appointment-public .summary-action{
     min-width:0;
-    flex-basis:calc(50% - 4px);
-    padding-inline:8px;
-    font-size:.73rem;
+    flex-basis:auto;
+    min-height:27px;
+    padding-inline:5px;
+    font-size:.6rem;
   }
-  .container--appointment-public .mini-card__content{
-    gap:10px;
+  .container--appointment-public .mini-card--service .mini-card__content{
+    gap:9px;
   }
-  .container--appointment-public .mini-card__media{
-    flex-basis:62px;
-    width:62px;
-    height:62px;
+  .container--appointment-public .mini-card--service .mini-card__media{
+    flex-basis:70px;
+    width:70px;
+    height:70px;
   }
-  .container--appointment-public .mini-card__state,
-  .container--appointment-public .mini-card__price,
-  .container--appointment-public .mini-card__duration{
-    font-size:.68rem;
-    padding-inline:8px;
+  .container--appointment-public .mini-card--service .mini-card__title{
+    font-size:.9rem;
+  }
+  .container--appointment-public .mini-card--service .mini-card__description{
+    font-size:.8rem;
+  }
+  .container--appointment-public .mini-card--service .mini-card__state,
+  .container--appointment-public .mini-card--service .mini-card__price,
+  .container--appointment-public .mini-card--service .mini-card__duration{
+    font-size:.65rem;
+    padding-inline:7px;
   }
   .container--appointment-public .novo-agendamento__flow-footer-actions{
     grid-template-columns:minmax(82px, .7fr) minmax(0, 1.3fr);
+  }
+}
+
+.novo-agendamento__services .mini-card--service{
+  display:block;
+  min-height:0;
+  padding:8px;
+  border-radius:14px;
+  text-align:left;
+  box-shadow:0 6px 16px rgba(15,23,42,.05);
+}
+.novo-agendamento__services .mini-card--service:hover,
+.novo-agendamento__services .mini-card--service:focus-visible{
+  background:#fff;
+  border-color:rgba(100,116,139,.24);
+  box-shadow:0 8px 18px rgba(15,23,42,.07);
+  transform:none;
+}
+.novo-agendamento__services .mini-card--service.mini-card--selected{
+  border-color:#243746;
+  box-shadow:0 0 0 1px rgba(36,55,70,.18) inset, 0 8px 18px rgba(36,55,70,.08);
+}
+.novo-agendamento__services .mini-card--service .mini-card__content{
+  display:grid;
+  grid-template-columns:72px minmax(0, 1fr);
+  align-items:start;
+  gap:10px;
+  width:100%;
+  min-width:0;
+}
+.novo-agendamento__services .mini-card--service .mini-card__media{
+  width:72px;
+  height:72px;
+  border-radius:12px;
+  overflow:hidden;
+}
+.novo-agendamento__services .mini-card--service .mini-card__media img{
+  width:100%;
+  height:100%;
+  object-fit:cover;
+  display:block;
+  color:transparent;
+  font-size:0;
+}
+.novo-agendamento__services .mini-card--service .mini-card__main{
+  min-width:0;
+  display:flex;
+  flex-direction:column;
+  align-items:stretch;
+  gap:5px;
+  text-align:left;
+}
+.novo-agendamento__services .mini-card--service .mini-card__header{
+  display:grid;
+  grid-template-columns:minmax(0, 1fr) auto;
+  align-items:start;
+  gap:8px;
+  width:100%;
+}
+.novo-agendamento__services .mini-card--service .mini-card__heading,
+.novo-agendamento__services .mini-card--service .mini-card__eyebrow,
+.novo-agendamento__services .mini-card--service .mini-card__side{
+  display:none;
+}
+.novo-agendamento__services .mini-card--service .mini-card__title{
+  margin:0;
+  min-width:0;
+  font-size:.92rem;
+  font-weight:700;
+  line-height:1.18;
+  text-align:left;
+  color:var(--booking-text);
+  overflow-wrap:anywhere;
+  display:-webkit-box;
+  -webkit-line-clamp:2;
+  -webkit-box-orient:vertical;
+  overflow:hidden;
+}
+.novo-agendamento__services .mini-card--service .mini-card__description{
+  margin:0;
+  padding:0;
+  border:0;
+  color:#64748b;
+  font-size:13px;
+  line-height:1.32;
+  text-align:left;
+  word-break:normal;
+  display:-webkit-box;
+  -webkit-line-clamp:2;
+  -webkit-box-orient:vertical;
+  overflow:hidden;
+}
+.novo-agendamento__services .mini-card--service .mini-card__meta-row{
+  display:flex;
+  align-items:center;
+  justify-content:flex-start;
+  flex-wrap:wrap;
+  gap:6px;
+  margin:2px 0 0;
+  padding:0;
+  border:0;
+}
+.novo-agendamento__services .mini-card--service .mini-card__state{
+  min-height:24px;
+  padding:0 8px;
+  border-radius:999px;
+  font-size:.66rem;
+  font-weight:800;
+  line-height:1;
+  white-space:nowrap;
+}
+.novo-agendamento__services .mini-card--service .mini-card__price,
+.novo-agendamento__services .mini-card--service .mini-card__duration{
+  min-height:22px;
+  padding:0 8px;
+  border-radius:999px;
+  font-size:.67rem;
+  line-height:1;
+  white-space:nowrap;
+}
+.novo-agendamento__services .mini-card--service .mini-card__loyalty{
+  margin-top:2px;
+  max-width:100%;
+  font-size:.72rem;
+  line-height:1.25;
+}
+
+@media (max-width: 380px){
+  .novo-agendamento__services .mini-card--service{
+    padding:8px;
+  }
+  .novo-agendamento__services .mini-card--service .mini-card__content{
+    grid-template-columns:68px minmax(0, 1fr);
+    gap:9px;
+  }
+  .novo-agendamento__services .mini-card--service .mini-card__media{
+    width:68px;
+    height:68px;
+  }
+  .novo-agendamento__services .mini-card--service .mini-card__header{
+    gap:6px;
+  }
+  .novo-agendamento__services .mini-card--service .mini-card__title{
+    font-size:.88rem;
+  }
+  .novo-agendamento__services .mini-card--service .mini-card__description{
+    font-size:12.5px;
+  }
+  .novo-agendamento__services .mini-card--service .mini-card__state,
+  .novo-agendamento__services .mini-card--service .mini-card__price,
+  .novo-agendamento__services .mini-card--service .mini-card__duration{
+    padding-inline:7px;
+    font-size:.63rem;
   }
 }
 
@@ -12593,5 +12812,78 @@ body.planos-no-scrollbar .container--wide::-webkit-scrollbar{
   .novo-agendamento__loyalty-banner {
     flex-direction: column;
     align-items: stretch;
+  }
+}
+
+/* Final override for the public establishment action bar. Keep it inside the card. */
+.novo-agendamento__summary--establishment .novo-agendamento__summary-actions{
+  display:grid !important;
+  grid-template-columns:repeat(4, minmax(0, 1fr)) !important;
+  align-items:center !important;
+  justify-content:stretch !important;
+  gap:4px !important;
+  width:100% !important;
+  max-width:100% !important;
+  margin:4px auto 0 !important;
+  padding:0 !important;
+  overflow:hidden !important;
+  box-sizing:border-box !important;
+}
+
+.novo-agendamento__summary--establishment .summary-action{
+  width:100% !important;
+  min-width:0 !important;
+  max-width:100% !important;
+  min-height:28px !important;
+  height:28px !important;
+  padding:0 4px !important;
+  border-radius:9px !important;
+  display:inline-flex !important;
+  align-items:center !important;
+  justify-content:center !important;
+  gap:2px !important;
+  box-sizing:border-box !important;
+  overflow:hidden !important;
+  white-space:nowrap !important;
+  font-size:10px !important;
+  line-height:1 !important;
+  letter-spacing:0 !important;
+}
+
+.novo-agendamento__summary--establishment .summary-action svg{
+  width:10px !important;
+  height:10px !important;
+  flex:0 0 10px !important;
+}
+
+.novo-agendamento__summary--establishment .summary-action > span[aria-hidden]{
+  flex:0 0 auto !important;
+  font-size:10px !important;
+  line-height:1 !important;
+}
+
+.novo-agendamento__summary--establishment .summary-action__text{
+  min-width:0;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+
+@media (max-width: 360px){
+  .novo-agendamento__summary--establishment .novo-agendamento__summary-actions{
+    gap:3px !important;
+  }
+
+  .novo-agendamento__summary--establishment .summary-action{
+    height:27px !important;
+    min-height:27px !important;
+    padding-inline:3px !important;
+    font-size:9px !important;
+  }
+
+  .novo-agendamento__summary--establishment .summary-action svg{
+    width:9px !important;
+    height:9px !important;
+    flex-basis:9px !important;
   }
 }

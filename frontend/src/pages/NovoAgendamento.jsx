@@ -2080,7 +2080,7 @@ const ServiceCard = ({ service, selected, onSelect, loyaltyHint = null }) => {
 
   const showDuration = duration > 0;
 
-  const cardClass = ['mini-card', selected ? 'mini-card--selected' : ''].filter(Boolean).join(' ');
+  const cardClass = ['mini-card', 'mini-card--service', selected ? 'mini-card--selected' : ''].filter(Boolean).join(' ');
   const fallbackLabel = title
     .split(/\s+/)
     .filter(Boolean)
@@ -2101,7 +2101,13 @@ const ServiceCard = ({ service, selected, onSelect, loyaltyHint = null }) => {
 
         <div className={`mini-card__media${imageUrl ? '' : ' mini-card__media--fallback'}`}>
           {imageUrl ? (
-            <img src={imageUrl} alt={`Imagem do serviço ${title}`} />
+            <img
+              src={imageUrl}
+              alt=""
+              onError={(event) => {
+                event.currentTarget.style.display = 'none';
+              }}
+            />
           ) : (
             <span>{fallbackLabel}</span>
           )}
@@ -2110,16 +2116,13 @@ const ServiceCard = ({ service, selected, onSelect, loyaltyHint = null }) => {
         <div className="mini-card__main">
 
           <div className="mini-card__header">
-            <div className="mini-card__heading">
-              <span className="mini-card__eyebrow">{selected ? 'Selecionado' : 'Serviço'}</span>
-              <div className="mini-card__title">{title}</div>
-            </div>
+            <div className="mini-card__title">{title}</div>
             <span className={`mini-card__state${selected ? ' is-selected' : ''}`}>
               {selected ? 'Incluído' : 'Selecionar'}
             </span>
           </div>
 
-          {description && <div className="mini-card__description">{description}</div>}
+          {description && <p className="mini-card__description">{description}</p>}
 
           {(showPrice || showDuration) && (
             <div className="mini-card__meta-row">
@@ -8607,7 +8610,7 @@ useEffect(() => {
 
                     </svg>
 
-                    Galeria
+                    <span className="summary-action__text">Galeria</span>
 
                   </button>
 
@@ -8615,7 +8618,7 @@ useEffect(() => {
 
                     <IconList aria-hidden style={{ width: 14, height: 14, color: 'var(--booking-accent-strong, var(--primary-600))' }} />
 
-                    Detalhes
+                    <span className="summary-action__text">Detalhes</span>
 
                   </button>
 
@@ -8664,7 +8667,7 @@ useEffect(() => {
 
                       </svg>
 
-                      Compartilhar
+                      <span className="summary-action__text">Compartilhar</span>
 
                     </button>
 
@@ -8676,7 +8679,7 @@ useEffect(() => {
 
                       <span aria-hidden>♡</span>
 
-                      Favoritar
+                      <span className="summary-action__text">Favoritar</span>
 
                     </Link>
 
@@ -8698,7 +8701,7 @@ useEffect(() => {
 
                       <span aria-hidden>♡</span>
 
-                      {selectedExtras?.is_favorite ? 'Favorito' : 'Favoritar'}
+                      <span className="summary-action__text">{selectedExtras?.is_favorite ? 'Favorito' : 'Favoritar'}</span>
 
                     </button>
 
@@ -8710,7 +8713,7 @@ useEffect(() => {
 
                       <span aria-hidden>★</span>
 
-                      Avaliar
+                      <span className="summary-action__text">Avaliar</span>
 
                     </Link>
 
@@ -8732,7 +8735,7 @@ useEffect(() => {
 
                       <span aria-hidden>★</span>
 
-                      {ratingButtonLabel}
+                      <span className="summary-action__text">{ratingButtonLabel}</span>
 
                     </button>
 
