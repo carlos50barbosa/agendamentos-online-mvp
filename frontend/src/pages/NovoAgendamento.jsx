@@ -2009,13 +2009,19 @@ const SlotButton = ({ slot, isSelected, onClick, density = "compact" }) => {
   const disabledReason = isPast || !isAvailableLabel(slot.label);
 
   const tooltipLabel = slot?.label ?? 'disponível';
+  const capacity = Math.max(1, Number(slot?.capacidade ?? slot?.capacity ?? 1) || 1);
+  const remainingValue = Number(slot?.vagas_restantes ?? slot?.vagasRestantes ?? slot?.remaining_slots ?? slot?.remaining ?? capacity);
+  const remaining = Number.isFinite(remainingValue) ? Math.max(0, remainingValue) : capacity;
+  const availableLabel = capacity > 1 && remaining > 0
+    ? `${remaining} vagas disponíveis`
+    : "Disponível";
 
   const statusLabel = isPast
     ? "Indisponivel"
     : isSelected
       ? "Selecionado"
       : isAvailableLabel(slot.label)
-        ? "Disponível"
+        ? availableLabel
         : tooltipLabel;
 
   const className = [
@@ -4940,6 +4946,8 @@ useEffect(() => {
 
         serviceIds: selectedServices.map((svc) => svc.id),
 
+        professionalId: state.professionalId || undefined,
+
       });
 
       const normalized = normalizeSlots(slotsData);
@@ -4957,6 +4965,7 @@ useEffect(() => {
       for (const s of normalized) {
 
         const k = minuteISO(s.datetime);
+        const slotCapacity = Math.max(1, Number(s.capacidade ?? s.capacity ?? 1) || 1);
 
         if (!isAvailableLabel(s.label)) {
 
@@ -4966,7 +4975,7 @@ useEffect(() => {
 
           } else {
 
-            busyFromApiCount.set(k, (busyFromApiCount.get(k) || 0) + 1);
+            busyFromApiCount.set(k, Math.max(busyFromApiCount.get(k) || 0, slotCapacity));
 
           }
 
@@ -5000,15 +5009,14 @@ useEffect(() => {
 
         const forcedSet = new Set(filteredForced);
 
-        const capacity = state.professionalId
-
-           ? 1
-
-          : Math.max(1, serviceProfessionals.length || 0);
+        const fallbackCapacity = selectedServices.length === 1
+          ? Math.max(1, Number(selectedServices[0]?.capacidade_por_horario || 1) || 1)
+          : Math.max(1, serviceProfessionals.length || 1);
 
         const overlayed = grid.map((s) => {
 
           const k = minuteISO(s.datetime);
+          const capacity = Math.max(1, Number(s.capacidade ?? s.capacity ?? fallbackCapacity) || fallbackCapacity);
 
           if (normalizeSlotLabel(s.label) === 'bloqueado') {
 
@@ -5018,7 +5026,7 @@ useEffect(() => {
 
           if (blockedSet.has(k)) return { ...s, label: 'bloqueado' };
 
-          const countApi = state.professionalId ? 0 : busyFromApiCount.get(k) || 0;
+          const countApi = busyFromApiCount.get(k) || 0;
 
           const countAppt = apptCounts && typeof apptCounts.get === 'function' ? apptCounts.get(k) || 0 : 0;
 
@@ -5026,9 +5034,14 @@ useEffect(() => {
 
           const total = countApi + countAppt + countForced;
 
-          if (total >= capacity) return { ...s, label: 'agendado' };
+          if (total >= capacity) return { ...s, label: 'agendado', capacidade: capacity, vagas_restantes: 0 };
 
-          return { ...s, label: 'disponivel' };
+          return {
+            ...s,
+            label: 'disponivel',
+            capacidade: capacity,
+            vagas_restantes: Math.max(0, capacity - total),
+          };
 
         });
 
@@ -5389,7 +5402,11 @@ useEffect(() => {
 
       try {
 
-        const slotsData = await Api.getSlots(establishmentId, currentWeek, { includeBusy: true });
+        const slotsData = await Api.getSlots(establishmentId, currentWeek, {
+          includeBusy: true,
+          serviceIds: selectedServices.map((svc) => svc.id),
+          professionalId: state.professionalId || undefined,
+        });
 
         const normalized = normalizeSlots(slotsData);
 
@@ -5433,7 +5450,7 @@ useEffect(() => {
 
     },
 
-    [establishmentId, currentWeek, isOwnerViewing, normalizeSlots]
+    [establishmentId, currentWeek, isOwnerViewing, normalizeSlots, selectedServices, state.professionalId]
 
   );
 
@@ -5626,7 +5643,7 @@ useEffect(() => {
 
           } else {
 
-            showToast("error", "Este horário acabou de ficar indisponível. Escolha outro.");
+            showToast("error", e?.data?.message || "Este horário acabou de ficar indisponível. Escolha outro.");
 
           }
 

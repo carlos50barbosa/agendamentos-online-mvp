@@ -222,7 +222,17 @@ export default function Book(){
 
         })
 
-        .map(s => ({ iso: s.datetime, label: formatTimeBR(s.datetime) }));
+        .map(s => {
+          const capacidade = Math.max(1, Number(s.capacidade ?? s.capacity ?? 1) || 1);
+          const vagas = Math.max(0, Number(s.vagas_restantes ?? s.remaining ?? capacidade) || 0);
+          const timeLabel = formatTimeBR(s.datetime);
+          return {
+            iso: s.datetime,
+            label: capacidade > 1 && vagas > 0
+              ? `${timeLabel} - ${vagas} vagas disponíveis`
+              : timeLabel,
+          };
+        });
 
       setTimes(filtered);
 

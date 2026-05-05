@@ -6,6 +6,7 @@ import {
 } from '../lib/plans.js';
 import { saveServiceImageFromDataUrl, removeServiceImageFile } from '../lib/service_images.js';
 import { ensureSubscriptionOperationalAccess } from '../middleware/billing.js';
+import { normalizeServiceSlotCapacity } from '../lib/service_capacity.js';
 
 const router = Router();
 
@@ -111,7 +112,7 @@ router.get('/', async (req, res, next) => {
 
   try {
     const [rows] = await pool.query(
-      `SELECT id, nome AS title, nome, descricao, imagem_url, duracao_min, preco_centavos, ativo
+      `SELECT id, nome AS title, nome, descricao, imagem_url, duracao_min, preco_centavos, capacidade_por_horario, ativo
          FROM servicos
         WHERE estabelecimento_id=?
           AND (ativo IS NULL OR ativo=1)
@@ -154,11 +155,12 @@ router.post('/', auth, isEstabelecimento, ensureSubscriptionOperationalAccess({
   let conn;
   try {
     const estId = req.user.id;
-    const { nome, descricao, duracao_min, preco_centavos, ativo = 1, professionalIds, imagem } = req.body || {};
+    const { nome, descricao, duracao_min, preco_centavos, capacidade_por_horario, ativo = 1, professionalIds, imagem } = req.body || {};
     const nomeTrim = String(nome || '').trim();
     const descricaoTrim = descricao != null ? String(descricao).trim() : null;
     const duracao = Number(duracao_min);
     const preco = Number(preco_centavos ?? 0);
+    const capacidade = normalizeServiceSlotCapacity(capacidade_por_horario ?? 1);
     const isActive = toBoolean(ativo);
     if (!nomeTrim || !duracao) {
       return res.status(400).json({
@@ -213,8 +215,8 @@ router.post('/', auth, isEstabelecimento, ensureSubscriptionOperationalAccess({
     await conn.beginTransaction();
 
     const [insert] = await conn.query(
-      'INSERT INTO servicos (estabelecimento_id, nome, descricao, imagem_url, duracao_min, preco_centavos, ativo) VALUES (?,?,?,?,?,?,?)',
-      [estId, nomeTrim, descricaoTrim || null, imagemUrl, Number.isFinite(duracao) ? Math.max(0, Math.round(duracao)) : 0, Number.isFinite(preco) ? Math.max(0, Math.round(preco)) : 0, isActive ? 1 : 0]
+      'INSERT INTO servicos (estabelecimento_id, nome, descricao, imagem_url, duracao_min, preco_centavos, capacidade_por_horario, ativo) VALUES (?,?,?,?,?,?,?,?)',
+      [estId, nomeTrim, descricaoTrim || null, imagemUrl, Number.isFinite(duracao) ? Math.max(0, Math.round(duracao)) : 0, Number.isFinite(preco) ? Math.max(0, Math.round(preco)) : 0, capacidade, isActive ? 1 : 0]
     );
     const serviceId = insert.insertId;
 
@@ -271,6 +273,9 @@ router.put('/:id', auth, isEstabelecimento, ensureSubscriptionOperationalAccess(
         : current.descricao,
       duracao_min: req.body?.duracao_min != null ? Number(req.body.duracao_min) : current.duracao_min,
       preco_centavos: req.body?.preco_centavos != null ? Number(req.body.preco_centavos) : current.preco_centavos,
+      capacidade_por_horario: Object.prototype.hasOwnProperty.call(req.body || {}, 'capacidade_por_horario')
+        ? normalizeServiceSlotCapacity(req.body.capacidade_por_horario)
+        : normalizeServiceSlotCapacity(current.capacidade_por_horario),
       ativo: req.body?.ativo != null ? (toBoolean(req.body.ativo) ? 1 : 0) : current.ativo,
     };
 
@@ -336,8 +341,8 @@ router.put('/:id', auth, isEstabelecimento, ensureSubscriptionOperationalAccess(
     await conn.beginTransaction();
 
     await conn.query(
-      'UPDATE servicos SET nome=?, descricao=?, imagem_url=?, duracao_min=?, preco_centavos=?, ativo=? WHERE id=? AND estabelecimento_id=?',
-      [updates.nome, updates.descricao, nextImageUrl, updates.duracao_min, updates.preco_centavos, updates.ativo ? 1 : 0, serviceId, estId]
+      'UPDATE servicos SET nome=?, descricao=?, imagem_url=?, duracao_min=?, preco_centavos=?, capacidade_por_horario=?, ativo=? WHERE id=? AND estabelecimento_id=?',
+      [updates.nome, updates.descricao, nextImageUrl, updates.duracao_min, updates.preco_centavos, updates.capacidade_por_horario, updates.ativo ? 1 : 0, serviceId, estId]
     );
 
     if (professionalIdsToLink !== null) {

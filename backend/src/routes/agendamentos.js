@@ -22,6 +22,7 @@ import { clientWhatsappDisabled, whatsappImmediateDisabled, whatsappConfirmation
 import { ensureSubscriptionOperationalAccess } from '../middleware/billing.js';
 import { applyClientLoyaltyBenefitsTx, previewClientLoyaltyBenefits } from '../lib/client_loyalty_credits.js'
 import { cancelPendingPaymentAppointmentTx, restoreAppointmentLoyaltyBenefitsTx } from '../lib/appointment_loyalty.js'
+import { checkAppointmentSlotCapacityTx, normalizeServiceSlotCapacity } from '../lib/service_capacity.js';
 
 const router = Router();
 
@@ -272,7 +273,7 @@ const fetchServicesForAppointment = async (db, estabelecimentoId, serviceIds) =>
   if (!serviceIds.length) return { items: [], missing: serviceIds };
   const placeholders = serviceIds.map(() => '?').join(', ');
   const [rows] = await db.query(
-    `SELECT id, nome, duracao_min, preco_centavos
+    `SELECT id, nome, duracao_min, preco_centavos, capacidade_por_horario
        FROM servicos
       WHERE id IN (${placeholders})
         AND estabelecimento_id=?
@@ -289,6 +290,7 @@ const fetchServicesForAppointment = async (db, estabelecimentoId, serviceIds) =>
       nome: svc.nome,
       duracao_min: Number(svc.duracao_min || 0),
       preco_centavos: Number(svc.preco_centavos || 0),
+      capacidade_por_horario: normalizeServiceSlotCapacity(svc.capacidade_por_horario),
     };
   });
   return { items, missing: [] };
@@ -820,32 +822,25 @@ router.post('/', authRequired, isCliente, ensureSubscriptionOperationalAccess({
     await conn.beginTransaction();
     txStarted = true;
 
-    // Conflito por sobreposicao: a.inicio < novoFim AND a.fim > novoInicio
-    let conflictSql = `
-      SELECT id FROM agendamentos
-      WHERE estabelecimento_id=? AND status IN ('confirmado','pendente','pendente_pagamento')
-        AND (
-          status = 'confirmado'
-          OR (status = 'pendente' AND (public_confirm_expires_at IS NULL OR public_confirm_expires_at >= NOW()))
-          OR (status = 'pendente_pagamento' AND (deposit_expires_at IS NULL OR deposit_expires_at >= NOW()))
-        )
-        AND (inicio < ? AND fim > ?)
-    `;
-    const conflictParams = [estabelecimento_id, fimDate, inicioDate];
-    if (profissional_id != null && requiresProfessional) {
-      conflictSql += ' AND (profissional_id IS NULL OR profissional_id=?)';
-      conflictParams.push(profissional_id);
-    }
-    conflictSql += ' FOR UPDATE';
+    const capacityCheck = await checkAppointmentSlotCapacityTx({
+      db: conn,
+      estabelecimentoId: estabelecimento_id,
+      serviceItems,
+      profissionalId: profissional_id,
+      requiresProfessional,
+      inicioDate,
+      fimDate,
+    });
 
-    const [conf] = await conn.query(conflictSql, conflictParams);
-
-    if (conf.length) {
+    if (!capacityCheck.ok) {
       if (txStarted && conn) {
         await conn.rollback();
       }
       conn.release();
-      return res.status(409).json({ error: 'slot_ocupado', message: 'Horário indisponível.' });
+      return res.status(409).json({
+        error: capacityCheck.error,
+        message: capacityCheck.message,
+      });
     }
 
     const loyaltyApplication = await applyClientLoyaltyBenefitsTx({
@@ -1541,27 +1536,24 @@ router.post('/estabelecimento', authRequired, isEstabelecimento, ensureSubscript
     await conn.beginTransaction();
     txStarted = true;
 
-    let conflictSql = `SELECT id FROM agendamentos
-       WHERE estabelecimento_id=? AND status IN ('confirmado','pendente','pendente_pagamento')
-         AND (
-           status = 'confirmado'
-           OR (status = 'pendente' AND (public_confirm_expires_at IS NULL OR public_confirm_expires_at >= NOW()))
-           OR (status = 'pendente_pagamento' AND (deposit_expires_at IS NULL OR deposit_expires_at >= NOW()))
-         )
-         AND (inicio < ? AND fim > ?)`;
-    const conflictParams = [estabelecimento_id, fimDate, inicioDate];
-    if (profissional_id != null && requiresProfessional) {
-      conflictSql += ' AND (profissional_id IS NULL OR profissional_id=?)';
-      conflictParams.push(profissional_id);
-    }
-    conflictSql += ' FOR UPDATE';
-    const [conf] = await conn.query(conflictSql, conflictParams);
-    if (conf.length) {
+    const capacityCheck = await checkAppointmentSlotCapacityTx({
+      db: conn,
+      estabelecimentoId: estabelecimento_id,
+      serviceItems,
+      profissionalId: profissional_id,
+      requiresProfessional,
+      inicioDate,
+      fimDate,
+    });
+    if (!capacityCheck.ok) {
       if (txStarted && conn) {
         await conn.rollback();
       }
       conn.release();
-      return res.status(409).json({ error: 'slot_ocupado' });
+      return res.status(409).json({
+        error: capacityCheck.error,
+        message: capacityCheck.message,
+      });
     }
 
     const loyaltyApplication = await applyClientLoyaltyBenefitsTx({
@@ -1906,25 +1898,26 @@ router.put('/:id/reschedule-estab', authRequired, isEstabelecimento, ensureSubsc
     const servicesRequiringProfessional = serviceIds.filter((id) => (professionalMap.get(id)?.size || 0) > 0);
     const requiresProfessional = servicesRequiringProfessional.length > 0;
 
-    let conflictSql = `SELECT id FROM agendamentos
-       WHERE estabelecimento_id=? AND status IN ('confirmado','pendente')
-         AND (status <> 'pendente' OR public_confirm_expires_at IS NULL OR public_confirm_expires_at >= NOW())
-         AND id<>?
-         AND (inicio < ? AND fim > ?)`;
-    const conflictParams = [estId, ag.id, fimDate, inicioDate];
-    if (ag.profissional_id != null && requiresProfessional) {
-      conflictSql += ' AND (profissional_id IS NULL OR profissional_id=?)';
-      conflictParams.push(ag.profissional_id);
-    }
-    conflictSql += ' FOR UPDATE';
-    const [conf] = await conn.query(conflictSql, conflictParams);
-    if (conf.length) {
+    const capacityCheck = await checkAppointmentSlotCapacityTx({
+      db: conn,
+      estabelecimentoId: estId,
+      serviceItems,
+      profissionalId: ag.profissional_id,
+      requiresProfessional,
+      inicioDate,
+      fimDate,
+      excludeAppointmentId: ag.id,
+    });
+    if (!capacityCheck.ok) {
       if (txStarted && conn) {
         await conn.rollback();
       }
       conn.release();
       conn = null;
-      return res.status(409).json({ error: 'slot_ocupado', message: 'Horário indisponível.' });
+      return res.status(409).json({
+        error: capacityCheck.error,
+        message: capacityCheck.message,
+      });
     }
 
     const oldInicioIso = ag?.inicio ? new Date(ag.inicio).toISOString() : null;

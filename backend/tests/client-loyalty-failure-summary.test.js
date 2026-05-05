@@ -9,11 +9,13 @@ process.env.JWT_SECRET ??= 'test-secret'
 
 const {
   CLIENT_LOYALTY_CARDHOLDER_NAME_FIELD,
+  buildClientLoyaltyActivationEventPayload,
   buildClientLoyaltyPaymentSnapshot,
   interpretClientLoyaltyAuthorizedPaymentStatus,
   resolveClientLoyaltyAuthorizedPaymentPriority,
   resolveDominantClientLoyaltyFinalRealPayment,
   resolveClientLoyaltyCardholderNameInput,
+  resolveClientLoyaltyHighRiskFailureSequence,
   resolveClientLoyaltyRecentCardAttemptSummary,
   resolveClientLoyaltyRetryOptions,
   resolveLatestClientLoyaltyFailureSummary,
@@ -76,7 +78,7 @@ test('client loyalty failure summary prefers payment status_detail over newer au
 
   assert.equal(summary?.source, 'payment')
   assert.equal(summary?.code, 'cc_rejected_high_risk')
-  assert.equal(summary?.friendly_message, 'A última tentativa de cobrança foi recusada por análise de risco do cartão.')
+  assert.equal(summary?.friendly_message, 'Não foi possível aprovar este cartão no momento. Você pode tentar outro cartão ou pagar por PIX.')
   assert.equal(summary?.created_at, '2026-04-25T08:00:00.000Z')
   assert.equal(summary?.payment_method_id, 'master')
   assert.equal(summary?.payment_type_id, 'credit_card')
@@ -303,7 +305,7 @@ test('client loyalty payment snapshot resolver reads explicit snapshot payloads'
   assert.equal(snapshot?.payment_target, 'payment')
 })
 
-test('client loyalty retry options block card cooldown after high risk while keeping PIX enabled', () => {
+test('client loyalty retry options apply 24h same-card cooldown after high risk while keeping PIX and new card available', () => {
   const retryOptions = resolveClientLoyaltyRetryOptions({
     subscriptionStatus: 'past_due',
     latestFailure: {
@@ -314,10 +316,105 @@ test('client loyalty retry options block card cooldown after high risk while kee
   })
 
   assert.equal(retryOptions?.recommended_method, 'pix')
-  assert.equal(retryOptions?.card?.cooldown_active, true)
-  assert.equal(retryOptions?.card?.cooldown_reason, 'cc_rejected_high_risk')
-  assert.equal(retryOptions?.card?.enabled, false)
+  assert.equal(retryOptions?.same_card_cooldown_active, true)
+  assert.equal(retryOptions?.same_card_cooldown_remaining_ms, 23.5 * 60 * 60 * 1000)
+  assert.equal(retryOptions?.card?.same_card_cooldown_reason, 'cc_rejected_high_risk')
+  assert.equal(retryOptions?.card?.cooldown_active, false)
+  assert.equal(retryOptions?.card?.enabled, true)
+  assert.equal(retryOptions?.card?.manual_new_card_allowed, true)
   assert.equal(retryOptions?.pix?.enabled, true)
+})
+
+test('client loyalty high risk sequence counts consecutive distinct rejected payments', () => {
+  const events = [
+    {
+      id: 12,
+      tipo_evento: 'payment_failed',
+      mp_payment_id: 'pay-2',
+      payment_status: 'rejected',
+      payment_type: 'credit_card',
+      payload_json: {
+        payment_status: 'rejected',
+        payment_status_detail: 'cc_rejected_high_risk',
+        raw: { payment: { id: 'pay-2', status: 'rejected', status_detail: 'cc_rejected_high_risk' } },
+      },
+      created_at: '2026-04-25T09:00:00.000Z',
+    },
+    {
+      id: 11,
+      tipo_evento: 'payment_snapshot',
+      mp_payment_id: 'pay-2',
+      payment_status: 'rejected',
+      payment_type: 'credit_card',
+      payload_json: {
+        snapshot: { payment_id: 'pay-2', status: 'rejected', status_detail: 'cc_rejected_high_risk' },
+      },
+      created_at: '2026-04-25T08:59:30.000Z',
+    },
+    {
+      id: 10,
+      tipo_evento: 'payment_failed',
+      mp_payment_id: 'pay-1',
+      payment_status: 'rejected',
+      payment_type: 'credit_card',
+      payload_json: {
+        payment_status: 'rejected',
+        payment_status_detail: 'cc_rejected_high_risk',
+        raw: { payment: { id: 'pay-1', status: 'rejected', status_detail: 'cc_rejected_high_risk' } },
+      },
+      created_at: '2026-04-25T08:00:00.000Z',
+    },
+  ]
+
+  const sequence = resolveClientLoyaltyHighRiskFailureSequence(events)
+  const failure = resolveLatestClientLoyaltyFailureSummary(events, { subscriptionStatus: 'past_due' })
+
+  assert.equal(sequence.high_risk_consecutive_count, 2)
+  assert.equal(sequence.same_day_auto_retry_blocked, true)
+  assert.equal(sequence.action_required, false)
+  assert.equal(failure.high_risk_consecutive_count, 2)
+  assert.equal(failure.high_risk_same_day_auto_retry_blocked, true)
+})
+
+test('client loyalty retry options require customer action after third consecutive high risk rejection', () => {
+  const retryOptions = resolveClientLoyaltyRetryOptions({
+    subscriptionStatus: 'past_due',
+    latestFailure: {
+      code: 'cc_rejected_high_risk',
+      created_at: '2026-04-25T08:30:00.000Z',
+      high_risk_consecutive_count: 3,
+    },
+    referenceDate: '2026-04-25T09:00:00.000Z',
+  })
+
+  assert.equal(retryOptions.recommended_method, 'pix')
+  assert.equal(retryOptions.automatic_retry_allowed, false)
+  assert.equal(retryOptions.high_risk_action_required, true)
+  assert.equal(retryOptions.card.action_required, true)
+  assert.equal(retryOptions.card.action, 'update_card')
+  assert.equal(retryOptions.card.enabled, true)
+  assert.equal(retryOptions.pix.enabled, true)
+})
+
+test('client loyalty PIX activation payload records fallback source and previous failure code', () => {
+  const payload = buildClientLoyaltyActivationEventPayload({
+    id: 'pix-123',
+    status: 'approved',
+    payment_method_id: 'pix',
+    metadata: {
+      fallback_reason: 'card_high_risk',
+      fallback_source: 'pix',
+      fallback_origin: 'failure_recovery',
+      previous_failure_code: 'cc_rejected_high_risk',
+    },
+  }, {
+    paymentMethod: 'pix',
+  })
+
+  assert.equal(payload.fallback_source, 'pix')
+  assert.equal(payload.fallback_reason, 'card_high_risk')
+  assert.equal(payload.fallback_origin, 'failure_recovery')
+  assert.equal(payload.previous_failure_code, 'cc_rejected_high_risk')
 })
 
 test('client loyalty retry options block repeated similar card attempts while keeping PIX enabled', () => {

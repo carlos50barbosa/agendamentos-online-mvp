@@ -32,12 +32,26 @@ function isRealFailureCode(value) {
 
 export function getLoyaltyFailureFriendlyMessage(code, fallbackMessage = null) {
   const normalized = normalizeKey(code)
+  if (normalized === 'cc_rejected_high_risk') {
+    return 'Não foi possível aprovar este cartão no momento. Você pode tentar outro cartão ou pagar por PIX.'
+  }
   const messages = {
     cc_rejected_high_risk: 'A última tentativa de cobrança foi recusada por análise de risco do cartão.',
     cc_rejected_insufficient_amount: 'A última tentativa de cobrança foi recusada por saldo ou limite insuficiente.',
     cc_rejected_bad_filled_security_code: 'A última tentativa de cobrança foi recusada por dados do cartão inválidos.',
   }
   return messages[normalized] || normalizeValue(fallbackMessage) || ''
+}
+
+function getHighRiskRetryMessage(count = 1) {
+  const safeCount = Number(count || 0) || 1
+  if (safeCount >= 3) {
+    return 'Por segurança, novas tentativas com este cartão foram pausadas. Atualize o cartão ou pague por PIX para manter sua assinatura ativa.'
+  }
+  if (safeCount >= 2) {
+    return 'Este cartão continua sendo recusado por análise de segurança. Recomendamos pagar por PIX ou usar outro cartão.'
+  }
+  return 'Não foi possível aprovar este cartão no momento. Você pode tentar outro cartão ou pagar por PIX.'
 }
 
 export function resolveLoyaltyFailureDisplay(details = null) {
@@ -154,6 +168,37 @@ export function resolveLoyaltyRetryDisplay(details = null) {
   const cardRetry = retryOptions?.card || null
   const pixRetry = retryOptions?.pix || null
   const highRisk = failure.technicalCode === 'cc_rejected_high_risk'
+  const highRiskCount = Number(
+    retryOptions?.high_risk_consecutive_count ||
+      cardRetry?.high_risk_consecutive_count ||
+      details?.high_risk_consecutive_failures ||
+      details?.subscription?.high_risk_consecutive_failures ||
+      0
+  ) || (highRisk ? 1 : 0)
+  const highRiskMessage = highRisk ? getHighRiskRetryMessage(highRiskCount) : ''
+
+  if (highRisk) {
+    return {
+      showRecovery: true,
+      title: highRiskMessage,
+      description: '',
+      cardActionLabel: highRiskCount >= 3 ? 'Atualizar cartão' : 'Tentar outro cartão',
+      pixActionLabel: 'Pagar por PIX agora',
+      cardCooldownActive: cardRetry?.cooldown_active === true || cardRetry?.same_card_cooldown_active === true,
+      cardAttemptLimitActive: cardRetry?.cooldown_active === true,
+      sameCardCooldownActive: cardRetry?.same_card_cooldown_active === true,
+      cardCooldownRemainingMs: Number(
+        cardRetry?.cooldown_remaining_ms ||
+          cardRetry?.same_card_cooldown_remaining_ms ||
+          0
+      ) || 0,
+      sameCardCooldownRemainingMs: Number(cardRetry?.same_card_cooldown_remaining_ms || 0) || 0,
+      cardEnabled: cardRetry?.enabled !== false,
+      pixEnabled: pixRetry?.enabled !== false,
+      highRiskConsecutiveCount: highRiskCount,
+      paymentMethodActionRequired: retryOptions?.high_risk_action_required === true || cardRetry?.action_required === true,
+    }
+  }
 
   return {
     showRecovery: Boolean(failure.technicalCode || retryOptions?.suggested),

@@ -42,7 +42,7 @@ const CLIENT_LOYALTY_CARD_PENDING_WINDOW_MS = Math.max(
   60000
 )
 const CLIENT_LOYALTY_HIGH_RISK_COOLDOWN_MS = Math.max(
-  Number(process.env.CLIENT_LOYALTY_HIGH_RISK_COOLDOWN_MS || 60 * 60 * 1000) || (60 * 60 * 1000),
+  Number(process.env.CLIENT_LOYALTY_HIGH_RISK_COOLDOWN_MS || 24 * 60 * 60 * 1000) || (24 * 60 * 60 * 1000),
   60000
 )
 const CLIENT_LOYALTY_CARD_DUPLICATE_RETRY_WINDOW_MS = Math.max(
@@ -54,6 +54,9 @@ const CLIENT_LOYALTY_CARD_DUPLICATE_RETRY_THRESHOLD = Math.max(
   2
 )
 const DAY_MS = 86400000
+const CLIENT_LOYALTY_HIGH_RISK_CODE = 'cc_rejected_high_risk'
+const CLIENT_LOYALTY_HIGH_RISK_STRONG_WARNING_THRESHOLD = 2
+const CLIENT_LOYALTY_HIGH_RISK_ACTION_REQUIRED_THRESHOLD = 3
 
 function createError(message, status = 400, code = 'bad_request', details = null) {
   const error = new Error(message)
@@ -336,6 +339,47 @@ function buildPixExternalReference({ subscriptionId, estabelecimentoId, clienteI
   })
 }
 
+function buildClientLoyaltyPixFallbackMetadata(fallbackContext = null) {
+  if (!fallbackContext?.reason) return {}
+  return {
+    fallback_reason: fallbackContext.reason,
+    fallback_source: 'pix',
+    ...(fallbackContext?.source ? { fallback_origin: fallbackContext.source } : {}),
+    ...(fallbackContext?.previousFailureCode ? { previous_failure_code: fallbackContext.previousFailureCode } : {}),
+  }
+}
+
+export function buildClientLoyaltyActivationEventPayload(rawPayload = null, {
+  paymentMethod = null,
+} = {}) {
+  const method = String(paymentMethod || '').trim().toLowerCase()
+  if (method !== 'pix') return rawPayload
+
+  const metadata = rawPayload?.metadata || rawPayload?.payment?.metadata || null
+  const previousFailureCode = String(metadata?.previous_failure_code || metadata?.previousFailureCode || '').trim() || null
+  const fallbackReason = String(metadata?.fallback_reason || metadata?.fallbackReason || '').trim() || null
+  if (!previousFailureCode && !fallbackReason) return rawPayload
+
+  const fallbackAudit = {
+    fallback_source: 'pix',
+    fallback_reason: fallbackReason,
+    fallback_origin: metadata?.fallback_origin || metadata?.fallbackOrigin || null,
+    previous_failure_code: previousFailureCode,
+  }
+
+  if (rawPayload && typeof rawPayload === 'object' && !Array.isArray(rawPayload)) {
+    return {
+      ...rawPayload,
+      ...fallbackAudit,
+    }
+  }
+
+  return {
+    value: rawPayload ?? null,
+    ...fallbackAudit,
+  }
+}
+
 function buildSellerEventContext(account, estabelecimentoId, extra = {}) {
   return {
     ownerType: 'establishment',
@@ -353,6 +397,14 @@ function normalizeGatewayPaymentStatus(value) {
 
 function normalizeGatewayPaymentStatusKey(value) {
   return normalizeGatewayPaymentStatus(value).replace(/-/g, '_')
+}
+
+function normalizeClientLoyaltyFailureCode(value) {
+  return normalizeGatewayPaymentStatusKey(value)
+}
+
+function isClientLoyaltyHighRiskFailureCode(value) {
+  return normalizeClientLoyaltyFailureCode(value) === CLIENT_LOYALTY_HIGH_RISK_CODE
 }
 
 function isApprovedGatewayPaymentStatus(status) {
@@ -670,6 +722,9 @@ function extractClientLoyaltyFailureFromEvent(event) {
 
 function mapClientLoyaltyFailureFriendlyMessage(code) {
   const normalized = String(code || '').trim().toLowerCase()
+  if (normalized === CLIENT_LOYALTY_HIGH_RISK_CODE) {
+    return 'Não foi possível aprovar este cartão no momento. Você pode tentar outro cartão ou pagar por PIX.'
+  }
   const messages = {
     cc_rejected_high_risk: 'A última tentativa de cobrança foi recusada por análise de risco do cartão.',
     cc_rejected_insufficient_amount: 'A última tentativa de cobrança foi recusada por saldo ou limite insuficiente.',
@@ -744,6 +799,95 @@ function buildClientLoyaltyFailureCandidate(event) {
   }
 }
 
+function getClientLoyaltyEventSortTime(event = null) {
+  const parsed = toDate(event?.created_at || event?.createdAt || event?.payload_json?.date_created || null)
+  return parsed ? parsed.getTime() : 0
+}
+
+function sortClientLoyaltyEventsNewestFirst(events = []) {
+  return [...(Array.isArray(events) ? events : [])].sort((left, right) => {
+    const timeDiff = getClientLoyaltyEventSortTime(right) - getClientLoyaltyEventSortTime(left)
+    if (timeDiff) return timeDiff
+    return Number(right?.id || 0) - Number(left?.id || 0)
+  })
+}
+
+function isClientLoyaltyPaymentSuccessEvent(event = null) {
+  const eventType = String(event?.tipo_evento || '').trim().toLowerCase()
+  if (['payment_approved', 'subscription_renewed'].includes(eventType)) return true
+  const status = normalizeGatewayPaymentStatusKey(event?.payment_status || event?.payload_json?.payment_status || '')
+  return isApprovedGatewayPaymentStatus(status)
+}
+
+function resolveClientLoyaltyFailureAttemptKey(event = null, candidate = null) {
+  const payload = event?.payload_json || null
+  const snapshot = payload?.snapshot || payload?.payment_snapshot || null
+  const raw = payload?.raw || payload || null
+  const payment = raw?.payment || raw?.authorized_payment || raw || null
+  return String(
+    event?.mp_payment_id ||
+      snapshot?.payment_id ||
+      payment?.id ||
+      candidate?.gateway_event_id ||
+      event?.gateway_event_id ||
+      event?.id ||
+      ''
+  ).trim() || null
+}
+
+export function resolveClientLoyaltyHighRiskFailureSequence(events = []) {
+  const failures = []
+  const seenAttempts = new Set()
+
+  for (const event of sortClientLoyaltyEventsNewestFirst(events)) {
+    if (isClientLoyaltyPaymentSuccessEvent(event)) break
+
+    const eventType = String(event?.tipo_evento || '').trim().toLowerCase()
+    if (!['payment_failed', 'payment_expired'].includes(eventType)) continue
+
+    const candidate = buildClientLoyaltyFailureCandidate(event)
+    if (!candidate) continue
+
+    const attemptKey = resolveClientLoyaltyFailureAttemptKey(event, candidate) || `event:${event?.id || failures.length}`
+    if (seenAttempts.has(attemptKey)) continue
+    seenAttempts.add(attemptKey)
+
+    const failureCode = candidate.code || candidate.status_detail || null
+    if (!isClientLoyaltyHighRiskFailureCode(failureCode)) break
+
+    failures.push({
+      attempt_key: attemptKey,
+      payment_id: event?.mp_payment_id || null,
+      gateway_event_id: candidate.gateway_event_id || event?.gateway_event_id || null,
+      status: candidate.status || null,
+      status_detail: candidate.status_detail || failureCode,
+      code: CLIENT_LOYALTY_HIGH_RISK_CODE,
+      source: candidate.source || null,
+      created_at: candidate.date_created || candidate.created_at || event?.created_at || null,
+    })
+  }
+
+  const latest = failures[0] || null
+  const count = failures.length
+  return {
+    high_risk_consecutive_count: count,
+    count,
+    latest_at: latest?.created_at || null,
+    latest_payment_id: latest?.payment_id || null,
+    latest_gateway_event_id: latest?.gateway_event_id || null,
+    same_day_auto_retry_blocked: count >= CLIENT_LOYALTY_HIGH_RISK_STRONG_WARNING_THRESHOLD,
+    action_required: count >= CLIENT_LOYALTY_HIGH_RISK_ACTION_REQUIRED_THRESHOLD,
+    severity: count >= CLIENT_LOYALTY_HIGH_RISK_ACTION_REQUIRED_THRESHOLD
+      ? 'action_required'
+      : count >= CLIENT_LOYALTY_HIGH_RISK_STRONG_WARNING_THRESHOLD
+        ? 'strong_warning'
+        : count > 0
+          ? 'warning'
+          : null,
+    failures,
+  }
+}
+
 export function resolveLatestClientLoyaltyFailureSummary(events = [], {
   subscriptionStatus = null,
 } = {}) {
@@ -761,6 +905,9 @@ export function resolveLatestClientLoyaltyFailureSummary(events = [], {
     null
 
   if (!selected) return null
+  const highRiskSequence = isClientLoyaltyHighRiskFailureCode(selected.code)
+    ? resolveClientLoyaltyHighRiskFailureSequence(events)
+    : null
 
   return {
     status: selected.status || null,
@@ -776,6 +923,11 @@ export function resolveLatestClientLoyaltyFailureSummary(events = [], {
     gateway_event_id: selected.gateway_event_id || null,
     payment_method_id: selected.payment_method_id || null,
     payment_type_id: selected.payment_type_id || null,
+    high_risk_consecutive_count: highRiskSequence?.high_risk_consecutive_count || 0,
+    high_risk_action_required: highRiskSequence?.action_required === true,
+    high_risk_same_day_auto_retry_blocked: highRiskSequence?.same_day_auto_retry_blocked === true,
+    high_risk_severity: highRiskSequence?.severity || null,
+    high_risk_sequence: highRiskSequence,
   }
 }
 
@@ -1446,51 +1598,82 @@ export function resolveClientLoyaltyRetryOptions({
   recentAttemptSummary = null,
 } = {}) {
   const normalizedStatus = String(subscriptionStatus || '').trim().toLowerCase()
-  const failureCode = String(latestFailure?.code || latestFailure?.status_detail || '').trim().toLowerCase() || null
+  const failureCode = normalizeClientLoyaltyFailureCode(latestFailure?.code || latestFailure?.status_detail || '') || null
   const failureAt = toDate(latestFailure?.created_at || latestFailure?.date_created || null)
   const reference = toDate(referenceDate) || new Date()
   const failureAgeMs = failureAt ? Math.max(reference.getTime() - failureAt.getTime(), 0) : null
+  const highRisk = isClientLoyaltyHighRiskFailureCode(failureCode)
+  const highRiskCount = Math.max(Number(latestFailure?.high_risk_consecutive_count || 0) || 0, highRisk ? 1 : 0)
   const highRiskCooldownActive =
-    failureCode === 'cc_rejected_high_risk' &&
+    highRisk &&
     failureAgeMs != null &&
     failureAgeMs < CLIENT_LOYALTY_HIGH_RISK_COOLDOWN_MS
-  const cooldownRemainingMs = highRiskCooldownActive
+  const highRiskCooldownRemainingMs = highRiskCooldownActive
     ? Math.max(CLIENT_LOYALTY_HIGH_RISK_COOLDOWN_MS - failureAgeMs, 0)
     : 0
   const recentCooldownActive = recentAttemptSummary?.cooldown_active === true
-  const effectiveCooldownActive = highRiskCooldownActive || recentCooldownActive
-  const effectiveCooldownRemainingMs = highRiskCooldownActive
-    ? cooldownRemainingMs
-    : Math.max(Number(recentAttemptSummary?.cooldown_remaining_ms || 0), 0)
-  const cooldownReason = highRiskCooldownActive
-    ? 'cc_rejected_high_risk'
-    : (recentCooldownActive ? recentAttemptSummary?.cooldown_reason || 'recent_similar_attempts' : null)
+  const attemptCooldownRemainingMs = Math.max(Number(recentAttemptSummary?.cooldown_remaining_ms || 0), 0)
+  const cardAttemptCooldownReason = recentCooldownActive
+    ? recentAttemptSummary?.cooldown_reason || 'recent_similar_attempts'
+    : null
+  const sameDayAutoRetryBlocked = highRiskCount >= CLIENT_LOYALTY_HIGH_RISK_STRONG_WARNING_THRESHOLD
+  const actionRequired = highRiskCount >= CLIENT_LOYALTY_HIGH_RISK_ACTION_REQUIRED_THRESHOLD
   const recoverySuggested = ['pending_payment', 'past_due', 'unpaid', 'expired'].includes(normalizedStatus)
+  const manualNewCardAllowed = recoverySuggested && !recentCooldownActive
+  const cardMessage = recentCooldownActive
+    ? 'Muitas tentativas com cartões em poucos minutos. Use PIX agora ou aguarde antes de tentar outro cartão.'
+    : highRisk
+      ? (
+        actionRequired
+          ? 'Por segurança, novas tentativas com este cartão foram pausadas. Atualize o cartão ou pague por PIX para manter sua assinatura ativa.'
+          : highRiskCount >= CLIENT_LOYALTY_HIGH_RISK_STRONG_WARNING_THRESHOLD
+            ? 'Este cartão continua sendo recusado por análise de segurança. Recomendamos pagar por PIX ou usar outro cartão.'
+            : 'Não foi possível aprovar este cartão no momento. Você pode tentar outro cartão ou pagar por PIX.'
+      )
+      : recoverySuggested
+        ? 'Você pode tentar outro cartão para reativar a assinatura.'
+        : null
 
   return {
     suggested: recoverySuggested,
-    recommended_method: failureCode === 'cc_rejected_high_risk' || effectiveCooldownActive ? 'pix' : 'credit_card',
+    recommended_method: highRisk || recentCooldownActive ? 'pix' : 'credit_card',
     retry_count_recent: recentAttemptSummary?.retry_count_recent ?? null,
     same_buyer_recent_attempts: recentAttemptSummary?.same_buyer_recent_attempts ?? null,
     same_card_recent_attempts: recentAttemptSummary?.same_card_recent_attempts ?? null,
-    cooldown_reason: cooldownReason,
+    cooldown_reason: cardAttemptCooldownReason || (highRiskCooldownActive ? CLIENT_LOYALTY_HIGH_RISK_CODE : null),
+    high_risk_consecutive_count: highRiskCount,
+    high_risk_action_required: actionRequired,
+    high_risk_same_day_auto_retry_blocked: sameDayAutoRetryBlocked,
+    same_card_cooldown_active: highRiskCooldownActive,
+    same_card_cooldown_remaining_ms: highRiskCooldownRemainingMs,
+    automatic_retry_allowed: !sameDayAutoRetryBlocked,
     card: {
       available: recoverySuggested,
-      enabled: recoverySuggested && !effectiveCooldownActive,
-      action: 'try_other_card',
-      cooldown_active: effectiveCooldownActive,
-      cooldown_remaining_ms: effectiveCooldownRemainingMs,
-      cooldown_reason: cooldownReason,
-      message: effectiveCooldownActive
+      enabled: manualNewCardAllowed,
+      action: highRisk ? 'update_card' : 'try_other_card',
+      cooldown_active: recentCooldownActive,
+      cooldown_remaining_ms: attemptCooldownRemainingMs,
+      cooldown_reason: cardAttemptCooldownReason,
+      same_card_blocked: highRiskCooldownActive,
+      same_card_cooldown_active: highRiskCooldownActive,
+      same_card_cooldown_remaining_ms: highRiskCooldownRemainingMs,
+      same_card_cooldown_reason: highRiskCooldownActive ? CLIENT_LOYALTY_HIGH_RISK_CODE : null,
+      manual_new_card_allowed: manualNewCardAllowed,
+      automatic_retry_allowed: !sameDayAutoRetryBlocked,
+      same_day_auto_retry_blocked: sameDayAutoRetryBlocked,
+      action_required: actionRequired,
+      high_risk_consecutive_count: highRiskCount,
+      message: cardMessage || (recentCooldownActive
         ? 'Por segurança, novas tentativas com cartão ficam indisponíveis por alguns minutos. Se preferir, pague por PIX agora.'
         : recoverySuggested
           ? 'Você pode tentar outro cartão para reativar a assinatura.'
-          : null,
+          : null),
     },
     pix: {
       available: true,
       enabled: true,
       action: 'pay_with_pix',
+      priority: highRisk || recentCooldownActive,
       message: 'Você pode pagar por PIX para liberar o ciclo atual.',
     },
   }
@@ -1578,6 +1761,33 @@ async function assertClientLoyaltyCardRetryAllowed(subscription, {
         same_card_recent_attempts: retryOptions.same_card_recent_attempts,
       }
     )
+  }
+
+  if (latestFailure?.code === CLIENT_LOYALTY_HIGH_RISK_CODE && retryOptions?.card?.manual_new_card_allowed) {
+    await appendClientLoyaltySubscriptionEvent(subscription.id, {
+      eventType: 'card_retry_allowed',
+      mpTopic: 'client-loyalty',
+      ownerType: subscription.ownerType || 'establishment',
+      ownerId: subscription.estabelecimentoId || null,
+      estabelecimentoId: subscription.estabelecimentoId || null,
+      paymentMethod: 'credit_card',
+      paymentType: 'credit_card',
+      amountCents,
+      actionTaken: 'new_card_allowed',
+      ignoredReason: CLIENT_LOYALTY_HIGH_RISK_CODE,
+      payload: {
+        subscription_id: subscription.id || null,
+        cliente_id: subscription.clienteId || null,
+        estabelecimento_id: subscription.estabelecimentoId || null,
+        loyalty_plan_id: subscription.loyaltyPlanId || null,
+        previous_failure_code: latestFailure.code || null,
+        high_risk_consecutive_count: retryOptions.high_risk_consecutive_count || 0,
+        same_card_cooldown_active: retryOptions.card.same_card_cooldown_active === true,
+        same_card_cooldown_remaining_ms: retryOptions.card.same_card_cooldown_remaining_ms || 0,
+        manual_new_card_allowed: true,
+        suggested_fallback: 'pix',
+      },
+    }, { db })
   }
 
   return { latestFailure, retryOptions }
@@ -1792,7 +2002,7 @@ async function activateSubscriptionCycleTx(subscriptionId, {
     paymentType,
     amountCents,
     actionTaken: 'activated',
-    payload: rawPayload,
+    payload: buildClientLoyaltyActivationEventPayload(rawPayload, { paymentMethod: paymentMethod || current.paymentMethod }),
   }, { db })
   await appendClientLoyaltySubscriptionEvent(subscriptionId, {
     eventType: 'cycle_credits_generated',
@@ -1837,7 +2047,7 @@ async function markSubscriptionPastDueTx(subscriptionId, {
     ? new Date(Date.now() + CLIENT_LOYALTY_GRACE_DAYS * DAY_MS)
     : null
 
-  const updated = await updateClientLoyaltySubscription(subscriptionId, {
+  let updated = await updateClientLoyaltySubscription(subscriptionId, {
     ownerType: current.ownerType || 'establishment',
     sellerMpAccountId: current.sellerMpAccountId || null,
     status: nextStatus,
@@ -1889,8 +2099,19 @@ async function markSubscriptionPastDueTx(subscriptionId, {
     const recentAttemptSummary = resolveClientLoyaltyRecentCardAttemptSummary(recentEvents, {
       amountCents,
     })
-    const failureCode = failureDetails?.status_detail || failureDetails?.code || null
-    const highRisk = String(failureCode || '').toLowerCase() === 'cc_rejected_high_risk'
+    const failureCode = normalizeClientLoyaltyFailureCode(failureDetails?.status_detail || failureDetails?.code || null)
+    const highRisk = isClientLoyaltyHighRiskFailureCode(failureCode)
+    const highRiskSequence = highRisk
+      ? resolveClientLoyaltyHighRiskFailureSequence(recentEvents)
+      : null
+    const highRiskCount = highRiskSequence?.high_risk_consecutive_count || 0
+    const sameDayAutoRetryBlocked = highRiskSequence?.same_day_auto_retry_blocked === true
+    const actionRequired = highRiskSequence?.action_required === true
+    if (sameDayAutoRetryBlocked && updated.autoRenew !== false) {
+      updated = await updateClientLoyaltySubscription(subscriptionId, {
+        autoRenew: false,
+      }, { db })
+    }
     const riskAudit = {
       subscription_id: subscriptionId,
       cliente_id: current.clienteId || null,
@@ -1906,9 +2127,12 @@ async function markSubscriptionPastDueTx(subscriptionId, {
       same_card_recent_attempts: recentAttemptSummary.same_card_recent_attempts,
       same_buyer_recent_attempts: recentAttemptSummary.same_buyer_recent_attempts,
       cooldown_applied: highRisk,
-      cooldown_reason: highRisk ? 'cc_rejected_high_risk' : null,
+      cooldown_reason: highRisk ? CLIENT_LOYALTY_HIGH_RISK_CODE : null,
       cooldown_ms: highRisk ? CLIENT_LOYALTY_HIGH_RISK_COOLDOWN_MS : 0,
       suggested_fallback: highRisk ? 'pix' : 'try_other_card_or_pix',
+      high_risk_consecutive_count: highRiskCount,
+      same_day_auto_retry_blocked: sameDayAutoRetryBlocked,
+      action_required: actionRequired,
       transition_rule: transitionRule || null,
     }
     console.info('[client-loyalty][risk] payment_failure_audit', riskAudit)
@@ -1926,9 +2150,55 @@ async function markSubscriptionPastDueTx(subscriptionId, {
       paymentType,
       amountCents,
       actionTaken: 'payment_failure_audit',
-      ignoredReason: highRisk ? 'cc_rejected_high_risk' : null,
+      ignoredReason: highRisk ? CLIENT_LOYALTY_HIGH_RISK_CODE : null,
       payload: riskAudit,
     }, { db })
+
+    if (sameDayAutoRetryBlocked) {
+      await appendClientLoyaltySubscriptionEvent(subscriptionId, {
+        eventType: 'card_automatic_retry_blocked',
+        gatewayEventId: riskGatewayEventId
+          ? `auto-retry-blocked:${riskGatewayEventId}:${highRiskCount}`
+          : null,
+        mpTopic: 'client-loyalty',
+        ...(eventContext || buildSellerEventContext(null, current.estabelecimentoId, {})),
+        mpPaymentId: gatewayPaymentId || null,
+        paymentStatus: paymentStatus || null,
+        paymentMethod: current.paymentMethod || null,
+        paymentType,
+        amountCents,
+        actionTaken: 'same_day_auto_retry_blocked',
+        ignoredReason: CLIENT_LOYALTY_HIGH_RISK_CODE,
+        payload: {
+          ...riskAudit,
+          automatic_retry_allowed: false,
+          action_recommendation: 'use_pix_or_update_card',
+        },
+      }, { db })
+    }
+
+    if (actionRequired) {
+      await appendClientLoyaltySubscriptionEvent(subscriptionId, {
+        eventType: 'subscription_payment_method_action_required',
+        gatewayEventId: riskGatewayEventId
+          ? `action-required:${riskGatewayEventId}:${highRiskCount}`
+          : null,
+        mpTopic: 'client-loyalty',
+        ...(eventContext || buildSellerEventContext(null, current.estabelecimentoId, {})),
+        mpPaymentId: gatewayPaymentId || null,
+        paymentStatus: paymentStatus || null,
+        paymentMethod: current.paymentMethod || null,
+        paymentType,
+        amountCents,
+        actionTaken: 'customer_action_required',
+        ignoredReason: CLIENT_LOYALTY_HIGH_RISK_CODE,
+        payload: {
+          ...riskAudit,
+          required_actions: ['update_card', 'pay_with_pix'],
+          blocked_status: 'past_due',
+        },
+      }, { db })
+    }
   }
 
   return updated
@@ -1985,6 +2255,7 @@ export async function startClientLoyaltyCardSubscription({
   })
   const normalizedPayer = payerValidation.normalized
   const current = await getPreferredClientLoyaltySubscription(clienteId, estabelecimentoId, { db })
+  let cardReplacementContext = null
   if (current) {
     const state = computeClientLoyaltySubscriptionState(current)
     const pendingCardCheckout = isPendingCardCheckoutStillInFlight(current)
@@ -2006,10 +2277,19 @@ export async function startClientLoyaltyCardSubscription({
         current.paymentMethod === 'credit_card' &&
         ['past_due', 'unpaid', 'expired', 'canceled'].includes(state.resolvedStatus)
       ) {
-        await assertClientLoyaltyCardRetryAllowed(current, {
+        const retryDecision = await assertClientLoyaltyCardRetryAllowed(current, {
           db,
           amountCents: Number(plan.preco_centavos || 0),
         })
+        cardReplacementContext = {
+          previous_subscription_id: current.id || null,
+          previous_status: current.status || null,
+          previous_failure_code: retryDecision.latestFailure?.code || null,
+          high_risk_consecutive_count: retryDecision.retryOptions?.high_risk_consecutive_count || 0,
+          retry_reason: retryDecision.latestFailure?.code === CLIENT_LOYALTY_HIGH_RISK_CODE
+            ? 'new_card_after_high_risk'
+            : 'new_card_after_failed_payment',
+        }
       }
       await retireReplaceableClientLoyaltySubscription(current, {
         reason: 'replaced_by_new_card_checkout',
@@ -2121,6 +2401,27 @@ export async function startClientLoyaltyCardSubscription({
     payload: gatewayResult.raw,
   }, { db })
 
+  if (cardReplacementContext?.previous_subscription_id) {
+    await appendClientLoyaltySubscriptionEvent(subscription.id, {
+      eventType: 'card_payment_method_updated',
+      gatewayEventId: `card-update:${subscription.id}:${cardReplacementContext.previous_subscription_id}`,
+      mpTopic: 'client-loyalty',
+      ...buildSellerEventContext(mpAccess.account, estabelecimentoId, {
+        paymentMethod: 'credit_card',
+        paymentType: 'credit_card',
+        actionTaken: 'new_card_flow_created',
+        ignoredReason: cardReplacementContext.previous_failure_code || null,
+      }),
+      payload: {
+        ...cardReplacementContext,
+        new_subscription_id: subscription.id || null,
+        new_gateway_subscription_id: subscription.gatewaySubscriptionId || null,
+        cooldown_scope: 'new_card_new_subscription',
+        history_preserved: true,
+      },
+    }, { db })
+  }
+
   return { subscription, plan, estabelecimento, gatewayResult }
 }
 
@@ -2140,7 +2441,8 @@ export async function createClientLoyaltyPixCheckout({
   const current = await getPreferredClientLoyaltySubscription(clienteId, estabelecimentoId, { db })
   if (current) {
     const state = computeClientLoyaltySubscriptionState(current)
-    if (state.benefitsActive) {
+    const currentStatus = String(current.status || '').trim().toLowerCase()
+    if (state.benefitsActive && currentStatus === 'active') {
       throw createError(
         'Este plano já está ativo no ciclo atual.',
         409,
@@ -2183,9 +2485,7 @@ export async function createClientLoyaltyPixCheckout({
       cliente_id: String(clienteId),
       estabelecimento_id: String(estabelecimentoId),
       cycle_ref: cycleRef,
-      ...(fallbackContext?.reason ? { fallback_reason: fallbackContext.reason } : {}),
-      ...(fallbackContext?.source ? { fallback_source: fallbackContext.source } : {}),
-      ...(fallbackContext?.previousFailureCode ? { previous_failure_code: fallbackContext.previousFailureCode } : {}),
+      ...buildClientLoyaltyPixFallbackMetadata(fallbackContext),
     },
     notificationUrl: resolveSellerWebhookUrl(),
     payerEmail: cliente.email || null,
@@ -2232,7 +2532,8 @@ export async function createClientLoyaltyPixCheckout({
       payload: {
         chosen_payment_method: 'pix',
         fallback_reason: fallbackContext.reason,
-        fallback_source: fallbackContext.source || null,
+        fallback_source: 'pix',
+        fallback_origin: fallbackContext.source || null,
         previous_failure_code: fallbackContext.previousFailureCode || null,
         previous_subscription_id: fallbackContext.previousSubscriptionId || null,
       },
@@ -2243,7 +2544,8 @@ export async function createClientLoyaltyPixCheckout({
       estabelecimento_id: estabelecimentoId,
       chosen_payment_method: 'pix',
       fallback_reason: fallbackContext.reason,
-      fallback_source: fallbackContext.source || null,
+      fallback_source: 'pix',
+      fallback_origin: fallbackContext.source || null,
       previous_failure_code: fallbackContext.previousFailureCode || null,
     })
   }
@@ -3500,6 +3802,8 @@ export async function loadClientLoyaltySubscriptionDetails(subscriptionInput, {
       last_failure_source: latestFailure?.source || null,
       last_failure_payment_method_id: latestFailure?.payment_method_id || null,
       last_failure_payment_type_id: latestFailure?.payment_type_id || null,
+      high_risk_consecutive_failures: latestFailure?.high_risk_consecutive_count || 0,
+      payment_method_action_required: latestFailure?.high_risk_action_required === true,
       latest_payment_snapshot: latestPaymentSnapshot,
       retry_options: retryOptions,
     },
@@ -3524,6 +3828,8 @@ export async function loadClientLoyaltySubscriptionDetails(subscriptionInput, {
     last_failure_gateway_message: latestFailure?.message || latestFailure?.description || null,
     last_failure_at: latestFailure?.created_at || null,
     last_failure_source: latestFailure?.source || null,
+    high_risk_consecutive_failures: latestFailure?.high_risk_consecutive_count || 0,
+    payment_method_action_required: latestFailure?.high_risk_action_required === true,
     retry_options: retryOptions,
   }
 }

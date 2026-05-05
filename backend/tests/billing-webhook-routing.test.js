@@ -110,6 +110,7 @@ test('billing payment webhook keeps platform payments on the platform flow', asy
     bodyUserId: 281768531,
     depositHandler: async () => ({ ok: false, reason: 'not_deposit' }),
     recoveryHandler: async () => ({ ok: false, reason: 'not_subscription_recovery' }),
+    implementationPaymentHandler: async () => ({ ok: false, handled: false, reason: 'not_implementation_payment' }),
     platformPaymentHandler: async () => ({ ok: true, reason: null, already_processed: false, stale: false }),
   })
 

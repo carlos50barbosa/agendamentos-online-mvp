@@ -197,7 +197,7 @@ export default function LoyaltyAssinaturaCliente() {
   const retryDisplay = resolveLoyaltyRetryDisplay(currentDetails)
   const latestFailure = failureDisplay.raw || null
   const latestPaymentSnapshot = currentDetails?.latest_payment_snapshot || currentDetails?.subscription?.latest_payment_snapshot || null
-  const cardRetryBlocked = retryDisplay.cardCooldownActive || retryDisplay.cardEnabled === false
+  const cardRetryBlocked = retryDisplay.cardAttemptLimitActive || retryDisplay.cardEnabled === false
 
   const loadData = useCallback(async () => {
     setLoading(true)

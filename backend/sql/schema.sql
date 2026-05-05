@@ -60,6 +60,7 @@ CREATE TABLE IF NOT EXISTS servicos (
   imagem_url         VARCHAR(255)     NULL,
   duracao_min        INT              NOT NULL,
   preco_centavos     INT              DEFAULT 0,
+  capacidade_por_horario INT          NOT NULL DEFAULT 1,
   ativo              TINYINT(1)       DEFAULT 1,
   CONSTRAINT fk_serv_estab FOREIGN KEY (estabelecimento_id) REFERENCES usuarios(id) ON DELETE CASCADE,
   INDEX idx_servicos_estab_ativo (estabelecimento_id, ativo)
@@ -140,6 +141,7 @@ CREATE TABLE IF NOT EXISTS agendamentos (
   INDEX idx_ag_estab_origem_inicio (estabelecimento_id, origem, inicio),
   INDEX idx_ag_cliente_inicio (cliente_id, inicio),
   INDEX idx_ag_estab_status_inicio (estabelecimento_id, status, inicio),
+  INDEX idx_ag_capacity_lookup (estabelecimento_id, servico_id, profissional_id, inicio, status),
   INDEX idx_ag_cliente_status_inicio (cliente_id, status, inicio),
   INDEX idx_ag_confirm_wa (cliente_confirmou_whatsapp_at),
   INDEX idx_ag_public_confirm_expires (public_confirm_expires_at),

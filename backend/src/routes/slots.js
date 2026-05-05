@@ -5,6 +5,7 @@ import { EST_TZ_OFFSET_MIN, makeUtcFromLocalYMDHM, weekDayIndexInTZ } from '../l
 import { buildWorkingRules, resolveExpedienteForDay } from '../lib/expediente.js';
 import { auth, isEstabelecimento } from '../middleware/auth.js';
 import { ensureSubscriptionOperationalAccess } from '../middleware/billing.js';
+import { activeAppointmentStatusWhere, normalizeServiceSlotCapacity } from '../lib/service_capacity.js';
 
 const router = Router();
 
@@ -96,6 +97,18 @@ const extractServiceIds = (query) => {
   return [];
 };
 
+const extractProfessionalId = (query) => {
+  const raw =
+    query?.profissional_id ??
+    query?.profissionalId ??
+    query?.professional_id ??
+    query?.professionalId ??
+    null;
+  if (raw === null || raw === undefined || String(raw).trim() === '') return null;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : NaN;
+};
+
 /**
  * GET /slots?establishmentId=ID&weekStart=YYYY-MM-DD
  * Retorna { slots: [{ datetime, label, status }] }
@@ -115,7 +128,12 @@ router.get('/', async (req, res) => {
     }
 
     const serviceIds = extractServiceIds(req.query);
+    const professionalId = extractProfessionalId(req.query);
+    if (Number.isNaN(professionalId)) {
+      return res.status(400).json({ error: 'profissional_invalido' });
+    }
     let durationMinutes = null;
+    let selectedServiceCapacity = 1;
     const durationRaw =
       req.query.duracao_total ??
       req.query.duracaoTotal ??
@@ -133,23 +151,26 @@ router.get('/', async (req, res) => {
     if (serviceIds.length) {
       const placeholders = serviceIds.map(() => '?').join(', ');
       const [rows] = await pool.query(
-        `SELECT id, duracao_min
+        `SELECT id, duracao_min, capacidade_por_horario
            FROM servicos
           WHERE id IN (${placeholders})
             AND estabelecimento_id=?
             AND ativo=1`,
         [...serviceIds, establishmentId]
       );
-      const map = new Map(rows.map((row) => [Number(row.id), Number(row.duracao_min || 0)]));
+      const map = new Map(rows.map((row) => [Number(row.id), row]));
       const missing = serviceIds.filter((id) => !map.has(Number(id)));
       if (missing.length) {
         return res.status(400).json({ error: 'servico_invalido' });
       }
-      const total = serviceIds.reduce((sum, id) => sum + (map.get(Number(id)) || 0), 0);
+      const total = serviceIds.reduce((sum, id) => sum + Number(map.get(Number(id))?.duracao_min || 0), 0);
       if (!Number.isFinite(total) || total <= 0) {
         return res.status(400).json({ error: 'duracao_invalida' });
       }
       durationMinutes = total;
+      if (serviceIds.length === 1) {
+        selectedServiceCapacity = normalizeServiceSlotCapacity(map.get(Number(serviceIds[0]))?.capacidade_por_horario);
+      }
     }
 
     if (durationMinutes == null) {
@@ -170,18 +191,20 @@ router.get('/', async (req, res) => {
     const rangeEndUtcExclusive = new Date(rangeStartUtc.getTime() + 7 * DAY_MS);
 
     // Carrega agendamentos confirmados e bloqueios no periodo
-    const [ags] = await pool.query(
-      `
-      SELECT inicio, fim
+    let appointmentsSql = `
+      SELECT servico_id, profissional_id, inicio, fim
         FROM agendamentos
        WHERE estabelecimento_id = ?
-         AND status IN ('confirmado','pendente')
-         AND (status <> 'pendente' OR public_confirm_expires_at IS NULL OR public_confirm_expires_at >= NOW())
+         AND ${activeAppointmentStatusWhere()}
          AND inicio < ?
          AND fim > ?
-      `,
-      [establishmentId, rangeEndUtcExclusive, rangeStartUtc]
-    );
+      `;
+    const appointmentsParams = [establishmentId, rangeEndUtcExclusive, rangeStartUtc];
+    if (professionalId != null) {
+      appointmentsSql += ' AND (profissional_id IS NULL OR profissional_id=?)';
+      appointmentsParams.push(professionalId);
+    }
+    const [ags] = await pool.query(appointmentsSql, appointmentsParams);
 
     const [blq] = await pool.query(
       `
@@ -205,8 +228,16 @@ router.get('/', async (req, res) => {
       (rows || [])
         .map((row) => [new Date(row.inicio).getTime(), new Date(row.fim).getTime()])
         .filter(([startMs, endMs]) => Number.isFinite(startMs) && Number.isFinite(endMs));
-    const agIntervals = toIntervals(ags);
+    const agIntervals = (ags || [])
+      .map((row) => ({
+        start: new Date(row.inicio).getTime(),
+        end: new Date(row.fim).getTime(),
+        serviceId: Number(row.servico_id || 0),
+        professionalId: row.profissional_id == null ? null : Number(row.profissional_id),
+      }))
+      .filter((row) => Number.isFinite(row.start) && Number.isFinite(row.end));
     const blqIntervals = toIntervals(blq);
+    const capacityAwareService = serviceIds.length === 1 ? Number(serviceIds[0]) : null;
 
     // Monta grade da semana em passos de 30min
     const slots = [];
@@ -297,7 +328,28 @@ router.get('/', async (req, res) => {
           const slotEndWindow = minute + effectiveDuration;
 
           const ultrapassaFim = slotEndWindow > closeLimit;
-          const ocupado = !ultrapassaFim && agIntervals.some(([start, end]) => start < eMs && end > sMs);
+          const overlappingAppointments = !ultrapassaFim
+            ? agIntervals.filter((appt) => appt.start < eMs && appt.end > sMs)
+            : [];
+          let vagasRestantes = capacityAwareService ? selectedServiceCapacity : 1;
+          let ocupado = false;
+          if (capacityAwareService) {
+            const compatibleAppointments = overlappingAppointments.filter((appt) => (
+              appt.serviceId === capacityAwareService &&
+              appt.start === sMs &&
+              (
+                professionalId != null
+                  ? appt.professionalId === professionalId
+                  : appt.professionalId == null
+              )
+            ));
+            const hasBlockingAppointment = compatibleAppointments.length !== overlappingAppointments.length;
+            vagasRestantes = Math.max(0, selectedServiceCapacity - compatibleAppointments.length);
+            ocupado = hasBlockingAppointment || compatibleAppointments.length >= selectedServiceCapacity;
+          } else {
+            ocupado = overlappingAppointments.length > 0;
+            vagasRestantes = ocupado ? 0 : 1;
+          }
           const bloqueadoDb = !ultrapassaFim && blqIntervals.some(([start, end]) => start < eMs && end > sMs);
           const bloqueadoHorario = Array.isArray(interval.breaks) &&
             interval.breaks.some(([startMin, endMin]) => minute < endMin && slotEndWindow > startMin);
@@ -309,7 +361,9 @@ router.get('/', async (req, res) => {
           slots.push({
             datetime: slotStartUtc.toISOString(), // ISO-8601 em UTC equivalente ao hor rio local
             label,
-            status
+            status,
+            capacidade: capacityAwareService ? selectedServiceCapacity : 1,
+            vagas_restantes: status === 'free' ? vagasRestantes : 0
           });
         }
       }

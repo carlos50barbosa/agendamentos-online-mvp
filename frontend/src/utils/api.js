@@ -430,7 +430,7 @@ export const Api = {
 
   // Obs.: includeBusy é opcional; se o backend suportar, retorna também ocupados/bloqueados.
 
-  getSlots: (establishmentId, weekStart, { includeBusy, durationMinutes, duration, serviceIds } = {}) => {
+  getSlots: (establishmentId, weekStart, { includeBusy, durationMinutes, duration, serviceIds, professionalId, profissionalId } = {}) => {
 
     const servicoIdsParam = Array.isArray(serviceIds) ? serviceIds.join(',') : serviceIds;
 
@@ -447,6 +447,8 @@ export const Api = {
       duracao_total: duracaoTotalParam,
 
       servico_ids: servicoIdsParam,
+
+      profissional_id: professionalId ?? profissionalId,
 
     })}`);
 

@@ -60,6 +60,8 @@ export default function ServicosEstabelecimento() {
 
     preco_centavos: 0,
 
+    capacidade_por_horario: 1,
+
     ativo: true,
 
   });
@@ -106,7 +108,7 @@ export default function ServicosEstabelecimento() {
 
   const [editItem, setEditItem] = useState(null);
 
-  const [editForm, setEditForm] = useState({ nome: '', descricao: '', duracao_min: 30, preco_centavos: 0 });
+  const [editForm, setEditForm] = useState({ nome: '', descricao: '', duracao_min: 30, preco_centavos: 0, capacidade_por_horario: 1 });
 
   const [editPrecoStr, setEditPrecoStr] = useState('R$ 0,00');
 
@@ -370,7 +372,7 @@ export default function ServicosEstabelecimento() {
 
   function resetNewServiceForm() {
 
-    setForm({ nome: "", descricao: "", duracao_min: 30, preco_centavos: 0, ativo: true });
+    setForm({ nome: "", descricao: "", duracao_min: 30, preco_centavos: 0, capacidade_por_horario: 1, ativo: true });
 
     setPrecoStr("R$ 0,00");
 
@@ -442,6 +444,8 @@ export default function ServicosEstabelecimento() {
 
     form.preco_centavos <= 0 ||
 
+    Number(form.capacidade_por_horario || 0) < 1 ||
+
     !Array.isArray(selectedProsNew) ||
 
     !selectedProsNew.length;
@@ -485,6 +489,8 @@ export default function ServicosEstabelecimento() {
         duracao_min: form.duracao_min,
 
         preco_centavos: form.preco_centavos,
+
+        capacidade_por_horario: Math.max(1, parseInt(form.capacidade_por_horario || 1, 10)),
 
         ativo: form.ativo,
 
@@ -572,6 +578,8 @@ export default function ServicosEstabelecimento() {
 
       preco_centavos: svc.preco_centavos || 0,
 
+      capacidade_por_horario: Math.max(1, Number(svc.capacidade_por_horario || 1)),
+
     });
 
     setEditPrecoStr(formatBRL(svc.preco_centavos || 0));
@@ -599,6 +607,8 @@ export default function ServicosEstabelecimento() {
     !editForm.duracao_min ||
 
     !editForm.preco_centavos ||
+
+    Number(editForm.capacidade_por_horario || 0) < 1 ||
 
     !Array.isArray(selectedProsEdit) ||
 
@@ -628,6 +638,8 @@ export default function ServicosEstabelecimento() {
 
       !editForm.preco_centavos ||
 
+      Number(editForm.capacidade_por_horario || 0) < 1 ||
+
       !Array.isArray(selectedProsEdit) ||
 
       !selectedProsEdit.length
@@ -653,6 +665,8 @@ export default function ServicosEstabelecimento() {
         duracao_min: editForm.duracao_min,
 
         preco_centavos: editForm.preco_centavos,
+
+        capacidade_por_horario: Math.max(1, parseInt(editForm.capacidade_por_horario || 1, 10)),
 
       };
 
@@ -1064,6 +1078,12 @@ export default function ServicosEstabelecimento() {
 
                           <div className="service-card__duration">{s.duracao_min} min</div>
 
+                          {Number(s.capacidade_por_horario || 1) > 1 && (
+                            <div className="service-card__duration">
+                              {Number(s.capacidade_por_horario)} vagas/horário
+                            </div>
+                          )}
+
                         </div>
 
                         <div className="service-card__footer">
@@ -1270,6 +1290,32 @@ export default function ServicosEstabelecimento() {
                   ))}
 
                 </select>
+
+              </div>
+
+              <div className="service-form__field">
+
+                <label className="service-form__label">Capacidade por horário</label>
+
+                <input
+
+                  className="input"
+
+                  type="number"
+
+                  min="1"
+
+                  step="1"
+
+                  value={form.capacidade_por_horario}
+
+                  onChange={(e) =>
+
+                    setForm((f) => ({ ...f, capacidade_por_horario: Math.max(1, parseInt(e.target.value || '1', 10)) }))
+
+                  }
+
+                />
 
               </div>
 
@@ -1523,6 +1569,28 @@ export default function ServicosEstabelecimento() {
               ))}
 
             </select>
+
+            <label className="service-form__field">
+
+              <span className="service-form__label">Capacidade por horário</span>
+
+              <input
+
+                className="input"
+
+                type="number"
+
+                min="1"
+
+                step="1"
+
+                value={editForm.capacidade_por_horario}
+
+                onChange={(e)=> setEditForm(f => ({ ...f, capacidade_por_horario: Math.max(1, parseInt(e.target.value || '1', 10)) }))}
+
+              />
+
+            </label>
 
             <input
 

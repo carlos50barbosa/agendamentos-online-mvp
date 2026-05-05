@@ -13,7 +13,7 @@ const agendamentosRouter = (await import('../src/routes/agendamentos.js')).defau
 
 const state = {
   usuarios: new Map([[1, { id: 1, tipo: 'estabelecimento', plan: 'starter', plan_status: 'active' }], [123, { id: 123, tipo: 'cliente' }]]),
-  servicos: new Map([[10, { id: 10, estabelecimento_id: 1, nome: 'Consulta', duracao_min: 60, preco_centavos: 10000, ativo: 1 }]]),
+  servicos: new Map([[10, { id: 10, estabelecimento_id: 1, nome: 'Consulta', duracao_min: 60, preco_centavos: 10000, capacidade_por_horario: 1, ativo: 1 }]]),
   agendamentos: [],
   servicoProf: new Map(),
 }
@@ -43,7 +43,7 @@ pool.query = async (sql, params = []) => {
     return [[{ total }], []]
   }
   // service
-  if (norm.startsWith('SELECT id, nome, duracao_min, preco_centavos FROM servicos WHERE id IN (')) {
+  if (norm.startsWith('SELECT id, nome, duracao_min, preco_centavos') && norm.includes('FROM servicos WHERE id IN (')) {
     const estId = Number(params[params.length - 1])
     const serviceIds = params.slice(0, -1).map(Number)
     const rows = serviceIds
@@ -54,10 +54,14 @@ pool.query = async (sql, params = []) => {
         nome: s.nome,
         duracao_min: s.duracao_min,
         preco_centavos: s.preco_centavos || 0,
+        capacidade_por_horario: s.capacidade_por_horario || 1,
       }))
     return [rows, []]
   }
   if (norm.startsWith('SELECT servico_id, profissional_id FROM servico_profissionais WHERE servico_id IN (')) {
+    return [[], []]
+  }
+  if (norm.startsWith('SELECT * FROM client_loyalty_subscriptions WHERE cliente_id=? AND estabelecimento_id=?')) {
     return [[], []]
   }
   // after commit reads
@@ -84,7 +88,12 @@ pool.getConnection = async () => {
     async query(sql, params = []) {
       const norm = normalize(sql)
       // conflicts
-      if (norm.startsWith('SELECT id FROM agendamentos WHERE estabelecimento_id = ?')) {
+      if (norm.startsWith('SELECT capacidade_por_horario FROM servicos WHERE id=? AND estabelecimento_id=?')) {
+        const [id, estId] = params
+        const svc = state.servicos.get(Number(id))
+        return [svc && Number(svc.estabelecimento_id) === Number(estId) ? [{ capacidade_por_horario: svc.capacidade_por_horario || 1 }] : [], []]
+      }
+      if (norm.startsWith('SELECT id FROM agendamentos WHERE estabelecimento_id=?') || norm.startsWith('SELECT id FROM agendamentos WHERE estabelecimento_id = ?')) {
         return [[], []]
       }
       if (norm.startsWith('SELECT * FROM agendamentos WHERE id=?')) {
@@ -97,8 +106,22 @@ pool.getConnection = async () => {
         const u = state.usuarios.get(Number(id)) || { nome: 'User', email: null, telefone: null }
         return [[{ email: u.email || null, telefone: u.telefone || null, nome: u.nome || 'User' }], []]
       }
+      if (norm.startsWith('SELECT email, telefone, nome, notify_email_estab, notify_whatsapp_estab FROM usuarios WHERE id=?')) {
+        const [id] = params
+        const u = state.usuarios.get(Number(id)) || { nome: 'User', email: null, telefone: null }
+        return [[{
+          email: u.email || null,
+          telefone: u.telefone || null,
+          nome: u.nome || 'User',
+          notify_email_estab: 0,
+          notify_whatsapp_estab: 0,
+        }], []]
+      }
+      if (norm.startsWith('SELECT * FROM client_loyalty_subscriptions WHERE cliente_id=? AND estabelecimento_id=?')) {
+        return [[], []]
+      }
       // insert
-      if (norm.startsWith('INSERT INTO agendamentos (cliente_id, estabelecimento_id, servico_id, profissional_id, inicio, fim) VALUES (?,?,?,?,?,?)')) {
+      if (norm.startsWith('INSERT INTO agendamentos')) {
         // verify placeholders vs params length
         const placeholders = (sql.match(/\?/g) || []).length
         assert.equal(placeholders, params.length, 'placeholders should match params length')
@@ -109,6 +132,15 @@ pool.getConnection = async () => {
       }
       if (norm.startsWith('INSERT INTO agendamento_itens (agendamento_id, servico_id, ordem, duracao_min, preco_snapshot) VALUES')) {
         return [{ affectedRows: 1 }, []]
+      }
+      if (norm.startsWith('SELECT COALESCE(SUM(preco_snapshot), 0) AS total_centavos FROM agendamento_itens WHERE agendamento_id=?')) {
+        return [[{ total_centavos: 10000 }], []]
+      }
+      if (norm.startsWith('UPDATE agendamentos SET total_centavos=? WHERE id=?')) {
+        const [total, id] = params
+        const a = state.agendamentos.find((x) => x.id === Number(id))
+        if (a) a.total_centavos = total
+        return [{ affectedRows: a ? 1 : 0 }, []]
       }
       throw new Error('Unhandled conn.query: ' + norm)
     },

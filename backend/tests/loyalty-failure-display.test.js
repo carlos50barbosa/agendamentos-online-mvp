@@ -32,7 +32,7 @@ test('loyalty failure display keeps subscription status separate from technical 
       status: 'past_due',
     },
     last_failure_code: 'cc_rejected_high_risk',
-    last_failure_message: 'A última tentativa de cobrança foi recusada por análise de risco do cartão.',
+    last_failure_message: 'Não foi possível aprovar este cartão no momento. Você pode tentar outro cartão ou pagar por PIX.',
     last_failure_at: '2026-04-25T08:00:00.000Z',
     latest_failure: {
       payment_method_id: 'master',
@@ -41,7 +41,7 @@ test('loyalty failure display keeps subscription status separate from technical 
 
   assert.equal(display.subscriptionStatus, 'past_due')
   assert.equal(display.technicalCode, 'cc_rejected_high_risk')
-  assert.equal(display.technicalMessage, 'A última tentativa de cobrança foi recusada por análise de risco do cartão.')
+  assert.equal(display.technicalMessage, 'Não foi possível aprovar este cartão no momento. Você pode tentar outro cartão ou pagar por PIX.')
   assert.equal(display.occurredAt, '2026-04-25T08:00:00.000Z')
 })
 
@@ -81,11 +81,64 @@ test('loyalty retry display exposes PIX fallback for high risk declines', () => 
   })
 
   assert.equal(display.showRecovery, true)
-  assert.equal(display.title, 'Não foi possível aprovar este cartão no momento.')
-  assert.equal(display.description, 'Você pode tentar outro cartão ou pagar por PIX. Por segurança, novas tentativas com este cartão podem ficar indisponíveis por alguns minutos.')
+  assert.equal(display.title, 'Não foi possível aprovar este cartão no momento. Você pode tentar outro cartão ou pagar por PIX.')
+  assert.equal(display.description, '')
   assert.equal(display.cardCooldownActive, true)
+  assert.equal(display.cardAttemptLimitActive, true)
   assert.equal(display.pixEnabled, true)
   assert.equal(display.pixActionLabel, 'Pagar por PIX agora')
+})
+
+test('loyalty retry display reinforces message on second high risk decline', () => {
+  const display = resolveLoyaltyRetryDisplay({
+    subscription_status: 'past_due',
+    last_failure_code: 'cc_rejected_high_risk',
+    retry_options: {
+      suggested: true,
+      high_risk_consecutive_count: 2,
+      card: {
+        enabled: true,
+        same_card_cooldown_active: true,
+        same_card_cooldown_remaining_ms: 23 * 60 * 60 * 1000,
+        high_risk_consecutive_count: 2,
+      },
+      pix: {
+        enabled: true,
+      },
+    },
+  })
+
+  assert.equal(display.title, 'Este cartão continua sendo recusado por análise de segurança. Recomendamos pagar por PIX ou usar outro cartão.')
+  assert.equal(display.sameCardCooldownActive, true)
+  assert.equal(display.cardAttemptLimitActive, false)
+  assert.equal(display.cardEnabled, true)
+  assert.equal(display.pixEnabled, true)
+})
+
+test('loyalty retry display requires action on third high risk decline', () => {
+  const display = resolveLoyaltyRetryDisplay({
+    subscription_status: 'past_due',
+    last_failure_code: 'cc_rejected_high_risk',
+    retry_options: {
+      suggested: true,
+      high_risk_consecutive_count: 3,
+      high_risk_action_required: true,
+      card: {
+        enabled: true,
+        action_required: true,
+        same_card_cooldown_active: true,
+        high_risk_consecutive_count: 3,
+      },
+      pix: {
+        enabled: true,
+      },
+    },
+  })
+
+  assert.equal(display.title, 'Por segurança, novas tentativas com este cartão foram pausadas. Atualize o cartão ou pague por PIX para manter sua assinatura ativa.')
+  assert.equal(display.paymentMethodActionRequired, true)
+  assert.equal(display.cardActionLabel, 'Atualizar cartão')
+  assert.equal(display.pixEnabled, true)
 })
 
 test('loyalty failure display does not show manual review as technical failure', () => {
