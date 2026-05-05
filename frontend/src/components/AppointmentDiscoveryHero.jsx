@@ -1,5 +1,4 @@
 import React from 'react';
-import LogoAO from './LogoAO.jsx';
 import { IconSearch } from './Icons.jsx';
 
 export default function AppointmentDiscoveryHero({
@@ -28,9 +27,6 @@ export default function AppointmentDiscoveryHero({
       <div className="appointment-discovery-hero__inner">
         <div className="appointment-discovery-hero__header">
           <div className="appointment-discovery-hero__brand">
-            <div className="appointment-discovery-hero__logo-shell" aria-hidden="true">
-              <LogoAO size={64} className="appointment-discovery-hero__logo" />
-            </div>
             <div className="appointment-discovery-hero__copy">
               {(brandName || brandTagline) ? (
                 <div className="appointment-discovery-hero__brand-line">

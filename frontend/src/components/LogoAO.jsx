@@ -3,7 +3,7 @@ import React from 'react';
 
 export default function LogoAO({ size = 28, className = 'brand__logo', title = 'Agendamentos Online' }) {
   return (
-    <span className={className} style={{ width: size, height: size }} aria-label={title} role="img">
+    <span {...(className ? { className } : {})} style={{ width: size, height: size }} aria-label={title} role="img">
       <svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
         <defs>
           <linearGradient id="aoGradient" x1="12%" y1="10%" x2="88%" y2="90%">

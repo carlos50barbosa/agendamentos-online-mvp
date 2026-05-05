@@ -834,13 +834,11 @@ textarea.input:focus {
   min-height: 540px;
   padding: 56px 48px 44px;
   border-radius: var(--radius);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid var(--border);
   overflow: hidden;
-  color: #f8fbff;
-  background:
-    radial-gradient(circle at top right, rgba(185, 226, 215, 0.14), transparent 32%),
-    linear-gradient(120deg, rgba(7, 17, 28, 0.94), rgba(18, 62, 99, 0.88) 56%, rgba(9, 28, 46, 0.96));
-  box-shadow: 0 28px 56px rgba(16, 32, 51, 0.16);
+  color: var(--text);
+  background: transparent;
+  box-shadow: none;
 }
 
 .landing-hero__bg {
@@ -851,8 +849,8 @@ textarea.input:focus {
   aspect-ratio: 1;
   transform: translateY(-50%);
   background: var(--landing-hero-brand-mark, none) center / contain no-repeat;
-  opacity: 0.11;
-  filter: brightness(0) invert(1);
+  opacity: 0.06;
+  filter: none;
   pointer-events: none;
 }
 
@@ -875,9 +873,9 @@ textarea.input:focus {
   padding: 0 10px;
   width: fit-content;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.12);
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  color: rgba(248, 251, 255, 0.8);
+  background: color-mix(in srgb, var(--brand-soft) 72%, transparent);
+  border: 1px solid color-mix(in srgb, var(--primary-400) 24%, var(--border));
+  color: var(--primary-600);
   display: inline-flex;
   align-items: center;
   font-size: 0.74rem;
@@ -890,14 +888,14 @@ textarea.input:focus {
   max-width: 12ch;
   font-size: clamp(2.5rem, 5vw, 4.6rem);
   line-height: 0.96;
-  color: #ffffff;
+  color: var(--text);
 }
 
 .landing-hero__subtitle {
   max-width: 56ch;
   font-size: 1.06rem;
   line-height: 1.75;
-  color: rgba(248, 251, 255, 0.78);
+  color: color-mix(in srgb, var(--text) 72%, var(--muted) 28%);
 }
 
 .landing-hero__trust {
@@ -908,13 +906,13 @@ textarea.input:focus {
   min-height: 36px;
   padding: 0 12px;
   border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.08);
-  color: rgba(248, 251, 255, 0.84);
+  border: 1px solid color-mix(in srgb, var(--primary-400) 20%, var(--border));
+  background: color-mix(in srgb, var(--surface) 82%, transparent);
+  color: color-mix(in srgb, var(--text) 82%, var(--muted) 18%);
 }
 
 .landing-hero__trust-item svg {
-  color: #b9e2d7;
+  color: var(--primary-500);
 }
 
 .landing-hero__actions {
@@ -930,9 +928,10 @@ textarea.input:focus {
 .landing-hero__stat {
   padding: 16px;
   border-radius: var(--radius);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(7, 17, 28, 0.18);
+  border: 1px solid color-mix(in srgb, var(--primary-400) 16%, var(--border));
+  background: color-mix(in srgb, var(--surface) 82%, transparent);
   backdrop-filter: blur(12px);
+  color: var(--text);
   display: grid;
   gap: 6px;
 }
@@ -940,10 +939,11 @@ textarea.input:focus {
 .landing-hero__stat strong {
   font-size: 1.3rem;
   font-weight: 700;
+  color: var(--text);
 }
 
 .landing-hero__stat span {
-  color: rgba(248, 251, 255, 0.72);
+  color: color-mix(in srgb, var(--text) 58%, var(--muted) 42%);
   font-size: 0.84rem;
 }
 
@@ -956,9 +956,10 @@ textarea.input:focus {
 .landing-hero__panel {
   padding: 18px;
   border-radius: var(--radius);
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  background: rgba(7, 17, 28, 0.22);
+  border: 1px solid color-mix(in srgb, var(--primary-400) 16%, var(--border));
+  background: color-mix(in srgb, var(--surface) 84%, transparent);
   backdrop-filter: blur(14px);
+  color: var(--text);
   display: grid;
   gap: 14px;
 }
@@ -971,10 +972,11 @@ textarea.input:focus {
 .landing-hero__panel-title strong {
   font-size: 1rem;
   font-weight: 700;
+  color: var(--text);
 }
 
 .landing-hero__panel-title span {
-  color: rgba(248, 251, 255, 0.68);
+  color: color-mix(in srgb, var(--text) 58%, var(--muted) 42%);
   line-height: 1.6;
 }
 
@@ -994,8 +996,9 @@ textarea.input:focus {
   width: 28px;
   height: 28px;
   border-radius: 999px;
-  background: rgba(185, 226, 215, 0.18);
-  color: #d7f2ea;
+  background: color-mix(in srgb, var(--brand-soft) 82%, transparent);
+  border: 1px solid color-mix(in srgb, var(--primary-400) 20%, var(--border));
+  color: var(--primary-500);
   display: grid;
   place-items: center;
   font-size: 0.76rem;
@@ -1006,12 +1009,13 @@ textarea.input:focus {
   display: block;
   font-size: 0.92rem;
   font-weight: 700;
+  color: var(--text);
 }
 
 .landing-hero__process-item span {
   display: block;
   margin-top: 3px;
-  color: rgba(248, 251, 255, 0.68);
+  color: color-mix(in srgb, var(--text) 56%, var(--muted) 44%);
   font-size: 0.84rem;
   line-height: 1.55;
 }
@@ -1033,8 +1037,8 @@ textarea.input:focus {
   height: 56px;
   border-radius: var(--radius);
   overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid var(--border);
+  background: var(--surface-soft);
 }
 
 .landing-hero__spotlight-media img {
@@ -1052,10 +1056,11 @@ textarea.input:focus {
 .landing-hero__spotlight-copy strong {
   font-size: 0.92rem;
   font-weight: 700;
+  color: var(--text);
 }
 
 .landing-hero__spotlight-copy span {
-  color: rgba(248, 251, 255, 0.68);
+  color: color-mix(in srgb, var(--text) 56%, var(--muted) 44%);
   font-size: 0.82rem;
   line-height: 1.5;
 }

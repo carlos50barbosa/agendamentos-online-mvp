@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import LogoAO from '../components/LogoAO.jsx';
-import { IconBell, IconMenu, IconSearch, IconStar } from '../components/Icons.jsx';
+import { IconBell, IconMenu, IconMoney, IconSearch, IconStar } from '../components/Icons.jsx';
 import { Api, resolveAssetUrl } from '../utils/api.js';
 import { getUser } from '../utils/auth.js';
 
@@ -24,6 +24,7 @@ const BENEFITS = [
   { icon: IconStar, text: 'Confirmação rápida' },
   { icon: IconSearch, text: 'Horários em tempo real' },
   { icon: IconBell, text: 'Lembretes automáticos' },
+  { icon: IconMoney, text: 'Sinal e PIX' },
 ];
 
 const CATEGORIES = [

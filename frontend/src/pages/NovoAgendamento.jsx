@@ -2822,14 +2822,15 @@ export default function NovoAgendamento() {
   const [guestModal, setGuestModal] = useState(() => createGuestModalState());
 
   const [showGuestOptional, setShowGuestOptional] = useState(false);
+  const userEditedSearchRef = useRef(false);
 
   // Inicializa estQuery a partir de ?q= da URL e reage a mudanças no histórico
 
   useEffect(() => {
 
-    const q = (searchParams.get('q') || '').trim();
+    const q = searchParams.get('q') || '';
 
-    setEstQuery(q);
+    setEstQuery((prev) => (prev === q ? prev : q));
 
     setDebouncedEstQuery(q);
 
@@ -2863,7 +2864,11 @@ export default function NovoAgendamento() {
 
     const timer = setTimeout(() => {
 
-      setDebouncedEstQuery(estQuery.trim());
+      if (estQuery.trim() && userEditedSearchRef.current) {
+        pendingDiscoveryResultsScrollRef.current = true;
+      }
+
+      setDebouncedEstQuery(estQuery);
 
     }, QUERY_DEBOUNCE_MS);
 
@@ -2873,7 +2878,7 @@ export default function NovoAgendamento() {
 
   useEffect(() => {
 
-    const current = (searchParams.get('q') || '').trim();
+    const current = searchParams.get('q') || '';
 
     if (debouncedEstQuery === current) return;
 
@@ -6178,6 +6183,8 @@ useEffect(() => {
 
   const handleQueryChange = useCallback((value) => {
 
+    userEditedSearchRef.current = true;
+
     setEstQuery(value);
 
   }, []);
@@ -6201,7 +6208,7 @@ useEffect(() => {
 
     pendingDiscoveryResultsScrollRef.current = true;
     scrollDiscoveryResultsIntoView();
-    setDebouncedEstQuery(estQuery.trim());
+    setDebouncedEstQuery(estQuery);
 
     setEstablishmentsPage(1);
 
@@ -8299,8 +8306,6 @@ useEffect(() => {
 
               headingId="novo-agendamento-hero-title"
 
-              stepper={<AppointmentFlowStepper currentStep={step} />}
-
               meta={discoveryHeroMeta}
 
             >
@@ -8349,7 +8354,8 @@ useEffect(() => {
 
             <section className="novo-agendamento__discovery-shell">
 
-              <div className="novo-agendamento__quick-filters-panel">
+              {!normalizedQuery ? (
+                <div className="novo-agendamento__quick-filters-panel">
 
                 <div className="novo-agendamento__quick-filters-copy">
 
@@ -8421,7 +8427,8 @@ useEffect(() => {
 
                 </div>
 
-              </div>
+                </div>
+              ) : null}
 
               <div ref={discoveryResultsRef} className="novo-agendamento__results-shell">
 
@@ -8441,6 +8448,7 @@ useEffect(() => {
 
                   </div>
 
+                  {!normalizedQuery ? (
                   <label className="novo-agendamento__sort-field">
 
                     <span>Ordenar por</span>
@@ -8470,6 +8478,7 @@ useEffect(() => {
                     </select>
 
                   </label>
+                  ) : null}
 
                 </div>
 
