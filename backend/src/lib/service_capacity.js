@@ -14,6 +14,16 @@ export function activeAppointmentStatusWhere(alias = '') {
     )`;
 }
 
+function minuteWindow(date) {
+  const ms = new Date(date).getTime();
+  if (!Number.isFinite(ms)) return null;
+  const start = Math.floor(ms / 60_000) * 60_000;
+  return {
+    start: new Date(start),
+    end: new Date(start + 60_000),
+  };
+}
+
 export async function checkAppointmentSlotCapacityTx({
   db,
   estabelecimentoId,
@@ -28,6 +38,7 @@ export async function checkAppointmentSlotCapacityTx({
   const canUseServiceCapacity = services.length === 1;
   const serviceId = Number(services[0]?.id || 0);
   const professionalParam = profissionalId == null ? null : Number(profissionalId);
+  const sameStartWindow = minuteWindow(inicioDate);
   let capacity = 1;
 
   if (canUseServiceCapacity && serviceId > 0) {
@@ -58,9 +69,9 @@ export async function checkAppointmentSlotCapacityTx({
     blockingParams.push(professionalParam);
   }
 
-  if (canUseServiceCapacity && serviceId > 0) {
-    blockingSql += ' AND NOT (servico_id=? AND inicio=? AND (profissional_id <=> ?))';
-    blockingParams.push(serviceId, inicioDate, professionalParam);
+  if (canUseServiceCapacity && serviceId > 0 && sameStartWindow) {
+    blockingSql += ' AND NOT (servico_id=? AND inicio>=? AND inicio<? AND (profissional_id <=> ?))';
+    blockingParams.push(serviceId, sameStartWindow.start, sameStartWindow.end, professionalParam);
   }
 
   blockingSql += ' FOR UPDATE';
@@ -85,14 +96,15 @@ export async function checkAppointmentSlotCapacityTx({
        FROM agendamentos
       WHERE estabelecimento_id=?
         AND servico_id=?
-        AND inicio=?
+        AND inicio>=?
+        AND inicio<?
         AND (profissional_id <=> ?)
         ${excludeAppointmentId != null ? 'AND id<>?' : ''}
         AND ${activeAppointmentStatusWhere()}
       FOR UPDATE`,
     excludeAppointmentId != null
-      ? [estabelecimentoId, serviceId, inicioDate, professionalParam, excludeAppointmentId]
-      : [estabelecimentoId, serviceId, inicioDate, professionalParam]
+      ? [estabelecimentoId, serviceId, sameStartWindow.start, sameStartWindow.end, professionalParam, excludeAppointmentId]
+      : [estabelecimentoId, serviceId, sameStartWindow.start, sameStartWindow.end, professionalParam]
   );
 
   const used = sameSlotRows.length;
