@@ -5008,7 +5008,7 @@ useEffect(() => {
 
         const filteredForced = rawForced.filter(
 
-          (k) => busyFromApiCount.has(k) || (apptCounts && typeof apptCounts.has === 'function' && apptCounts.has(k))
+          (k) => busyFromApiCount.has(k)
 
         );
 
@@ -8352,7 +8352,9 @@ useEffect(() => {
 
             </AppointmentDiscoveryHero>
 
-            <section className="novo-agendamento__discovery-shell">
+            <section
+              className={`novo-agendamento__discovery-shell${normalizedQuery ? ' novo-agendamento__discovery-shell--search' : ''}`}
+            >
 
               {!normalizedQuery ? (
                 <div className="novo-agendamento__quick-filters-panel">

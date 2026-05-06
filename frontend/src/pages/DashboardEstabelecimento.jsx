@@ -458,6 +458,10 @@ const SlotButton = ({ slot, isSelected, onClick, density = 'compact', disabled =
   const disabledReason = disabled || isPast || !isAvailableLabel(slot.label)
 
   const tooltipLabel = slot?.label ?? 'disponivel'
+  const capacity = Math.max(1, Number(slot?.capacidade ?? slot?.capacity ?? 1) || 1)
+  const remainingValue = Number(slot?.vagas_restantes ?? slot?.vagasRestantes ?? slot?.remaining_slots ?? slot?.remaining ?? capacity)
+  const remaining = Number.isFinite(remainingValue) ? Math.max(0, remainingValue) : capacity
+  const metaLabel = capacity > 1 && remaining > 0 ? `${remaining} vagas` : ''
 
   const className = [
 
@@ -495,7 +499,8 @@ const SlotButton = ({ slot, isSelected, onClick, density = 'compact', disabled =
 
     >
 
-      {DateHelpers.formatTime(slot.datetime)}
+      <span className="slot-btn__time">{DateHelpers.formatTime(slot.datetime)}</span>
+      {metaLabel && <span className="slot-btn__meta">{metaLabel}</span>}
 
     </button>
 
@@ -2888,6 +2893,7 @@ function ProfessionalAgendaView({
     Api.getSlots(establishmentId, selfBookingWeekStart, {
       includeBusy: true,
       serviceIds: selfBookingServiceId ? [Number(selfBookingServiceId)] : undefined,
+      professionalId: selfBookingProfessionalId || undefined,
     })
       .then((data) => {
 
@@ -2919,7 +2925,7 @@ function ProfessionalAgendaView({
 
     }
 
-  }, [selfBookingOpen, establishmentId, selfBookingWeekStart, selfBookingServiceId])
+  }, [selfBookingOpen, establishmentId, selfBookingWeekStart, selfBookingServiceId, selfBookingProfessionalId])
 
 
 

@@ -334,13 +334,14 @@ router.get('/', async (req, res) => {
           let vagasRestantes = capacityAwareService ? selectedServiceCapacity : 1;
           let ocupado = false;
           if (capacityAwareService) {
+            const sameSlotStart = (startMs) => Math.abs(Number(startMs) - sMs) < 60_000;
             const compatibleAppointments = overlappingAppointments.filter((appt) => (
               appt.serviceId === capacityAwareService &&
-              appt.start === sMs &&
+              sameSlotStart(appt.start) &&
               (
                 professionalId != null
                   ? appt.professionalId === professionalId
-                  : appt.professionalId == null
+                  : true
               )
             ));
             const hasBlockingAppointment = compatibleAppointments.length !== overlappingAppointments.length;

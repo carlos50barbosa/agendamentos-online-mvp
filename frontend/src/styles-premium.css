@@ -371,6 +371,7 @@ textarea.input:focus {
 
 .container--appointment {
   max-width: 1440px;
+  width: 100%;
 }
 
 .app-shell {
@@ -1508,6 +1509,10 @@ textarea.input:focus {
   .novo-agendamento__discovery-shell {
     grid-template-columns: minmax(0, 280px) minmax(0, 1fr);
     align-items: start;
+  }
+
+  .novo-agendamento__discovery-shell--search {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .novo-agendamento__quick-filters-panel {

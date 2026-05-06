@@ -3984,6 +3984,7 @@ button.danger:disabled,
 .container--appointment{
   max-width: 1440px;
   padding-inline: 16px;
+  width: 100%;
 }
 /* =======================
    Layout com barra lateral esquerda
@@ -7646,11 +7647,19 @@ body.planos-no-scrollbar .container--wide::-webkit-scrollbar{
   letter-spacing:.08em;
   text-transform:uppercase;
 }
-.novo-agendamento__discovery-shell{display:grid;gap:18px;}
+.novo-agendamento__discovery-shell{
+  display:grid;
+  gap:18px;
+  width:100%;
+  min-width:0;
+}
 .novo-agendamento__quick-filters-panel,
 .novo-agendamento__results-shell{
   display:grid;
   gap:16px;
+  width:100%;
+  min-width:0;
+  box-sizing:border-box;
   padding:22px;
   border-radius:28px;
   border:1px solid color-mix(in srgb, var(--border) 84%, transparent 16%);
@@ -7733,6 +7742,21 @@ body.planos-no-scrollbar .container--wide::-webkit-scrollbar{
 }
 .novo-agendamento__load-more{display:flex;justify-content:center;padding-top:6px;}
 .novo-agendamento__load-more-btn{min-height:46px;border-radius:16px;padding-inline:18px;}
+@media (min-width:960px){
+  .novo-agendamento__discovery-shell{
+    grid-template-columns:minmax(0, 280px) minmax(0, 1fr);
+    align-items:start;
+  }
+
+  .novo-agendamento__discovery-shell--search{
+    grid-template-columns:minmax(0, 1fr);
+  }
+
+  .novo-agendamento__quick-filters-panel{
+    position:sticky;
+    top:88px;
+  }
+}
 .discovery-empty-state{
   display:grid;
   justify-items:center;
@@ -7763,11 +7787,16 @@ body.planos-no-scrollbar .container--wide::-webkit-scrollbar{
 .discovery-empty-state__body p{margin:0;color:#64748b;line-height:1.6;}
 .discovery-empty-state__action{display:flex;justify-content:center;}
 .establishments__grid--premium{
-  grid-template-columns:repeat(auto-fit, minmax(300px, 1fr));
+  width:100%;
+  min-width:0;
+  grid-template-columns:repeat(auto-fit, minmax(min(100%, 340px), 1fr));
   gap:14px;
 }
 .establishment-card{
   display:grid;
+  width:100%;
+  min-width:0;
+  box-sizing:border-box;
   gap:10px;
   padding:14px;
   border-radius:20px;
@@ -7805,7 +7834,7 @@ body.planos-no-scrollbar .container--wide::-webkit-scrollbar{
 .establishment-card__header{display:grid;gap:6px;flex:1 1 auto;min-width:0;}
 .establishment-card__heading{display:grid;gap:6px;}
 .establishment-card__eyebrow-row,
-.establishment-card__title-row{display:flex;gap:8px;align-items:center;justify-content:space-between;flex-wrap:wrap;}
+.establishment-card__title-row{display:flex;gap:8px;align-items:center;justify-content:space-between;flex-wrap:wrap;min-width:0;}
 .establishment-card__category{
   display:inline-flex;
   align-items:center;
@@ -7839,6 +7868,8 @@ body.planos-no-scrollbar .container--wide::-webkit-scrollbar{
   font-size:1.05rem;
   line-height:1.2;
   color:#0f172a;
+  min-width:0;
+  overflow-wrap:anywhere;
 }
 .establishment-card__rating{
   display:inline-flex;
@@ -7899,6 +7930,7 @@ body.planos-no-scrollbar .container--wide::-webkit-scrollbar{
   display:flex;
   align-items:center;
   justify-content:space-between;
+  min-width:0;
   gap:10px;
   padding-top:8px;
   border-top:1px solid rgba(148,163,184,.12);
@@ -7907,6 +7939,7 @@ body.planos-no-scrollbar .container--wide::-webkit-scrollbar{
   display:inline-flex;
   align-items:center;
   gap:6px;
+  min-width:0;
   border:none;
   background:none;
   padding:0;
@@ -7919,6 +7952,7 @@ body.planos-no-scrollbar .container--wide::-webkit-scrollbar{
 .establishment-card__map-link:focus-visible{text-decoration:underline;outline:none;}
 .establishment-card__map-link--muted{color:#94a3b8;cursor:default;text-decoration:none;}
 .establishment-card__cta{
+  flex:0 0 auto;
   min-height:38px;
   border-radius:12px;
   padding-inline:14px;
@@ -12249,6 +12283,19 @@ body.planos-no-scrollbar .container--wide::-webkit-scrollbar{
 .container--appointment-public .novo-agendamento__flow-bottom-spacer,
 .container--appointment-public .novo-agendamento__services-bottom-spacer{
   block-size:8px;
+}
+
+@media (min-width: 960px){
+  .container--appointment-public{
+    max-width:1180px;
+    padding-inline:24px;
+  }
+
+  .container--appointment-public .novo-agendamento,
+  .container--appointment-public .establishments,
+  .container--appointment-public .establishments__results{
+    max-width:none;
+  }
 }
 
 @media (max-width: 380px){

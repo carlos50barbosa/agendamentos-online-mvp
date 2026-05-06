@@ -1333,6 +1333,10 @@ const SlotButton = ({ slot, isSelected, onClick, density = "compact" }) => {
   const disabledReason = isPast || !isAvailableLabel(slot.label);
 
   const tooltipLabel = slot?.label ?? 'disponível';
+  const capacity = Math.max(1, Number(slot?.capacidade ?? slot?.capacity ?? 1) || 1);
+  const remainingValue = Number(slot?.vagas_restantes ?? slot?.vagasRestantes ?? slot?.remaining_slots ?? slot?.remaining ?? capacity);
+  const remaining = Number.isFinite(remainingValue) ? Math.max(0, remainingValue) : capacity;
+  const metaLabel = capacity > 1 && remaining > 0 ? `${remaining} vagas` : '';
 
   const className = [
 
@@ -1370,7 +1374,8 @@ const SlotButton = ({ slot, isSelected, onClick, density = "compact" }) => {
 
     >
 
-      {DateHelpers.formatTime(slot.datetime)}
+      <span className="slot-btn__time">{DateHelpers.formatTime(slot.datetime)}</span>
+      {metaLabel && <span className="slot-btn__meta">{metaLabel}</span>}
 
     </button>
 
@@ -3018,7 +3023,11 @@ useEffect(() => {
 
       // A) slots reais (pedindo ocupados/bloqueados)
 
-      const slotsData = await Api.getSlots(establishmentId, currentWeek, { includeBusy: true });
+      const slotsData = await Api.getSlots(establishmentId, currentWeek, {
+        includeBusy: true,
+        serviceIds: serviceId ? [Number(serviceId)] : undefined,
+        professionalId: state.professionalId || undefined,
+      });
 
       const normalized = normalizeSlots(slotsData);
 
@@ -3035,6 +3044,7 @@ useEffect(() => {
       for (const s of normalized) {
 
         const k = minuteISO(s.datetime);
+        const slotCapacity = Math.max(1, Number(s.capacidade ?? s.capacity ?? 1) || 1);
 
         if (!isAvailableLabel(s.label)) {
 
@@ -3044,7 +3054,7 @@ useEffect(() => {
 
           } else {
 
-            busyFromApiCount.set(k, (busyFromApiCount.get(k) || 0) + 1);
+            busyFromApiCount.set(k, Math.max(busyFromApiCount.get(k) || 0, slotCapacity));
 
           }
 
@@ -3072,21 +3082,18 @@ useEffect(() => {
 
         const filteredForced = rawForced.filter(
 
-          (k) => busyFromApiCount.has(k) || (apptCounts && typeof apptCounts.has === 'function' && apptCounts.has(k))
+          (k) => busyFromApiCount.has(k)
 
         );
 
         const forcedSet = new Set(filteredForced);
 
-        const capacity = state.professionalId
-
-           ? 1
-
-          : Math.max(1, Array.isArray(selectedService?.professionals) ? selectedService.professionals.length : 1);
+        const fallbackCapacity = Math.max(1, Number(selectedService?.capacidade_por_horario || 1) || 1);
 
         const overlayed = grid.map((s) => {
 
           const k = minuteISO(s.datetime);
+          const capacity = Math.max(1, Number(s.capacidade ?? s.capacity ?? fallbackCapacity) || fallbackCapacity);
 
           if (normalizeSlotLabel(s.label) === 'bloqueado') {
 
@@ -3096,7 +3103,7 @@ useEffect(() => {
 
           if (blockedSet.has(k)) return { ...s, label: 'bloqueado' };
 
-          const countApi = state.professionalId ? 0 : busyFromApiCount.get(k) || 0;
+          const countApi = busyFromApiCount.get(k) || 0;
 
           const countAppt = apptCounts && typeof apptCounts.get === 'function' ? apptCounts.get(k) || 0 : 0;
 
@@ -3104,9 +3111,9 @@ useEffect(() => {
 
           const total = countApi + countAppt + countForced;
 
-          if (total >= capacity) return { ...s, label: 'agendado' };
+          if (total >= capacity) return { ...s, label: 'agendado', capacidade: capacity, vagas_restantes: 0 };
 
-          return { ...s, label: 'disponivel' };
+          return { ...s, label: 'disponivel', capacidade: capacity, vagas_restantes: Math.max(0, capacity - total) };
 
         });
 
@@ -3382,7 +3389,11 @@ useEffect(() => {
 
       try {
 
-        const slotsData = await Api.getSlots(establishmentId, currentWeek, { includeBusy: true });
+        const slotsData = await Api.getSlots(establishmentId, currentWeek, {
+          includeBusy: true,
+          serviceIds: serviceId ? [Number(serviceId)] : undefined,
+          professionalId: state.professionalId || undefined,
+        });
 
         const normalized = normalizeSlots(slotsData);
 
@@ -3426,7 +3437,7 @@ useEffect(() => {
 
     },
 
-    [establishmentId, currentWeek, isOwnerViewing, normalizeSlots]
+    [establishmentId, currentWeek, isOwnerViewing, normalizeSlots, serviceId, state.professionalId]
 
   );
 
