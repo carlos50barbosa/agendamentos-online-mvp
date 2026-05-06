@@ -4964,6 +4964,7 @@ useEffect(() => {
       // C) conjuntos/contagens de ocupados por fonte
 
       const busyFromApiCount = new Map();
+      const fullFromApiSet = new Set();
 
       const blockedSet = new Set();
 
@@ -4971,6 +4972,11 @@ useEffect(() => {
 
         const k = minuteISO(s.datetime);
         const slotCapacity = Math.max(1, Number(s.capacidade ?? s.capacity ?? 1) || 1);
+
+        const remainingRaw = Number(
+          s.vagas_restantes ?? s.vagasRestantes ?? s.remaining_slots ?? s.remaining
+        );
+        const hasRemaining = Number.isFinite(remainingRaw);
 
         if (!isAvailableLabel(s.label)) {
 
@@ -4981,8 +4987,15 @@ useEffect(() => {
           } else {
 
             busyFromApiCount.set(k, Math.max(busyFromApiCount.get(k) || 0, slotCapacity));
+            fullFromApiSet.add(k);
 
           }
+
+        } else if (hasRemaining) {
+
+          const remaining = Math.max(0, Math.min(slotCapacity, Math.floor(remainingRaw)));
+          const used = Math.max(0, slotCapacity - remaining);
+          busyFromApiCount.set(k, Math.max(busyFromApiCount.get(k) || 0, used));
 
         }
 
@@ -5008,7 +5021,7 @@ useEffect(() => {
 
         const filteredForced = rawForced.filter(
 
-          (k) => busyFromApiCount.has(k)
+          (k) => fullFromApiSet.has(k)
 
         );
 
@@ -5037,7 +5050,7 @@ useEffect(() => {
 
           const countForced = forcedSet.has(k) ? capacity : 0;
 
-          const total = countApi + countAppt + countForced;
+          const total = Math.max(countApi, countAppt, countForced);
 
           if (total >= capacity) return { ...s, label: 'agendado', capacidade: capacity, vagas_restantes: 0 };
 
