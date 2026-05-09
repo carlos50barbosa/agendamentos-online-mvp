@@ -26,6 +26,8 @@ function serializeUserRow(row) {
     plan_trial_ends_at: row.plan_trial_ends_at ? new Date(row.plan_trial_ends_at).toISOString() : null,
     plan_active_until: row.plan_active_until ? new Date(row.plan_active_until).toISOString() : null,
     plan_subscription_id: row.plan_subscription_id || null,
+    onboarding_concluido: Boolean(row.onboarding_concluido ?? 0),
+    onboarding_etapa: row.onboarding_etapa || 'profissionais',
   };
 }
 
@@ -44,7 +46,7 @@ export async function resolveUserFromToken(token) {
   }
 
   const [rows] = await pool.query(
-    "SELECT id, nome, email, telefone, data_nascimento, cpf_cnpj, cep, endereco, numero, complemento, bairro, cidade, estado, avatar_url, tipo, notify_email_estab, notify_whatsapp_estab, plan, plan_status, plan_trial_ends_at, plan_active_until, plan_subscription_id FROM usuarios WHERE id=? LIMIT 1",
+    "SELECT id, nome, email, telefone, data_nascimento, cpf_cnpj, cep, endereco, numero, complemento, bairro, cidade, estado, avatar_url, tipo, notify_email_estab, notify_whatsapp_estab, plan, plan_status, plan_trial_ends_at, plan_active_until, plan_subscription_id, onboarding_concluido, onboarding_etapa FROM usuarios WHERE id=? LIMIT 1",
     [userId]
   );
 

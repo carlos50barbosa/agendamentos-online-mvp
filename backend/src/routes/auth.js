@@ -271,6 +271,8 @@ router.post('/register', async (req, res) => {
       plan_trial_ends_at: trialEndsAt ? trialEndsAt.toISOString() : null,
       plan_active_until: null,
       plan_subscription_id: null,
+      onboarding_concluido: false,
+      onboarding_etapa: 'profissionais',
     };
 
     const maskPhoneForDisplay = (value) => {
@@ -380,7 +382,7 @@ router.post('/login', async (req, res) => {
     }
 
     const [rows] = await pool.query(
-      'SELECT id, nome, email, telefone, data_nascimento, cpf_cnpj, cep, endereco, numero, complemento, bairro, cidade, estado, avatar_url, senha_hash, tipo, notify_email_estab, notify_whatsapp_estab, plan, plan_status, plan_trial_ends_at, plan_active_until, plan_subscription_id FROM usuarios WHERE LOWER(email)=? LIMIT 1',
+      'SELECT id, nome, email, telefone, data_nascimento, cpf_cnpj, cep, endereco, numero, complemento, bairro, cidade, estado, avatar_url, senha_hash, tipo, notify_email_estab, notify_whatsapp_estab, plan, plan_status, plan_trial_ends_at, plan_active_until, plan_subscription_id, onboarding_concluido, onboarding_etapa FROM usuarios WHERE LOWER(email)=? LIMIT 1',
       [email]
     );
     if (!rows.length) return res.status(401).json({ error: 'invalid_credentials' });
@@ -422,6 +424,8 @@ router.post('/login', async (req, res) => {
       plan_trial_ends_at: u.plan_trial_ends_at ? new Date(u.plan_trial_ends_at).toISOString() : null,
       plan_active_until: u.plan_active_until ? new Date(u.plan_active_until).toISOString() : null,
       plan_subscription_id: u.plan_subscription_id || null,
+      onboarding_concluido: toBool(u.onboarding_concluido),
+      onboarding_etapa: u.onboarding_etapa || 'profissionais',
     };
     return res.json({ ok: true, token, user });
   } catch (e) {
@@ -654,7 +658,7 @@ router.put('/me', auth, async (req, res) => {
       const html = `<p>Olá!</p><p>Use o código <strong>${code}</strong> para confirmar seu novo e-mail.</p><p>O código expira em 30 minutos.</p>`;
       try { await notifyEmail(emailNorm, subject, html); } catch (err) { console.error('[auth/me][email]', err); }
 
-      const [[userRow]] = await pool.query("SELECT id, nome, email, telefone, data_nascimento, cpf_cnpj, cep, endereco, numero, complemento, bairro, cidade, estado, avatar_url, tipo, notify_email_estab, notify_whatsapp_estab, plan, plan_status, plan_trial_ends_at, plan_active_until, plan_subscription_id FROM usuarios WHERE id=? LIMIT 1", [userId]);
+      const [[userRow]] = await pool.query("SELECT id, nome, email, telefone, data_nascimento, cpf_cnpj, cep, endereco, numero, complemento, bairro, cidade, estado, avatar_url, tipo, notify_email_estab, notify_whatsapp_estab, plan, plan_status, plan_trial_ends_at, plan_active_until, plan_subscription_id, onboarding_concluido, onboarding_etapa FROM usuarios WHERE id=? LIMIT 1", [userId]);
       if (!userRow) {
         return res.status(404).json({ error: 'not_found', message: 'Usuário não encontrado.' });
       }
@@ -675,6 +679,8 @@ router.put('/me', auth, async (req, res) => {
         avatar_url: userRow.avatar_url || nextAvatar || null,
         notify_email_estab: toBool(userRow.notify_email_estab ?? nextNotifyEmail),
         notify_whatsapp_estab: toBool(userRow.notify_whatsapp_estab ?? nextNotifyWhatsapp),
+        onboarding_concluido: toBool(userRow.onboarding_concluido),
+        onboarding_etapa: userRow.onboarding_etapa || 'profissionais',
       };
       req.user = { ...req.user, ...mergedUser };
 
@@ -690,7 +696,7 @@ router.put('/me', auth, async (req, res) => {
       [nome, email, phoneClean || null, dataNascimentoNext, cpfCnpjNext, cepValue, enderecoValue, numeroValue, complementoValue, bairroValue, cidadeValue, estadoValue, nextNotifyEmail ? 1 : 0, nextNotifyWhatsapp ? 1 : 0, nextAvatar, userId]
     );
 
-    const [[userRow]] = await pool.query("SELECT id, nome, email, telefone, data_nascimento, cpf_cnpj, cep, endereco, numero, complemento, bairro, cidade, estado, avatar_url, tipo, notify_email_estab, notify_whatsapp_estab, plan, plan_status, plan_trial_ends_at, plan_active_until, plan_subscription_id FROM usuarios WHERE id=? LIMIT 1", [userId]);
+    const [[userRow]] = await pool.query("SELECT id, nome, email, telefone, data_nascimento, cpf_cnpj, cep, endereco, numero, complemento, bairro, cidade, estado, avatar_url, tipo, notify_email_estab, notify_whatsapp_estab, plan, plan_status, plan_trial_ends_at, plan_active_until, plan_subscription_id, onboarding_concluido, onboarding_etapa FROM usuarios WHERE id=? LIMIT 1", [userId]);
     if (!userRow) {
       return res.status(404).json({ error: 'not_found', message: 'Usuário não encontrado.' });
     }
@@ -699,6 +705,8 @@ router.put('/me', auth, async (req, res) => {
       ...userRow,
       notify_email_estab: toBool(userRow.notify_email_estab ?? nextNotifyEmail),
       notify_whatsapp_estab: toBool(userRow.notify_whatsapp_estab ?? nextNotifyWhatsapp),
+      onboarding_concluido: toBool(userRow.onboarding_concluido),
+      onboarding_etapa: userRow.onboarding_etapa || 'profissionais',
     };
 
     req.user = { ...req.user, ...normalizedUser };
@@ -746,7 +754,7 @@ router.post('/me/email-confirm', auth, async (req, res) => {
     await pool.query('UPDATE usuarios SET email=? WHERE id=?', [newEmail, userId]);
     await pool.query('DELETE FROM email_change_tokens WHERE id=?', [token.id]);
 
-    const [[userRow]] = await pool.query("SELECT id, nome, email, telefone, data_nascimento, cpf_cnpj, cep, endereco, numero, complemento, bairro, cidade, estado, avatar_url, tipo, notify_email_estab, notify_whatsapp_estab, plan, plan_status, plan_trial_ends_at, plan_active_until, plan_subscription_id FROM usuarios WHERE id=? LIMIT 1", [userId]);
+    const [[userRow]] = await pool.query("SELECT id, nome, email, telefone, data_nascimento, cpf_cnpj, cep, endereco, numero, complemento, bairro, cidade, estado, avatar_url, tipo, notify_email_estab, notify_whatsapp_estab, plan, plan_status, plan_trial_ends_at, plan_active_until, plan_subscription_id, onboarding_concluido, onboarding_etapa FROM usuarios WHERE id=? LIMIT 1", [userId]);
     if (!userRow) {
       return res.status(404).json({ error: 'not_found', message: 'Usuário não encontrado.' });
     }
@@ -755,6 +763,8 @@ router.post('/me/email-confirm', auth, async (req, res) => {
       ...userRow,
       notify_email_estab: toBool(userRow.notify_email_estab),
       notify_whatsapp_estab: toBool(userRow.notify_whatsapp_estab),
+      onboarding_concluido: toBool(userRow.onboarding_concluido),
+      onboarding_etapa: userRow.onboarding_etapa || 'profissionais',
     };
 
     req.user = { ...req.user, ...normalized };

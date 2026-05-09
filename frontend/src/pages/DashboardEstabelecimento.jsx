@@ -1056,7 +1056,9 @@ export default function DashboardEstabelecimento() {
   const [searchParams, setSearchParams] = useSearchParams()
   const location = useLocation()
   const prefillHandledRef = useRef(null)
+  const onboardingNoticeHandledRef = useRef(false)
   const [trialModalOpen, setTrialModalOpen] = useState(false)
+  const [dashboardNotice, setDashboardNotice] = useState('')
   const establishmentId =
     currentUser && currentUser.tipo === 'estabelecimento' ? currentUser.id : null
 
@@ -1098,6 +1100,30 @@ export default function DashboardEstabelecimento() {
     updatedParams.delete('trial')
     setSearchParams(updatedParams, { replace: true })
   }, [searchParams, setSearchParams])
+
+  useEffect(() => {
+    if (onboardingNoticeHandledRef.current) return undefined
+    const onboardingParam = searchParams.get('onboarding')
+    const stateSuccess = Boolean(location?.state?.onboardingSuccess)
+    if (onboardingParam !== 'sucesso' && !stateSuccess) return undefined
+
+    onboardingNoticeHandledRef.current = true
+    setDashboardNotice('Configuração inicial concluída. Sua agenda já pode receber agendamentos.')
+
+    if (onboardingParam === 'sucesso') {
+      const updatedParams = new URLSearchParams(searchParams)
+      updatedParams.delete('onboarding')
+      setSearchParams(updatedParams, { replace: true })
+    }
+
+    return undefined
+  }, [location?.state, searchParams, setSearchParams])
+
+  useEffect(() => {
+    if (!dashboardNotice) return undefined
+    const timeoutId = window.setTimeout(() => setDashboardNotice(''), 7000)
+    return () => window.clearTimeout(timeoutId)
+  }, [dashboardNotice])
 
 
   useEffect(() => {
@@ -1303,6 +1329,8 @@ export default function DashboardEstabelecimento() {
   return (
 
     <div className="dashboard-narrow dashboard-pro dashboard-estab-pro">
+
+      {dashboardNotice ? <div className="dashboard-success-banner">{dashboardNotice}</div> : null}
 
       <section className="page-shell__hero dashboard-estab-hero">
         <div className="page-toolbar">

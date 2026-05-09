@@ -67,6 +67,7 @@ const ProfissionaisEstabelecimento = React.lazy(() => import('./pages/Profission
 const NovoAgendamento = React.lazy(() => import('./pages/NovoAgendamento.jsx'));
 
 const Configuracoes = React.lazy(() => import('./pages/Configuracoes.jsx'));
+const ConfiguracaoInicial = React.lazy(() => import('./pages/ConfiguracaoInicial.jsx'));
 const Assinatura = React.lazy(() => import('./pages/Assinatura.jsx'));
 const LoyaltyPlansEstabelecimento = React.lazy(() => import('./pages/LoyaltyPlansEstabelecimento.jsx'));
 const LoyaltyAssinaturaCliente = React.lazy(() => import('./pages/LoyaltyAssinaturaCliente.jsx'));
@@ -132,6 +133,8 @@ const APP_ROUTES = [
 
   { path: '/novo-agendamento', element: <NovoAgendamento /> },
 
+  { path: '/configuracao-inicial', element: <ConfiguracaoInicial />, auth: true, role: 'estabelecimento' },
+
   { path: '/configuracoes', element: <Configuracoes />, auth: true },
   { path: '/assinatura', element: <Assinatura />, auth: true, role: 'estabelecimento' },
   { path: '/fidelidade', element: <LoyaltyPlansEstabelecimento />, auth: true, role: 'estabelecimento' },
@@ -176,7 +179,7 @@ const DASHBOARD_BY_ROLE = {
 
 
 
-function GuardedRoute({ element, user, requireAuth = false, role = '' }) {
+function GuardedRoute({ element, user, requireAuth = false, role = '', onboardingGate }) {
 
   const location = useLocation();
 
@@ -227,6 +230,35 @@ function GuardedRoute({ element, user, requireAuth = false, role = '' }) {
 
     return <Navigate to={fallback} replace />;
 
+  }
+
+  if (userRole === 'estabelecimento' && requireAuth) {
+    const isOnboardingRoute = location.pathname.startsWith('/configuracao-inicial');
+    const onboardingData = onboardingGate?.data || null;
+    const fallbackConcluido = Boolean(user?.onboarding_concluido);
+    const onboardingConcluido = Boolean(onboardingData?.onboarding?.concluido ?? fallbackConcluido);
+
+    if (onboardingGate?.loading && onboardingData == null) {
+      return (
+        <div className="card" role="status" aria-live="polite">
+          <span className="spinner" /> Verificando configuracao inicial...
+        </div>
+      );
+    }
+
+    if (!onboardingConcluido && !isOnboardingRoute) {
+      return (
+        <Navigate
+          to="/configuracao-inicial"
+          replace
+          state={{ from: `${location.pathname || ''}${location.search || ''}` }}
+        />
+      );
+    }
+
+    if (onboardingConcluido && isOnboardingRoute) {
+      return <Navigate to="/estab" replace />;
+    }
   }
 
 
@@ -856,6 +888,7 @@ export default function App() {
     pathname.startsWith('/novo-agendamento');
   const isPublicAppointmentPage = /^\/novo\/[^/]+/.test(pathname);
   const [currentUser, setCurrentUser] = useState(() => getUser());
+  const [onboardingGate, setOnboardingGate] = useState({ loading: false, data: null, error: '' });
 
   const [billingStatus, setBillingStatus] = useState(null);
 
@@ -867,6 +900,7 @@ export default function App() {
   const isPlanos = (loc?.pathname || '') === '/planos';
   const isConfiguracoes =
     (loc?.pathname || '').startsWith('/configuracoes') ||
+    (loc?.pathname || '').startsWith('/configuracao-inicial') ||
     (loc?.pathname || '').startsWith('/assinatura') ||
     (loc?.pathname || '').startsWith('/whatsappbusiness') ||
     (loc?.pathname || '').startsWith('/sinal');
@@ -942,6 +976,44 @@ export default function App() {
     };
 
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!currentUser || currentUser.tipo !== 'estabelecimento') {
+      setOnboardingGate({ loading: false, data: null, error: '' });
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    const fallbackData = {
+      onboarding: {
+        concluido: Boolean(currentUser.onboarding_concluido),
+        etapa: currentUser.onboarding_etapa || 'profissionais',
+      },
+    };
+
+    setOnboardingGate({ loading: true, data: fallbackData, error: '' });
+
+    Api.onboardingStatus()
+      .then((data) => {
+        if (!cancelled) setOnboardingGate({ loading: false, data, error: '' });
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setOnboardingGate({
+            loading: false,
+            data: fallbackData,
+            error: err?.message || 'Falha ao carregar onboarding.',
+          });
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentUser?.id, currentUser?.tipo, currentUser?.onboarding_concluido, currentUser?.onboarding_etapa]);
 
 
 
@@ -1585,7 +1657,15 @@ const topbarAlert = useMemo(() => {
 
                     path={path}
 
-                    element={<GuardedRoute element={element} user={currentUser} requireAuth={auth} role={role} />}
+                    element={
+                      <GuardedRoute
+                        element={element}
+                        user={currentUser}
+                        requireAuth={auth}
+                        role={role}
+                        onboardingGate={onboardingGate}
+                      />
+                    }
 
                   />
 

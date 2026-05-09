@@ -34,6 +34,8 @@ CREATE TABLE IF NOT EXISTS usuarios (
   plan_trial_ends_at DATETIME       NULL,
   plan_active_until DATETIME       NULL,
   plan_subscription_id VARCHAR(80) NULL,
+  onboarding_concluido TINYINT(1)  NOT NULL DEFAULT 0,
+  onboarding_etapa VARCHAR(50)     NOT NULL DEFAULT 'profissionais',
   criado_em    TIMESTAMP             NOT NULL DEFAULT CURRENT_TIMESTAMP,
   INDEX idx_usuarios_tipo (tipo)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;

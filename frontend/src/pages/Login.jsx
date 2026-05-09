@@ -204,7 +204,10 @@ export default function Login() {
         sessionStorage.removeItem('next_after_login');
       } catch {}
 
-      nav(`/loading?type=login&next=${encodeURIComponent(nextTarget)}`);
+      const onboardingPending = user?.tipo === 'estabelecimento' && !user?.onboarding_concluido;
+      const loginTarget = onboardingPending ? '/configuracao-inicial' : nextTarget;
+
+      nav(`/loading?type=login&next=${encodeURIComponent(loginTarget)}`);
     } catch (err) {
       const message =
         err?.message === 'tipo_incorreto'

@@ -582,9 +582,10 @@ export default function Cadastro() {
 
       try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch {}
 
+      const onboardingPending = user?.tipo === 'estabelecimento' && !user?.onboarding_concluido;
       const fallback = user?.tipo === 'cliente' ? '/cliente' : '/estab';
 
-      const destination = nextParam || fallback;
+      const destination = onboardingPending ? '/configuracao-inicial' : (nextParam || fallback);
 
       setTimeout(() => nav(destination), 1200);
 

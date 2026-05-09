@@ -347,6 +347,12 @@ export const Api = {
   updateEstablishmentProfile: (id, payload) =>
     req(`/establishments/${id}/profile`, { method: 'PUT', body: JSON.stringify(payload) }),
   getEstablishmentSettings: () => req('/estabelecimento/settings'),
+  onboardingStatus: () => req('/estabelecimento/onboarding'),
+  onboardingUpdateStep: (etapa) =>
+    req('/estabelecimento/onboarding', { method: 'PATCH', body: JSON.stringify({ etapa }) }),
+  onboardingSaveHours: (horarios) =>
+    req('/estabelecimento/onboarding/horarios', { method: 'PUT', body: JSON.stringify({ horarios }) }),
+  onboardingFinish: () => req('/estabelecimento/onboarding/finalizar', { method: 'POST' }),
   updateEstablishmentDepositSettings: (payload) =>
     req('/estabelecimento/settings/deposit', { method: 'PUT', body: JSON.stringify(payload) }),
   getEstablishmentStats: (id) => req(`/establishments/${id}/stats`),
