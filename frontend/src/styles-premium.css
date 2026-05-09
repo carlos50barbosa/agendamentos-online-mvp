@@ -1013,7 +1013,7 @@ textarea.input:focus {
   color: var(--text);
 }
 
-.landing-hero__process-item span {
+.landing-hero__process-item > div > span {
   display: block;
   margin-top: 3px;
   color: color-mix(in srgb, var(--text) 56%, var(--muted) 44%);
