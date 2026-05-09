@@ -9598,6 +9598,9 @@ body.planos-no-scrollbar .container--wide::-webkit-scrollbar{
   gap: 14px;
   border-bottom: 1px solid rgba(148,163,184,0.2);
   background: var(--pro-agenda-toolbar-bg);
+  position: relative;
+  z-index: 30;
+  overflow: visible;
 }
 .dashboard-estab-pro .pro-agenda__toolbar-row{
   gap: 14px;
@@ -9843,6 +9846,7 @@ body.planos-no-scrollbar .container--wide::-webkit-scrollbar{
 }
 .dashboard-estab-pro .pro-agenda__filter-menu{
   top: calc(100% + 10px);
+  z-index: 60;
   min-width: 260px;
   padding: 10px;
   border-radius: 18px;
