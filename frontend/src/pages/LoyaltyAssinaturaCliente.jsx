@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import Modal from '../components/Modal.jsx'
 import { Api } from '../utils/api.js'
 import { getUser } from '../utils/auth.js'
 import {
@@ -80,6 +81,47 @@ function normalizePixCheckoutResponse(response) {
     ...response,
     pix: normalizedPix,
   }
+}
+
+function LoyaltyPixCheckoutDetails({
+  pixPayload,
+  pixCode,
+  pixCopyNotice,
+  onCopyPixCode,
+  idPrefix = 'loyalty-pix',
+}) {
+  if (!pixPayload) return null
+  return (
+    <>
+      <strong>PIX pendente</strong>
+      {pixPayload.amount_cents != null ? <p>Valor: {formatCurrencyFromCents(pixPayload.amount_cents)}</p> : null}
+      {pixPayload.qr_code_base64 ? (
+        <img
+          src={`data:image/png;base64,${pixPayload.qr_code_base64}`}
+          alt="QR Code PIX"
+          className="pix-checkout__qr"
+        />
+      ) : null}
+      {pixPayload.ticket_url ? (
+        <a className="btn btn--outline btn--sm" href={pixPayload.ticket_url} target="_blank" rel="noreferrer">
+          Abrir PIX no Mercado Pago
+        </a>
+      ) : null}
+      {pixCode ? (
+        <>
+          <label className="label" htmlFor={`${idPrefix}-code`}>PIX copia e cola</label>
+          <textarea id={`${idPrefix}-code`} className="input loyalty-pix-box__code" readOnly value={pixCode} rows={4} />
+          <button type="button" className="btn btn--outline btn--sm" onClick={onCopyPixCode}>
+            Copiar codigo
+          </button>
+          {pixCopyNotice ? <p className="muted">{pixCopyNotice}</p> : null}
+        </>
+      ) : (
+        <p className="loyalty-inline-error">O Mercado Pago nao retornou o codigo PIX. Gere novamente ou abra o link acima.</p>
+      )}
+      {pixPayload.expires_at ? <p className="muted">Expira em: {formatDate(pixPayload.expires_at)}</p> : null}
+    </>
+  )
 }
 
 function getStatusLabel(value) {
@@ -207,6 +249,7 @@ export default function LoyaltyAssinaturaCliente() {
   const [paymentMethod, setPaymentMethod] = useState('pix')
   const [fallbackIntent, setFallbackIntent] = useState(null)
   const [pixCheckout, setPixCheckout] = useState(null)
+  const [pixModalOpen, setPixModalOpen] = useState(false)
   const [pixCopyNotice, setPixCopyNotice] = useState('')
   const [cardFormResetKey, setCardFormResetKey] = useState(0)
   const [cardState, setCardState] = useState({ loading: false, ready: false, error: '' })
@@ -312,7 +355,9 @@ export default function LoyaltyAssinaturaCliente() {
         previous_failure_code: recoveryFallback?.previous_failure_code || null,
         previous_subscription_id: recoveryFallback?.previous_subscription_id || null,
       })
-      setPixCheckout(normalizePixCheckoutResponse(response))
+      const normalizedResponse = normalizePixCheckoutResponse(response)
+      setPixCheckout(normalizedResponse)
+      setPixModalOpen(true)
       setFallbackIntent(null)
       setNotice({ type: 'success', message: 'PIX gerado. Pague para ativar o plano.' })
       await loadData()
@@ -863,33 +908,16 @@ export default function LoyaltyAssinaturaCliente() {
                   </button>
                   {pixPayload ? (
                     <div className="loyalty-pix-box">
-                      <strong>PIX pendente</strong>
-                      {pixPayload.amount_cents != null ? <p>Valor: {formatCurrencyFromCents(pixPayload.amount_cents)}</p> : null}
-                      {pixPayload.qr_code_base64 ? (
-                        <img
-                          src={`data:image/png;base64,${pixPayload.qr_code_base64}`}
-                          alt="QR Code PIX"
-                          className="pix-checkout__qr"
-                        />
-                      ) : null}
-                      {pixPayload.ticket_url ? (
-                        <a className="btn btn--outline btn--sm" href={pixPayload.ticket_url} target="_blank" rel="noreferrer">
-                          Abrir PIX no Mercado Pago
-                        </a>
-                      ) : null}
-                      {pixCode ? (
-                        <>
-                          <label className="label" htmlFor="loyalty-pix-code">PIX copia e cola</label>
-                          <textarea id="loyalty-pix-code" className="input loyalty-pix-box__code" readOnly value={pixCode} rows={4} />
-                          <button type="button" className="btn btn--outline btn--sm" onClick={handleCopyPixCode}>
-                            Copiar codigo
-                          </button>
-                          {pixCopyNotice ? <p className="muted">{pixCopyNotice}</p> : null}
-                        </>
-                      ) : (
-                        <p className="loyalty-inline-error">O Mercado Pago nao retornou o codigo PIX. Gere novamente ou abra o link acima.</p>
-                      )}
-                      {pixPayload.expires_at ? <p className="muted">Expira em: {formatDate(pixPayload.expires_at)}</p> : null}
+                      <LoyaltyPixCheckoutDetails
+                        pixPayload={pixPayload}
+                        pixCode={pixCode}
+                        pixCopyNotice={pixCopyNotice}
+                        onCopyPixCode={handleCopyPixCode}
+                        idPrefix="loyalty-pix-inline"
+                      />
+                      <button type="button" className="btn btn--primary btn--sm" onClick={() => setPixModalOpen(true)}>
+                        Ver PIX
+                      </button>
                     </div>
                   ) : null}
                 </div>
@@ -967,6 +995,34 @@ export default function LoyaltyAssinaturaCliente() {
           </div>
         )) : <p className="loyalty-empty">{loading ? 'Carregando...' : 'Nenhuma assinatura registrada.'}</p>}
       </section>
+
+      {pixModalOpen && pixPayload ? (
+        <Modal
+          title="Pagar por PIX"
+          onClose={() => setPixModalOpen(false)}
+          closeButton
+          actions={[
+            pixPayload.ticket_url ? (
+              <a key="open" className="btn btn--primary" href={pixPayload.ticket_url} target="_blank" rel="noreferrer">
+                Abrir no Mercado Pago
+              </a>
+            ) : null,
+            <button key="close" type="button" className="btn btn--outline" onClick={() => setPixModalOpen(false)}>
+              Fechar
+            </button>,
+          ]}
+        >
+          <div className="pix-checkout loyalty-pix-modal">
+            <LoyaltyPixCheckoutDetails
+              pixPayload={pixPayload}
+              pixCode={pixCode}
+              pixCopyNotice={pixCopyNotice}
+              onCopyPixCode={handleCopyPixCode}
+              idPrefix="loyalty-pix-modal"
+            />
+          </div>
+        </Modal>
+      ) : null}
     </div>
   )
 }
