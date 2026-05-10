@@ -121,6 +121,8 @@ export default function NovoAgendamentoModals(props) {
     handleGuestFormSubmit,
 
     setGuestModal,
+    bookingSuccessModal,
+    handleCloseBookingSuccessModal,
 
     showGuestOptional,
 
@@ -192,6 +194,22 @@ export default function NovoAgendamentoModals(props) {
   const depositAmountLabel =
     typeof depositModal?.amountCents === "number"
        ? (depositModal.amountCents / 100).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })
+      : "";
+  const bookingSuccessInfo = bookingSuccessModal?.appointmentInfo || null;
+  const bookingSuccessLink =
+    bookingSuccessModal?.appointmentId && user?.tipo === "cliente"
+      ? `/cliente?agendamento=${bookingSuccessModal.appointmentId}`
+      : "";
+  const bookingSuccessDuration = Number(bookingSuccessInfo?.duracaoMin || 0);
+  const bookingSuccessDateLabel = bookingSuccessInfo?.inicioISO
+    ? DateHelpers.formatDateFull(bookingSuccessInfo.inicioISO)
+    : "";
+  const bookingSuccessTimeLabel = bookingSuccessInfo?.inicioISO
+    ? DateHelpers.formatTime(bookingSuccessInfo.inicioISO)
+    : "";
+  const bookingSuccessEndLabel =
+    bookingSuccessInfo?.inicioISO && bookingSuccessDuration > 0
+      ? DateHelpers.formatTime(DateHelpers.addMinutes(new Date(bookingSuccessInfo.inicioISO), bookingSuccessDuration))
       : "";
 
 
@@ -1264,6 +1282,126 @@ export default function NovoAgendamentoModals(props) {
                     </div>
 
                   )}
+
+                </div>
+
+              </Modal>
+
+            )}
+
+            {bookingSuccessModal?.open && (
+
+              <Modal onClose={handleCloseBookingSuccessModal} closeButton>
+
+                <div className="booking-modal booking-modal--success">
+
+                  <div className="booking-modal__intro">
+
+                    <span className="booking-modal__eyebrow">Reserva concluída</span>
+
+                    <div className="confirmation-icon" aria-hidden="true">
+
+                      <svg viewBox="0 0 48 48" width="56" height="56" focusable="false">
+
+                        <circle cx="24" cy="24" r="22" fill="#22c55e" />
+
+                        <path
+                          d="M16 24l6 6 12-12"
+                          fill="none"
+                          stroke="#ffffff"
+                          strokeWidth="4"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+
+                      </svg>
+
+                    </div>
+
+                    <h3>{bookingSuccessModal.title || 'Agendamento realizado'}</h3>
+
+                    <p>{bookingSuccessModal.message || 'Sua reserva foi concluída com sucesso.'}</p>
+
+                  </div>
+
+                  {bookingSuccessInfo ? (
+
+                    <div className="confirmation-card">
+
+                      <dl className="confirmation-details">
+
+                        {bookingSuccessInfo.estabelecimentoNome ? (
+                          <div className="confirmation-details__item">
+                            <dt>Estabelecimento</dt>
+                            <dd>{bookingSuccessInfo.estabelecimentoNome}</dd>
+                          </div>
+                        ) : null}
+
+                        {bookingSuccessInfo.servicoNome ? (
+                          <div className="confirmation-details__item">
+                            <dt>Serviço</dt>
+                            <dd>{bookingSuccessInfo.servicoNome}</dd>
+                          </div>
+                        ) : null}
+
+                        {bookingSuccessInfo.profissionalNome ? (
+                          <div className="confirmation-details__item">
+                            <dt>Profissional</dt>
+                            <dd>{bookingSuccessInfo.profissionalNome}</dd>
+                          </div>
+                        ) : null}
+
+                        {bookingSuccessDateLabel ? (
+                          <div className="confirmation-details__item">
+                            <dt>Data</dt>
+                            <dd>{bookingSuccessDateLabel}</dd>
+                          </div>
+                        ) : null}
+
+                        {bookingSuccessTimeLabel ? (
+                          <div className="confirmation-details__item">
+                            <dt>Horário</dt>
+                            <dd>
+                              <span className="badge badge--time">
+                                {bookingSuccessTimeLabel}{bookingSuccessEndLabel ? ` - ${bookingSuccessEndLabel}` : ''}
+                              </span>
+                            </dd>
+                          </div>
+                        ) : null}
+
+                        {bookingSuccessDuration > 0 ? (
+                          <div className="confirmation-details__item">
+                            <dt>Duração</dt>
+                            <dd>{bookingSuccessDuration} minutos</dd>
+                          </div>
+                        ) : null}
+
+                        {bookingSuccessInfo.precoLabel ? (
+                          <div className="confirmation-details__item">
+                            <dt>Preço</dt>
+                            <dd>{bookingSuccessInfo.precoLabel}</dd>
+                          </div>
+                        ) : null}
+
+                      </dl>
+
+                    </div>
+
+                  ) : null}
+
+                  <div className="booking-modal__actions">
+
+                    {bookingSuccessLink ? (
+                      <Link className="btn btn--primary" to={bookingSuccessLink} onClick={handleCloseBookingSuccessModal}>
+                        Ver agendamento
+                      </Link>
+                    ) : null}
+
+                    <button type="button" className={bookingSuccessLink ? "btn btn--outline" : "btn btn--primary"} onClick={handleCloseBookingSuccessModal}>
+                      Fechar
+                    </button>
+
+                  </div>
 
                 </div>
 

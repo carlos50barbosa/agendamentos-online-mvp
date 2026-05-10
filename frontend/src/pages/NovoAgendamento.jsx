@@ -557,6 +557,13 @@ const createGuestModalState = () => ({
   error: "",
   info: "",
 });
+const createBookingSuccessModalState = () => ({
+  open: false,
+  appointmentId: null,
+  appointmentInfo: null,
+  title: "Agendamento realizado",
+  message: "Sua reserva foi concluída com sucesso.",
+});
 const createDepositModalState = () => ({
   open: false,
   status: "pending",
@@ -569,6 +576,14 @@ const createDepositModalState = () => ({
   appointmentInfo: null,
 });
 const PENDING_DEPOSIT_STORAGE_KEY = "ao:public-deposit-pending";
+const extractAppointmentId = (response) => (
+  response?.agendamentoId ||
+  response?.agendamento_id ||
+  response?.appointment_id ||
+  response?.appointmentId ||
+  response?.id ||
+  null
+);
 const formatCountdown = (ms) => {
   if (!Number.isFinite(ms) || ms <= 0) return "00:00";
   const totalSeconds = Math.max(0, Math.floor(ms / 1000));
@@ -592,7 +607,7 @@ const extractDepositPayload = (response) => {
     response?.deposit?.deposit_token ||
     response?.token ||
     null;
-  const appointmentId = response.agendamentoId || response.id || response.agendamento_id || null;
+  const appointmentId = extractAppointmentId(response);
   const expiresAt =
     response.expiresAt ||
     response.expires_at ||
@@ -2954,6 +2969,7 @@ export default function NovoAgendamento() {
 
   }, [searchParams, state.currentWeek]);
   const [modal, setModal] = useState({ isOpen: false, isSaving: false });
+  const [bookingSuccessModal, setBookingSuccessModal] = useState(createBookingSuccessModalState());
   const [depositModal, setDepositModal] = useState(createDepositModalState());
   const [depositCountdown, setDepositCountdown] = useState("");
   const depositHandledRef = useRef({ paid: false, expired: false });
@@ -4197,6 +4213,16 @@ export default function NovoAgendamento() {
       depositToken: payload.depositToken || null,
       appointmentInfo: appointmentInfo || null,
     });
+  }, []);
+  const openBookingSuccessModal = useCallback((payload = {}) => {
+    setBookingSuccessModal({
+      ...createBookingSuccessModalState(),
+      ...payload,
+      open: true,
+    });
+  }, []);
+  const closeBookingSuccessModal = useCallback(() => {
+    setBookingSuccessModal(createBookingSuccessModalState());
   }, []);
   const buildDepositAppointmentInfo = useCallback(() => ({
     inicioISO: selectedSlot?.datetime || null,
@@ -5563,6 +5589,7 @@ useEffect(() => {
     setModal((p) => ({ ...p, isSaving: true }));
 
     let success = false;
+    const appointmentInfo = buildDepositAppointmentInfo();
 
     try {
 
@@ -5599,6 +5626,12 @@ useEffect(() => {
           inicioISO: selectedSlot.datetime,
           servicoNome: serviceLabel || "serviço",
           estabelecimentoNome: selectedEstablishment?.name || "seu estabelecimento",
+        });
+        openBookingSuccessModal({
+          appointmentId: extractAppointmentId(response),
+          appointmentInfo,
+          title: "Agendamento realizado",
+          message: "Sua reserva foi concluída. Você pode acompanhar os detalhes na área do cliente.",
         });
         showToast("success", "Agendado com sucesso!");
       }
@@ -5640,6 +5673,11 @@ useEffect(() => {
             success = true;
 
             setModal((p) => ({ ...p, isOpen: false }));
+            openBookingSuccessModal({
+              appointmentInfo,
+              title: "Agendamento confirmado",
+              message: "Seu agendamento já estava registrado para este horário.",
+            });
 
             showToast("success", "Seu agendamento já existia e foi confirmado.");
 
@@ -5672,6 +5710,11 @@ useEffect(() => {
             success = true;
 
             setModal((p) => ({ ...p, isOpen: false }));
+            openBookingSuccessModal({
+              appointmentInfo,
+              title: "Agendamento realizado",
+              message: "Sua reserva foi concluída. Atualizamos a agenda para refletir o horário reservado.",
+            });
 
             showToast("success", "Agendado com sucesso! (o servidor retornou 500)");
 
@@ -5730,6 +5773,7 @@ useEffect(() => {
     scheduleWhatsAppReminders,
     buildDepositAppointmentInfo,
     openDepositModal,
+    openBookingSuccessModal,
     loadSlots,
     showToast,
 
@@ -7199,6 +7243,7 @@ useEffect(() => {
     profileImageModalOpen ||
     ratingModal.open ||
     guestModal.open ||
+    bookingSuccessModal.open ||
     planLimitModal.open ||
     confirmModalOpen ||
     depositModal.open;
@@ -8978,6 +9023,8 @@ useEffect(() => {
             handleGuestFormSubmit={handleGuestFormSubmit}
 
             setGuestModal={setGuestModal}
+            bookingSuccessModal={bookingSuccessModal}
+            handleCloseBookingSuccessModal={closeBookingSuccessModal}
 
             showGuestOptional={showGuestOptional}
 
