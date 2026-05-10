@@ -166,7 +166,7 @@ export default function SinalAgendamentos() {
               </div>
             ) : null}
 
-            <label className="switch settings-module-switch">
+            <label className="switch switch--status settings-module-switch">
               <input
                 type="checkbox"
                 checked={deposit.enabled}

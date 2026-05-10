@@ -5730,7 +5730,7 @@ function _l() {
                           ],
                         }),
                       e.jsxs("label", {
-                        className: "switch",
+                        className: "switch switch--status",
                         children: [
                           e.jsx("input", {
                             type: "checkbox",
