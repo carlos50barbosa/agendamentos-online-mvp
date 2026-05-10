@@ -10358,7 +10358,7 @@ body.planos-no-scrollbar .container--wide::-webkit-scrollbar{
 .crm-sort{
   display:flex; align-items:center; gap:6px; border:0; background:transparent; cursor:pointer; font-weight:600; color:inherit; padding:0;
 }
-.crm-sort__icon{ font-size:12px; color:var(--muted); }
+.crm-sort__icon{ display:inline-flex; align-items:center; justify-content:center; width:16px; height:16px; color:var(--muted); }
 .crm-sort.is-active .crm-sort__icon{ color:var(--brand); }
 .crm-table-wrapper{ border:1px solid var(--border); border-radius:12px; overflow:hidden; background:var(--surface); }
 .crm-table{ width:100%; min-width:920px; font-size:14px; border-collapse:collapse; }

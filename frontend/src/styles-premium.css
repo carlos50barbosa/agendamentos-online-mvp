@@ -305,6 +305,7 @@ textarea.input:focus {
 .chip--active {
   background: var(--brand);
   border-color: var(--brand);
+  color: #fff;
   box-shadow: none;
 }
 

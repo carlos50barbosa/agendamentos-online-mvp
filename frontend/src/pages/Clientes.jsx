@@ -2,6 +2,7 @@
 
 // frontend/src/pages/Clientes.jsx
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { ArrowDown, ArrowUp, ArrowUpDown } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { Api } from '../utils/api';
 import { getUser } from '../utils/auth';
@@ -168,14 +169,18 @@ const KpiCard = ({ label, value, helper, loading, placeholder }) => (
   </div>
 );
 
-const SortButton = ({ active, direction, label, onClick }) => (
-  <button type="button" className={`crm-sort${active ? ' is-active' : ''}`} onClick={onClick}>
-    <span>{label}</span>
-    <span className="crm-sort__icon" aria-hidden>
-      {active ? (direction === 'asc' ? '?' : '?') : '?'}
-    </span>
-  </button>
-);
+const SortButton = ({ active, direction, label, onClick }) => {
+  const SortIcon = active ? (direction === 'asc' ? ArrowUp : ArrowDown) : ArrowUpDown;
+
+  return (
+    <button type="button" className={`crm-sort${active ? ' is-active' : ''}`} onClick={onClick}>
+      <span>{label}</span>
+      <span className="crm-sort__icon" aria-hidden="true">
+        <SortIcon size={14} strokeWidth={2.4} />
+      </span>
+    </button>
+  );
+};
 
 export default function Clientes() {
   const user = getUser();
