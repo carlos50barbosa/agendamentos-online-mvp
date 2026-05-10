@@ -1645,7 +1645,12 @@ export default function Assinatura() {
               </button>
             </form>
             {cardState.loading ? <span className="muted">Carregando formulário seguro do gateway...</span> : null}
-            {cardState.error ? <span className="muted" style={{ color: '#b91c1c' }}>{cardState.error}</span> : null}
+            {cardState.error ? (
+              <div className="subscription-page__callout subscription-page__callout--danger" role="alert">
+                <strong>Não foi possível continuar com este cartão.</strong>
+                <p className="muted">{cardState.error}</p>
+              </div>
+            ) : null}
             {cardRecoveryNeedsNewToken && hasDelinquentStatus ? (
               <p className="muted">
                 Os dados do cartão precisam ser confirmados novamente para gerar um novo token de segurança antes da cobrança manual.

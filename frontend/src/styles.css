@@ -2973,6 +2973,16 @@ a:hover { opacity: 1; text-decoration: underline; }
 .subscription-page__callout strong{
   color:#0f172a;
 }
+.subscription-page__callout--danger{
+  border-color:rgba(220,38,38,.24);
+  background:rgba(254,242,242,.96);
+}
+.subscription-page__callout--danger strong{
+  color:#991b1b;
+}
+.subscription-page__callout--danger .muted{
+  color:#7f1d1d;
+}
 .subscription-page__payments-card{
   display:grid;
   gap:14px;
@@ -12644,6 +12654,11 @@ body.planos-no-scrollbar .container--wide::-webkit-scrollbar{
   color: #991b1b;
 }
 
+.loyalty-alert--warn {
+  background: rgba(245, 158, 11, 0.14);
+  color: #92400e;
+}
+
 .loyalty-grid {
   display: grid;
   gap: 16px;
@@ -12755,12 +12770,13 @@ body.planos-no-scrollbar .container--wide::-webkit-scrollbar{
 
 .loyalty-failure-box {
   display: grid;
-  gap: 6px;
+  gap: 12px;
   padding: 14px 16px;
   border-radius: 16px;
-  border: 1px solid rgba(220, 38, 38, 0.18);
-  background: rgba(254, 242, 242, 0.92);
+  border: 1px solid rgba(220, 38, 38, 0.3);
+  background: rgba(254, 242, 242, 0.96);
   color: #991b1b;
+  box-shadow: 0 12px 30px rgba(153, 27, 27, 0.08);
 }
 
 .loyalty-failure-box strong {
@@ -12770,6 +12786,43 @@ body.planos-no-scrollbar .container--wide::-webkit-scrollbar{
 .loyalty-failure-box span {
   font-size: 14px;
   line-height: 1.45;
+}
+
+.loyalty-alert-heading {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.loyalty-alert-heading > div,
+.loyalty-alert-details,
+.loyalty-recovery-panel {
+  display: grid;
+  gap: 6px;
+}
+
+.loyalty-alert-icon {
+  width: 26px;
+  height: 26px;
+  flex: 0 0 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: #dc2626;
+  color: #fff;
+  font-weight: 800;
+}
+
+.loyalty-alert-details {
+  padding-left: 38px;
+}
+
+.loyalty-recovery-panel {
+  padding: 12px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.75);
+  border: 1px solid rgba(220, 38, 38, 0.14);
 }
 
 .loyalty-payment-state-box {
@@ -12789,6 +12842,12 @@ body.planos-no-scrollbar .container--wide::-webkit-scrollbar{
 .loyalty-payment-state-box span {
   font-size: 14px;
   line-height: 1.45;
+}
+
+.loyalty-payment-state-box--success {
+  border-color: rgba(22, 163, 74, 0.22);
+  background: rgba(240, 253, 244, 0.96);
+  color: #166534;
 }
 
 .loyalty-plan-card__items,
@@ -12882,7 +12941,27 @@ body.planos-no-scrollbar .container--wide::-webkit-scrollbar{
   background: #fff;
 }
 
-.loyalty-inline-error,
+.loyalty-inline-error {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(220, 38, 38, 0.22);
+  background: rgba(254, 242, 242, 0.95);
+  color: #991b1b;
+}
+
+.loyalty-inline-error strong {
+  color: #7f1d1d;
+}
+
+.loyalty-inline-error span,
+.loyalty-inline-error p {
+  margin: 0;
+  color: #991b1b;
+}
+
 .loyalty-empty {
   color: #64748b;
 }

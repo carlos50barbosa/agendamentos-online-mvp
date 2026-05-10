@@ -392,6 +392,54 @@ function buildClientLoyaltyPixFallbackMetadata(fallbackContext = null) {
   }
 }
 
+function formatClientLoyaltyCycleEnd(value) {
+  const date = toDate(value)
+  if (!date) return null
+  try {
+    return date.toLocaleDateString('pt-BR', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+    })
+  } catch {
+    return date.toISOString().slice(0, 10)
+  }
+}
+
+function resolveClientLoyaltyPaidCyclePixBlock(subscription) {
+  if (!subscription) return null
+  const state = computeClientLoyaltySubscriptionState(subscription)
+  const status = String(subscription.status || '').trim().toLowerCase()
+  if (!state.benefitsActive || !['active', 'canceled'].includes(status)) return null
+
+  const periodEnd = toDate(subscription.currentPeriodEnd || subscription.nextBillingAt)
+  const friendlyEnd = formatClientLoyaltyCycleEnd(periodEnd)
+  const message = friendlyEnd
+    ? `Este plano de fidelidade já está pago até ${friendlyEnd}. Gere um novo PIX somente após o vencimento do ciclo atual.`
+    : 'Este plano de fidelidade já está pago no ciclo atual. Gere um novo PIX somente após o vencimento.'
+
+  return {
+    message,
+    currentPeriodEnd: periodEnd ? periodEnd.toISOString() : null,
+    resolvedStatus: state.resolvedStatus,
+  }
+}
+
+function assertClientLoyaltyPixAllowedForCycle(subscription) {
+  const block = resolveClientLoyaltyPaidCyclePixBlock(subscription)
+  if (!block) return
+  throw createError(
+    block.message,
+    409,
+    'client_loyalty_pix_cycle_already_paid',
+    {
+      current_period_end: block.currentPeriodEnd,
+      status: block.resolvedStatus,
+      reason: 'paid_cycle_not_expired',
+    }
+  )
+}
+
 export function buildClientLoyaltyActivationEventPayload(rawPayload = null, {
   paymentMethod = null,
 } = {}) {
@@ -2504,27 +2552,13 @@ export async function createClientLoyaltyPixCheckout({
         'client_loyalty_subscription_plan_mismatch'
       )
     }
-    const requestedState = computeClientLoyaltySubscriptionState(subscription)
-    if (requestedState.benefitsActive && String(subscription.status || '').trim().toLowerCase() === 'active') {
-      throw createError(
-        'Este plano ja esta ativo no ciclo atual.',
-        409,
-        'client_loyalty_subscription_active'
-      )
-    }
+    assertClientLoyaltyPixAllowedForCycle(subscription)
   }
 
   const current = await getPreferredClientLoyaltySubscription(clienteId, estabelecimentoId, { db })
   if (current) {
     const state = computeClientLoyaltySubscriptionState(current)
-    const currentStatus = String(current.status || '').trim().toLowerCase()
-    if (state.benefitsActive && currentStatus === 'active') {
-      throw createError(
-        'Este plano já está ativo no ciclo atual.',
-        409,
-        'client_loyalty_subscription_active'
-      )
-    }
+    assertClientLoyaltyPixAllowedForCycle(current)
     if (
       !subscription &&
       Number(current.loyaltyPlanId) === Number(loyaltyPlanId) &&

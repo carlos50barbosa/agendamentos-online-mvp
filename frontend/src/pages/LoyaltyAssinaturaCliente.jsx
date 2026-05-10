@@ -63,6 +63,30 @@ function formatCooldown(value) {
   return `${totalMinutes} min`
 }
 
+function isFutureDate(value) {
+  if (!value) return false
+  const date = value instanceof Date ? value : new Date(value)
+  return Number.isFinite(date.getTime()) && date.getTime() > Date.now()
+}
+
+function getPaidCyclePixBlock(details) {
+  const subscription = details?.subscription || null
+  if (!subscription) return null
+  const computedState = subscription.computed_state || {}
+  const status = String(subscription.status_raw || subscription.status || '').toLowerCase().trim()
+  const currentPeriodEnd = subscription.current_period_end || subscription.next_billing_at || null
+  const paidCycleActive = computedState.benefitsActive === true ||
+    (['active', 'canceled'].includes(status) && isFutureDate(currentPeriodEnd))
+  if (!paidCycleActive) return null
+
+  return {
+    currentPeriodEnd,
+    message: currentPeriodEnd
+      ? `Este ciclo já está pago até ${formatDate(currentPeriodEnd)}. Um novo PIX só fica disponível após o vencimento.`
+      : 'Este ciclo já está pago. Um novo PIX só fica disponível após o vencimento.',
+  }
+}
+
 function normalizePixCheckoutResponse(response) {
   if (!response) return null
   const pix = response.pix || {}
@@ -262,6 +286,8 @@ export default function LoyaltyAssinaturaCliente() {
   const latestFailure = failureDisplay.raw || null
   const latestPaymentSnapshot = currentDetails?.latest_payment_snapshot || currentDetails?.subscription?.latest_payment_snapshot || null
   const cardRetryBlocked = retryDisplay.cardAttemptLimitActive || retryDisplay.cardEnabled === false
+  const paidCyclePixBlock = useMemo(() => getPaidCyclePixBlock(currentDetails), [currentDetails])
+  const pixCycleBlocked = Boolean(paidCyclePixBlock)
 
   const loadData = useCallback(async () => {
     setLoading(true)
@@ -326,6 +352,11 @@ export default function LoyaltyAssinaturaCliente() {
       setNotice({ type: 'error', message: 'Selecione um plano de fidelidade para gerar o PIX.' })
       return
     }
+    if (paidCyclePixBlock) {
+      setNotice({ type: 'warn', message: paidCyclePixBlock.message })
+      setPixModalOpen(false)
+      return
+    }
     if (!sellerConnected) {
       setNotice({ type: 'error', message: 'Este estabelecimento ainda não conectou uma conta Mercado Pago.' })
       return
@@ -377,6 +408,7 @@ export default function LoyaltyAssinaturaCliente() {
     failureDisplay.technicalCode,
     fallbackIntent,
     loadData,
+    paidCyclePixBlock,
     selectedPlanId,
     sellerConnected,
   ])
@@ -736,6 +768,13 @@ export default function LoyaltyAssinaturaCliente() {
             <span>Pagamento: {currentDetails.subscription?.payment_method || '-'}</span>
           </div>
 
+          {paidCyclePixBlock ? (
+            <div className="loyalty-payment-state-box loyalty-payment-state-box--success">
+              <strong>Ciclo já pago</strong>
+              <span>{paidCyclePixBlock.message}</span>
+            </div>
+          ) : null}
+
           {paymentStateDisplay.show && !failureDisplay.technicalCode ? (
             <div className="loyalty-payment-state-box">
               <strong>{paymentStateDisplay.title}</strong>
@@ -746,17 +785,24 @@ export default function LoyaltyAssinaturaCliente() {
           ) : null}
 
           {failureDisplay.technicalCode ? (
-            <div className="loyalty-failure-box">
-              <strong>Cobrança pendente de regularização</strong>
-              <span>Status da assinatura: {currentDetails?.subscription_status || currentStatus || '-'}</span>
-              <span>Última falha técnica: {failureDisplay.technicalCode}</span>
-              {failureDisplay.technicalMessage ? <span>{failureDisplay.technicalMessage}</span> : null}
-              {failureDisplay.occurredAt ? <span>Última tentativa registrada em: {formatDate(failureDisplay.occurredAt)}</span> : null}
-              {latestFailure?.payment_method_id ? <span>Método da última tentativa: {latestFailure.payment_method_id}</span> : null}
-              {latestPaymentSnapshot?.status ? <span>Último status do payment: {latestPaymentSnapshot.status}</span> : null}
-              {latestPaymentSnapshot?.status_detail ? <span>Último status_detail do payment: {latestPaymentSnapshot.status_detail}</span> : null}
+            <div className="loyalty-failure-box" role="alert">
+              <div className="loyalty-alert-heading">
+                <span className="loyalty-alert-icon" aria-hidden="true">!</span>
+                <div>
+                  <strong>Cobrança pendente de regularização</strong>
+                  {failureDisplay.technicalMessage ? <span>{failureDisplay.technicalMessage}</span> : null}
+                </div>
+              </div>
+              <div className="loyalty-alert-details">
+                <span>Status da assinatura: {currentDetails?.subscription_status || currentStatus || '-'}</span>
+                <span>Última falha técnica: {failureDisplay.technicalCode}</span>
+                {failureDisplay.occurredAt ? <span>Última tentativa registrada em: {formatDate(failureDisplay.occurredAt)}</span> : null}
+                {latestFailure?.payment_method_id ? <span>Método da última tentativa: {latestFailure.payment_method_id}</span> : null}
+                {latestPaymentSnapshot?.status ? <span>Último status do payment: {latestPaymentSnapshot.status}</span> : null}
+                {latestPaymentSnapshot?.status_detail ? <span>Último status_detail do payment: {latestPaymentSnapshot.status_detail}</span> : null}
+              </div>
               {retryDisplay.showRecovery ? (
-                <>
+                <div className="loyalty-recovery-panel">
                   {retryDisplay.title ? <span>{retryDisplay.title}</span> : null}
                   {retryDisplay.description ? <span>{retryDisplay.description}</span> : null}
                   {retryDisplay.cardCooldownActive ? (
@@ -793,7 +839,7 @@ export default function LoyaltyAssinaturaCliente() {
                       {retryDisplay.pixActionLabel}
                     </button>
                   </div>
-                </>
+                </div>
               ) : null}
             </div>
           ) : null}
@@ -902,9 +948,18 @@ export default function LoyaltyAssinaturaCliente() {
 
               {paymentMethod === 'pix' ? (
                 <div className="loyalty-checkout-block">
-                  <p>Pagamento manual por ciclo. Ao pagar, o plano é ativado e os créditos do mês são liberados.</p>
-                  <button type="button" className="btn btn--primary" onClick={handlePixSubscribe} disabled={submitting || !sellerConnected}>
-                    {fallbackIntent || failureDisplay.technicalCode === 'cc_rejected_high_risk' ? 'Pagar por PIX agora' : 'Gerar PIX'}
+                  {paidCyclePixBlock ? (
+                    <div className="loyalty-payment-state-box loyalty-payment-state-box--success">
+                      <strong>PIX indisponível neste ciclo</strong>
+                      <span>{paidCyclePixBlock.message}</span>
+                    </div>
+                  ) : (
+                    <p>Pagamento manual por ciclo. Ao pagar, o plano é ativado e os créditos do mês são liberados.</p>
+                  )}
+                  <button type="button" className="btn btn--primary" onClick={handlePixSubscribe} disabled={submitting || !sellerConnected || pixCycleBlocked}>
+                    {pixCycleBlocked
+                      ? 'Ciclo já pago'
+                      : (fallbackIntent || failureDisplay.technicalCode === 'cc_rejected_high_risk' ? 'Pagar por PIX agora' : 'Gerar PIX')}
                   </button>
                   {pixPayload ? (
                     <div className="loyalty-pix-box">
@@ -928,11 +983,14 @@ export default function LoyaltyAssinaturaCliente() {
                     <p className="loyalty-inline-error">Conta Mercado Pago desconectada ou sem permissao valida.</p>
                   ) : null}
                   {cardRetryBlocked ? (
-                    <p className="loyalty-inline-error">
-                      {retryDisplay.cardCooldownActive
-                        ? `Por segurança, novas tentativas com cartão ficam indisponíveis por ${formatCooldown(retryDisplay.cardCooldownRemainingMs)}. PIX continua disponível.`
-                        : 'Não foi possível aprovar este cartão no momento. Tente PIX ou outro cartão.'}
-                    </p>
+                    <div className="loyalty-inline-error" role="alert">
+                      <strong>Cartão temporariamente indisponível</strong>
+                      <span>
+                        {retryDisplay.cardCooldownActive
+                          ? `Por segurança, novas tentativas com cartão ficam indisponíveis por ${formatCooldown(retryDisplay.cardCooldownRemainingMs)}. PIX continua disponível.`
+                          : 'Não foi possível aprovar este cartão no momento. Tente PIX ou outro cartão.'}
+                      </span>
+                    </div>
                   ) : null}
                   <form
                     key={cardFormResetKey}
@@ -955,7 +1013,12 @@ export default function LoyaltyAssinaturaCliente() {
                       {cardState.loading ? 'Carregando...' : 'Assinar no cartão'}
                     </button>
                   </form>
-                  {cardState.error ? <p className="loyalty-inline-error">{cardState.error}</p> : null}
+                  {cardState.error ? (
+                    <div className="loyalty-inline-error" role="alert">
+                      <strong>Não foi possível continuar no cartão</strong>
+                      <span>{cardState.error}</span>
+                    </div>
+                  ) : null}
                 </div>
               )}
             </>
