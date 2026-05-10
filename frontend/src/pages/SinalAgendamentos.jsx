@@ -173,7 +173,7 @@ export default function SinalAgendamentos() {
                 onChange={(event) => setDepositEnabled(event.target.checked)}
                 disabled={deposit.saving}
               />
-              <span>Ativar sinal nos agendamentos</span>
+              <span>{deposit.enabled ? 'Ativado' : 'Desativado'}</span>
             </label>
 
             <div className="settings-module-form__row">

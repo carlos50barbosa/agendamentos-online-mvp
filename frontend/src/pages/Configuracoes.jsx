@@ -5742,7 +5742,7 @@ function _l() {
                             disabled: de,
                           }),
                           e.jsx("span", {
-                            children: "Ativar sinal nos agendamentos",
+                            children: L ? "Ativado" : "Desativado",
                           }),
                         ],
                       }),
