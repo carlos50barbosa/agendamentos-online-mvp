@@ -62,6 +62,26 @@ function formatCooldown(value) {
   return `${totalMinutes} min`
 }
 
+function normalizePixCheckoutResponse(response) {
+  if (!response) return null
+  const pix = response.pix || {}
+  const normalizedPix = {
+    ...pix,
+    payment_id: pix.payment_id || response.payment?.id || null,
+    qr_code: pix.qr_code || response.qr_code || null,
+    qr_code_base64: pix.qr_code_base64 || response.qr_code_base64 || null,
+    copia_e_cola: pix.copia_e_cola || response.copia_e_cola || pix.qr_code || response.qr_code || '',
+    ticket_url: pix.ticket_url || response.ticket_url || null,
+    amount_cents: pix.amount_cents ?? response.amount_cents ?? response.subscription?.plan?.preco_centavos ?? null,
+    expires_at: pix.expires_at || response.expires_at || null,
+  }
+
+  return {
+    ...response,
+    pix: normalizedPix,
+  }
+}
+
 function getStatusLabel(value) {
   const key = String(value || '').toLowerCase().trim()
   const labels = {
@@ -187,6 +207,7 @@ export default function LoyaltyAssinaturaCliente() {
   const [paymentMethod, setPaymentMethod] = useState('pix')
   const [fallbackIntent, setFallbackIntent] = useState(null)
   const [pixCheckout, setPixCheckout] = useState(null)
+  const [pixCopyNotice, setPixCopyNotice] = useState('')
   const [cardFormResetKey, setCardFormResetKey] = useState(0)
   const [cardState, setCardState] = useState({ loading: false, ready: false, error: '' })
   const currentStatus = String(currentDetails?.subscription?.status || '').toLowerCase().trim()
@@ -252,16 +273,25 @@ export default function LoyaltyAssinaturaCliente() {
     [plansBundle.plans, selectedPlanId]
   )
 
-  const handlePixSubscribe = useCallback(async () => {
-    if (!estabelecimentoId || !selectedPlanId) return
+  const handlePixSubscribe = useCallback(async (input = {}) => {
+    const fallbackOverride = input?.fallbackOverride || null
+    const currentLoyaltyPlanId = currentDetails?.subscription?.loyalty_plan_id || currentDetails?.plan?.id || ''
+    const planIdForPix = fallbackOverride?.previous_subscription_id
+      ? (currentLoyaltyPlanId || selectedPlanId)
+      : (selectedPlanId || currentLoyaltyPlanId)
+    if (!estabelecimentoId || !planIdForPix) {
+      setNotice({ type: 'error', message: 'Selecione um plano de fidelidade para gerar o PIX.' })
+      return
+    }
     if (!sellerConnected) {
       setNotice({ type: 'error', message: 'Este estabelecimento ainda não conectou uma conta Mercado Pago.' })
       return
     }
     setSubmitting(true)
     setNotice({ type: '', message: '' })
+    setPixCopyNotice('')
     try {
-      const recoveryFallback = fallbackIntent || (
+      const recoveryFallback = fallbackOverride || fallbackIntent || (
         failureDisplay.technicalCode === 'cc_rejected_high_risk'
           ? {
               reason: 'card_high_risk',
@@ -273,13 +303,16 @@ export default function LoyaltyAssinaturaCliente() {
       )
       const response = await Api.clientLoyaltyPayPix({
         estabelecimento_id: Number(estabelecimentoId),
-        loyalty_plan_id: Number(selectedPlanId),
+        loyalty_plan_id: Number(planIdForPix),
+        subscription_id: currentDetails?.subscription?.id && String(currentLoyaltyPlanId) === String(planIdForPix)
+          ? currentDetails.subscription.id
+          : null,
         fallback_reason: recoveryFallback?.reason || null,
         fallback_source: recoveryFallback?.source || null,
         previous_failure_code: recoveryFallback?.previous_failure_code || null,
         previous_subscription_id: recoveryFallback?.previous_subscription_id || null,
       })
-      setPixCheckout(response || null)
+      setPixCheckout(normalizePixCheckoutResponse(response))
       setFallbackIntent(null)
       setNotice({ type: 'success', message: 'PIX gerado. Pague para ativar o plano.' })
       await loadData()
@@ -293,6 +326,8 @@ export default function LoyaltyAssinaturaCliente() {
     }
   }, [
     currentDetails?.subscription?.id,
+    currentDetails?.subscription?.loyalty_plan_id,
+    currentDetails?.plan?.id,
     estabelecimentoId,
     failureDisplay.technicalCode,
     fallbackIntent,
@@ -318,6 +353,20 @@ export default function LoyaltyAssinaturaCliente() {
       setSubmitting(false)
     }
   }, [currentDetails?.subscription?.id, loadData])
+
+  const handleCopyPixCode = useCallback(async () => {
+    const code = pixCheckout?.pix?.copia_e_cola || pixCheckout?.pix?.qr_code || ''
+    if (!code) return
+    try {
+      if (typeof navigator === 'undefined' || !navigator.clipboard?.writeText) {
+        throw new Error('clipboard_unavailable')
+      }
+      await navigator.clipboard.writeText(code)
+      setPixCopyNotice('Codigo PIX copiado.')
+    } catch {
+      setPixCopyNotice('Nao foi possivel copiar automaticamente. Selecione o codigo e copie manualmente.')
+    }
+  }, [pixCheckout?.pix?.copia_e_cola, pixCheckout?.pix?.qr_code])
 
   const resetCardFormForNewToken = useCallback(() => {
     try {
@@ -591,6 +640,8 @@ export default function LoyaltyAssinaturaCliente() {
   }, [cardFormResetKey, gatewayPublicKey, handleCardSubmit, paymentMethod, selectedPlan, sellerConnected])
 
   const activeCredits = currentDetails?.credits || []
+  const pixPayload = pixCheckout?.pix || null
+  const pixCode = pixPayload?.copia_e_cola || pixPayload?.qr_code || ''
 
   return (
     <div className="page loyalty-page">
@@ -682,15 +733,17 @@ export default function LoyaltyAssinaturaCliente() {
                       type="button"
                       className="btn btn--primary"
                       onClick={() => {
-                        setFallbackIntent({
+                        const fallback = {
                           reason: failureDisplay.technicalCode === 'cc_rejected_high_risk' ? 'card_high_risk' : 'card_decline',
                           source: 'failure_recovery',
                           previous_failure_code: failureDisplay.technicalCode || null,
                           previous_subscription_id: currentDetails?.subscription?.id || null,
-                        })
+                        }
+                        setFallbackIntent(fallback)
                         setPaymentMethod('pix')
+                        void handlePixSubscribe({ fallbackOverride: fallback })
                       }}
-                      disabled={!retryDisplay.pixEnabled}
+                      disabled={!retryDisplay.pixEnabled || submitting}
                     >
                       {retryDisplay.pixActionLabel}
                     </button>
@@ -808,11 +861,35 @@ export default function LoyaltyAssinaturaCliente() {
                   <button type="button" className="btn btn--primary" onClick={handlePixSubscribe} disabled={submitting || !sellerConnected}>
                     {fallbackIntent || failureDisplay.technicalCode === 'cc_rejected_high_risk' ? 'Pagar por PIX agora' : 'Gerar PIX'}
                   </button>
-                  {pixCheckout?.pix ? (
+                  {pixPayload ? (
                     <div className="loyalty-pix-box">
                       <strong>PIX pendente</strong>
-                      <p>Valor: {formatCurrencyFromCents(pixCheckout.pix.amount_cents)}</p>
-                      <textarea className="input loyalty-pix-box__code" readOnly value={pixCheckout.pix.copia_e_cola || pixCheckout.pix.qr_code || ''} />
+                      {pixPayload.amount_cents != null ? <p>Valor: {formatCurrencyFromCents(pixPayload.amount_cents)}</p> : null}
+                      {pixPayload.qr_code_base64 ? (
+                        <img
+                          src={`data:image/png;base64,${pixPayload.qr_code_base64}`}
+                          alt="QR Code PIX"
+                          className="pix-checkout__qr"
+                        />
+                      ) : null}
+                      {pixPayload.ticket_url ? (
+                        <a className="btn btn--outline btn--sm" href={pixPayload.ticket_url} target="_blank" rel="noreferrer">
+                          Abrir PIX no Mercado Pago
+                        </a>
+                      ) : null}
+                      {pixCode ? (
+                        <>
+                          <label className="label" htmlFor="loyalty-pix-code">PIX copia e cola</label>
+                          <textarea id="loyalty-pix-code" className="input loyalty-pix-box__code" readOnly value={pixCode} rows={4} />
+                          <button type="button" className="btn btn--outline btn--sm" onClick={handleCopyPixCode}>
+                            Copiar codigo
+                          </button>
+                          {pixCopyNotice ? <p className="muted">{pixCopyNotice}</p> : null}
+                        </>
+                      ) : (
+                        <p className="loyalty-inline-error">O Mercado Pago nao retornou o codigo PIX. Gere novamente ou abra o link acima.</p>
+                      )}
+                      {pixPayload.expires_at ? <p className="muted">Expira em: {formatDate(pixPayload.expires_at)}</p> : null}
                     </div>
                   ) : null}
                 </div>

@@ -372,6 +372,7 @@ router.post('/subscribe', auth, isCliente, async (req, res) => {
       clienteId: req.user.id,
       estabelecimentoId,
       loyaltyPlanId,
+      subscriptionId: normalizeId(req.body?.subscription_id || req.body?.assinatura_id),
       fallbackContext: buildClientLoyaltyFallbackContext(req.body),
     })
     return res.status(201).json({
@@ -379,6 +380,10 @@ router.post('/subscribe', auth, isCliente, async (req, res) => {
       method: 'pix',
       subscription: await loadClientLoyaltySubscriptionDetails(result.subscription),
       pix: result.pix,
+      qr_code: result.pix?.qr_code || null,
+      qr_code_base64: result.pix?.qr_code_base64 || null,
+      copia_e_cola: result.pix?.copia_e_cola || result.pix?.qr_code || null,
+      ticket_url: result.pix?.ticket_url || null,
       payment: {
         id: result.payment?.id || null,
         status: result.payment?.status || null,
@@ -407,12 +412,17 @@ router.post('/pay/pix', auth, isCliente, async (req, res) => {
       clienteId: req.user.id,
       estabelecimentoId,
       loyaltyPlanId,
+      subscriptionId: normalizeId(req.body?.subscription_id || req.body?.assinatura_id),
       fallbackContext: buildClientLoyaltyFallbackContext(req.body),
     })
     return res.status(201).json({
       ok: true,
       subscription: await loadClientLoyaltySubscriptionDetails(result.subscription),
       pix: result.pix,
+      qr_code: result.pix?.qr_code || null,
+      qr_code_base64: result.pix?.qr_code_base64 || null,
+      copia_e_cola: result.pix?.copia_e_cola || result.pix?.qr_code || null,
+      ticket_url: result.pix?.ticket_url || null,
       payment: {
         id: result.payment?.id || null,
         status: result.payment?.status || null,

@@ -90,6 +90,32 @@ function normalizeSpaces(value) {
   return normalizeText(value).replace(/\s+/g, ' ')
 }
 
+function splitClientName(value) {
+  const normalized = normalizeSpaces(value)
+  if (!normalized) return { firstName: null, lastName: null }
+  const parts = normalized.split(' ').filter(Boolean)
+  return {
+    firstName: parts[0] || null,
+    lastName: parts.length > 1 ? parts.slice(1).join(' ') : null,
+  }
+}
+
+function buildClientPixPayer(cliente = {}) {
+  const payer = {}
+  const email = normalizeText(cliente?.email).toLowerCase()
+  const document = digitsOnly(cliente?.cpf_cnpj || cliente?.cpfCnpj)
+  const nameParts = splitClientName(cliente?.nome)
+  if (email) payer.email = email
+  if (nameParts.firstName) payer.first_name = nameParts.firstName
+  if (nameParts.lastName) payer.last_name = nameParts.lastName
+  if (document.length === 11 && isValidCpf(document)) {
+    payer.identification = { type: 'CPF', number: document }
+  } else if (document.length === 14 && isValidCnpj(document)) {
+    payer.identification = { type: 'CNPJ', number: document }
+  }
+  return Object.keys(payer).length ? payer : null
+}
+
 export const CLIENT_LOYALTY_CARDHOLDER_NAME_FIELD = 'cardholder_name'
 export const CLIENT_LOYALTY_CARDHOLDER_NAME_FIELDS = [
   CLIENT_LOYALTY_CARDHOLDER_NAME_FIELD,
@@ -125,6 +151,22 @@ function isValidCpf(value) {
   digit = (sum * 10) % 11
   if (digit === 10) digit = 0
   return digit === Number(cpf[10])
+}
+
+function isValidCnpj(value) {
+  const cnpj = digitsOnly(value)
+  if (cnpj.length !== 14 || /^(\d)\1{13}$/.test(cnpj)) return false
+
+  const calcDigit = (length) => {
+    const weights = length === 12
+      ? [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]
+      : [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]
+    const sum = weights.reduce((total, weight, index) => total + Number(cnpj[index]) * weight, 0)
+    const remainder = sum % 11
+    return remainder < 2 ? 0 : 11 - remainder
+  }
+
+  return calcDigit(12) === Number(cnpj[12]) && calcDigit(13) === Number(cnpj[13])
 }
 
 export function normalizeClientLoyaltyCardholderName(value) {
@@ -346,6 +388,7 @@ function buildClientLoyaltyPixFallbackMetadata(fallbackContext = null) {
     fallback_source: 'pix',
     ...(fallbackContext?.source ? { fallback_origin: fallbackContext.source } : {}),
     ...(fallbackContext?.previousFailureCode ? { previous_failure_code: fallbackContext.previousFailureCode } : {}),
+    ...(fallbackContext?.previousSubscriptionId ? { previous_subscription_id: String(fallbackContext.previousSubscriptionId) } : {}),
   }
 }
 
@@ -1807,7 +1850,7 @@ async function fetchEstablishmentSummary(estabelecimentoId, { db = pool } = {}) 
 
 async function fetchClientSummary(clienteId, { db = pool } = {}) {
   const [rows] = await db.query(
-    `SELECT id, nome, email, telefone
+    `SELECT id, nome, email, telefone, cpf_cnpj
        FROM usuarios
       WHERE id=?
       LIMIT 1`,
@@ -2429,6 +2472,7 @@ export async function createClientLoyaltyPixCheckout({
   clienteId,
   estabelecimentoId,
   loyaltyPlanId,
+  subscriptionId = null,
   db = pool,
   fallbackContext = null,
 } = {}) {
@@ -2438,6 +2482,38 @@ export async function createClientLoyaltyPixCheckout({
     loyaltyPlanId,
     { db }
   )
+  const requestedSubscriptionId = Number(subscriptionId || 0) || null
+  let subscription = null
+  if (requestedSubscriptionId) {
+    subscription = await getClientLoyaltySubscriptionById(requestedSubscriptionId, { db })
+    if (
+      !subscription ||
+      Number(subscription.clienteId) !== Number(clienteId) ||
+      Number(subscription.estabelecimentoId) !== Number(estabelecimentoId)
+    ) {
+      throw createError(
+        'Assinatura de fidelidade nao encontrada para este cliente.',
+        404,
+        'client_loyalty_subscription_not_found'
+      )
+    }
+    if (Number(subscription.loyaltyPlanId) !== Number(loyaltyPlanId)) {
+      throw createError(
+        'A assinatura informada nao pertence ao plano selecionado.',
+        409,
+        'client_loyalty_subscription_plan_mismatch'
+      )
+    }
+    const requestedState = computeClientLoyaltySubscriptionState(subscription)
+    if (requestedState.benefitsActive && String(subscription.status || '').trim().toLowerCase() === 'active') {
+      throw createError(
+        'Este plano ja esta ativo no ciclo atual.',
+        409,
+        'client_loyalty_subscription_active'
+      )
+    }
+  }
+
   const current = await getPreferredClientLoyaltySubscription(clienteId, estabelecimentoId, { db })
   if (current) {
     const state = computeClientLoyaltySubscriptionState(current)
@@ -2449,19 +2525,37 @@ export async function createClientLoyaltyPixCheckout({
         'client_loyalty_subscription_active'
       )
     }
+    if (
+      !subscription &&
+      Number(current.loyaltyPlanId) === Number(loyaltyPlanId) &&
+      ['pending_pix', 'past_due', 'unpaid', 'expired', 'canceled'].includes(state.resolvedStatus)
+    ) {
+      subscription = current
+    }
   }
 
-  const subscription = await createClientLoyaltySubscription({
-    clienteId,
-    estabelecimentoId,
-    loyaltyPlanId,
-    ownerType: 'establishment',
-    sellerMpAccountId: null,
-    status: 'pending_pix',
-    paymentMethod: 'pix',
-    gateway: 'mercadopago',
-    autoRenew: false,
-  }, { db })
+  const mpAccess = await resolveActiveLoyaltyMpContext(estabelecimentoId)
+  if (!subscription) {
+    subscription = await createClientLoyaltySubscription({
+      clienteId,
+      estabelecimentoId,
+      loyaltyPlanId,
+      ownerType: 'establishment',
+      sellerMpAccountId: mpAccess.account?.id || null,
+      status: 'pending_pix',
+      paymentMethod: 'pix',
+      gateway: 'mercadopago',
+      autoRenew: false,
+    }, { db })
+  } else if (subscription.paymentMethod === 'credit_card' && subscription.gatewaySubscriptionId) {
+    try {
+      await cancelMercadoPagoCardSubscription(subscription.gatewaySubscriptionId, {
+        accessToken: mpAccess.accessToken,
+      })
+    } catch (error) {
+      console.warn('[client-loyalty][pix] gateway_cancel_failed', error?.message || error)
+    }
+  }
 
   const cycleRef = formatCycleRef(new Date())
   const externalReference = buildPixExternalReference({
@@ -2472,14 +2566,16 @@ export async function createClientLoyaltyPixCheckout({
     cycleRef,
   })
 
-  const mpAccess = await resolveActiveLoyaltyMpContext(estabelecimentoId)
   const sellerEventContext = buildSellerEventContext(mpAccess.account, estabelecimentoId)
   const paymentResult = await createMercadoPagoPixPayment({
     amountCents: Number(plan.preco_centavos || 0),
-    description: `${plan.nome} - ${estabelecimento.nome}`,
+    description: `Fidelidade - ${plan.nome} - ${estabelecimento.nome}`,
     externalReference,
     metadata: {
       kind: 'loyalty_subscription_pix',
+      tipo: 'fidelidade',
+      assinatura_id: String(subscription.id),
+      subscription_id: String(subscription.id),
       loyalty_subscription_id: String(subscription.id),
       loyalty_plan_id: String(loyaltyPlanId),
       cliente_id: String(clienteId),
@@ -2489,6 +2585,7 @@ export async function createClientLoyaltyPixCheckout({
     },
     notificationUrl: resolveSellerWebhookUrl(),
     payerEmail: cliente.email || null,
+    payer: buildClientPixPayer(cliente),
     accessToken: mpAccess.accessToken,
   })
 
@@ -2497,6 +2594,8 @@ export async function createClientLoyaltyPixCheckout({
     sellerMpAccountId: mpAccess.account?.id || null,
     status: 'pending_pix',
     gatewayPaymentId: paymentResult?.payment?.id ? String(paymentResult.payment.id) : null,
+    gatewaySubscriptionId: null,
+    mpPreapprovalId: null,
     externalReference,
     paymentMethod: 'pix',
     autoRenew: false,

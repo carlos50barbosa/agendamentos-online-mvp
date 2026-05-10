@@ -87,6 +87,7 @@ function ensureMercadoPagoPayment() {
           payment_method_id: body?.payment_method_id,
           external_reference: body?.external_reference,
           metadata: body?.metadata || null,
+          payer: body?.payer || null,
           point_of_interaction: { transaction_data: txData },
           date_of_expiration: expires,
         }
@@ -152,11 +153,14 @@ export async function createMercadoPagoPixPayment({
   metadata,
   notificationUrl,
   payerEmail,
+  payer = null,
   expiresAt = null,
   accessToken = null,
 }) {
   const paymentClient = resolveMercadoPagoPayment(accessToken)
   const amountNum = Number((Number(amountCents || 0) / 100).toFixed(2))
+  const payerPayload = payer && typeof payer === 'object' ? { ...payer } : {}
+  if (!payerPayload.email && payerEmail) payerPayload.email = payerEmail
   const paymentBody = {
     transaction_amount: amountNum,
     description: description || 'Agendamentos Online - Pagamento',
@@ -164,7 +168,7 @@ export async function createMercadoPagoPixPayment({
     external_reference: externalReference,
     metadata,
     notification_url: notificationUrl,
-    payer: payerEmail ? { email: payerEmail } : undefined,
+    payer: Object.keys(payerPayload).length ? payerPayload : undefined,
   }
   if (expiresAt) {
     const exp = new Date(expiresAt)
