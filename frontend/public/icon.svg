@@ -1,0 +1,17 @@
+<svg viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Agendamentos Online">
+  <defs>
+    <linearGradient id="ao-icon" x1="12%" y1="10%" x2="88%" y2="90%">
+      <stop offset="0%" stop-color="#5049E5"/>
+      <stop offset="100%" stop-color="#1E1B4B"/>
+    </linearGradient>
+  </defs>
+  <!-- full-bleed para maskable; glifo dentro da zona segura central -->
+  <rect width="512" height="512" fill="url(#ao-icon)"/>
+  <g transform="translate(146 150)">
+    <rect x="0" y="34" width="220" height="196" rx="46" fill="#ffffff"/>
+    <path d="M34 96h152" stroke="rgba(30,27,75,0.14)" stroke-width="11" stroke-linecap="round"/>
+    <circle cx="58" cy="20" r="15" fill="#7669ED"/>
+    <circle cx="162" cy="20" r="15" fill="#7669ED"/>
+    <path d="M64 162l42 42 84-84" fill="none" stroke="#5049E5" stroke-width="26" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>

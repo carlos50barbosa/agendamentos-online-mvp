@@ -1,23 +1,22 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import moment from 'moment'
-import 'moment/locale/pt-br'
+import { format, parse, startOfWeek, getDay } from 'date-fns'
+import { ptBR } from 'date-fns/locale'
 import 'react-big-calendar/lib/css/react-big-calendar.css'
-import { Calendar as BigCalendar, momentLocalizer, Views } from 'react-big-calendar'
+import { Calendar as BigCalendar, dateFnsLocalizer, Views } from 'react-big-calendar'
 import { Api, resolveAssetUrl } from '../utils/api'
 import { getUser, USER_EVENT } from '../utils/auth'
 import Modal from '../components/Modal.jsx'
 import { NavLink, useLocation, useSearchParams } from 'react-router-dom'
 
 
-moment.locale('pt-br')
-
-moment.updateLocale('pt-br', {
-
-  week: { dow: 1 },
-
+const localizer = dateFnsLocalizer({
+  format,
+  parse,
+  // Semana começa na segunda-feira (preserva o comportamento anterior).
+  startOfWeek: (date) => startOfWeek(date, { weekStartsOn: 1 }),
+  getDay,
+  locales: { 'pt-BR': ptBR, 'pt-br': ptBR },
 })
-
-const localizer = momentLocalizer(moment)
 const CALENDAR_TIME_ZONE = 'America/Sao_Paulo'
 
 

@@ -1,14 +1,16 @@
 // src/components/LogoAO.jsx
 import React from 'react';
 
+// Marca do produto (índigo): badge com calendário + check.
+// Cores vêm das CSS vars da marca (theme.js); os fallbacks são o índigo novo.
 export default function LogoAO({ size = 28, className = 'brand__logo', title = 'Agendamentos Online' }) {
   return (
     <span {...(className ? { className } : {})} style={{ width: size, height: size }} aria-label={title} role="img">
       <svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
         <defs>
           <linearGradient id="aoGradient" x1="12%" y1="10%" x2="88%" y2="90%">
-            <stop offset="0%" stopColor="var(--primary-500, #4f46e5)" />
-            <stop offset="100%" stopColor="var(--primary-600, #4338ca)" />
+            <stop offset="0%" stopColor="var(--brand, #5049E5)" />
+            <stop offset="100%" stopColor="var(--brand-deep, #1E1B4B)" />
           </linearGradient>
           <linearGradient id="aoShine" x1="0%" y1="0%" x2="100%" y2="100%">
             <stop offset="0%" stopColor="rgba(255,255,255,0.35)" />
@@ -16,46 +18,28 @@ export default function LogoAO({ size = 28, className = 'brand__logo', title = '
           </linearGradient>
         </defs>
 
-        {/* Fundo em degradê com leve brilho */}
-        <circle cx="32" cy="32" r="28" fill="url(#aoGradient)" />
-        <path d="M10 26C12 18 20 12 32 12s20 6 22 14" fill="url(#aoShine)" />
+        {/* Badge arredondado com leve brilho */}
+        <rect x="6" y="6" width="52" height="52" rx="16" fill="url(#aoGradient)" />
+        <path d="M12 22C14 14 22 10 32 10s18 4 20 12" fill="url(#aoShine)" />
 
         {/* Ícone de calendário */}
         <g transform="translate(16 18)">
-          <rect
-            x="2"
-            y="6"
-            width="28"
-            height="28"
-            rx="8"
-            fill="var(--surface, #ffffff)"
-            stroke="rgba(15, 23, 42, 0.08)"
-            strokeWidth="1"
-          />
-          <path
-            d="M6 14h20"
-            stroke="rgba(15, 23, 42, 0.08)"
-            strokeWidth="1"
-            strokeLinecap="round"
-          />
-          <circle cx="8" cy="6" r="1.8" fill="var(--primary-500, #4f46e5)" />
-          <circle cx="24" cy="6" r="1.8" fill="var(--primary-400, #6366f1)" />
+          <rect x="2" y="6" width="28" height="26" rx="7" fill="var(--surface, #ffffff)" />
+          <path d="M6 14h20" stroke="rgba(30, 27, 75, 0.14)" strokeWidth="1.5" strokeLinecap="round" />
+          <circle cx="9" cy="4" r="2" fill="var(--brand-light, #7669ED)" />
+          <circle cx="23" cy="4" r="2" fill="var(--brand-light, #7669ED)" />
 
-          {/* Marca AO estilizada */}
+          {/* Check */}
           <path
-            d="M10 24l6 6 12-12"
+            d="M10 23l5.5 5.5L27 17"
             fill="none"
-            stroke="var(--primary-500, #4f46e5)"
-            strokeWidth="3"
+            stroke="var(--brand, #5049E5)"
+            strokeWidth="3.4"
             strokeLinecap="round"
             strokeLinejoin="round"
           />
         </g>
-
-        {/* Detalhe pulsante */}
-        <circle cx="46" cy="18" r="4" fill="var(--primary-200, #c7d2fe)" />
-        <circle cx="46" cy="18" r="2.4" fill="var(--primary-500, #4f46e5)" />
       </svg>
     </span>
   );
-}
+}

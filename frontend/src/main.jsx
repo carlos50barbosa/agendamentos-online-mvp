@@ -5,7 +5,10 @@ import App from './App.jsx'
 import './styles.css'
 import './styles-premium.css'
 import { initAnalytics } from './utils/analytics.js'
+import { applyTheme } from './config/theme.js'
 
+// Aplica os tokens de marca (índigo) no :root antes do primeiro render.
+applyTheme()
 initAnalytics()
 
 createRoot(document.getElementById('root')).render(
