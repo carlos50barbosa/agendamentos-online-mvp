@@ -23,6 +23,8 @@ import waConnectRouter from './routes/waConnect.js';
 import waTenantWebhookRouter from './routes/waWebhook.js';
 import mercadoPagoRouter from './routes/mercadopago.js';
 import mercadoPagoSellersWebhookRouter from './routes/mercadopago_sellers_webhooks.js';
+import asaasWebhookRouter from './routes/webhooks_asaas.js';
+import billingAsaasRouter from './routes/billing_asaas.js';
 import publicAgendamentosRouter from './routes/agendamentos_public.js';
 import otpPublicRouter from './routes/otp_public.js';
 import profissionaisRouter from './routes/profissionais.js';
@@ -286,6 +288,8 @@ app.use('/whatsapp', waConnectRouter);
 app.use('/marketplace/mp', mercadoPagoRouter);
 app.use('/mercadopago', mercadoPagoRouter);
 app.use('/webhooks/mercadopago/sellers', mercadoPagoSellersWebhookRouter);
+app.use('/webhooks/asaas', asaasWebhookRouter);
+app.use('/billing/asaas', billingAsaasRouter);
 app.use('/wa/webhook', waTenantWebhookRouter);
 app.use('/webhooks/whatsapp', whatsappWebhookRouter);
 
@@ -317,6 +321,8 @@ app.use('/api/whatsapp', waConnectRouter);
 app.use('/api/marketplace/mp', mercadoPagoRouter);
 app.use('/api/mercadopago', mercadoPagoRouter);
 app.use('/api/webhooks/mercadopago/sellers', mercadoPagoSellersWebhookRouter);
+app.use('/api/webhooks/asaas', asaasWebhookRouter);
+app.use('/api/billing/asaas', billingAsaasRouter);
 app.use('/api/wa/webhook', waTenantWebhookRouter);
 app.use('/api/webhooks/whatsapp', whatsappWebhookRouter);
 
