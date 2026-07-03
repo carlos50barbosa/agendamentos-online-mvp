@@ -754,6 +754,18 @@ pool.query = async (sql, params = []) => {
     }], []]
   }
 
+  if (norm.startsWith('SELECT email, telefone, nome, cpf_cnpj FROM usuarios WHERE id=?')) {
+    const id = params[0]
+    const user = findUserById(id)
+    if (!user) return [[], []]
+    return [[{
+      email: user.email || null,
+      telefone: user.telefone || null,
+      nome: user.nome || null,
+      cpf_cnpj: user.cpf_cnpj || null,
+    }], []]
+  }
+
   if (norm.startsWith('SELECT email, telefone, nome, notify_email_estab, notify_whatsapp_estab FROM usuarios WHERE id=?')) {
     const id = params[0]
     const user = findUserById(id)
@@ -906,6 +918,15 @@ pool.query = async (sql, params = []) => {
     const external = String(params[0])
     const matches = state.subscriptions
       .filter((r) => String(r.external_reference || r.externalReference || '') === external)
+      .sort((a, b) => Number(b.id || 0) - Number(a.id || 0))
+    const row = matches[0] || null
+    return [row ? [clone(row)] : [], []]
+  }
+
+  if (norm.startsWith('SELECT * FROM subscriptions WHERE gateway_payment_id=?')) {
+    const paymentId = String(params[0])
+    const matches = state.subscriptions
+      .filter((r) => String(r.gateway_payment_id || r.gatewayPaymentId || '') === paymentId)
       .sort((a, b) => Number(b.id || 0) - Number(a.id || 0))
     const row = matches[0] || null
     return [row ? [clone(row)] : [], []]
@@ -1213,6 +1234,46 @@ pool.query = async (sql, params = []) => {
     return [row ? [clone(row)] : [], []]
   }
 
+  // Capacidade por horário do serviço: agendamentos do mesmo slot/serviço.
+  if (
+    norm.startsWith('SELECT id FROM agendamentos WHERE estabelecimento_id') &&
+    norm.includes('servico_id=?') &&
+    norm.includes('inicio>=?') &&
+    norm.includes('inicio<?')
+  ) {
+    const [estId, svcId, start, end, prof] = params
+    const excludeId = params.length >= 6 ? params[5] : null
+    const startMs = new Date(start).getTime()
+    const endMs = new Date(end).getTime()
+    const profParam = prof ?? null
+    const rows = state.agendamentos.filter((a) => {
+      if (Number(a.estabelecimento_id) !== Number(estId)) return false
+      if (Number(a.servico_id) !== Number(svcId)) return false
+      if (excludeId != null && Number(a.id) === Number(excludeId)) return false
+      const ms = new Date(a.inicio).getTime()
+      if (Number.isNaN(ms) || !(ms >= startMs && ms < endMs)) return false
+      const ap = a.profissional_id ?? null
+      if (ap !== profParam && !(ap == null && profParam == null)) return false
+      return ['confirmado', 'pendente'].includes(String(a.status || 'confirmado').toLowerCase())
+    }).map((a) => ({ id: a.id }))
+    return [rows, []]
+  }
+
+  // Relatório: novos vs recorrentes (CRM). O teste não assevera esses valores.
+  if (norm.startsWith('SELECT SUM(CASE WHEN first_seen.first_seen_at BETWEEN')) {
+    return [[{ new_clients: 0, recurring_clients: 0 }], []]
+  }
+
+  // Idempotência de subscription_events (appendSubscriptionEvent) — nunca duplicado no mock.
+  if (norm.startsWith('SELECT id FROM subscription_events WHERE subscription_id=?') && norm.includes('gateway_event_id=?')) {
+    return [[], []]
+  }
+
+  // Listagem de subscription_events (JOIN subscriptions) — o teste não os assevera.
+  if (norm.startsWith('SELECT se.id, se.subscription_id, se.event_type')) {
+    return [[], []]
+  }
+
   throw new Error(`Unhandled query: ${norm}`)
 }
 
@@ -1231,6 +1292,16 @@ function getRouteHandler(router, path, method) {
   if (!layer) throw new Error(`Route ${method.toUpperCase()} ${path} not found`)
   const stack = layer.route.stack
   return stack[stack.length - 1].handle
+}
+
+// Middleware imediatamente antes do handler final (ex.: ensureSubscriptionOperationalAccess),
+// já com a config real da rota (getEstabelecimentoId etc.).
+function getRouteGuard(router, path, method) {
+  const layer = router.stack.find((entry) => entry.route && entry.route.path === path && entry.route.methods[method])
+  if (!layer) throw new Error(`Route ${method.toUpperCase()} ${path} not found`)
+  const stack = layer.route.stack
+  if (stack.length < 2) throw new Error(`Route ${method.toUpperCase()} ${path} sem middleware de guarda`)
+  return stack[stack.length - 2].handle
 }
 
 async function callHandler(handler, { params = {}, body = {}, query = {}, user = {}, headers = {}, middlewares = [] }) {
@@ -1289,6 +1360,11 @@ const createAppointmentHandler = getRouteHandler(agendamentosRouter, '/', 'post'
 const createServiceHandler = getRouteHandler(servicosRouter, '/', 'post')
 const createProfessionalHandler = getRouteHandler(professionalsRouter, '/', 'post')
 const slotToggleHandler = getRouteHandler(slotsRouter, '/toggle', 'post')
+
+// Guarda de assinatura (bloqueio por inadimplência) real de cada rota.
+const createAppointmentGuard = getRouteGuard(agendamentosRouter, '/', 'post')
+const createServiceGuard = getRouteGuard(servicosRouter, '/', 'post')
+const slotToggleGuard = getRouteGuard(slotsRouter, '/toggle', 'post')
 const relatorioHandler = getRouteHandler(relatoriosRouter, '/estabelecimento', 'get')
 const waWalletHandler = getRouteHandler(billingRouter, '/whatsapp/wallet', 'get')
 const waPacksHandler = getRouteHandler(billingRouter, '/whatsapp/packs', 'get')
@@ -1319,11 +1395,12 @@ const res2 = await callHandler(createAppointmentHandler, {
     servico_ids: [10],
     inicio: future.toISOString()
   },
-  user: { id: 42, tipo: 'cliente' }
+  user: { id: 42, tipo: 'cliente' },
+  middlewares: [createAppointmentGuard]
 })
 results.push({ name: 'agendar com plano delinquent', response: res2 })
-assert.equal(res2.status, 403)
-assert.equal(res2.body?.error, 'plan_delinquent')
+assert.equal(res2.status, 402)
+assert.equal(res2.body?.error, 'subscription_access_blocked')
 
 // 3) downgrade permitido mesmo com muitos servicos (sem limite de servicos)
 seedScenario({
@@ -1344,11 +1421,12 @@ assert.equal(res3.body.plan.plan, 'starter')
 seedScenario({ user: { plan_status: 'delinquent' } })
 const res4 = await callHandler(createServiceHandler, {
   body: { nome: 'Novo Servico', duracao_min: 30, preco_centavos: 1000 },
-  user: { id: 1, tipo: 'estabelecimento' }
+  user: { id: 1, tipo: 'estabelecimento' },
+  middlewares: [createServiceGuard]
 })
 results.push({ name: 'criar servico com plano delinquent', response: res4 })
 assert.equal(res4.status, 402)
-assert.equal(res4.body?.error, 'plan_delinquent')
+assert.equal(res4.body?.error, 'subscription_access_blocked')
 
 // 5) criacao de servico permitida acima do antigo limite (sem limite de servicos)
 seedScenario({
@@ -1424,11 +1502,12 @@ assert.equal(res9.body?.action, 'liberado')
 seedScenario({ user: { plan_status: 'delinquent' } })
 const res10 = await callHandler(slotToggleHandler, {
   body: { slotDatetime: slotIso },
-  user: { id: 1, tipo: 'estabelecimento' }
+  user: { id: 1, tipo: 'estabelecimento' },
+  middlewares: [slotToggleGuard]
 })
 results.push({ name: 'slot toggle bloqueado por plano', response: res10 })
-assert.equal(res10.status, 403)
-assert.equal(res10.body?.error, 'plan_delinquent')
+assert.equal(res10.status, 402)
+assert.equal(res10.body?.error, 'subscription_access_blocked')
 
 // 11) relatorio permitido para plano pro ativo
 seedScenario({

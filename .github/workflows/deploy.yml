@@ -27,15 +27,11 @@ jobs:
           cache: npm
           cache-dependency-path: backend/package-lock.json
       - run: npm ci
-      # Gate do deploy: suíte Asaas (determinística, cobre a migração de pagamentos).
+      # Gate do deploy: suíte Asaas (migração de pagamentos) + fluxos de plano/billing.
       - name: Asaas suite (client + payments + webhook + deposit + subscription)
         run: npm run test:asaas
-      # Informativo: test:plan é pré-existente e sensível à versão do Node
-      # (falha 500!=403 no Node 24; CI atual roda em Node 18). Não bloqueia o
-      # deploy até ser estabilizado. Ver docs/DEPLOY.md.
-      - name: Plan/billing flows (informativo)
+      - name: Plan/billing flows
         run: npm run test:plan
-        continue-on-error: true
 
   frontend-build:
     name: Frontend build

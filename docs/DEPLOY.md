@@ -7,9 +7,7 @@ Pipeline em [.github/workflows/deploy.yml](../.github/workflows/deploy.yml).
 - **Pull Request** → roda `backend-tests` e `frontend-build` (Vite). **Não** faz deploy.
 - **Push na `main`** (ou `workflow_dispatch` na `main`) → roda os testes/build e, **se o gate passar**, executa o job `deploy`, que entra por SSH no VPS e roda o `scripts/deploy.sh` já existente (`git pull` → `npm ci` → `pm2 reload` do backend → build + `rsync` do frontend).
 
-**Gate do deploy:** `npm run test:asaas` (determinístico) **+** `frontend-build` (Vite). Se qualquer um falhar, o deploy é bloqueado.
-
-> ⚠️ **`test:plan` roda como informativo (`continue-on-error`), não bloqueia.** Motivo: ele falha (`500 != 403`) já no `main` limpo quando executado em Node 24 — é **pré-existente** e sensível à versão do Node (o CI histórico usa Node 18). Vale investigar e reabilitar como gate depois de estabilizar.
+**Gate do deploy:** `npm run test:asaas` + `npm run test:plan` (backend) **+** `frontend-build` (Vite). Se qualquer um falhar, o deploy é bloqueado.
 
 Ou seja: **um merge/push na `main` publica sozinho**, e um teste vermelho **trava** o deploy.
 
