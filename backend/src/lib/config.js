@@ -183,6 +183,13 @@ export const config = {
       paymentUrl: getAny('BILLING_PAYMENT_URL', 'BILLING_REMINDER_PAYMENT_URL') || null,
     },
   },
+  // Asaas (migração gradual do Mercado Pago). env define a base URL:
+  //   sandbox -> https://api-sandbox.asaas.com | production -> https://api.asaas.com
+  asaas: {
+    apiKey: getAny('ASAAS_API_KEY'),
+    env: parseLowerString(getAny('ASAAS_ENV'), 'sandbox'),
+    webhookToken: getAny('ASAAS_WEBHOOK_TOKEN'),
+  },
 }
 
 export function getOperationalHardeningWarnings(env = process.env, cfg = config) {

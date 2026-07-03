@@ -9,6 +9,7 @@ import { sendAppointmentWhatsApp } from '../lib/whatsapp_outbox.js';
 import { buildConfirmacaoAgendamentoV2Components, isConfirmacaoAgendamentoV2 } from '../lib/whatsapp_templates.js';
 import { createMercadoPagoPixPayment } from '../lib/billing.js';
 import { resolveMpAccessToken } from '../services/mpAccounts.js';
+import { resolveDepositProvider, createAsaasDepositPixPayment } from '../lib/deposit_provider.js';
 import {
   extractPixPayloadFromRaw,
   fetchPendingDepositPayment,
@@ -789,24 +790,28 @@ router.post('/', authRequired, isCliente, ensureSubscriptionOperationalAccess({
     let depositHoldMinutes = DEFAULT_DEPOSIT_HOLD_MINUTES;
     let depositExpiresAt = null;
     let mpAccessToken = null;
+    const depositProvider = resolveDepositProvider();
     if (depositEnabled) {
       depositCentavos = Math.ceil(totalCentavosPreview * (depositPercent || 0) / 100);
       depositHoldMinutes = Number(depositConfig.holdMinutes || DEFAULT_DEPOSIT_HOLD_MINUTES) || DEFAULT_DEPOSIT_HOLD_MINUTES;
       depositExpiresAt = new Date(Date.now() + depositHoldMinutes * 60_000);
-      const mpAccess = await resolveMpAccessToken(estabelecimento_id, { allowFallback: false });
-      const mpStatus = mpAccess.account?.status || null;
-      if (mpStatus !== 'connected' || !mpAccess.accessToken) {
-        console.warn('[deposit] mp_not_connected', {
-          estabelecimento_id,
-          status: mpStatus,
-          reason: mpAccess.reason || 'missing_token',
-        });
-        return res.status(409).json({
-          error: 'mp_not_connected_for_deposit',
-          message: 'Conecte seu Mercado Pago para receber o sinal.',
-        });
+      // Asaas (conta única da plataforma) não exige conta MP conectada do estabelecimento.
+      if (depositProvider !== 'asaas') {
+        const mpAccess = await resolveMpAccessToken(estabelecimento_id, { allowFallback: false });
+        const mpStatus = mpAccess.account?.status || null;
+        if (mpStatus !== 'connected' || !mpAccess.accessToken) {
+          console.warn('[deposit] mp_not_connected', {
+            estabelecimento_id,
+            status: mpStatus,
+            reason: mpAccess.reason || 'missing_token',
+          });
+          return res.status(409).json({
+            error: 'mp_not_connected_for_deposit',
+            message: 'Conecte seu Mercado Pago para receber o sinal.',
+          });
+        }
+        mpAccessToken = mpAccess.accessToken;
       }
-      mpAccessToken = mpAccess.accessToken;
     }
     const depositRequired = Boolean(
       depositEnabled &&
@@ -1028,7 +1033,7 @@ router.post('/', authRequired, isCliente, ensureSubscriptionOperationalAccess({
 
     // 5) le dados consistentes ainda na transacao
     const [[novo]] = await conn.query('SELECT * FROM agendamentos WHERE id=?', [appointmentId]);
-    const [[cli]]  = await conn.query('SELECT email, telefone, nome FROM usuarios WHERE id=?', [req.user.id]);
+    const [[cli]]  = await conn.query('SELECT email, telefone, nome, cpf_cnpj FROM usuarios WHERE id=?', [req.user.id]);
     const [[est]]  = await conn.query('SELECT email, telefone, nome, notify_email_estab, notify_whatsapp_estab FROM usuarios WHERE id=?', [estabelecimento_id]);
 
     await conn.commit();
@@ -1037,6 +1042,65 @@ router.post('/', authRequired, isCliente, ensureSubscriptionOperationalAccess({
 
     if (depositRequired) {
       const expiresIso = depositExpiresAt ? depositExpiresAt.toISOString() : null;
+      // Sinal via Asaas (flag DEPOSIT_PROVIDER=asaas) — early-return; o bloco MP
+      // abaixo permanece intacto para o caminho legado.
+      if (depositProvider === 'asaas') {
+        const externalReference = `deposit:${depositPaymentId}`;
+        try {
+          const { payment, pix, providerPaymentId } = await createAsaasDepositPixPayment({
+            amountCents: depositCentavosFinal,
+            description: `Sinal - ${serviceLabel}`,
+            externalReference,
+            payer: {
+              name: cli?.nome,
+              email: cli?.email,
+              cpfCnpj: cli?.cpf_cnpj || cli?.cpf || null,
+              phone: cli?.telefone,
+            },
+            userId: req.user.id,
+            expiresAt: depositExpiresAt,
+          });
+          await pool.query(
+            'UPDATE appointment_payments SET provider=?, provider_payment_id=?, provider_reference=?, raw_payload=? WHERE id=?',
+            ['asaas', providerPaymentId, externalReference, safeJson(payment), depositPaymentId]
+          );
+          return res.status(201).json({
+            id: appointmentId,
+            agendamentoId: appointmentId,
+            status: 'pendente_pagamento',
+            total_centavos: totalCentavosFinal,
+            deposit_required: 1,
+            deposit_percent: depositPercent,
+            deposit_centavos: depositCentavosFinal,
+            deposit_expires_at: expiresIso,
+            paymentId: depositPaymentId,
+            expiresAt: expiresIso,
+            pix_qr: pix?.qr_code_base64 || null,
+            pix_qr_raw: pix?.qr_code || null,
+            pix_copia_cola: pix?.copia_e_cola || pix?.qr_code || null,
+            pix_ticket_url: pix?.ticket_url || null,
+            amount_centavos: depositCentavosFinal,
+            pix,
+            loyalty_subscription_id: novo.loyalty_subscription_id || null,
+            loyalty_credit_applied: Boolean(novo.loyalty_credit_applied),
+            loyalty_discount_percent: novo.loyalty_discount_percent == null ? null : Number(novo.loyalty_discount_percent),
+            loyalty_benefit_snapshot: safeJsonParse(novo.loyalty_benefit_snapshot_json),
+          });
+        } catch (err) {
+          console.error('[agendamentos][deposit][asaas] erro ao criar PIX:', err?.message || err);
+          const payload = safeJson({ error: err?.message || String(err) });
+          await pool.query(
+            'UPDATE appointment_payments SET status=?, raw_payload=? WHERE id=?',
+            ['failed', payload, depositPaymentId]
+          );
+          await cancelPendingPaymentAppointmentTx(appointmentId, { db: pool });
+          return res.status(502).json({
+            error: 'payment_create_failed',
+            message: 'Não foi possível gerar o PIX do sinal. Tente novamente.',
+          });
+        }
+      }
+
       const apiBase = resolveApiBaseUrl();
       const webhookUrl = resolveBillingWebhookUrl(apiBase);
       const externalReference = `dep:ag:${appointmentId}:pay:${depositPaymentId}:est:${estabelecimento_id}`;

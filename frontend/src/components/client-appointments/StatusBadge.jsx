@@ -1,4 +1,13 @@
 import React from 'react';
+import StatusPill from '../StatusPill.jsx';
+
+// -----------------------------------------------------------------------------
+// StatusBadge é agora um ADAPTADOR fino sobre o StatusPill (fonte única do
+// visual em theme.js). O normalizador abaixo é mantido com as CHAVES LEGADAS
+// porque ClientAppointmentsPage depende delas na lógica de negócio
+// (ex.: effectiveStatus === 'pendente_pagamento' libera "Pagar sinal").
+// Não altere estas chaves sem migrar aquela página.
+// -----------------------------------------------------------------------------
 
 const PENDING_PAYMENT_STATUSES = new Set([
   'pendente_pagamento',
@@ -7,29 +16,6 @@ const PENDING_PAYMENT_STATUSES = new Set([
   'pending_payment',
   'awaiting_payment',
 ]);
-
-const STATUS_META = {
-  confirmado: {
-    label: 'Confirmado',
-    className: 'tw-bg-emerald-50 tw-text-emerald-700 tw-ring-1 tw-ring-inset tw-ring-emerald-100',
-  },
-  concluido: {
-    label: 'Concluído',
-    className: 'tw-bg-slate-100 tw-text-slate-700 tw-ring-1 tw-ring-inset tw-ring-slate-200',
-  },
-  cancelado: {
-    label: 'Cancelado',
-    className: 'tw-bg-rose-50 tw-text-rose-700 tw-ring-1 tw-ring-inset tw-ring-rose-100',
-  },
-  pendente: {
-    label: 'Pendente',
-    className: 'tw-bg-sky-50 tw-text-sky-700 tw-ring-1 tw-ring-inset tw-ring-sky-100',
-  },
-  pendente_pagamento: {
-    label: 'Aguardando pagamento',
-    className: 'tw-bg-sky-50 tw-text-sky-700 tw-ring-1 tw-ring-inset tw-ring-sky-100',
-  },
-};
 
 export function normalizeAppointmentStatus(rawStatus, { isPast = false } = {}) {
   const status = String(rawStatus || '')
@@ -46,20 +32,11 @@ export function normalizeAppointmentStatus(rawStatus, { isPast = false } = {}) {
   return status;
 }
 
+// Mantido por compatibilidade de import; o visual real vem do StatusPill/theme.
 export function getStatusMeta(status, options) {
-  const normalized = normalizeAppointmentStatus(status, options);
-  return STATUS_META[normalized] || STATUS_META.pendente;
+  return { normalized: normalizeAppointmentStatus(status, options) };
 }
 
 export default function StatusBadge({ status, isPast = false, className = '' }) {
-  const normalized = normalizeAppointmentStatus(status, { isPast });
-  const meta = STATUS_META[normalized] || STATUS_META.pendente;
-
-  return (
-    <span
-      className={`tw-inline-flex tw-items-center tw-rounded-full tw-px-3 tw-py-1 tw-text-xs tw-font-medium ${meta.className} ${className}`}
-    >
-      {meta.label}
-    </span>
-  );
+  return <StatusPill status={status} isPast={isPast} size="sm" className={className} />;
 }

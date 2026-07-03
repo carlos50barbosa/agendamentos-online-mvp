@@ -1,0 +1,26 @@
+{
+  "name": "Agendamentos Online",
+  "short_name": "Agendamentos",
+  "description": "Agende horários e confirme com sinal via PIX — rápido e sem complicação.",
+  "lang": "pt-BR",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#F6F5FB",
+  "theme_color": "#5049E5",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ]
+}

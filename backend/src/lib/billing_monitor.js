@@ -5,6 +5,7 @@ import { notifyEmail, sendWhatsAppSmart } from './notifications.js'
 import { getPlanLabel } from './plans.js'
 import { estabNotificationsDisabled } from './estab_notifications.js'
 import { normalizeSubscriptionStatus } from './subscription_normalization.js'
+import { setTenantAsaasSubscriptionStatus } from './asaas_subscription.js'
 
 const DAY_MS = 86400000
 const TIMEZONE = config.timezone || process.env.TZ || 'America/Sao_Paulo'
@@ -380,6 +381,14 @@ async function applyDelinquentStatus(row) {
     'UPDATE usuarios SET plan_status=? WHERE id=? AND tipo=\'estabelecimento\' LIMIT 1',
     [nextStatus, row.id]
   )
+  // Transição para bloqueado: suspende a assinatura no gateway Asaas (INACTIVE,
+  // para de gerar cobranças). Best-effort e self-guarded (no-op se não for asaas).
+  // Só roda aqui, na mudança de estado — nunca a cada tick.
+  try {
+    await setTenantAsaasSubscriptionStatus(row.id, 'INACTIVE')
+  } catch (err) {
+    console.error('[billing-monitor] asaas suspend failed', { estabelecimentoId: row.id, error: err?.message || err })
+  }
   return true
 }
 
