@@ -392,6 +392,7 @@ export default function Assinatura() {
   const [selectedCycle, setSelectedCycle] = useState('');
   const [trialLoading, setTrialLoading] = useState(false);
   const [checkoutLoading, setCheckoutLoading] = useState(false);
+  const [billingProvider, setBillingProvider] = useState('mercadopago');
   const [renewalLoading, setRenewalLoading] = useState(false);
   const [cardState, setCardState] = useState({ ready: false, loading: false, submitting: false, error: '' });
   const [cardRecoveryReady, setCardRecoveryReady] = useState(false);
@@ -745,8 +746,46 @@ export default function Assinatura() {
     }
   }, [establishmentId, refreshData, trialLoading]);
 
+  // Descobre o provider ativo (Asaas usa checkout hospedado, sem CardForm/PCI).
+  useEffect(() => {
+    let alive = true;
+    Api.billingAsaasProvider()
+      .then((r) => { if (alive && r?.billing_provider) setBillingProvider(r.billing_provider); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, []);
+
+  // Assinatura via Asaas: cria a assinatura e redireciona ao checkout hospedado.
+  const handleAsaasCheckout = useCallback(async (targetPlan, billingCycle = 'mensal') => {
+    if (!establishmentId || checkoutLoading) return false;
+    setCheckoutLoading(true);
+    setNotice({ type: '', message: '' });
+    try {
+      const response = await Api.billingAsaasCheckoutSession({ plan: targetPlan, billing_cycle: billingCycle });
+      if (response?.init_point) {
+        window.location.assign(response.init_point);
+        return true;
+      }
+      await refreshData({ silent: true });
+      setNotice({
+        type: 'info',
+        message: 'Assinatura criada. Aguarde alguns segundos e atualize para ver o link de pagamento.',
+      });
+      return true;
+    } catch (requestError) {
+      setNotice({
+        type: 'error',
+        message: getErrorMessage(requestError, 'Falha ao iniciar a assinatura no Asaas.'),
+      });
+      return false;
+    } finally {
+      setCheckoutLoading(false);
+    }
+  }, [checkoutLoading, establishmentId, refreshData]);
+
   const handleStartCheckout = useCallback(async (targetPlan, billingCycle = 'mensal') => {
     if (!establishmentId || checkoutLoading) return false;
+    if (billingProvider === 'asaas') return handleAsaasCheckout(targetPlan, billingCycle);
     setCheckoutLoading(true);
     setNotice({ type: '', message: '' });
     try {
@@ -779,7 +818,7 @@ export default function Assinatura() {
     } finally {
       setCheckoutLoading(false);
     }
-  }, [checkoutLoading, establishmentId, openPixModal, refreshData]);
+  }, [checkoutLoading, establishmentId, openPixModal, refreshData, billingProvider, handleAsaasCheckout]);
 
   const handleOpenPendingRenewal = useCallback(() => {
     if (!openRenewalPayment) return;
@@ -815,6 +854,12 @@ export default function Assinatura() {
 
   const handleSubmitCard = useCallback(async (cardFormData) => {
     if (!establishmentId || cardSubmittingRef.current) return false;
+    // Asaas não captura cartão na interface: redireciona ao checkout hospedado.
+    if (billingProvider === 'asaas') {
+      const asaasPlan = cardAction.mode === 'update' ? planKey : checkoutPlanKey;
+      const asaasCycle = cardAction.mode === 'update' ? currentCycle : checkoutCycle;
+      return handleAsaasCheckout(asaasPlan, asaasCycle);
+    }
     const submitIntent = cardSubmitIntentRef.current === 'recover' ? 'recover' : 'save';
     cardSubmitIntentRef.current = 'save';
     cardSubmittingRef.current = true;
@@ -915,10 +960,16 @@ export default function Assinatura() {
       cardSubmittingRef.current = false;
       setCardState((current) => ({ ...current, submitting: false }));
     }
-  }, [cardAction.mode, checkoutCycle, checkoutPlanKey, currentCycle, establishmentId, planKey, refreshData, resetCardFormForNewToken, user?.email]);
+  }, [cardAction.mode, checkoutCycle, checkoutPlanKey, currentCycle, establishmentId, planKey, refreshData, resetCardFormForNewToken, user?.email, billingProvider, handleAsaasCheckout]);
 
   const handleCardSubmitSecure = useCallback(async (cardFormData) => {
     if (!establishmentId || cardSubmittingRef.current) return false;
+    // Asaas não captura cartão na interface: redireciona ao checkout hospedado.
+    if (billingProvider === 'asaas') {
+      const asaasPlan = cardAction.mode === 'update' ? planKey : checkoutPlanKey;
+      const asaasCycle = cardAction.mode === 'update' ? currentCycle : checkoutCycle;
+      return handleAsaasCheckout(asaasPlan, asaasCycle);
+    }
     const submitIntent = cardSubmitIntentRef.current === 'recover' ? 'recover' : 'save';
     cardSubmitIntentRef.current = 'save';
     cardSubmittingRef.current = true;
@@ -1036,7 +1087,7 @@ export default function Assinatura() {
       cardSubmittingRef.current = false;
       setCardState((current) => ({ ...current, submitting: false }));
     }
-  }, [cardAction.mode, checkoutCycle, checkoutPlanKey, currentCycle, establishmentId, hasDelinquentStatus, planKey, refreshData, resetCardFormForNewToken, user?.email]);
+  }, [cardAction.mode, checkoutCycle, checkoutPlanKey, currentCycle, establishmentId, hasDelinquentStatus, planKey, refreshData, resetCardFormForNewToken, user?.email, billingProvider, handleAsaasCheckout]);
 
   const handleRecoverNowWithCard = useCallback(() => {
     const form = document.getElementById('subscription-card-form');

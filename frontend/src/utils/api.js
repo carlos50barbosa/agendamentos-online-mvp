@@ -387,6 +387,15 @@ export const Api = {
 
   billingStatus: () => req('/billing/status'),
 
+  // Asaas (assinatura do tenant via checkout hospedado)
+  billingAsaasProvider: () => req('/billing/asaas/provider'),
+
+  billingAsaasCheckoutSession: (payload) => {
+    const body = { ...payload };
+    if (body.billing_cycle == null) body.billing_cycle = 'mensal';
+    return req('/billing/asaas/checkout-session', { method: 'POST', body: JSON.stringify(body) });
+  },
+
   billingImplementationCheckout: (payload) =>
     req('/billing/implementation/checkout', { method: 'POST', body: JSON.stringify(payload || {}) }),
 
