@@ -758,10 +758,21 @@ export default function Assinatura() {
   // Assinatura via Asaas: cria a assinatura e redireciona ao checkout hospedado.
   const handleAsaasCheckout = useCallback(async (targetPlan, billingCycle = 'mensal') => {
     if (!establishmentId || checkoutLoading) return false;
+    // Asaas exige CPF/CNPJ do pagador. Usa o do perfil; se faltar, coleta agora
+    // (o backend valida e salva no perfil).
+    let cpfCnpj = String(user?.cpf_cnpj || '').replace(/\D/g, '');
+    if (![11, 14].includes(cpfCnpj.length)) {
+      const entered = window.prompt('Para assinar, informe seu CPF ou CNPJ (somente números):');
+      cpfCnpj = String(entered || '').replace(/\D/g, '');
+      if (![11, 14].includes(cpfCnpj.length)) {
+        setNotice({ type: 'error', message: 'É necessário um CPF ou CNPJ válido para assinar.' });
+        return false;
+      }
+    }
     setCheckoutLoading(true);
     setNotice({ type: '', message: '' });
     try {
-      const response = await Api.billingAsaasCheckoutSession({ plan: targetPlan, billing_cycle: billingCycle });
+      const response = await Api.billingAsaasCheckoutSession({ plan: targetPlan, billing_cycle: billingCycle, cpf_cnpj: cpfCnpj });
       if (response?.init_point) {
         window.location.assign(response.init_point);
         return true;
@@ -781,7 +792,7 @@ export default function Assinatura() {
     } finally {
       setCheckoutLoading(false);
     }
-  }, [checkoutLoading, establishmentId, refreshData]);
+  }, [checkoutLoading, establishmentId, refreshData, user?.cpf_cnpj]);
 
   const handleStartCheckout = useCallback(async (targetPlan, billingCycle = 'mensal') => {
     if (!establishmentId || checkoutLoading) return false;
@@ -827,6 +838,11 @@ export default function Assinatura() {
 
   const handleGenerateRenewalPix = useCallback(async () => {
     if (!establishmentId || renewalLoading) return false;
+    // Assinatura Asaas renova automaticamente — não há PIX de renovação manual (é rota MP).
+    if (billingProvider === 'asaas') {
+      setNotice({ type: 'info', message: 'Sua assinatura Asaas renova automaticamente — não é preciso gerar PIX de renovação.' });
+      return false;
+    }
     setRenewalLoading(true);
     setNotice({ type: '', message: '' });
     try {
@@ -850,7 +866,7 @@ export default function Assinatura() {
     } finally {
       setRenewalLoading(false);
     }
-  }, [establishmentId, openPixModal, refreshData, renewalLoading]);
+  }, [billingProvider, establishmentId, openPixModal, refreshData, renewalLoading]);
 
   const handleSubmitCard = useCallback(async (cardFormData) => {
     if (!establishmentId || cardSubmittingRef.current) return false;
