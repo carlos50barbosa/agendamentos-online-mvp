@@ -532,6 +532,8 @@ const createGuestModalState = () => ({
 
   phone: "",
 
+  cpf: "",
+
   data_nascimento: "",
 
   cep: "",
@@ -5934,6 +5936,10 @@ useEffect(() => {
         const dataNascimento = (guestModal.data_nascimento || "").trim();
 
         if (dataNascimento) payload.data_nascimento = dataNascimento;
+
+        const cpfDigits = (guestModal.cpf || "").replace(/\D/g, "");
+
+        if (cpfDigits) payload.cpf = cpfDigits;
 
         const cepDigits = cepDigitsRaw.slice(0, 8);
 
