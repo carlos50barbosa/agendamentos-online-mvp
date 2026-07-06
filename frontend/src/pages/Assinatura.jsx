@@ -746,6 +746,19 @@ export default function Assinatura() {
     }
   }, [establishmentId, refreshData, trialLoading]);
 
+  // Retorno do checkout hospedado do Asaas (?assinatura=sucesso): avisa e atualiza o status.
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    if (params.get('assinatura') === 'sucesso') {
+      setNotice({
+        type: 'success',
+        message: 'Pagamento recebido! Sua assinatura será ativada assim que o Asaas confirmar.',
+      });
+      refreshData({ silent: true });
+      window.history.replaceState({}, '', '/assinatura');
+    }
+  }, [location.search, refreshData]);
+
   // Descobre o provider ativo (Asaas usa checkout hospedado, sem CardForm/PCI).
   useEffect(() => {
     let alive = true;

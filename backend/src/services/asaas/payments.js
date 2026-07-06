@@ -70,6 +70,7 @@ export function createAsaasPayments(client = getAsaasClient()) {
     billingType = 'UNDEFINED',
     description,
     externalReference,
+    callback,
   } = {}) {
     requireField(customerId, 'customerId');
     requireField(value, 'value');
@@ -82,6 +83,8 @@ export function createAsaasPayments(client = getAsaasClient()) {
         nextDueDate: toDateOnly(nextDueDate) || toDateOnly(new Date()),
         description: description || undefined,
         externalReference: externalReference || undefined,
+        // Redireciona o cliente de volta ao app após pagar (autoRedirect).
+        callback: callback || undefined,
       },
     });
   }

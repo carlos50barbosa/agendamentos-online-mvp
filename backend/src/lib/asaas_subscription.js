@@ -51,6 +51,9 @@ export async function createTenantAsaasSubscription({
   const amountCents = getPlanPriceCents(planKey, cycleKey);
   const value = Math.max(0, Math.round(Number(amountCents || 0))) / 100;
   const planLabel = resolvePlanConfig(planKey).label;
+  // Após pagar no checkout hospedado do Asaas, redireciona o cliente de volta ao app.
+  const frontBase = String(process.env.FRONTEND_BASE_URL || process.env.APP_URL || 'https://agendamentosonline.com').replace(/\/$/, '');
+  const successUrl = `${frontBase}/assinatura?assinatura=sucesso`;
 
   const payer = await loadEstabPayer(estabelecimentoId, db);
   const customerId = await resolveAsaasCustomerId({ payments, userId: estabelecimentoId, payer, db });
@@ -64,6 +67,7 @@ export async function createTenantAsaasSubscription({
     billingType,
     description: `Assinatura ${planLabel} (${cycleKey})`,
     externalReference: `subscription:estab:${estabelecimentoId}`,
+    callback: { successUrl, autoRedirect: true },
   });
   const asaasSubscriptionId = asaasSub?.id ? String(asaasSub.id) : null;
   if (!asaasSubscriptionId) throw new Error('asaas_subscription_missing_id');
