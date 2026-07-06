@@ -173,8 +173,11 @@ const FAQ_ITEMS = [
   },
 ];
 
-function buildWhatsAppUrl() {
-  return `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(WHATSAPP_MESSAGE)}`;
+function buildWhatsAppUrl(planHint = '') {
+  const plan = String(planHint || '').toLowerCase();
+  const planLabel = ['starter', 'pro', 'premium'].includes(plan) ? ` (plano ${plan})` : '';
+  const message = `${WHATSAPP_MESSAGE}${planLabel}`;
+  return `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(message)}`;
 }
 
 function SectionIntro({ eyebrow, title, text, align = 'center' }) {
@@ -275,30 +278,12 @@ export default function LandingImplantacao() {
     setMenuOpen(false);
   }, []);
 
-  const handleBuyImplementation = useCallback(async (planHint = '') => {
-    if (buyingPlan) return;
-
-    const normalizedPlan = String(planHint || '').toLowerCase();
-    setBuyingPlan(normalizedPlan || 'implementation');
-    setCheckoutNotice('');
-
-    try {
-      const response = await Api.billingImplementationCheckout({
-        produto: IMPLEMENTATION_PRODUCT,
-        valor_centavos: IMPLEMENTATION_AMOUNT_CENTS,
-        tipo: 'one_time',
-        plan_hint: ['starter', 'pro', 'premium'].includes(normalizedPlan) ? normalizedPlan : undefined,
-      });
-      const checkoutUrl = response?.checkout_url;
-      if (!checkoutUrl) throw new Error('checkout_url_missing');
-      window.location.assign(checkoutUrl);
-    } catch (error) {
-      console.warn('[LandingImplantacao] checkout indisponível, redirecionando para WhatsApp', error);
-      setCheckoutNotice('Checkout online indisponível no momento. Abrindo atendimento no WhatsApp para continuar a implantação.');
-      window.open(whatsAppUrl, '_blank', 'noopener,noreferrer');
-      setBuyingPlan('');
-    }
-  }, [buyingPlan, whatsAppUrl]);
+  const handleBuyImplementation = useCallback((planHint = '') => {
+    // Implantação: pagamento conduzido manualmente via WhatsApp (sem checkout online / sem Mercado Pago).
+    // O time envia um link de cobrança Asaas / PIX na conversa e confirma manualmente.
+    const url = buildWhatsAppUrl(planHint);
+    window.open(url, '_blank', 'noopener,noreferrer');
+  }, []);
 
   const year = new Date().getFullYear();
 

@@ -69,9 +69,7 @@ const NovoAgendamento = React.lazy(() => import('./pages/NovoAgendamento.jsx'));
 const Configuracoes = React.lazy(() => import('./pages/Configuracoes.jsx'));
 const ConfiguracaoInicial = React.lazy(() => import('./pages/ConfiguracaoInicial.jsx'));
 const Assinatura = React.lazy(() => import('./pages/Assinatura.jsx'));
-const LoyaltyPlansEstabelecimento = React.lazy(() => import('./pages/LoyaltyPlansEstabelecimento.jsx'));
-const LoyaltyAssinaturaCliente = React.lazy(() => import('./pages/LoyaltyAssinaturaCliente.jsx'));
-const LoyaltyPlanosPublicos = React.lazy(() => import('./pages/LoyaltyPlanosPublicos.jsx'));
+// Fidelidade desabilitada (feature 100% Mercado Pago) — imports/rotas removidos.
 const WhatsAppBusiness = React.lazy(() => import('./pages/WhatsAppBusiness.jsx'));
 const SinalAgendamentos = React.lazy(() => import('./pages/SinalAgendamentos.jsx'));
 
@@ -143,9 +141,6 @@ const APP_ROUTES = [
 
   { path: '/configuracoes', element: <Configuracoes />, auth: true },
   { path: '/assinatura', element: <Assinatura />, auth: true, role: 'estabelecimento' },
-  { path: '/fidelidade', element: <LoyaltyPlansEstabelecimento />, auth: true, role: 'estabelecimento' },
-  { path: '/cliente/fidelidade', element: <LoyaltyAssinaturaCliente />, auth: true, role: 'cliente' },
-  { path: '/planos-fidelidade/:idOrSlug', element: <LoyaltyPlanosPublicos /> },
   { path: '/whatsappbusiness', element: <WhatsAppBusiness />, auth: true, role: 'estabelecimento' },
   { path: '/sinal', element: <SinalAgendamentos />, auth: true, role: 'estabelecimento' },
 

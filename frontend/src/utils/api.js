@@ -557,11 +557,7 @@ export const Api = {
   waConnectStatus: () => req('/whatsapp/account'),
   waConnectDisconnect: () => req('/whatsapp/account/disconnect', { method: 'POST' }),
 
-  // Mercado Pago OAuth (estabelecimento)
-  marketplaceMpConnectStart: (params = {}) =>
-    req(`/marketplace/mp/connect/start${toQuery({ ...params, json: 1 })}`),
-  marketplaceMpAccount: () => req('/marketplace/mp/account'),
-  marketplaceMpDisconnect: () => req('/marketplace/mp/account', { method: 'DELETE' }),
+  // Mercado Pago OAuth (estabelecimento) — em remoção; mantidos só enquanto Configuracoes/useBusinessSettings usam.
   mpConnectStart: (params = {}) => req(`/marketplace/mp/connect/start${toQuery({ ...params, json: 1 })}`),
   mpConnectStatus: () => req('/marketplace/mp/account'),
   mpConnectDisconnect: () => req('/marketplace/mp/account', { method: 'DELETE' }),

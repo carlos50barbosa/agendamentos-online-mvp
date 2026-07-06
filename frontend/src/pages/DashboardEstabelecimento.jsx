@@ -3994,15 +3994,6 @@ function ProfessionalAgendaView({
 
           <div className="pro-agenda__toolbar-actions">
 
-            <NavLink
-              to="/fidelidade"
-              className="pro-agenda__btn pro-agenda__link-btn pro-agenda__link-btn--loyalty"
-              aria-label="Gerenciar planos de fidelidade"
-              title="Criar e editar planos de fidelidade"
-            >
-              Gerenciar fidelidade
-            </NavLink>
-
             <div className="pro-agenda__date-pill">{weekLabel}</div>
 
             <div className="pro-agenda__nav">

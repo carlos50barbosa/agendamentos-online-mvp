@@ -3301,40 +3301,8 @@ export default function NovoAgendamento() {
 
   const selectedProfessionals = selectedEstablishmentId ? professionalsByEstab[selectedEstablishmentId] : null;
 
-  useEffect(() => {
-    let cancelled = false;
-
-    if (!isAuthenticated || !isClientUser || !establishmentId) {
-      setLoyaltyContext({ loading: false, data: null, error: '' });
-      return undefined;
-    }
-
-    const loadLoyaltyContext = async () => {
-      setLoyaltyContext((current) => ({ ...current, loading: true, error: '' }));
-      try {
-        const response = await Api.clientLoyaltyContext({
-          estabelecimento_id: establishmentId,
-          servico_ids: normalizedServiceIds.join(','),
-        });
-        if (!cancelled) {
-          setLoyaltyContext({ loading: false, data: response, error: '' });
-        }
-      } catch (error) {
-        if (!cancelled) {
-          setLoyaltyContext({
-            loading: false,
-            data: null,
-            error: error?.data?.message || error?.message || 'Não foi possível carregar os benefícios do plano.',
-          });
-        }
-      }
-    };
-
-    void loadLoyaltyContext();
-    return () => {
-      cancelled = true;
-    };
-  }, [establishmentId, isAuthenticated, isClientUser, normalizedServiceIds]);
+  // Fidelidade desabilitada: loader neutralizado. loyaltyContext permanece no
+  // estado inicial (data: null) e todos os derivados caem nos guards de "sem plano".
 
   const profileData = selectedExtras?.profile || null;
 
@@ -7778,33 +7746,7 @@ useEffect(() => {
 
         </div>
 
-        {loyaltyContext.error ? (
-          <div className="novo-agendamento__loyalty-banner novo-agendamento__loyalty-banner--error">
-            {loyaltyContext.error}
-          </div>
-        ) : loyaltyDetails ? (
-          <div className="novo-agendamento__loyalty-banner">
-            <div>
-              <strong>{loyaltyDetails.plan?.nome || 'Plano ativo'}</strong>
-              <p>{loyaltyBannerText}</p>
-            </div>
-            {selectedEstablishmentId ? (
-              <Link className="btn btn--outline btn--sm" to={`/cliente/fidelidade?estabelecimento=${selectedEstablishmentId}`}>
-                Ver assinatura
-              </Link>
-            ) : null}
-          </div>
-        ) : isClientUser && establishmentId ? (
-          <div className="novo-agendamento__loyalty-banner novo-agendamento__loyalty-banner--subtle">
-            <div>
-              <strong>Sem plano ativo neste estabelecimento</strong>
-              <p>Se quiser, você pode assinar um plano antes de concluir o agendamento.</p>
-            </div>
-            <Link className="btn btn--outline btn--sm" to={`/planos-fidelidade/${establishmentId}`}>
-              Ver planos
-            </Link>
-          </div>
-        ) : null}
+        {/* Banner de fidelidade removido (feature desabilitada). */}
 
         <div ref={servicesSectionRef} className="novo-agendamento__services">
 

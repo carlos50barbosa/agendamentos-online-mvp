@@ -45,6 +45,9 @@ import {
   resolvePixPaymentDisposition,
   selectPixSubscriptionCandidate,
 } from './pix_reconciliation.js'
+import { createAsaasPayments } from '../services/asaas/payments.js'
+import { resolveAsaasCustomerId } from './deposit_provider.js'
+import { resolveBillingProvider } from './asaas_subscription.js'
 
 const BILLING_CURRENCY = (config.billing?.currency || 'BRL').toUpperCase()
 const BILLING_DEBUG = (() => {
@@ -431,6 +434,158 @@ export async function createMercadoPagoPixTopupCheckout({
   const initPoint = transactionData.ticket_url || null
 
   return { initPoint, subscription, pix: pixPayload, payment, package: pkg }
+}
+
+// Checkout PIX (Asaas, conta única) para compra avulsa (topup) de mensagens WhatsApp.
+// Espelha createMercadoPagoPixTopupCheckout: mesmo shape de retorno, persiste em
+// `subscriptions` (gateway='asaas', pending_pix) + evento topup.create. O webhook do
+// Asaas credita a carteira via confirmAsaasTopupByChargeId (idempotente pelo payment_id).
+export async function createAsaasPixTopupCheckout({
+  estabelecimento,
+  messages,
+  planHint,
+  pack = null,
+  availablePacks = null,
+  client,
+  db = pool,
+} = {}) {
+  if (!estabelecimento?.id) throw new Error('Estabelecimento inválido')
+  const pkg = normalizeTopupPackage(pack) || resolveTopupPackage(messages, { availablePacks })
+  if (!pkg) throw new Error('Pacote de mensagens inválido')
+
+  const payments = createAsaasPayments(client)
+  // Pagador = estabelecimento (reusa o cpf_cnpj já usado na assinatura Asaas do tenant).
+  const [urows] = await db.query(
+    'SELECT nome, email, telefone, cpf_cnpj FROM usuarios WHERE id=? LIMIT 1',
+    [estabelecimento.id],
+  )
+  const urow = urows?.[0] || {}
+  const payer = {
+    name: urow.nome || null,
+    email: urow.email || estabelecimento.email || null,
+    cpfCnpj: urow.cpf_cnpj || null,
+    phone: urow.telefone || null,
+  }
+  const customerId = await resolveAsaasCustomerId({ payments, userId: estabelecimento.id, payer, db })
+  if (!customerId) throw new Error('asaas_customer_unresolved')
+
+  const amountReais = Math.max(0, Math.round(Number(pkg.priceCents || 0))) / 100
+  const externalReference = `topup:est:${estabelecimento.id}:uuid:${randomUUID()}`
+  const description = pkg.name
+    ? `Agendamentos Online - ${pkg.name}`
+    : `Agendamentos Online - WhatsApp +${pkg.messages} mensagens`
+
+  const charge = await payments.createPixCharge({
+    customerId,
+    value: amountReais,
+    dueDate: new Date(),
+    description,
+    externalReference,
+  })
+  const chargeId = charge?.id ? String(charge.id) : null
+  if (!chargeId) throw new Error('asaas_charge_missing_id')
+  const qr = await payments.getPixQrCode(chargeId)
+  const ticketUrl = charge.invoiceUrl || charge.bankSlipUrl || null
+
+  const pixPayload = {
+    payment_id: chargeId,
+    qr_code: qr.payload || null,
+    copia_e_cola: qr.payload || null,
+    qr_code_base64: qr.encodedImage || null,
+    ticket_url: ticketUrl,
+    expires_at: qr.expirationDate || null,
+    amount_cents: pkg.priceCents,
+    messages: pkg.messages,
+    status: charge.status || 'PENDING',
+    pack_code: pkg.code || null,
+    pack_id: pkg.id ?? null,
+  }
+
+  const planForRow = (() => {
+    const p = String(planHint || 'starter').toLowerCase()
+    return PLAN_TIERS.includes(p) ? p : 'starter'
+  })()
+
+  const subscription = await createSubscription({
+    estabelecimentoId: estabelecimento.id,
+    plan: planForRow,
+    gateway: 'asaas',
+    amountCents: pkg.priceCents,
+    currency: BILLING_CURRENCY,
+    paymentMethod: 'pix',
+    status: 'pending_pix',
+    gatewaySubscriptionId: null,
+    gatewayPaymentId: chargeId,
+    gatewayPreferenceId: chargeId,
+    externalReference,
+    billingCycle: 'mensal',
+  })
+  await appendSubscriptionEvent(subscription.id, {
+    eventType: 'topup.create',
+    gatewayEventId: chargeId,
+    payload: { charge, messages: pkg.messages, pack_code: pkg.code || null, pack_id: pkg.id ?? null },
+  })
+
+  return { initPoint: ticketUrl, subscription, pix: pixPayload, payment: charge, package: pkg }
+}
+
+// Confirma um topup Asaas a partir do id da cobrança (== subscriptions.gateway_payment_id).
+// Idempotente: creditWhatsAppTopup usa INSERT IGNORE pelo payment_id. Chamado pelo webhook Asaas.
+export async function confirmAsaasTopupByChargeId(chargeId, { db = pool } = {}) {
+  if (!chargeId) return { handled: false, reason: 'missing_charge_id' }
+  const sub = await getSubscriptionByGatewayPaymentId(String(chargeId), { db })
+  if (!sub || sub.gateway !== 'asaas') return { handled: false, reason: 'topup_subscription_not_found' }
+
+  // Recupera messages/pack do evento topup.create (persistido na criação).
+  let messages = 0
+  let packCode = null
+  let packId = null
+  try {
+    const events = await listSubscriptionEventsBySubscriptionId(sub.id, { db })
+    const created = (events || []).find((e) => e.event_type === 'topup.create')
+    let payload = created?.payload ?? null
+    if (typeof payload === 'string') { try { payload = JSON.parse(payload) } catch { payload = null } }
+    messages = Number(payload?.messages || 0)
+    packCode = payload?.pack_code || null
+    packId = payload?.pack_id ?? null
+  } catch (err) {
+    console.warn('[billing][asaas_topup][event_lookup]', err?.message || err)
+  }
+
+  await updateSubscription(sub.id, {
+    status: 'active',
+    paymentMethod: 'pix',
+    lastPaymentAt: new Date(),
+    lastEventId: String(chargeId),
+  }, { db })
+
+  let packForCredit = null
+  if (packCode || packId) {
+    try { packForCredit = await findWhatsAppPack({ id: packId, code: packCode, activeOnly: false }) } catch {}
+  }
+  const estabelecimentoId = sub.estabelecimentoId
+  if (estabelecimentoId && messages) {
+    await creditWhatsAppTopup({
+      estabelecimentoId,
+      messages,
+      paymentId: String(chargeId),
+      subscriptionId: sub.id,
+      metadata: { kind: 'whatsapp_topup', messages, pack_code: packCode, pack_id: packId },
+      pack: normalizeTopupPackage(packForCredit) || null,
+    })
+  }
+  return { handled: true, kind: 'topup', subscriptionId: sub.id, estabelecimentoId, messages }
+}
+
+// PIX não pago (overdue/deleted): marca a subscription do topup como expirada. Sem crédito.
+export async function expireAsaasTopupByChargeId(chargeId, { db = pool } = {}) {
+  if (!chargeId) return { handled: false, reason: 'missing_charge_id' }
+  const sub = await getSubscriptionByGatewayPaymentId(String(chargeId), { db })
+  if (!sub || sub.gateway !== 'asaas') return { handled: false, reason: 'topup_subscription_not_found' }
+  if (sub.status === 'pending_pix') {
+    await updateSubscription(sub.id, { status: 'expired' }, { db })
+  }
+  return { handled: true, kind: 'topup', subscriptionId: sub.id, expired: true }
 }
 
 function addCycle(date, cycle) {
