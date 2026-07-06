@@ -4231,62 +4231,14 @@ async function handleDepositPaymentWebhook({
   }
 }
 
-router.post('/implementation/checkout', async (req, res) => {
-  try {
-    const payload = req.body || {}
-    const produto = String(payload.produto || IMPLEMENTATION_PRODUCT).trim()
-    const tipo = String(payload.tipo || 'one_time').trim()
-    const valorCentavos = Number(payload.valor_centavos ?? IMPLEMENTATION_AMOUNT_CENTS)
-
-    if (produto !== IMPLEMENTATION_PRODUCT) {
-      return res.status(400).json({ error: 'invalid_product', message: 'Produto de implantação inválido.' })
-    }
-    if (tipo !== 'one_time') {
-      return res.status(400).json({ error: 'invalid_type', message: 'Tipo de cobrança inválido.' })
-    }
-    if (valorCentavos !== IMPLEMENTATION_AMOUNT_CENTS) {
-      return res.status(400).json({ error: 'invalid_amount', message: 'Valor de implantação inválido.' })
-    }
-
-    const authResult = await tryAuthenticateRequest(req)
-    const user = authResult.user?.tipo === 'estabelecimento' ? authResult.user : null
-    const checkout = await createImplementationCheckout({
-      user,
-      payer: {
-        nome: payload.nome || payload.name || null,
-        email: payload.email || null,
-        telefone: payload.telefone || payload.phone || null,
-      },
-      planHint: payload.plan_hint || payload.plan || null,
-    })
-
-    console.info('[billing/implementation/checkout]', {
-      user_id: user?.id || null,
-      user_email: user?.email || payload.email || null,
-      public_id: checkout.public_id,
-      preference_id: checkout.preference_id || null,
-      valor_centavos: IMPLEMENTATION_AMOUNT_CENTS,
-    })
-
-    return res.json({
-      ok: true,
-      checkout_url: checkout.checkout_url,
-      public_id: checkout.public_id,
-      amount_cents: checkout.amount_cents,
-      produto: checkout.produto,
-      tipo: checkout.tipo,
-    })
-  } catch (error) {
-    const missingConfig = String(error?.message || '').includes('access token is not configured')
-    const status = missingConfig ? 503 : 500
-    console.error('POST /billing/implementation/checkout', error?.message || error)
-    return res.status(status).json({
-      error: missingConfig ? 'mercadopago_not_configured' : 'implementation_checkout_failed',
-      message: missingConfig
-        ? 'Checkout Mercado Pago indisponível no momento.'
-        : 'Não foi possível iniciar o checkout da implantação.',
-    })
-  }
+// Checkout online da implantação DESATIVADO no 'zerar MP'. A contratação passou a
+// ser conduzida manualmente pelo WhatsApp (o time envia link Asaas/PIX e confirma).
+// createImplementationCheckout (MP Checkout Pro) fica inalcançável por esta rota.
+router.post('/implementation/checkout', async (_req, res) => {
+  return res.status(410).json({
+    error: 'implementation_checkout_disabled',
+    message: 'A contratação da implantação passou a ser feita pelo WhatsApp.',
+  })
 })
 
 router.get('/implementation/status', async (req, res) => {
