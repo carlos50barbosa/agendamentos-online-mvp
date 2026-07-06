@@ -22,14 +22,31 @@ function onlyDigits(value) {
 
 /** Resolve (ou cria) o cliente Asaas do usuário, cacheando em usuarios.asaas_customer_id. */
 export async function resolveAsaasCustomerId({ payments, userId, payer, db = pool }) {
+  const doc = onlyDigits(payer?.cpfCnpj);
   if (userId) {
     const [rows] = await db.query('SELECT asaas_customer_id FROM usuarios WHERE id=? LIMIT 1', [userId]);
     const existing = rows?.[0]?.asaas_customer_id;
-    if (existing) return existing;
+    if (existing) {
+      // O cliente pode ter sido criado antes SEM CPF (ex.: tentativa de assinatura
+      // anterior). Se agora temos um CPF, atualiza (best-effort) para o Asaas aceitar
+      // cobranças/assinaturas — senão volta "necessário preencher o CPF ou CNPJ".
+      if (doc) {
+        try {
+          await payments.updateCustomer(existing, {
+            cpfCnpj: doc,
+            name: payer?.name || undefined,
+            email: payer?.email ? String(payer.email).trim().toLowerCase() : undefined,
+            phone: onlyDigits(payer?.phone),
+          });
+        } catch {
+          // best-effort: se a atualização falhar, segue com o cliente em cache
+        }
+      }
+      return existing;
+    }
   }
   // Dedupe: cliente sem cache local (ex.: guest sem userId) pode já existir no Asaas.
   // Busca por CPF/CNPJ antes de criar para não duplicar.
-  const doc = onlyDigits(payer?.cpfCnpj);
   if (doc) {
     try {
       const found = await payments.getCustomerByCpfCnpj(doc);
