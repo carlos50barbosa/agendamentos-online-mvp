@@ -34,14 +34,27 @@ test('auth: valida asaas-access-token', () => {
 })
 
 // ----------------------- mapeamento -----------------------
-test('map: sinal confirma só no PAYMENT_RECEIVED', () => {
+test('map: sinal confirma em RECEIVED e CONFIRMED', () => {
   const received = mapAsaasEvent({ id: 'evt1', event: 'PAYMENT_RECEIVED', payment: { id: 'pay1', externalReference: 'deposit:42' } })
   assert.equal(received.kind, 'deposit')
   assert.equal(received.internalId, 42)
   assert.equal(received.action, 'confirm')
 
   const confirmed = mapAsaasEvent({ id: 'evt1b', event: 'PAYMENT_CONFIRMED', payment: { id: 'pay1', externalReference: 'deposit:42' } })
-  assert.equal(confirmed.action, 'ignore') // sinal aguarda RECEIVED
+  assert.equal(confirmed.action, 'confirm') // CONFIRMED cobre bloqueio cautelar de conta PF
+})
+
+test('map: sinal vencido/removido libera o slot (fail_release)', () => {
+  assert.equal(mapAsaasEvent({ event: 'PAYMENT_OVERDUE', payment: { externalReference: 'deposit:9' } }).action, 'fail_release')
+  assert.equal(mapAsaasEvent({ event: 'PAYMENT_DELETED', payment: { externalReference: 'deposit:9' } }).action, 'fail_release')
+  // assinatura mantém past_due no overdue
+  assert.equal(mapAsaasEvent({ event: 'PAYMENT_OVERDUE', payment: { subscription: 'sub_x' } }).action, 'past_due')
+})
+
+test('map: extrai value/netValue em centavos (para a taxa real do Asaas)', () => {
+  const d = mapAsaasEvent({ id: 'e', event: 'PAYMENT_RECEIVED', payment: { externalReference: 'deposit:1', value: 30, netValue: 28.01 } })
+  assert.equal(d.valueCents, 3000)
+  assert.equal(d.netValueCents, 2801)
 })
 
 test('map: assinatura ativa no CONFIRMED ou RECEIVED', () => {
@@ -61,26 +74,73 @@ test('map: overdue/refunded e desconhecido', () => {
 })
 
 // ----------------------- aplicação -----------------------
-test('apply: sinal pago confirma pagamento e agendamento', async () => {
+test('apply: sinal pago confirma pagamento, agendamento e taxa real', async () => {
   const db = fakeDb([
+    { match: /SELECT agendamento_id, split_centavos/, result: [[{ agendamento_id: 77, split_centavos: 2750, refund_initiated_by_cancellation: 0 }]] },
     { match: /UPDATE appointment_payments/, result: [{ affectedRows: 1 }] },
     { match: /UPDATE agendamentos/, result: [{ affectedRows: 1 }] },
   ])
-  const desc = mapAsaasEvent({ id: 'evt1', event: 'PAYMENT_RECEIVED', payment: { id: 'pay1', externalReference: 'deposit:42' } })
+  const desc = mapAsaasEvent({ id: 'evt1', event: 'PAYMENT_RECEIVED', payment: { id: 'pay1', externalReference: 'deposit:42', value: 30, netValue: 28.01 } })
   const res = await applyAsaasWebhookAction(desc, { db, rawPayload: '{}' })
   assert.equal(res.matched, true)
-  assert.equal(db.calls.length, 2)
-  assert.match(db.calls[0].sql, /UPDATE appointment_payments/)
-  assert.equal(db.calls[0].params.at(-1), 42)
-  assert.match(db.calls[1].sql, /UPDATE agendamentos/)
+  assert.equal(res.agendamentoId, 77)
+  assert.equal(res.notify, 'confirmed')
+  assert.equal(db.calls.length, 3)
+  assert.match(db.calls[0].sql, /SELECT agendamento_id/)
+  assert.match(db.calls[1].sql, /UPDATE appointment_payments/)
+  assert.equal(db.calls[1].params[0], 199) // asaas_fee_centavos = (30 - 28,01)*100
+  assert.match(db.calls[2].sql, /UPDATE agendamentos/)
+  assert.equal(db.calls[2].params.at(-1), 77)
 })
 
 test('apply: sinal já não-pendente não mexe no agendamento', async () => {
-  const db = fakeDb([{ match: /UPDATE appointment_payments/, result: [{ affectedRows: 0 }] }])
+  const db = fakeDb([
+    { match: /SELECT agendamento_id, split_centavos/, result: [[{ agendamento_id: 77 }]] },
+    { match: /UPDATE appointment_payments/, result: [{ affectedRows: 0 }] },
+  ])
   const desc = mapAsaasEvent({ id: 'evt1', event: 'PAYMENT_RECEIVED', payment: { id: 'pay1', externalReference: 'deposit:42' } })
   const res = await applyAsaasWebhookAction(desc, { db, rawPayload: '{}' })
   assert.equal(res.matched, false)
-  assert.equal(db.calls.length, 1) // não chega a atualizar agendamentos
+  assert.equal(db.calls.length, 2) // SELECT + UPDATE, sem tocar agendamentos
+})
+
+test('apply: estorno cancela o agendamento e sinaliza estorno inesperado', async () => {
+  const db = fakeDb([
+    { match: /SELECT agendamento_id, split_centavos/, result: [[{ agendamento_id: 77, refund_initiated_by_cancellation: 0 }]] },
+    { match: /UPDATE appointment_payments SET status='refunded'/, result: [{ affectedRows: 1 }] },
+    { match: /UPDATE agendamentos SET status='cancelado'/, result: [{ affectedRows: 1 }] },
+  ])
+  const desc = mapAsaasEvent({ id: 'r1', event: 'PAYMENT_REFUNDED', payment: { id: 'pay1', externalReference: 'deposit:42' } })
+  const res = await applyAsaasWebhookAction(desc, { db, rawPayload: '{}' })
+  assert.equal(res.matched, true)
+  assert.equal(res.unexpectedRefund, true)
+  assert.match(db.calls[2].sql, /UPDATE agendamentos SET status='cancelado'/)
+})
+
+test('apply: estorno de um cancelamento nosso não é inesperado', async () => {
+  const db = fakeDb([
+    { match: /SELECT agendamento_id, split_centavos/, result: [[{ agendamento_id: 77, refund_initiated_by_cancellation: 1 }]] },
+    { match: /UPDATE appointment_payments SET status='refunded'/, result: [{ affectedRows: 1 }] },
+    { match: /UPDATE agendamentos SET status='cancelado'/, result: [{ affectedRows: 1 }] },
+  ])
+  const desc = mapAsaasEvent({ id: 'r2', event: 'PAYMENT_REFUNDED', payment: { id: 'pay1', externalReference: 'deposit:42' } })
+  const res = await applyAsaasWebhookAction(desc, { db, rawPayload: '{}' })
+  assert.equal(res.matched, true)
+  assert.equal(res.unexpectedRefund, false)
+})
+
+test('apply: fail_release marca sinal failed e libera o slot', async () => {
+  const db = fakeDb([
+    { match: /SELECT agendamento_id, split_centavos/, result: [[{ agendamento_id: 77 }]] },
+    { match: /UPDATE appointment_payments SET status='failed'/, result: [{ affectedRows: 1 }] },
+    // cancelPendingPaymentAppointmentTx lê o snapshot; vazio -> no-op seguro
+    { match: /FROM agendamentos/, result: [[]] },
+  ])
+  const desc = mapAsaasEvent({ id: 'o1', event: 'PAYMENT_OVERDUE', payment: { id: 'pay1', externalReference: 'deposit:42' } })
+  const res = await applyAsaasWebhookAction(desc, { db, rawPayload: '{}' })
+  assert.equal(res.action, 'fail_release')
+  assert.equal(res.matched, true)
+  assert.match(db.calls[1].sql, /status='failed'/)
 })
 
 test('apply: assinatura confirmada ativa subscription + usuario + evento', async () => {

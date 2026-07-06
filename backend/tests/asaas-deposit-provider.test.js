@@ -107,3 +107,72 @@ test('cria customer quando não há cache e persiste em usuarios', async () => {
   // persistiu o customer id
   assert.ok(db.calls.some((c) => /UPDATE usuarios SET asaas_customer_id/.test(c.sql) && c.params.includes('cus_new')))
 })
+
+test('repassa o sinal via split para o walletId do estabelecimento (fixedValue em reais)', async () => {
+  const client = stubClient({
+    'POST /v3/payments': { id: 'pay_s', status: 'PENDING' },
+    'GET /v3/payments/pay_s/pixQrCode': { encodedImage: 'B', payload: 'P', expirationDate: null },
+  })
+  const db = fakeDb([{ match: /SELECT asaas_customer_id FROM usuarios/, result: [[{ asaas_customer_id: 'cus_c' }]] }])
+
+  await createAsaasDepositPixPayment({
+    amountCents: 3000,
+    description: 'Sinal',
+    externalReference: 'deposit:7',
+    payer: { name: 'Fulano' },
+    userId: 1,
+    walletId: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
+    splitCents: 2890,
+    client,
+    db,
+  })
+
+  const charge = client.calls.find((c) => c.path === '/v3/payments')
+  assert.deepEqual(charge.body.split, [{ walletId: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890', fixedValue: 28.9 }])
+})
+
+test('sem walletId/splitCents não envia split (modelo legado)', async () => {
+  const client = stubClient({
+    'POST /v3/payments': { id: 'pay_n' },
+    'GET /v3/payments/pay_n/pixQrCode': {},
+  })
+  const db = fakeDb([{ match: /SELECT asaas_customer_id FROM usuarios/, result: [[{ asaas_customer_id: 'cus_c' }]] }])
+
+  await createAsaasDepositPixPayment({
+    amountCents: 3000,
+    externalReference: 'deposit:8',
+    payer: { name: 'F' },
+    userId: 1,
+    client,
+    db,
+  })
+
+  const charge = client.calls.find((c) => c.path === '/v3/payments')
+  assert.equal(charge.body.split, undefined)
+})
+
+test('dedupe: reusa customer existente por CPF quando não há cache local', async () => {
+  const client = stubClient({
+    'GET /v3/customers': { data: [{ id: 'cus_found' }] },
+    'POST /v3/payments': { id: 'pay_d' },
+    'GET /v3/payments/pay_d/pixQrCode': {},
+  })
+  const db = fakeDb([
+    { match: /SELECT asaas_customer_id FROM usuarios/, result: [[]] },
+    { match: /UPDATE usuarios SET asaas_customer_id/, result: [{ affectedRows: 1 }] },
+  ])
+
+  await createAsaasDepositPixPayment({
+    amountCents: 1000,
+    externalReference: 'deposit:5',
+    payer: { name: 'F', cpfCnpj: '123.456.789-09' },
+    userId: 3,
+    client,
+    db,
+  })
+
+  // não criou customer novo — reusou o encontrado por CPF
+  assert.ok(!client.calls.some((c) => c.method === 'POST' && c.path === '/v3/customers'))
+  const charge = client.calls.find((c) => c.path === '/v3/payments')
+  assert.equal(charge.body.customer, 'cus_found')
+})
