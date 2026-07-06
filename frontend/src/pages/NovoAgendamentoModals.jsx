@@ -1735,6 +1735,30 @@ export default function NovoAgendamentoModals(props) {
 
                         <label className="booking-modal__field">
 
+                          <span className="booking-modal__label">CPF</span>
+
+                          <input
+
+                            className="input"
+
+                            type="text"
+
+                            inputMode="numeric"
+
+                            placeholder="Necessário para o sinal via PIX"
+
+                            value={guestModal.cpf}
+
+                            onChange={(e) => setGuestModal((prev) => ({ ...prev, cpf: e.target.value }))}
+
+                            disabled={guestModal.loading}
+
+                          />
+
+                        </label>
+
+                        <label className="booking-modal__field">
+
                           <span className="booking-modal__label">CEP (opcional)</span>
 
                           <input

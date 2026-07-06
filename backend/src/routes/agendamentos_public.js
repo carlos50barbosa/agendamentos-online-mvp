@@ -10,6 +10,9 @@ import { sendAppointmentWhatsApp } from '../lib/whatsapp_outbox.js';
 import { buildConfirmacaoAgendamentoV2Components, isConfirmacaoAgendamentoV2 } from '../lib/whatsapp_templates.js';
 import { createMercadoPagoPixPayment } from '../lib/billing.js';
 import { resolveMpAccessToken } from '../services/mpAccounts.js';
+import { resolveDepositProvider, createAsaasDepositPixPayment } from '../lib/deposit_provider.js';
+import { config } from '../lib/config.js';
+import { computeSignalTotalCents, computeSplitCents, SignalTooLowError } from '../lib/signal_calculator.js';
 import { ensureSubscriptionOperationalAccess } from '../middleware/billing.js';
 import { estabNotificationsDisabled } from '../lib/estab_notifications.js';
 import { clientWhatsappDisabled, whatsappImmediateDisabled, whatsappConfirmationDisabled } from '../lib/client_notifications.js';
@@ -100,18 +103,28 @@ function resolveBillingWebhookUrl(apiBase) {
 async function resolveDepositConfig(estabelecimentoId, planContext) {
   const allowed = DEPOSIT_ALLOWED_PLANS.has(String(planContext?.plan || '').toLowerCase());
   if (!allowed) {
-    return { allowed: false, enabled: false, percent: null, holdMinutes: DEFAULT_DEPOSIT_HOLD_MINUTES };
+    return { allowed: false, enabled: false, percent: null, holdMinutes: DEFAULT_DEPOSIT_HOLD_MINUTES, signalConfig: null, walletId: null };
   }
   const [rows] = await pool.query(
-    'SELECT deposit_enabled, deposit_percent, deposit_hold_minutes FROM establishment_settings WHERE estabelecimento_id=? LIMIT 1',
+    `SELECT deposit_enabled, deposit_percent, deposit_hold_minutes,
+            deposit_type, deposit_fixed_centavos, deposit_min_centavos, deposit_max_centavos,
+            asaas_wallet_id
+       FROM establishment_settings WHERE estabelecimento_id=? LIMIT 1`,
     [estabelecimentoId]
   );
   const row = rows?.[0];
   const enabledFlag = row ? Number(row.deposit_enabled || 0) : 0;
   const percent = row?.deposit_percent != null ? Number(row.deposit_percent) : null;
+  const type = String(row?.deposit_type || 'PERCENT').toUpperCase();
+  const fixedCents = row?.deposit_fixed_centavos != null ? Number(row.deposit_fixed_centavos) : null;
+  const minCents = row?.deposit_min_centavos != null ? Number(row.deposit_min_centavos) : null;
+  const maxCents = row?.deposit_max_centavos != null ? Number(row.deposit_max_centavos) : null;
   const holdMinutes = Number(row?.deposit_hold_minutes || DEFAULT_DEPOSIT_HOLD_MINUTES) || DEFAULT_DEPOSIT_HOLD_MINUTES;
-  const enabled = Boolean(enabledFlag) && Number.isFinite(percent) && percent > 0;
-  return { allowed: true, enabled, percent, holdMinutes };
+  const signalConfig = { type, percent, fixedCents, minCents, maxCents };
+  const hasValue = type === 'FIXED' ? (Number.isFinite(fixedCents) && fixedCents > 0) : (Number.isFinite(percent) && percent > 0);
+  const enabled = Boolean(enabledFlag) && hasValue;
+  const walletId = row?.asaas_wallet_id ? String(row.asaas_wallet_id) : null;
+  return { allowed: true, enabled, percent, holdMinutes, signalConfig, walletId };
 }
 
 const normalizeServiceIds = (value) => {
@@ -541,6 +554,8 @@ router.post('/', ensureSubscriptionOperationalAccess({
       estado,
       data_nascimento,
       dataNascimento,
+      cpf,
+      cpf_cnpj,
     } = req.body || {};
 
     const professionalCandidate = profissionalIdRaw != null ? profissionalIdRaw : profissionalId;
@@ -566,6 +581,7 @@ router.post('/', ensureSubscriptionOperationalAccess({
     const estadoTrim = estado ? String(estado).trim().toUpperCase() : '';
     const dataNascimentoRaw = data_nascimento ?? dataNascimento;
     const dataNascimentoValue = normalizeBirthdate(dataNascimentoRaw);
+    const cpfDigits = String(cpf ?? cpf_cnpj ?? '').replace(/\D/g, '');
     if (dataNascimentoRaw && String(dataNascimentoRaw).trim() && !dataNascimentoValue) {
       return res.status(400).json({ error: 'data_nascimento_invalida', message: 'Informe uma data de nascimento válida.' });
     }
@@ -696,6 +712,7 @@ router.post('/', ensureSubscriptionOperationalAccess({
     const depositConfig = await resolveDepositConfig(estabelecimento_id, planContext);
     const depositEnabled = depositConfig.allowed && depositConfig.enabled;
     const depositPercent = depositEnabled ? Number(depositConfig.percent || 0) : null;
+    const depositProvider = resolveDepositProvider();
     let depositCentavos = null;
     let depositHoldMinutes = DEFAULT_DEPOSIT_HOLD_MINUTES;
     let depositExpiresAt = null;
@@ -709,7 +726,11 @@ router.post('/', ensureSubscriptionOperationalAccess({
         });
         return res.status(400).json({ error: 'invalid_total', message: 'Serviço sem preço configurado' });
       }
-      depositCentavos = Math.ceil(totalCentavos * (depositPercent || 0) / 100);
+      depositCentavos = computeSignalTotalCents({
+        servicePriceCents: totalCentavos,
+        config: depositConfig.signalConfig,
+        systemMinCents: depositProvider === 'asaas' ? config.signal.minCents : 0,
+      });
       if (!Number.isFinite(depositCentavos) || depositCentavos <= 0) {
         console.warn('[deposit] invalid_deposit_value', {
           estabelecimento_id,
@@ -721,20 +742,54 @@ router.post('/', ensureSubscriptionOperationalAccess({
       }
       depositHoldMinutes = Number(depositConfig.holdMinutes || DEFAULT_DEPOSIT_HOLD_MINUTES) || DEFAULT_DEPOSIT_HOLD_MINUTES;
       depositExpiresAt = new Date(Date.now() + depositHoldMinutes * 60_000);
-      const mpAccess = await resolveMpAccessToken(estabelecimento_id, { allowFallback: false });
-      const mpStatus = mpAccess.account?.status || null;
-      if (mpStatus !== 'connected' || !mpAccess.accessToken) {
-        console.warn('[deposit] mp_not_connected', {
-          estabelecimento_id,
-          status: mpStatus,
-          reason: mpAccess.reason || 'missing_token',
-        });
-        return res.status(409).json({
-          error: 'mp_not_connected_for_deposit',
-          message: 'Conecte seu Mercado Pago para receber o sinal.',
-        });
+      if (depositProvider === 'asaas') {
+        // O Asaas exige CPF/CNPJ do pagador para gerar o PIX (guest não tem no perfil).
+        if (!(cpfDigits.length === 11 || cpfDigits.length === 14)) {
+          return res.status(400).json({
+            error: 'cpf_required_for_deposit',
+            message: 'Informe seu CPF para pagar o sinal via PIX.',
+          });
+        }
+        // Com split exige walletId; no fallback de conta única (splitDisabled) nada disso se aplica.
+        if (!config.signal.splitDisabled) {
+          if (!depositConfig.walletId) {
+            return res.status(409).json({
+              error: 'asaas_not_connected_for_deposit',
+              message: 'Cadastre seu Wallet ID do Asaas para receber o sinal.',
+            });
+          }
+          try {
+            computeSplitCents({
+              totalCents: depositCentavos,
+              platformFeeCents: config.signal.platformFeeCents,
+              asaasFeeEstimateCents: config.signal.asaasPixFeeCents,
+            });
+          } catch (err) {
+            if (err instanceof SignalTooLowError) {
+              return res.status(400).json({
+                error: 'signal_too_low',
+                message: 'O valor do sinal é muito baixo para cobrir a taxa do PIX.',
+              });
+            }
+            throw err;
+          }
+        }
+      } else {
+        const mpAccess = await resolveMpAccessToken(estabelecimento_id, { allowFallback: false });
+        const mpStatus = mpAccess.account?.status || null;
+        if (mpStatus !== 'connected' || !mpAccess.accessToken) {
+          console.warn('[deposit] mp_not_connected', {
+            estabelecimento_id,
+            status: mpStatus,
+            reason: mpAccess.reason || 'missing_token',
+          });
+          return res.status(409).json({
+            error: 'mp_not_connected_for_deposit',
+            message: 'Conecte seu Mercado Pago para receber o sinal.',
+          });
+        }
+        mpAccessToken = mpAccess.accessToken;
       }
-      mpAccessToken = mpAccess.accessToken;
     }
     let depositRequired = Boolean(depositEnabled && Number.isFinite(depositCentavos) && depositCentavos > 0);
     if (!depositRequired) {
@@ -800,11 +855,12 @@ router.post('/', ensureSubscriptionOperationalAccess({
     if (!userId) {
       const hash = await bcrypt.hash(Math.random().toString(36), 10);
       const [r] = await pool.query(
-        "INSERT INTO usuarios (nome, email, telefone, data_nascimento, cep, endereco, numero, complemento, bairro, cidade, estado, senha_hash, tipo) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'cliente')",
+        "INSERT INTO usuarios (nome, email, telefone, cpf_cnpj, data_nascimento, cep, endereco, numero, complemento, bairro, cidade, estado, senha_hash, tipo) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,'cliente')",
         [
           String(nome).slice(0,120),
           emailNorm,
           telNorm || null,
+          cpfDigits || null,
           dataNascimentoValue,
           cepDigits || null,
           enderecoTrim || null,
@@ -1045,7 +1101,11 @@ router.post('/', ensureSubscriptionOperationalAccess({
 
     let depositCentavosFinal = depositCentavos;
     if (depositRequired) {
-      depositCentavosFinal = Math.ceil(totalCentavosFinal * (depositPercent || 0) / 100);
+      depositCentavosFinal = computeSignalTotalCents({
+        servicePriceCents: totalCentavosFinal,
+        config: depositConfig.signalConfig,
+        systemMinCents: depositProvider === 'asaas' ? config.signal.minCents : 0,
+      });
       if (!Number.isFinite(depositCentavosFinal) || depositCentavosFinal <= 0) {
         if (txStarted && conn) {
           await conn.rollback();
@@ -1087,6 +1147,88 @@ router.post('/', ensureSubscriptionOperationalAccess({
 
     if (depositRequired) {
       const expiresIso = depositExpiresAt ? depositExpiresAt.toISOString() : null;
+
+      // Sinal via Asaas (flag DEPOSIT_PROVIDER=asaas) — mesmo desenho da rota autenticada.
+      if (depositProvider === 'asaas') {
+        const externalReference = `deposit:${depositPaymentId}`;
+        const splitDisabled = config.signal.splitDisabled;
+        const platformFeeCents = config.signal.platformFeeCents;
+        const asaasFeeEstimateCents = config.signal.asaasPixFeeCents;
+        let splitCents = null;
+        if (!splitDisabled) {
+          try {
+            splitCents = computeSplitCents({ totalCents: depositCentavosFinal, platformFeeCents, asaasFeeEstimateCents });
+          } catch (err) {
+            if (err instanceof SignalTooLowError) {
+              await pool.query("UPDATE appointment_payments SET status='failed' WHERE id=?", [depositPaymentId]);
+              await cancelPendingPaymentAppointmentTx(appointmentId, { db: pool });
+              return res.status(400).json({
+                error: 'signal_too_low',
+                message: 'O valor do sinal é muito baixo para cobrir a taxa do PIX.',
+              });
+            }
+            throw err;
+          }
+        }
+        try {
+          const { payment, pix, providerPaymentId } = await createAsaasDepositPixPayment({
+            amountCents: depositCentavosFinal,
+            description: `Sinal - ${serviceLabel}`,
+            externalReference,
+            payer: { name: nome || null, email: emailNorm || null, cpfCnpj: cpfDigits || null, phone: telNorm || null },
+            userId,
+            expiresAt: depositExpiresAt,
+            walletId: splitDisabled ? null : depositConfig.walletId,
+            splitCents: splitDisabled ? 0 : splitCents,
+          });
+          await pool.query(
+            'UPDATE appointment_payments SET provider=?, provider_payment_id=?, provider_reference=?, split_centavos=?, platform_fee_centavos=?, raw_payload=? WHERE id=?',
+            ['asaas', providerPaymentId, externalReference, splitCents, splitDisabled ? null : platformFeeCents, safeJson(payment), depositPaymentId]
+          );
+          const depositToken = buildPublicDepositToken({
+            agendamentoId: appointmentId,
+            clienteId: userId,
+            estabelecimentoId: estabelecimento_id,
+            paymentId: depositPaymentId,
+          });
+          return res.status(201).json({
+            id: appointmentId,
+            agendamentoId: appointmentId,
+            status: 'pendente_pagamento',
+            total_centavos: totalCentavosFinal,
+            deposit_required: 1,
+            deposit_percent: depositPercent,
+            deposit_centavos: depositCentavosFinal,
+            deposit_expires_at: expiresIso,
+            deposit_token: depositToken,
+            paymentId: depositPaymentId,
+            expiresAt: expiresIso,
+            pix_qr: pix?.qr_code_base64 || null,
+            pix_qr_raw: pix?.qr_code || null,
+            pix_copia_cola: pix?.copia_e_cola || pix?.qr_code || null,
+            pix_ticket_url: pix?.ticket_url || null,
+            amount_centavos: depositCentavosFinal,
+            pix,
+            loyalty_subscription_id: loyaltyApplication?.subscription?.id || null,
+            loyalty_credit_applied: Boolean(loyaltyApplication?.loyalty_credit_applied),
+            loyalty_discount_percent: loyaltyApplication?.loyalty_discount_percent ?? null,
+            loyalty_benefit_snapshot: loyaltyApplication?.snapshot || null,
+          });
+        } catch (err) {
+          console.error('[public/agendamentos][deposit][asaas] erro ao criar PIX:', err?.message || err);
+          const payload = safeJson({ error: err?.message || String(err) });
+          await pool.query(
+            'UPDATE appointment_payments SET status=?, raw_payload=? WHERE id=?',
+            ['failed', payload, depositPaymentId]
+          );
+          await cancelPendingPaymentAppointmentTx(appointmentId, { db: pool });
+          return res.status(502).json({
+            error: 'payment_create_failed',
+            message: 'Não foi possível gerar o PIX do sinal. Tente novamente.',
+          });
+        }
+      }
+
       const apiBase = resolveApiBaseUrl();
       const webhookUrl = resolveBillingWebhookUrl(apiBase);
       const externalReference = `dep:ag:${appointmentId}:pay:${depositPaymentId}:est:${estabelecimento_id}`;
