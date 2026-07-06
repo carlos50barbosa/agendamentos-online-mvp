@@ -30,9 +30,10 @@ import otpPublicRouter from './routes/otp_public.js';
 import profissionaisRouter from './routes/profissionais.js';
 import estabelecimentoSettingsRouter from './routes/estabelecimento_settings.js';
 import onboardingRouter from './routes/onboarding.js';
-import loyaltyPlansRouter from './routes/loyalty_plans.js';
-import clientLoyaltyRouter from './routes/client_loyalty.js';
-import publicLoyaltyRouter from './routes/public_loyalty.js';
+// Fidelidade desabilitada (feature 100% Mercado Pago): imports/mounts desativados.
+// import loyaltyPlansRouter from './routes/loyalty_plans.js';
+// import clientLoyaltyRouter from './routes/client_loyalty.js';
+// import publicLoyaltyRouter from './routes/public_loyalty.js';
 import { pool } from './lib/db.js';
 import { config, getOperationalHardeningWarnings } from './lib/config.js';
 import { buildRateLimitClientKey, consumeRateLimit, getRateLimitMaintenanceInfo, initializeRateLimitStore, setRateLimitHeaders, startRateLimitStoreMaintenance } from './lib/request_rate_limit.js';
@@ -274,11 +275,12 @@ app.use('/profissionais', profissionaisRouter);
 app.use('/notify', notifyRouter);
 app.use('/public/otp', otpPublicRouter);
 app.use('/public/agendamentos', publicAgendamentosRouter);
-app.use('/public/estabelecimentos', publicLoyaltyRouter);
+// Fidelidade desabilitada (feature 100% Mercado Pago): mounts desativados.
+// app.use('/public/estabelecimentos', publicLoyaltyRouter);
 app.use('/admin', adminRouter);
 app.use('/relatorios', relatoriosRouter);
-app.use('/loyalty', loyaltyPlansRouter);
-app.use('/cliente/loyalty', clientLoyaltyRouter);
+// app.use('/loyalty', loyaltyPlansRouter);
+// app.use('/cliente/loyalty', clientLoyaltyRouter);
 if (BILLING_ROUTES_ENABLED) {
   app.use('/billing', billingRouter);
 }
@@ -307,11 +309,11 @@ app.use('/api/profissionais', profissionaisRouter);
 app.use('/api/notify', notifyRouter);
 app.use('/api/public/otp', otpPublicRouter);
 app.use('/api/public/agendamentos', publicAgendamentosRouter);
-app.use('/api/public/estabelecimentos', publicLoyaltyRouter);
+// app.use('/api/public/estabelecimentos', publicLoyaltyRouter);
 app.use('/api/admin', adminRouter);
 app.use('/api/relatorios', relatoriosRouter);
-app.use('/api/loyalty', loyaltyPlansRouter);
-app.use('/api/cliente/loyalty', clientLoyaltyRouter);
+// app.use('/api/loyalty', loyaltyPlansRouter);
+// app.use('/api/cliente/loyalty', clientLoyaltyRouter);
 if (BILLING_ROUTES_ENABLED) {
   app.use('/api/billing', billingRouter);
 }

@@ -60,7 +60,6 @@ export function buildNavigation(user) {
       { key: 'my-page', label: 'Minha página', to: publicPagePath, icon: IconList, type: 'link' },
       { key: 'professionals', label: 'Profissionais', to: '/profissionais', icon: IconUser, type: 'link' },
       { key: 'services', label: 'Serviços', to: '/servicos', icon: IconWrench, type: 'link' },
-      { key: 'loyalty', label: 'Fidelidade', to: '/fidelidade', icon: IconStar, type: 'link' },
       { key: 'clients', label: 'Clientes', to: '/clientes', icon: IconUsers, type: 'link' },
       { key: 'reports', label: 'Relatórios', to: '/relatorios', icon: IconChart, type: 'link' },
       { key: 'finance', label: 'Financeiro', to: '/financeiro', icon: IconMoney, type: 'link' },
@@ -68,7 +67,6 @@ export function buildNavigation(user) {
   } else {
     mainItems.push(
       { key: 'new', label: 'Novo Agendamento', to: '/novo', icon: IconPlus, type: 'link' },
-      { key: 'loyalty-client', label: 'Meus Planos', to: '/cliente/fidelidade', icon: IconStar, type: 'link' },
     )
   }
 
