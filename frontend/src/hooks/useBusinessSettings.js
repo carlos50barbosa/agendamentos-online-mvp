@@ -280,6 +280,9 @@ export function useBusinessSettings(options = {}) {
     enabled: false,
     percent: '',
     holdMinutes: DEFAULT_DEPOSIT_HOLD_MINUTES,
+    provider: 'mercadopago',
+    walletId: '',
+    walletVerified: false,
     noticeType: '',
     noticeMessage: '',
   });
@@ -467,6 +470,9 @@ export function useBusinessSettings(options = {}) {
         enabled: Boolean(depositConfig.enabled),
         percent: depositConfig.percent != null ? String(depositConfig.percent) : '',
         holdMinutes: Number(depositConfig.hold_minutes) || DEFAULT_DEPOSIT_HOLD_MINUTES,
+        provider: response?.provider || 'mercadopago',
+        walletId: depositConfig.wallet_id || '',
+        walletVerified: Boolean(depositConfig.wallet_verified),
       }));
       return response;
     } catch (error) {
@@ -931,13 +937,42 @@ export function useBusinessSettings(options = {}) {
     }));
   }, []);
 
+  const setDepositWalletId = useCallback((value) => {
+    setDeposit((current) => ({
+      ...current,
+      walletId: String(value || '').trim(),
+      noticeType: '',
+      noticeMessage: '',
+    }));
+  }, []);
+
   const saveDepositSettings = useCallback(async () => {
     if (!isEstablishment) return false;
 
     const enabled = Boolean(deposit.enabled);
+    const isAsaas = deposit.provider === 'asaas';
+    const walletId = String(deposit.walletId || '').trim();
+    const WALLET_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
     let percent = null;
 
+    if (walletId && !WALLET_RE.test(walletId)) {
+      setDeposit((current) => ({
+        ...current,
+        noticeType: 'error',
+        noticeMessage: 'Wallet ID inválido. Copie o identificador exato da sua conta Asaas.',
+      }));
+      return false;
+    }
+
     if (enabled) {
+      if (isAsaas && !walletId) {
+        setDeposit((current) => ({
+          ...current,
+          noticeType: 'error',
+          noticeMessage: 'Cadastre seu Wallet ID do Asaas para habilitar o sinal.',
+        }));
+        return false;
+      }
       const numeric = Number(String(deposit.percent || '').trim());
       if (!Number.isFinite(numeric)) {
         setDeposit((current) => ({
@@ -969,6 +1004,7 @@ export function useBusinessSettings(options = {}) {
       const response = await Api.updateEstablishmentDepositSettings({
         enabled,
         percent,
+        walletId: walletId || null,
       });
       const config = response?.deposit || {};
       setDeposit((current) => ({
@@ -981,6 +1017,9 @@ export function useBusinessSettings(options = {}) {
         enabled: Boolean(config.enabled),
         percent: config.percent != null ? String(config.percent) : '',
         holdMinutes: Number(config.hold_minutes) || DEFAULT_DEPOSIT_HOLD_MINUTES,
+        provider: response?.provider || current.provider,
+        walletId: config.wallet_id || '',
+        walletVerified: Boolean(config.wallet_verified),
         noticeType: 'success',
         noticeMessage: 'Configuração atualizada com sucesso.',
       }));
@@ -994,7 +1033,7 @@ export function useBusinessSettings(options = {}) {
       }));
       return false;
     }
-  }, [deposit.enabled, deposit.percent, isEstablishment]);
+  }, [deposit.enabled, deposit.percent, deposit.provider, deposit.walletId, isEstablishment]);
 
   const openWhatsappTopup = useCallback(async (pack) => {
     if (!isEstablishment || !loadWhatsApp) return false;
@@ -1187,6 +1226,7 @@ export function useBusinessSettings(options = {}) {
     disconnectMercadoPago,
     setDepositEnabled,
     setDepositPercent,
+    setDepositWalletId,
     saveDepositSettings,
     openWhatsappTopup,
     closePixModal,

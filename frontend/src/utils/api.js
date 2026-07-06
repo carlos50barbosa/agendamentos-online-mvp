@@ -355,6 +355,7 @@ export const Api = {
   onboardingFinish: () => req('/estabelecimento/onboarding/finalizar', { method: 'POST' }),
   updateEstablishmentDepositSettings: (payload) =>
     req('/estabelecimento/settings/deposit', { method: 'PUT', body: JSON.stringify(payload) }),
+  getSinais: () => req('/estabelecimento/financeiro/sinais'),
   getEstablishmentStats: (id) => req(`/establishments/${id}/stats`),
   listServices: (establishmentId) => req(`/servicos${toQuery({ establishmentId })}`),
 
@@ -511,6 +512,7 @@ export const Api = {
   cancelarAgendamento: (id) => req(`/agendamentos/${id}/cancel`, { method: 'PUT' }),
 
   cancelarAgendamentoEstab: (id) => req(`/agendamentos/${id}/cancel-estab`, { method: 'PUT' }),
+  registrarFaltaAgendamento: (id) => req(`/agendamentos/${id}/no-show`, { method: 'PUT' }),
 
   reagendarAgendamentoEstab: (id, payload) =>
 

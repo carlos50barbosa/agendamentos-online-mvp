@@ -50,6 +50,12 @@ if [[ "$SKIP_BACKEND" != "1" ]]; then
   echo "==> Backend: instalando dependências (npm ci)"
   cd "$BACK_DIR"
   npm ci
+  # Migrações pendentes ANTES de recarregar a API (set -e aborta o deploy se falhar,
+  # evitando recarregar a API contra um schema desatualizado). Bootstrap (uma vez, no VPS):
+  #   mysql -u<user> -p <db> < backend/sql/2026-07-05-add-asaas-split-sinal.sql   # aplica a pendente
+  #   node scripts/migrate.mjs --baseline                                          # registra o histórico
+  echo "==> Backend: aplicando migrações pendentes"
+  node scripts/migrate.mjs
   echo "==> Backend: recarregando PM2 ($PM2_PROCESS)"
   pm2 reload "$PM2_PROCESS" --update-env
 else

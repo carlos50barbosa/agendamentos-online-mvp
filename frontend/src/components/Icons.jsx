@@ -218,6 +218,82 @@ export function IconUsers(props){
   );
 }
 
+export function IconArrowRight(props){
+  return (
+    <svg {...base} viewBox="0 0 24 24" aria-hidden="true" {...props}>
+      <path d="M5 12h14M13 6l6 6-6 6"/>
+    </svg>
+  );
+}
+
+export function IconCalendar(props){
+  return (
+    <svg {...base} viewBox="0 0 24 24" aria-hidden="true" {...props}>
+      <rect x="3" y="4.5" width="18" height="16.5" rx="3"/>
+      <path d="M3 9h18M8 2.5v4M16 2.5v4"/>
+    </svg>
+  );
+}
+
+export function IconGrid(props){
+  return (
+    <svg {...base} viewBox="0 0 24 24" aria-hidden="true" {...props}>
+      <rect x="3" y="3" width="7" height="7" rx="1.5"/>
+      <rect x="14" y="3" width="7" height="7" rx="1.5"/>
+      <rect x="3" y="14" width="7" height="7" rx="1.5"/>
+      <rect x="14" y="14" width="7" height="7" rx="1.5"/>
+    </svg>
+  );
+}
+
+// Ícones de categoria (usados na landing pública)
+export function IconScissors(props){
+  return (
+    <svg {...base} viewBox="0 0 24 24" aria-hidden="true" {...props}>
+      <circle cx="6" cy="6" r="3"/>
+      <circle cx="6" cy="18" r="3"/>
+      <path d="M8.1 8.1 20 20M8.1 15.9 20 4"/>
+    </svg>
+  );
+}
+
+export function IconSalon(props){
+  return (
+    <svg {...base} viewBox="0 0 24 24" aria-hidden="true" {...props}>
+      <path d="M12 3c-3 4-6 6-6 10a6 6 0 0 0 12 0c0-4-3-6-6-10Z"/>
+      <path d="M12 13c-1.6.5-2.5 1.6-2.5 3"/>
+    </svg>
+  );
+}
+
+export function IconNail(props){
+  return (
+    <svg {...base} viewBox="0 0 24 24" aria-hidden="true" {...props}>
+      <path d="M9 3.5h6l-1 12a2 2 0 0 1-2 1.8 2 2 0 0 1-2-1.8Z"/>
+      <path d="M9.3 7.5h5.4"/>
+      <path d="M10 20.5h4"/>
+    </svg>
+  );
+}
+
+export function IconEyebrow(props){
+  return (
+    <svg {...base} viewBox="0 0 24 24" aria-hidden="true" {...props}>
+      <path d="M3 14c3-5 15-5 18 0"/>
+      <path d="M8.5 11.5 7 9M12 10.8V8M15.5 11.5 17 9"/>
+    </svg>
+  );
+}
+
+export function IconMassage(props){
+  return (
+    <svg {...base} viewBox="0 0 24 24" aria-hidden="true" {...props}>
+      <circle cx="12" cy="6" r="2.4"/>
+      <path d="M12 8.4c-3 0-6 1.6-6 4.6 0 2 1.4 3 3 3l1.4-2 1.6 4 1.6-4 1.4 2c1.6 0 3-1 3-3 0-3-3-4.6-6-4.6Z"/>
+    </svg>
+  );
+}
+
 export default {
   IconUser,
   IconMenu,
@@ -241,4 +317,12 @@ export default {
   IconPhone,
   IconWrench,
   IconUsers,
+  IconArrowRight,
+  IconCalendar,
+  IconGrid,
+  IconScissors,
+  IconSalon,
+  IconNail,
+  IconEyebrow,
+  IconMassage,
 };

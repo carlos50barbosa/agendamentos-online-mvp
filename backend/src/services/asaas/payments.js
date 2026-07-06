@@ -94,9 +94,21 @@ export function createAsaasPayments(client = getAsaasClient()) {
   }
 
   /**
+   * Busca um cliente Asaas por CPF/CNPJ (dedupe antes de criar).
+   * @returns o 1º cliente encontrado ou null.
+   */
+  async function getCustomerByCpfCnpj(cpfCnpj) {
+    const doc = String(cpfCnpj || '').replace(/\D/g, '');
+    if (!doc) return null;
+    const res = await client.get('/v3/customers', { query: { cpfCnpj: doc } });
+    const list = Array.isArray(res?.data) ? res.data : [];
+    return list[0] || null;
+  }
+
+  /**
    * Cria uma cobrança avulsa PIX (o sinal do agendamento).
-   * `split` é opcional (evolução futura: subconta/split por estabelecimento);
-   * no modelo atual (conta única da plataforma) fica indefinido.
+   * `split` (array de { walletId, fixedValue }) repassa o valor ao estabelecimento.
+   * Omitido no modelo de conta única sem split.
    */
   async function createPixCharge({ customerId, value, dueDate, description, externalReference, split } = {}) {
     requireField(customerId, 'customerId');
@@ -125,13 +137,43 @@ export function createAsaasPayments(client = getAsaasClient()) {
     };
   }
 
+  /** Consulta uma cobrança (usado na revalidação antes de expirar). */
+  async function getPayment(paymentId) {
+    requireField(paymentId, 'paymentId');
+    return client.get(`/v3/payments/${encodeURIComponent(paymentId)}`);
+  }
+
+  /** Remove uma cobrança pendente (evita pagamento tardio após a expiração). */
+  async function deletePayment(paymentId) {
+    requireField(paymentId, 'paymentId');
+    return client.delete(`/v3/payments/${encodeURIComponent(paymentId)}`);
+  }
+
+  /**
+   * Estorna uma cobrança recebida. Sem `value` = estorno total (também reverte o
+   * split automaticamente). Com `value` (reais) = estorno parcial.
+   */
+  async function refundPayment(paymentId, { value, description } = {}) {
+    requireField(paymentId, 'paymentId');
+    return client.post(`/v3/payments/${encodeURIComponent(paymentId)}/refund`, {
+      body: {
+        value: value != null ? Number(value) : undefined,
+        description: description || undefined,
+      },
+    });
+  }
+
   return {
     createCustomer,
+    getCustomerByCpfCnpj,
     createSubscription,
     getSubscriptionPayments,
     setSubscriptionStatus,
     createPixCharge,
     getPixQrCode,
+    getPayment,
+    deletePayment,
+    refundPayment,
   };
 }
 
@@ -139,11 +181,15 @@ export function createAsaasPayments(client = getAsaasClient()) {
 const defaultPayments = createAsaasPayments();
 export const {
   createCustomer,
+  getCustomerByCpfCnpj,
   createSubscription,
   getSubscriptionPayments,
   setSubscriptionStatus,
   createPixCharge,
   getPixQrCode,
+  getPayment,
+  deletePayment,
+  refundPayment,
 } = defaultPayments;
 
 export default defaultPayments;

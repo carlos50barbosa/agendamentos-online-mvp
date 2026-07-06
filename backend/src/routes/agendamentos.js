@@ -9,7 +9,9 @@ import { sendAppointmentWhatsApp } from '../lib/whatsapp_outbox.js';
 import { buildConfirmacaoAgendamentoV2Components, isConfirmacaoAgendamentoV2 } from '../lib/whatsapp_templates.js';
 import { createMercadoPagoPixPayment } from '../lib/billing.js';
 import { resolveMpAccessToken } from '../services/mpAccounts.js';
-import { resolveDepositProvider, createAsaasDepositPixPayment } from '../lib/deposit_provider.js';
+import { resolveDepositProvider, createAsaasDepositPixPayment, refundAsaasDepositForCancellation } from '../lib/deposit_provider.js';
+import { config } from '../lib/config.js';
+import { computeSignalTotalCents, computeSplitCents, SignalTooLowError } from '../lib/signal_calculator.js';
 import {
   extractPixPayloadFromRaw,
   fetchPendingDepositPayment,
@@ -125,18 +127,35 @@ function resolveBillingWebhookUrl(apiBase) {
 async function resolveDepositConfig(estabelecimentoId, planContext) {
   const allowed = DEPOSIT_ALLOWED_PLANS.has(String(planContext?.plan || '').toLowerCase());
   if (!allowed) {
-    return { allowed: false, enabled: false, percent: null, holdMinutes: DEFAULT_DEPOSIT_HOLD_MINUTES };
+    return {
+      allowed: false, enabled: false, percent: null, holdMinutes: DEFAULT_DEPOSIT_HOLD_MINUTES,
+      signalConfig: null, walletId: null, refundWindowHours: 24, retainOnNoShow: true,
+    };
   }
   const [rows] = await pool.query(
-    'SELECT deposit_enabled, deposit_percent, deposit_hold_minutes FROM establishment_settings WHERE estabelecimento_id=? LIMIT 1',
+    `SELECT deposit_enabled, deposit_percent, deposit_hold_minutes,
+            deposit_type, deposit_fixed_centavos, deposit_min_centavos, deposit_max_centavos,
+            asaas_wallet_id, refund_window_hours, retain_on_no_show
+       FROM establishment_settings WHERE estabelecimento_id=? LIMIT 1`,
     [estabelecimentoId]
   );
   const row = rows?.[0];
   const enabledFlag = row ? Number(row.deposit_enabled || 0) : 0;
   const percent = row?.deposit_percent != null ? Number(row.deposit_percent) : null;
+  const type = String(row?.deposit_type || 'PERCENT').toUpperCase();
+  const fixedCents = row?.deposit_fixed_centavos != null ? Number(row.deposit_fixed_centavos) : null;
+  const minCents = row?.deposit_min_centavos != null ? Number(row.deposit_min_centavos) : null;
+  const maxCents = row?.deposit_max_centavos != null ? Number(row.deposit_max_centavos) : null;
   const holdMinutes = Number(row?.deposit_hold_minutes || DEFAULT_DEPOSIT_HOLD_MINUTES) || DEFAULT_DEPOSIT_HOLD_MINUTES;
-  const enabled = Boolean(enabledFlag) && Number.isFinite(percent) && percent > 0;
-  return { allowed: true, enabled, percent, holdMinutes };
+  const signalConfig = { type, percent, fixedCents, minCents, maxCents };
+  const hasValue = type === 'FIXED'
+    ? (Number.isFinite(fixedCents) && fixedCents > 0)
+    : (Number.isFinite(percent) && percent > 0);
+  const enabled = Boolean(enabledFlag) && hasValue;
+  const walletId = row?.asaas_wallet_id ? String(row.asaas_wallet_id) : null;
+  const refundWindowHours = Number(row?.refund_window_hours ?? 24) || 24;
+  const retainOnNoShow = row?.retain_on_no_show != null ? Boolean(Number(row.retain_on_no_show)) : true;
+  return { allowed: true, enabled, percent, holdMinutes, signalConfig, walletId, refundWindowHours, retainOnNoShow };
 }
 
 function buildDepositPixPayload(paymentRow) {
@@ -792,11 +811,40 @@ router.post('/', authRequired, isCliente, ensureSubscriptionOperationalAccess({
     let mpAccessToken = null;
     const depositProvider = resolveDepositProvider();
     if (depositEnabled) {
-      depositCentavos = Math.ceil(totalCentavosPreview * (depositPercent || 0) / 100);
+      depositCentavos = computeSignalTotalCents({
+        servicePriceCents: totalCentavosPreview,
+        config: depositConfig.signalConfig,
+        systemMinCents: depositProvider === 'asaas' ? config.signal.minCents : 0,
+      });
       depositHoldMinutes = Number(depositConfig.holdMinutes || DEFAULT_DEPOSIT_HOLD_MINUTES) || DEFAULT_DEPOSIT_HOLD_MINUTES;
       depositExpiresAt = new Date(Date.now() + depositHoldMinutes * 60_000);
-      // Asaas (conta única da plataforma) não exige conta MP conectada do estabelecimento.
-      if (depositProvider !== 'asaas') {
+      if (depositProvider === 'asaas') {
+        // Com split (padrão): exige o walletId do estabelecimento e valida a viabilidade do
+        // split ANTES de inserir. No fallback de conta única (splitDisabled) nada disso se aplica.
+        if (!config.signal.splitDisabled) {
+          if (!depositConfig.walletId) {
+            return res.status(409).json({
+              error: 'asaas_not_connected_for_deposit',
+              message: 'Cadastre seu Wallet ID do Asaas para receber o sinal.',
+            });
+          }
+          try {
+            computeSplitCents({
+              totalCents: depositCentavos,
+              platformFeeCents: config.signal.platformFeeCents,
+              asaasFeeEstimateCents: config.signal.asaasPixFeeCents,
+            });
+          } catch (err) {
+            if (err instanceof SignalTooLowError) {
+              return res.status(400).json({
+                error: 'signal_too_low',
+                message: 'O valor do sinal é muito baixo para cobrir a taxa do PIX.',
+              });
+            }
+            throw err;
+          }
+        }
+      } else {
         const mpAccess = await resolveMpAccessToken(estabelecimento_id, { allowFallback: false });
         const mpStatus = mpAccess.account?.status || null;
         if (mpStatus !== 'connected' || !mpAccess.accessToken) {
@@ -984,7 +1032,11 @@ router.post('/', authRequired, isCliente, ensureSubscriptionOperationalAccess({
     }
 
     if (depositRequired) {
-      depositCentavosFinal = Math.ceil(totalCentavosFinal * (depositPercent || 0) / 100);
+      depositCentavosFinal = computeSignalTotalCents({
+        servicePriceCents: totalCentavosFinal,
+        config: depositConfig.signalConfig,
+        systemMinCents: depositProvider === 'asaas' ? config.signal.minCents : 0,
+      });
       if (!Number.isFinite(depositCentavosFinal) || depositCentavosFinal <= 0) {
         if (txStarted && conn) {
           await conn.rollback();
@@ -1046,6 +1098,25 @@ router.post('/', authRequired, isCliente, ensureSubscriptionOperationalAccess({
       // abaixo permanece intacto para o caminho legado.
       if (depositProvider === 'asaas') {
         const externalReference = `deposit:${depositPaymentId}`;
+        const splitDisabled = config.signal.splitDisabled;
+        const platformFeeCents = config.signal.platformFeeCents;
+        const asaasFeeEstimateCents = config.signal.asaasPixFeeCents;
+        let splitCents = null;
+        if (!splitDisabled) {
+          try {
+            splitCents = computeSplitCents({ totalCents: depositCentavosFinal, platformFeeCents, asaasFeeEstimateCents });
+          } catch (err) {
+            if (err instanceof SignalTooLowError) {
+              await pool.query("UPDATE appointment_payments SET status='failed' WHERE id=?", [depositPaymentId]);
+              await cancelPendingPaymentAppointmentTx(appointmentId, { db: pool });
+              return res.status(400).json({
+                error: 'signal_too_low',
+                message: 'O valor do sinal é muito baixo para cobrir a taxa do PIX.',
+              });
+            }
+            throw err;
+          }
+        }
         try {
           const { payment, pix, providerPaymentId } = await createAsaasDepositPixPayment({
             amountCents: depositCentavosFinal,
@@ -1059,11 +1130,20 @@ router.post('/', authRequired, isCliente, ensureSubscriptionOperationalAccess({
             },
             userId: req.user.id,
             expiresAt: depositExpiresAt,
+            walletId: splitDisabled ? null : depositConfig.walletId,
+            splitCents: splitDisabled ? 0 : splitCents,
           });
           await pool.query(
-            'UPDATE appointment_payments SET provider=?, provider_payment_id=?, provider_reference=?, raw_payload=? WHERE id=?',
-            ['asaas', providerPaymentId, externalReference, safeJson(payment), depositPaymentId]
+            'UPDATE appointment_payments SET provider=?, provider_payment_id=?, provider_reference=?, split_centavos=?, platform_fee_centavos=?, raw_payload=? WHERE id=?',
+            ['asaas', providerPaymentId, externalReference, splitCents, splitDisabled ? null : platformFeeCents, safeJson(payment), depositPaymentId]
           );
+          // Cobrança com split aceita -> o walletId está válido.
+          await pool
+            .query(
+              'UPDATE establishment_settings SET wallet_verified_at=NOW() WHERE estabelecimento_id=? AND wallet_verified_at IS NULL',
+              [estabelecimento_id],
+            )
+            .catch(() => {});
           return res.status(201).json({
             id: appointmentId,
             agendamentoId: appointmentId,
@@ -1093,6 +1173,17 @@ router.post('/', authRequired, isCliente, ensureSubscriptionOperationalAccess({
             'UPDATE appointment_payments SET status=?, raw_payload=? WHERE id=?',
             ['failed', payload, depositPaymentId]
           );
+          // Rejeição de split/walletId -> marca o wallet como não verificado (§5.3);
+          // o painel deve orientar a revisar o Wallet ID antes de novas cobranças.
+          const emsg = String(err?.message || '').toLowerCase();
+          if (emsg.includes('wallet') || emsg.includes('split')) {
+            await pool
+              .query(
+                'UPDATE establishment_settings SET wallet_verified_at=NULL WHERE estabelecimento_id=?',
+                [estabelecimento_id],
+              )
+              .catch(() => {});
+          }
           await cancelPendingPaymentAppointmentTx(appointmentId, { db: pool });
           return res.status(502).json({
             error: 'payment_create_failed',
@@ -2043,6 +2134,55 @@ router.put('/:id/reschedule-estab', authRequired, isEstabelecimento, ensureSubsc
   }
 });
 
+/* =================== No-show =================== */
+
+// Registrar falta (estabelecimento): cliente confirmado que não compareceu.
+// Seta no_show + conclui; retém o sinal (padrão) ou estorna se retain_on_no_show=false.
+router.put('/:id/no-show', authRequired, isEstabelecimento, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const estId = req.user.id;
+
+    const [[ag]] = await pool.query(
+      'SELECT id, status FROM agendamentos WHERE id=? AND estabelecimento_id=?',
+      [id, estId]
+    );
+    if (!ag) {
+      return res.status(404).json({ error: 'not_found', message: 'Agendamento não encontrado.' });
+    }
+    if (String(ag.status || '').toLowerCase() !== 'confirmado') {
+      return res.status(409).json({
+        error: 'invalid_status',
+        message: 'Só é possível registrar falta em agendamentos confirmados.',
+      });
+    }
+
+    const [upd] = await pool.query(
+      "UPDATE agendamentos SET no_show=1, status='concluido' WHERE id=? AND estabelecimento_id=? AND status='confirmado'",
+      [id, estId]
+    );
+    if (!upd.affectedRows) {
+      return res.status(409).json({ error: 'invalid_status', message: 'Não foi possível registrar a falta.' });
+    }
+
+    // Política do sinal: retém (padrão, penaliza) ou estorna (lenient).
+    const [[cfg]] = await pool.query(
+      'SELECT retain_on_no_show FROM establishment_settings WHERE estabelecimento_id=? LIMIT 1',
+      [estId]
+    );
+    const retain = cfg?.retain_on_no_show != null ? Boolean(Number(cfg.retain_on_no_show)) : true;
+    if (!retain) {
+      // Estorna o sinal apesar da falta (ignora a janela — o horário já passou).
+      fireAndForget(() => refundAsaasDepositForCancellation(id, { db: pool, ignoreWindow: true }));
+    }
+
+    return res.json({ ok: true, no_show: true, retained: retain });
+  } catch (e) {
+    console.error('[agendamentos/no-show]', e);
+    return res.status(500).json({ error: 'server_error' });
+  }
+});
+
 /* =================== Cancelamento =================== */
 
 // Cancelar (cliente)
@@ -2094,6 +2234,9 @@ router.put('/:id/cancel', authRequired, isCliente, async (req, res) => {
     }
 
     await restoreAppointmentLoyaltyBenefitsTx(id, { db: pool });
+
+    // Estorna o sinal Asaas se pago e dentro da janela (best-effort; não bloqueia a resposta).
+    fireAndForget(() => refundAsaasDepositForCancellation(id, { db: pool }));
 
     // contatos para notificar (opcional)
     const [[a]]   = await pool.query('SELECT estabelecimento_id, servico_id, profissional_id, inicio FROM agendamentos WHERE id=?', [id]);
@@ -2250,6 +2393,9 @@ router.put('/:id/cancel-estab', authRequired, isEstabelecimento, async (req, res
     }
 
     await restoreAppointmentLoyaltyBenefitsTx(id, { db: pool });
+
+    // Estorna o sinal Asaas se pago e dentro da janela (best-effort; não bloqueia a resposta).
+    fireAndForget(() => refundAsaasDepositForCancellation(id, { db: pool }));
 
     const [[cli]] = await pool.query('SELECT nome, telefone FROM usuarios WHERE id=?', [ag?.cliente_id || 0]);
     const [[est]] = await pool.query(

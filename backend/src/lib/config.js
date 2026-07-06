@@ -190,6 +190,21 @@ export const config = {
     env: parseLowerString(getAny('ASAAS_ENV'), 'sandbox'),
     webhookToken: getAny('ASAAS_WEBHOOK_TOKEN'),
   },
+  // Sinal (depósito) via Asaas com split para o estabelecimento.
+  // splitCents = totalCents - platformFeeCents - asaasPixFeeCents. O fee da plataforma
+  // (>0) é o próprio buffer: se a taxa real do Asaas vier maior que a estimada, ela
+  // reduz o resíduo da plataforma antes de estourar o líquido da cobrança.
+  signal: {
+    ttlMinutes: Number(getAny('SIGNAL_PAYMENT_TTL_MINUTES') || 0) || null,
+    platformFeeCents: Number(getAny('PLATFORM_FEE_CENTS') || 0) || 0,
+    asaasPixFeeCents: Number(getAny('ASAAS_PIX_FEE_CENTS') || 0) || 0,
+    // Piso mínimo do sinal Asaas (centavos). Garante split viável e evita cobranças
+    // irrisórias; só se aplica ao provider asaas e nunca excede o preço do serviço.
+    minCents: Number(getAny('SIGNAL_MIN_CENTS') || 500) || 500,
+    // Fallback de conta única: cobra o sinal na conta da plataforma SEM split (sem
+    // exigir walletId). Útil quando o estabelecimento ainda não configurou a wallet.
+    splitDisabled: parseBool(getAny('ASAAS_SPLIT_DISABLED'), false),
+  },
 }
 
 export function getOperationalHardeningWarnings(env = process.env, cfg = config) {

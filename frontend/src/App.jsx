@@ -79,6 +79,8 @@ const Ajuda = React.lazy(() => import('./pages/Ajuda.jsx'));
 
 const Relatorios = React.lazy(() => import('./pages/Relatorios.jsx'));
 
+const Financeiro = React.lazy(() => import('./pages/Financeiro.jsx'));
+
 const Planos = React.lazy(() => import('./pages/Planos.jsx'));
 
 const RecuperarSenha = React.lazy(() => import('./pages/RecuperarSenha.jsx'));
@@ -152,6 +154,8 @@ const APP_ROUTES = [
   { path: '/ajuda', element: <Ajuda /> },
 
   { path: '/relatorios', element: <Relatorios />, auth: true, role: 'estabelecimento' },
+
+  { path: '/financeiro', element: <Financeiro />, auth: true, role: 'estabelecimento' },
 
   { path: '/planos', element: <Planos /> },
 
