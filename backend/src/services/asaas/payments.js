@@ -43,6 +43,24 @@ export function createAsaasPayments(client = getAsaasClient()) {
     });
   }
 
+  /**
+   * Atualiza um cliente Asaas existente (POST /v3/customers/{id}). Usado para
+   * preencher o cpfCnpj em clientes criados antes sem CPF (senão o Asaas recusa
+   * cobranças/assinaturas com "necessário preencher o CPF ou CNPJ do cliente").
+   */
+  async function updateCustomer(id, { name, cpfCnpj, email, phone } = {}) {
+    requireField(id, 'id');
+    return client.post(`/v3/customers/${encodeURIComponent(String(id))}`, {
+      body: {
+        name: name || undefined,
+        cpfCnpj: cpfCnpj || undefined,
+        email: email || undefined,
+        phone: phone || undefined,
+        mobilePhone: phone || undefined,
+      },
+    });
+  }
+
   /** Cria uma assinatura recorrente (plano do tenant). */
   async function createSubscription({
     customerId,
@@ -52,6 +70,7 @@ export function createAsaasPayments(client = getAsaasClient()) {
     billingType = 'UNDEFINED',
     description,
     externalReference,
+    callback,
   } = {}) {
     requireField(customerId, 'customerId');
     requireField(value, 'value');
@@ -64,6 +83,8 @@ export function createAsaasPayments(client = getAsaasClient()) {
         nextDueDate: toDateOnly(nextDueDate) || toDateOnly(new Date()),
         description: description || undefined,
         externalReference: externalReference || undefined,
+        // Redireciona o cliente de volta ao app após pagar (autoRedirect).
+        callback: callback || undefined,
       },
     });
   }
@@ -165,6 +186,7 @@ export function createAsaasPayments(client = getAsaasClient()) {
 
   return {
     createCustomer,
+    updateCustomer,
     getCustomerByCpfCnpj,
     createSubscription,
     getSubscriptionPayments,
@@ -181,6 +203,7 @@ export function createAsaasPayments(client = getAsaasClient()) {
 const defaultPayments = createAsaasPayments();
 export const {
   createCustomer,
+  updateCustomer,
   getCustomerByCpfCnpj,
   createSubscription,
   getSubscriptionPayments,
