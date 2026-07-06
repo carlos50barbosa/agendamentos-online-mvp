@@ -187,3 +187,23 @@ test('apply: evento ignorado não toca no banco', async () => {
   assert.equal(res.handled, false)
   assert.equal(db.calls.length, 0)
 })
+
+// ----------------------- topup (recarga WhatsApp) -----------------------
+test('map: topup classifica por externalReference topup: (confirm / fail_release)', () => {
+  const c = mapAsaasEvent({ id: 't1', event: 'PAYMENT_RECEIVED', payment: { id: 'ch1', externalReference: 'topup:est:9:uuid:abc' } })
+  assert.equal(c.kind, 'topup')
+  assert.equal(c.action, 'confirm')
+  assert.equal(c.paymentId, 'ch1') // subscription é localizada pelo paymentId (== gateway_payment_id)
+  assert.equal(mapAsaasEvent({ event: 'PAYMENT_OVERDUE', payment: { externalReference: 'topup:est:9:uuid:abc' } }).action, 'fail_release')
+  assert.equal(mapAsaasEvent({ event: 'PAYMENT_DELETED', payment: { externalReference: 'topup:est:9:uuid:abc' } }).action, 'fail_release')
+})
+
+test('apply: topup sem subscription correspondente é no-op seguro', async () => {
+  const db = fakeDb([
+    { match: /gateway_payment_id/, result: [[]] },
+  ])
+  const desc = mapAsaasEvent({ id: 't2', event: 'PAYMENT_RECEIVED', payment: { id: 'ch_missing', externalReference: 'topup:est:9:uuid:abc' } })
+  const res = await applyAsaasWebhookAction(desc, { db, rawPayload: '{}' })
+  assert.equal(res.handled, false)
+  assert.equal(res.reason, 'topup_subscription_not_found')
+})

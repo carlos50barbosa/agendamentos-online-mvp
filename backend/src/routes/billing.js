@@ -5,9 +5,11 @@ import { auth, isEstabelecimento, tryAuthenticateRequest } from '../middleware/a
 import {
   createMercadoPagoPixCheckout,
   createMercadoPagoPixTopupCheckout,
+  createAsaasPixTopupCheckout,
   fetchMercadoPagoPayment,
   syncMercadoPagoPayment,
 } from '../lib/billing.js'
+import { resolveBillingProvider } from '../lib/asaas_subscription.js'
 import {
   cancelMercadoPagoCardSubscription,
   createMercadoPagoCardSubscription,
@@ -5298,13 +5300,16 @@ router.post('/whatsapp/pix', auth, isEstabelecimento, async (req, res) => {
       return res.status(400).json({ error: 'invalid_pack', message: 'Pacote n\u00e3o informado.' })
     }
 
-    const result = await createMercadoPagoPixTopupCheckout({
+    const topupArgs = {
       estabelecimento: { id: req.user.id, email: req.user.email },
       messages: selectedPack?.waMessages ?? messages,
       planHint: req.user.plan || 'starter',
       pack: selectedPack,
       availablePacks: availablePacks.length ? availablePacks : null,
-    })
+    }
+    const result = resolveBillingProvider() === 'asaas'
+      ? await createAsaasPixTopupCheckout(topupArgs)
+      : await createMercadoPagoPixTopupCheckout(topupArgs)
 
     const packResponse =
       serializeWhatsAppPack(selectedPack) ||

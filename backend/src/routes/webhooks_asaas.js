@@ -16,9 +16,11 @@ import { pool } from '../lib/db.js';
 import { config } from '../lib/config.js';
 import { cancelPendingPaymentAppointmentTx } from '../lib/appointment_loyalty.js';
 import { notifyAppointmentConfirmed } from '../lib/appointment_confirmation.js';
+import { confirmAsaasTopupByChargeId, expireAsaasTopupByChargeId } from '../lib/billing.js';
 
 const DEPOSIT_REF_PREFIX = 'deposit:';
 const SUBSCRIPTION_REF_PREFIX = 'subscription:';
+const TOPUP_REF_PREFIX = 'topup:';
 
 function safeJson(payload) {
   try {
@@ -63,6 +65,9 @@ export function mapAsaasEvent(body = {}) {
     kind = 'deposit';
     const parsed = Number(externalReference.slice(DEPOSIT_REF_PREFIX.length));
     internalId = Number.isFinite(parsed) ? parsed : null;
+  } else if (externalReference?.startsWith(TOPUP_REF_PREFIX)) {
+    // Topup (recarga WhatsApp): a subscription é localizada pelo paymentId (== gateway_payment_id).
+    kind = 'topup';
   }
 
   // Pago -> confirma (RECEIVED = saldo disponível; CONFIRMED = pago mas saldo ainda
@@ -73,9 +78,9 @@ export function mapAsaasEvent(body = {}) {
   } else if (event === 'PAYMENT_REFUNDED' || event === 'PAYMENT_CHARGEBACK_REQUESTED') {
     action = 'refunded';
   } else if (event === 'PAYMENT_OVERDUE') {
-    action = kind === 'deposit' ? 'fail_release' : 'past_due';
+    action = (kind === 'deposit' || kind === 'topup') ? 'fail_release' : 'past_due';
   } else if (event === 'PAYMENT_DELETED') {
-    action = kind === 'deposit' ? 'fail_release' : 'ignore';
+    action = (kind === 'deposit' || kind === 'topup') ? 'fail_release' : 'ignore';
   }
 
   const valueCents = Number.isFinite(Number(payment?.value)) ? Math.round(Number(payment.value) * 100) : null;
@@ -95,6 +100,13 @@ export async function applyAsaasWebhookAction(descriptor, { db = pool, rawPayloa
   const { kind, action, internalId, subscriptionId, paymentId, event, eventId } = descriptor;
   if (action === 'ignore' || kind === 'unknown') {
     return { handled: false, reason: 'ignored' };
+  }
+
+  if (kind === 'topup') {
+    // Topup (recarga WhatsApp): confirma credita a carteira; overdue/deleted expira o pendente.
+    if (action === 'confirm') return confirmAsaasTopupByChargeId(paymentId, { db });
+    if (action === 'fail_release') return expireAsaasTopupByChargeId(paymentId, { db });
+    return { handled: false, reason: 'noop_topup' };
   }
 
   if (kind === 'deposit') {
