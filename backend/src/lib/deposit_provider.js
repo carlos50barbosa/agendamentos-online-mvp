@@ -20,6 +20,17 @@ function onlyDigits(value) {
   return d || undefined;
 }
 
+/**
+ * Telefone BR só quando plausível (o Asaas recusa formatos inválidos com
+ * "O telefone informado é inválido"). Remove DDI 55; aceita 10 (fixo) ou 11
+ * (celular) dígitos; caso contrário devolve undefined (campo é opcional no Asaas).
+ */
+function sanitizeBrPhone(value) {
+  let d = String(value ?? '').replace(/\D/g, '');
+  if (d.startsWith('55') && d.length >= 12) d = d.slice(2);
+  return d.length === 10 || d.length === 11 ? d : undefined;
+}
+
 /** Resolve (ou cria) o cliente Asaas do usuário, cacheando em usuarios.asaas_customer_id. */
 export async function resolveAsaasCustomerId({ payments, userId, payer, db = pool }) {
   const doc = onlyDigits(payer?.cpfCnpj);
@@ -36,7 +47,7 @@ export async function resolveAsaasCustomerId({ payments, userId, payer, db = poo
             cpfCnpj: doc,
             name: payer?.name || undefined,
             email: payer?.email ? String(payer.email).trim().toLowerCase() : undefined,
-            phone: onlyDigits(payer?.phone),
+            phone: sanitizeBrPhone(payer?.phone),
           });
         } catch {
           // best-effort: se a atualização falhar, segue com o cliente em cache
@@ -70,7 +81,7 @@ export async function resolveAsaasCustomerId({ payments, userId, payer, db = poo
     name: payer?.name || 'Cliente',
     cpfCnpj: doc,
     email: payer?.email ? String(payer.email).trim().toLowerCase() : undefined,
-    phone: onlyDigits(payer?.phone),
+    phone: sanitizeBrPhone(payer?.phone),
   });
   const customerId = customer?.id ? String(customer.id) : null;
   if (userId && customerId) {
