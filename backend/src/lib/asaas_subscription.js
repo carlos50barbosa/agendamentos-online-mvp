@@ -89,6 +89,16 @@ export async function createTenantAsaasSubscription({
     { db },
   );
 
+  // Supersede: cancela as outras assinaturas do estabelecimento (ex.: MP antigas) para
+  // não brigarem com esta no motor de billing. Sem isso, o billing pode reverter o
+  // usuário para uma assinatura antiga (unpaid) mesmo após o webhook Asaas confirmar.
+  await db
+    .query(
+      "UPDATE subscriptions SET status='canceled', updated_at=NOW() WHERE estabelecimento_id=? AND id<>? AND status NOT IN ('canceled')",
+      [estabelecimentoId, localSub.id],
+    )
+    .catch(() => {});
+
   // Espelha ponteiros no usuarios (sem ativar o plano — isso é no webhook).
   await db
     .query('UPDATE usuarios SET plan_subscription_id=?, plan_cycle=? WHERE id=?', [
