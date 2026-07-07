@@ -4374,8 +4374,10 @@ router.get('/status', auth, isEstabelecimento, async (req, res) => {
         primary: 'credit_card',
         alternative: 'pix',
         recommended: 'credit_card',
-        gateway: 'mercadopago',
-        public_key: getMercadoPagoPublicKey(),
+        gateway: resolveBillingProvider() === 'asaas' ? 'asaas' : 'mercadopago',
+        // Sob Asaas o pagamento (cartão ou PIX) acontece no checkout HOSPEDADO — sem CardForm/SDK do
+        // MP no app. Sem public_key, o CardForm do MP não monta (não carrega o SDK à toa).
+        public_key: resolveBillingProvider() === 'asaas' ? null : getMercadoPagoPublicKey(),
         credentials: getBillingMercadoPagoCredentialDiagnostics(),
       },
       billing: {
