@@ -89,6 +89,42 @@ export async function createTenantAsaasSubscription({
     { db },
   );
 
+  // Supersede: uma nova assinatura de PLANO substitui as ANTERIORES do estabelecimento no Asaas.
+  // (1) desativa no GATEWAY as assinaturas Asaas antigas — senão viram "zumbi" cobrando em paralelo
+  //     (cobrança dupla) e podem reverter usuarios.plan via webhook; (2) cancela localmente com
+  //     canceled_at. Escopo positivo em 'subscription:estab:%' para NÃO tocar topups de WhatsApp
+  //     (pending_pix/active) nem assinaturas MP históricas (que, com o período setado no webhook,
+  //     já não brigam com esta).
+  try {
+    const [oldAsaas] = await db.query(
+      `SELECT id, gateway_subscription_id FROM subscriptions
+        WHERE estabelecimento_id=? AND id<>? AND gateway='asaas'
+          AND status NOT IN ('canceled') AND gateway_subscription_id IS NOT NULL
+          AND external_reference LIKE 'subscription:estab:%'`,
+      [estabelecimentoId, localSub.id],
+    );
+    for (const old of oldAsaas || []) {
+      try {
+        await payments.setSubscriptionStatus(old.gateway_subscription_id, 'INACTIVE');
+      } catch (err) {
+        console.error('[asaas-sub] falha ao desativar assinatura antiga no gateway', {
+          estabelecimentoId,
+          subscriptionId: old.id,
+          gatewaySubscriptionId: old.gateway_subscription_id,
+          error: err?.message || err,
+        });
+      }
+    }
+    await db.query(
+      `UPDATE subscriptions SET status='canceled', canceled_at=NOW(), updated_at=NOW()
+        WHERE estabelecimento_id=? AND id<>? AND gateway='asaas'
+          AND status NOT IN ('canceled') AND external_reference LIKE 'subscription:estab:%'`,
+      [estabelecimentoId, localSub.id],
+    );
+  } catch (err) {
+    console.error('[asaas-sub] supersede falhou', { estabelecimentoId, error: err?.message || err });
+  }
+
   // Espelha ponteiros no usuarios (sem ativar o plano — isso é no webhook).
   await db
     .query('UPDATE usuarios SET plan_subscription_id=?, plan_cycle=? WHERE id=?', [
@@ -96,7 +132,7 @@ export async function createTenantAsaasSubscription({
       cycleKey,
       estabelecimentoId,
     ])
-    .catch(() => {});
+    .catch((err) => console.error('[asaas-sub] falha ao espelhar ponteiro no usuario', { estabelecimentoId, error: err?.message || err }));
 
   // O id da 1ª cobrança NÃO volta na criação — busca para pegar o link hospedado.
   let checkoutUrl = null;

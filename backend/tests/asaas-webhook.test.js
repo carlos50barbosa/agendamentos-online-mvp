@@ -145,7 +145,7 @@ test('apply: fail_release marca sinal failed e libera o slot', async () => {
 
 test('apply: assinatura confirmada ativa subscription + usuario + evento', async () => {
   const db = fakeDb([
-    { match: /SELECT id, estabelecimento_id, plan FROM subscriptions/, result: [[{ id: 5, estabelecimento_id: 9, plan: 'pro' }]] },
+    { match: /SELECT id, estabelecimento_id, plan, billing_cycle FROM subscriptions/, result: [[{ id: 5, estabelecimento_id: 9, plan: 'pro', billing_cycle: 'mensal' }]] },
     { match: /UPDATE subscriptions/, result: [{ affectedRows: 1 }] },
     { match: /UPDATE usuarios/, result: [{ affectedRows: 1 }] },
     { match: /INSERT INTO subscription_events/, result: [{ insertId: 1 }] },
@@ -159,9 +159,38 @@ test('apply: assinatura confirmada ativa subscription + usuario + evento', async
   assert.match(db.calls[3].sql, /INSERT INTO subscription_events/)
 })
 
+test('apply: confirmacao de assinatura grava periodo (current_period_end + plan_active_until) e payment_method real', async () => {
+  const db = fakeDb([
+    { match: /SELECT id, estabelecimento_id, plan, billing_cycle FROM subscriptions/, result: [[{ id: 5, estabelecimento_id: 9, plan: 'pro', billing_cycle: 'mensal' }]] },
+    { match: /UPDATE subscriptions/, result: [{ affectedRows: 1 }] },
+    { match: /UPDATE usuarios/, result: [{ affectedRows: 1 }] },
+    { match: /INSERT INTO subscription_events/, result: [{ insertId: 1 }] },
+  ])
+  const desc = mapAsaasEvent({ id: 'e_p', event: 'PAYMENT_RECEIVED', payment: { id: 'pay3', subscription: 'sub_x', dueDate: '2026-07-06', billingType: 'CREDIT_CARD' } })
+  const res = await applyAsaasWebhookAction(desc, { db, rawPayload: '{}' })
+  assert.equal(res.matched, true)
+  assert.match(db.calls[1].sql, /current_period_end=/) // grava o periodo pago
+  assert.match(db.calls[1].sql, /status<>'canceled'/) // guard contra zumbi de gateway
+  assert.equal(db.calls[1].params[3], 'credit_card') // payment_method real (billingType CREDIT_CARD), nao 'pix' fixo
+  assert.match(db.calls[2].sql, /plan_active_until=/) // seta a validade -> nao reverte para expired
+  assert.match(db.calls[2].sql, /plan_trial_ends_at=NULL/) // limpa trial residual
+})
+
+test('apply: confirm NAO reativa sub cancelada (guard status<>canceled)', async () => {
+  const db = fakeDb([
+    { match: /SELECT id, estabelecimento_id, plan, billing_cycle FROM subscriptions/, result: [[{ id: 5, estabelecimento_id: 9, plan: 'pro', billing_cycle: 'mensal' }]] },
+    { match: /UPDATE subscriptions/, result: [{ affectedRows: 0 }] }, // WHERE status<>'canceled' nao casou
+    { match: /INSERT INTO subscription_events/, result: [{ insertId: 1 }] },
+  ])
+  const desc = mapAsaasEvent({ id: 'e_z', event: 'PAYMENT_RECEIVED', payment: { id: 'payz', subscription: 'sub_zombie' } })
+  const res = await applyAsaasWebhookAction(desc, { db, rawPayload: '{}' })
+  assert.equal(res.matched, false)
+  assert.ok(!db.calls.some((c) => /UPDATE usuarios/.test(c.sql))) // nao repointa usuarios a partir de sub cancelada
+})
+
 test('apply: assinatura vencida -> past_due', async () => {
   const db = fakeDb([
-    { match: /SELECT id, estabelecimento_id, plan FROM subscriptions/, result: [[{ id: 5, estabelecimento_id: 9, plan: 'pro' }]] },
+    { match: /SELECT id, estabelecimento_id, plan, billing_cycle FROM subscriptions/, result: [[{ id: 5, estabelecimento_id: 9, plan: 'pro', billing_cycle: 'mensal' }]] },
     { match: /UPDATE subscriptions/, result: [{ affectedRows: 1 }] },
     { match: /UPDATE usuarios/, result: [{ affectedRows: 1 }] },
     { match: /INSERT INTO subscription_events/, result: [{ insertId: 1 }] },
@@ -173,7 +202,7 @@ test('apply: assinatura vencida -> past_due', async () => {
 })
 
 test('apply: assinatura inexistente é no-op', async () => {
-  const db = fakeDb([{ match: /SELECT id, estabelecimento_id, plan FROM subscriptions/, result: [[]] }])
+  const db = fakeDb([{ match: /SELECT id, estabelecimento_id, plan, billing_cycle FROM subscriptions/, result: [[]] }])
   const desc = mapAsaasEvent({ id: 'e4', event: 'PAYMENT_RECEIVED', payment: { subscription: 'sub_inexistente' } })
   const res = await applyAsaasWebhookAction(desc, { db, rawPayload: '{}' })
   assert.equal(res.handled, false)

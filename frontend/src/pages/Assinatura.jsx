@@ -393,6 +393,7 @@ export default function Assinatura() {
   const [trialLoading, setTrialLoading] = useState(false);
   const [checkoutLoading, setCheckoutLoading] = useState(false);
   const [billingProvider, setBillingProvider] = useState('mercadopago');
+  const [providerReady, setProviderReady] = useState(false);
   const [renewalLoading, setRenewalLoading] = useState(false);
   const [cardState, setCardState] = useState({ ready: false, loading: false, submitting: false, error: '' });
   const [cardRecoveryReady, setCardRecoveryReady] = useState(false);
@@ -764,7 +765,8 @@ export default function Assinatura() {
     let alive = true;
     Api.billingAsaasProvider()
       .then((r) => { if (alive && r?.billing_provider) setBillingProvider(r.billing_provider); })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => { if (alive) setProviderReady(true); });
     return () => { alive = false; };
   }, []);
 
@@ -1635,8 +1637,8 @@ export default function Assinatura() {
               </button>
             ) : null}
             {hasCheckoutSelection ? (
-              <button type="button" className="btn btn--primary" onClick={() => void handleStartCheckout(checkoutPlanKey, checkoutCycle)} disabled={checkoutLoading}>
-                {checkoutLoading ? <span className="spinner" /> : `Gerar PIX do ${checkoutPlanMeta.label}`}
+              <button type="button" className="btn btn--primary" onClick={() => void handleStartCheckout(checkoutPlanKey, checkoutCycle)} disabled={checkoutLoading || !providerReady}>
+                {checkoutLoading ? <span className="spinner" /> : (billingProvider === 'asaas' ? `Assinar ${checkoutPlanMeta.label}` : `Gerar PIX do ${checkoutPlanMeta.label}`)}
               </button>
             ) : null}
 
@@ -1813,9 +1815,9 @@ export default function Assinatura() {
                 type="button"
                 className="btn btn--outline"
                 onClick={() => void handleStartCheckout(checkoutPlanKey, checkoutCycle)}
-                disabled={checkoutLoading}
+                disabled={checkoutLoading || !providerReady}
               >
-                {checkoutLoading ? <span className="spinner" /> : `Gerar PIX do ${checkoutPlanMeta.label}`}
+                {checkoutLoading ? <span className="spinner" /> : (billingProvider === 'asaas' ? `Assinar ${checkoutPlanMeta.label}` : `Gerar PIX do ${checkoutPlanMeta.label}`)}
               </button>
             </div>
           </div>

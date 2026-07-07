@@ -17,10 +17,27 @@ import { config } from '../lib/config.js';
 import { cancelPendingPaymentAppointmentTx } from '../lib/appointment_loyalty.js';
 import { notifyAppointmentConfirmed } from '../lib/appointment_confirmation.js';
 import { confirmAsaasTopupByChargeId, expireAsaasTopupByChargeId } from '../lib/billing.js';
+import { toDatabaseDateTime } from '../lib/database_datetime.js';
 
 const DEPOSIT_REF_PREFIX = 'deposit:';
 const SUBSCRIPTION_REF_PREFIX = 'subscription:';
 const TOPUP_REF_PREFIX = 'topup:';
+
+/** Avança a data em 1 ciclo (mensal por padrão; anual quando billing_cycle='anual'). */
+function addCycle(base, billingCycle) {
+  const d = new Date(base);
+  if (String(billingCycle || '').toLowerCase() === 'anual') d.setFullYear(d.getFullYear() + 1);
+  else d.setMonth(d.getMonth() + 1);
+  return d;
+}
+
+/** billingType do Asaas -> payment_method (enum credit_card|pix). null = não sobrescreve. */
+function normalizeAsaasPaymentMethod(billingType) {
+  const t = String(billingType || '').trim().toUpperCase();
+  if (t === 'CREDIT_CARD') return 'credit_card';
+  if (t === 'PIX') return 'pix';
+  return null;
+}
 
 function safeJson(payload) {
   try {
@@ -56,6 +73,8 @@ export function mapAsaasEvent(body = {}) {
   const paymentId = payment?.id ? String(payment.id) : null;
   const subscriptionId = payment?.subscription ? String(payment.subscription) : null;
   const externalReference = payment?.externalReference ? String(payment.externalReference) : null;
+  const dueDate = payment?.dueDate ? String(payment.dueDate) : null;
+  const billingType = payment?.billingType ? String(payment.billingType) : null;
 
   let kind = 'unknown';
   let internalId = null;
@@ -88,7 +107,7 @@ export function mapAsaasEvent(body = {}) {
 
   return {
     eventId, event, paymentId, subscriptionId, externalReference,
-    kind, internalId, action, valueCents, netValueCents,
+    kind, internalId, action, valueCents, netValueCents, dueDate, billingType,
   };
 }
 
@@ -184,31 +203,56 @@ export async function applyAsaasWebhookAction(descriptor, { db = pool, rawPayloa
 
   // kind === 'subscription' (tenant)
   const [subRows] = await db.query(
-    `SELECT id, estabelecimento_id, plan FROM subscriptions
+    `SELECT id, estabelecimento_id, plan, billing_cycle FROM subscriptions
       WHERE gateway='asaas' AND gateway_subscription_id=? LIMIT 1`,
     [subscriptionId],
   );
   const sub = subRows?.[0];
   if (!sub) return { handled: false, reason: 'subscription_not_found' };
 
+  let matched = false;
   if (action === 'confirm') {
-    await db.query(
+    // Grava o PERIODO pago (fim do ciclo = vencimento da cobranca, ou agora, + 1 ciclo). Sem isso o
+    // motor de billing reverte a ativacao (dueAt no passado -> expired) e nao ha janela de carencia.
+    const periodEnd = toDatabaseDateTime(addCycle(descriptor.dueDate ? new Date(descriptor.dueDate) : new Date(), sub.billing_cycle));
+    const paymentMethod = normalizeAsaasPaymentMethod(descriptor.billingType); // real (credit_card|pix), nao 'pix' fixo
+    // Guard status<>'canceled': nao reativa/repointa a partir de uma sub cancelada (zumbi de gateway).
+    const [r] = await db.query(
       `UPDATE subscriptions
           SET status='active', last_payment_at=NOW(),
-              gateway_payment_id=COALESCE(gateway_payment_id, ?), updated_at=NOW()
-        WHERE id=?`,
-      [paymentId, sub.id],
+              gateway_payment_id=COALESCE(gateway_payment_id, ?),
+              current_period_end=?, next_billing_at=?,
+              payment_method=COALESCE(?, payment_method), updated_at=NOW()
+        WHERE id=? AND status<>'canceled'`,
+      [paymentId, periodEnd, periodEnd, paymentMethod, sub.id],
     );
-    // Ativa o plano do estabelecimento (plano + ponteiro + status).
-    await db.query(
-      `UPDATE usuarios SET plan_status='active', plan=COALESCE(?, plan), plan_subscription_id=? WHERE id=?`,
-      [sub.plan || null, String(sub.id), sub.estabelecimento_id],
-    );
+    matched = (r?.affectedRows || 0) > 0;
+    if (matched) {
+      // Ativa: status + ponteiro + plan_active_until (fim do ciclo) e limpa plan_trial_ends_at residual
+      // (um trial vencido tambem rebaixaria active->expired em computeSubscriptionState).
+      await db.query(
+        `UPDATE usuarios
+            SET plan_status='active', plan=COALESCE(?, plan),
+                plan_subscription_id=?, plan_active_until=?,
+                plan_cycle=COALESCE(?, plan_cycle), plan_trial_ends_at=NULL
+          WHERE id=?`,
+        [sub.plan || null, String(sub.id), periodEnd, sub.billing_cycle || null, sub.estabelecimento_id],
+      );
+    }
   } else {
-    // past_due | refunded -> reverter para past_due (bloqueio suave; a rotina de
-    // billing decide expiração/graça).
-    await db.query(`UPDATE subscriptions SET status='past_due', updated_at=NOW() WHERE id=?`, [sub.id]);
-    await db.query(`UPDATE usuarios SET plan_status='past_due' WHERE id=?`, [sub.estabelecimento_id]);
+    // past_due | refunded -> bloqueio suave. Guard status<>'canceled' (nao mexe em sub cancelada).
+    const [r] = await db.query(
+      `UPDATE subscriptions SET status='past_due', updated_at=NOW() WHERE id=? AND status<>'canceled'`,
+      [sub.id],
+    );
+    matched = (r?.affectedRows || 0) > 0;
+    // So rebaixa o usuario se ele aponta para ESTA sub (nao derruba tenant sadio por evento de sub antiga/zumbi).
+    if (matched) {
+      await db.query(
+        `UPDATE usuarios SET plan_status='past_due' WHERE id=? AND plan_subscription_id=?`,
+        [sub.estabelecimento_id, String(sub.id)],
+      );
+    }
   }
 
   await db.query(
@@ -216,7 +260,7 @@ export async function applyAsaasWebhookAction(descriptor, { db = pool, rawPayloa
      VALUES (?,?,?,?)`,
     [sub.id, event, eventId, rawPayload],
   );
-  return { handled: true, kind, action, matched: true };
+  return { handled: true, kind, action, matched };
 }
 
 const router = Router();
