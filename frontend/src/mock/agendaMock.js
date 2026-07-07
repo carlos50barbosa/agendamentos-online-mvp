@@ -47,9 +47,9 @@ export function buildMockAppointments(baseDate = new Date()) {
   ];
 }
 
-/** Simula createPixCharge + getPixQrCode (o que a Fase 2/Asaas fornecerá). */
-export function mockCreatePixCharge({ service }) {
-  const value = service?.depositValue ?? 15;
+/** Simula createPixCharge + getPixQrCode (o que a Fase 2/Asaas fornece de verdade). */
+export function mockCreatePixCharge({ services } = {}) {
+  const value = (services || []).reduce((sum, s) => sum + (Number(s?.depositValue) || 0), 0) || 15;
   const expirationDate = addMinutes(new Date(), 15);
   const payload =
     '00020126360014BR.GOV.BCB.PIX0114+5511999998888520400005303986540' +

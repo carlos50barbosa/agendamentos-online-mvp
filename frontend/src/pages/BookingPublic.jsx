@@ -85,6 +85,8 @@ export default function BookingPublic() {
     () => (state.services || []).map((s) => ({
       id: s.id,
       nome: s.nome,
+      descricao: s.descricao,
+      imagem_url: s.imagem_url,
       durationMin: s.duracao_min,
       price: (s.preco_centavos || 0) / 100,
       // Profissionais vinculados ao serviço (o passo só aparece quando há algum).
@@ -99,10 +101,10 @@ export default function BookingPublic() {
   );
 
   // Slots reais: getSlots devolve 7 dias a partir de weekStart -> filtra o dia escolhido.
-  const buildSlots = useCallback(async (date, { serviceId, professionalId } = {}) => {
+  const buildSlots = useCallback(async (date, { serviceIds, professionalId } = {}) => {
     if (!establishmentId || !date) return [];
     const resp = await Api.getSlots(establishmentId, ymd(date), {
-      serviceIds: serviceId ? [serviceId] : undefined,
+      serviceIds: serviceIds && serviceIds.length ? serviceIds : undefined,
       professionalId: professionalId || undefined,
     });
     const all = resp?.slots || [];
@@ -111,12 +113,12 @@ export default function BookingPublic() {
       .map((s) => ({ datetime: s.datetime, available: s.status === 'free' }));
   }, [establishmentId]);
 
-  const onConfirm = useCallback(async ({ service, professional, date, slot, guest }) => {
+  const onConfirm = useCallback(async ({ services, professional, date, slot, guest }) => {
     const cpfDigits = (guest?.cpf || '').replace(/\D/g, '');
     const inicio = typeof slot?.datetime === 'string' ? slot.datetime : new Date(slot.datetime).toISOString();
     const payload = {
       estabelecimento_id: Number(establishmentId),
-      servico_ids: [service.id],
+      servico_ids: (services || []).map((s) => s.id),
       inicio,
       nome: (guest?.nome || '').trim(),
       email: (guest?.email || '').trim(),

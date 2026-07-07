@@ -1,18 +1,19 @@
-// src/components/booking/BookingWizard.jsx
+// src/pages/../components/booking/BookingWizard.jsx
 // Fluxo público do cliente final em passos (um por tela no mobile):
-//   Serviço → Profissional → Dia → Horário → Confirmação (+ dados do cliente) → Pagamento (PIX).
-// Consome dados via props: pode ser mock (Fase 1) ou a API real (Fase 2 — BookingPublic.jsx,
-// que injeta getSlots/publicAgendar do backend com sinal via Asaas). Props que ligam o real:
+//   Serviços (multi + busca) → Profissional → Dia → Horário → Confirmação (+ dados) → Pagamento (PIX).
+// Consome dados via props: mock (Fase 1) ou API real (Fase 2 — BookingPublic.jsx, que injeta
+// getSlots/publicAgendar do backend com sinal via Asaas). Props que ligam o real:
 //   collectGuest=true  -> mostra os campos nome/e-mail/telefone/CPF na confirmação
-//   buildSlots pode ser sync (mock) OU async (Promise, API real)
+//   buildSlots(date, { serviceIds, professionalId }) pode ser sync (mock) OU async (Promise, API real)
 //   pollStatus(paymentId, token) -> vira o PIX para 'paid'/'expired' sozinho
+//   onConfirm({ services, professional, date, slot, guest }) -> cria o agendamento e devolve o PIX
 import React, { useEffect, useMemo, useState } from 'react';
-import { ChevronLeft, Scissors, User, Check, ArrowRight, Loader2 } from 'lucide-react';
+import { ChevronLeft, Scissors, Search, User, Check, ArrowRight, Loader2 } from 'lucide-react';
 import LogoAO from '../LogoAO.jsx';
 import DayChips from '../agenda/DayChips.jsx';
 import SlotPicker from '../agenda/SlotPicker.jsx';
 import PixCheckout from '../agenda/PixCheckout.jsx';
-import { buildDayRange, fullDateLabel, hourLabel, durationLabel, toDate } from '../../utils/agendaDates.js';
+import { buildDayRange, fullDateLabel, hourLabel, durationLabel } from '../../utils/agendaDates.js';
 import { site } from '../../config/site.js';
 import { iconSizes } from '../../config/theme.js';
 
@@ -21,6 +22,13 @@ const STEP = { SERVICO: 0, PROFISSIONAL: 1, DIA: 2, HORARIO: 3, CONFIRMACAO: 4, 
 function formatBRL(value) {
   const n = Number(value);
   return Number.isFinite(n) ? n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : '';
+}
+
+// Profissionais que atendem TODOS os serviços que exigem profissional (interseção).
+function intersectProfessionals(services) {
+  const lists = (services || []).filter((s) => s?.professionals?.length).map((s) => s.professionals);
+  if (!lists.length) return [];
+  return lists.reduce((acc, list) => acc.filter((p) => list.some((x) => x.id === p.id)), lists[0]);
 }
 
 export default function BookingWizard({
@@ -34,7 +42,8 @@ export default function BookingWizard({
   pollStatus,
 }) {
   const [step, setStep] = useState(STEP.SERVICO);
-  const [service, setService] = useState(null);
+  const [selectedServices, setSelectedServices] = useState([]);
+  const [serviceSearch, setServiceSearch] = useState('');
   const [professional, setProfessional] = useState(null);
   const [date, setDate] = useState(null);
   const [slot, setSlot] = useState(null);
@@ -46,22 +55,42 @@ export default function BookingWizard({
 
   const days = useMemo(() => daysProp || buildDayRange(new Date(), 14), [daysProp]);
 
-  // Profissionais do passo: os vinculados ao serviço (API real) ou a lista geral (mock).
-  const stepProfessionals = useMemo(
-    () => (service?.professionals?.length ? service.professionals : professionals),
-    [service, professionals],
-  );
+  const filteredServices = useMemo(() => {
+    const q = serviceSearch.trim().toLowerCase();
+    if (!q) return services;
+    return services.filter((s) =>
+      [s.nome, s.descricao].filter(Boolean).some((t) => String(t).toLowerCase().includes(q)),
+    );
+  }, [services, serviceSearch]);
 
-  // Carrega os horários do dia (suporta buildSlots sync [mock] OU async [Promise, API real]).
+  const totalPrice = useMemo(() => selectedServices.reduce((sum, s) => sum + (Number(s.price) || 0), 0), [selectedServices]);
+  const totalDuration = useMemo(() => selectedServices.reduce((sum, s) => sum + (Number(s.durationMin) || 0), 0), [selectedServices]);
+  const depositTotal = useMemo(() => {
+    if (!selectedServices.length || selectedServices.some((s) => s.depositValue == null)) return null;
+    return selectedServices.reduce((sum, s) => sum + (Number(s.depositValue) || 0), 0);
+  }, [selectedServices]);
+
+  // Profissional: interseção dos vinculados aos serviços (API real) ou lista geral (mock).
+  const professionalRequired = useMemo(() => selectedServices.some((s) => s?.professionals?.length), [selectedServices]);
+  const professionalOptions = useMemo(() => {
+    const inter = intersectProfessionals(selectedServices);
+    return inter.length ? inter : (professionalRequired ? [] : professionals);
+  }, [selectedServices, professionals, professionalRequired]);
+  const showProfessionalStep = professionalRequired || professionalOptions.length > 0;
+
+  const selectedServiceKey = selectedServices.map((s) => s.id).join(',');
+
+  // Carrega os horários do dia (buildSlots sync [mock] OU async [Promise, API real]).
   useEffect(() => {
-    if (step !== STEP.HORARIO || !date || !buildSlots) return undefined;
+    if (step !== STEP.HORARIO || !date || !buildSlots || !selectedServices.length) return undefined;
     let alive = true;
     setSlotsState({ loading: true, list: [] });
-    Promise.resolve(buildSlots(date, { serviceId: service?.id, professionalId: professional?.id }))
+    Promise.resolve(buildSlots(date, { serviceIds: selectedServices.map((s) => s.id), professionalId: professional?.id }))
       .then((list) => { if (alive) setSlotsState({ loading: false, list: Array.isArray(list) ? list : [] }); })
       .catch(() => { if (alive) setSlotsState({ loading: false, list: [] }); });
     return () => { alive = false; };
-  }, [step, date, service?.id, professional?.id, buildSlots]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, date, selectedServiceKey, professional?.id, buildSlots]);
 
   // Poll do status do PIX (API real): vira 'paid'/'expired' automaticamente.
   useEffect(() => {
@@ -85,12 +114,14 @@ export default function BookingWizard({
   };
   const back = () => go(Math.max(0, step - 1));
 
-  const selectService = (s) => {
-    setService(s);
-    setProfessional(null);
+  const toggleService = (s) => {
     setSlot(null);
-    const pros = (s?.professionals?.length ? s.professionals : professionals) || [];
-    go(pros.length ? STEP.PROFISSIONAL : STEP.DIA);
+    setProfessional(null);
+    setSelectedServices((prev) => (prev.some((x) => x.id === s.id) ? prev.filter((x) => x.id !== s.id) : [...prev, s]));
+  };
+  const goFromServices = () => {
+    if (!selectedServices.length) { setError('Selecione ao menos um serviço.'); return; }
+    go(showProfessionalStep ? STEP.PROFISSIONAL : STEP.DIA);
   };
   const selectProfessional = (p) => {
     setProfessional(p);
@@ -122,7 +153,7 @@ export default function BookingWizard({
     setSubmitting(true);
     setError(null);
     try {
-      const result = await onConfirm({ service, professional, date, slot, guest });
+      const result = await onConfirm({ services: selectedServices, professional, date, slot, guest });
       setPix(result);
       go(STEP.PAGAMENTO);
     } catch (e) {
@@ -165,36 +196,89 @@ export default function BookingWizard({
 
       <main className="tw-flex-1">
         {step === STEP.SERVICO && (
-          <StepShell title="Escolha o serviço">
-            <div className="tw-flex tw-flex-col tw-gap-2">
-              {services.map((s) => (
+          <StepShell title="Escolha os serviços">
+            <div
+              className="tw-flex tw-items-center tw-gap-2 tw-rounded-xl tw-px-3"
+              style={{ minHeight: 44, background: 'var(--surface, #fff)', border: '1px solid var(--brand-border, #E7E5F5)' }}
+            >
+              <Search size={18} strokeWidth={2} aria-hidden="true" style={{ color: 'var(--muted-ink, #6B7280)', flexShrink: 0 }} />
+              <input
+                type="text"
+                value={serviceSearch}
+                onChange={(e) => setServiceSearch(e.target.value)}
+                placeholder="Buscar serviço..."
+                aria-label="Buscar serviço"
+                className="tw-w-full tw-border-0 tw-bg-transparent tw-text-sm tw-outline-none"
+                style={{ color: 'var(--ink, #1E1B4B)' }}
+              />
+            </div>
+
+            <div className="tw-mt-3 tw-flex tw-flex-col tw-gap-2 tw-pb-24">
+              {filteredServices.map((s) => (
                 <SelectableRow
                   key={s.id}
                   icon={Scissors}
+                  imageUrl={s.imagem_url || s.imageUrl}
                   title={s.nome}
                   subtitle={[durationLabel({ minutes: s.durationMin }), s.priceLabel || formatBRL(s.price)].filter(Boolean).join(' · ')}
-                  selected={service?.id === s.id}
-                  onClick={() => selectService(s)}
+                  selected={selectedServices.some((x) => x.id === s.id)}
+                  onClick={() => toggleService(s)}
                 />
               ))}
+              {!filteredServices.length && (
+                <p className="tw-m-0 tw-rounded-2xl tw-p-6 tw-text-center tw-text-sm" style={{ background: 'var(--surface-soft, #FBFBFE)', color: 'var(--muted-ink, #6B7280)' }}>
+                  Nenhum serviço encontrado.
+                </p>
+              )}
+            </div>
+
+            {/* Barra fixa: total + continuar */}
+            <div
+              className="tw-fixed tw-inset-x-0 tw-bottom-0 tw-mx-auto tw-flex tw-max-w-lg tw-items-center tw-justify-between tw-gap-3 tw-p-4"
+              style={{ background: 'linear-gradient(to top, var(--bg-lav, #F6F5FB) 70%, transparent)' }}
+            >
+              <div className="tw-min-w-0">
+                <p className="tw-m-0 tw-text-xs" style={{ color: 'var(--muted-ink, #6B7280)' }}>
+                  {selectedServices.length} selecionado(s){totalDuration ? ` · ${durationLabel({ minutes: totalDuration })}` : ''}
+                </p>
+                <p className="tw-m-0 tw-text-sm tw-font-extrabold" style={{ color: 'var(--brand-deep, #1E1B4B)' }}>
+                  {formatBRL(totalPrice)}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={goFromServices}
+                disabled={!selectedServices.length}
+                className="tw-flex tw-items-center tw-gap-2 tw-rounded-xl tw-px-5 tw-font-semibold tw-text-white"
+                style={{ minHeight: 48, background: 'var(--brand)', opacity: selectedServices.length ? 1 : 0.6 }}
+              >
+                Continuar <ArrowRight size={20} strokeWidth={2.2} aria-hidden="true" />
+              </button>
             </div>
           </StepShell>
         )}
 
         {step === STEP.PROFISSIONAL && (
           <StepShell title="Escolha o profissional">
-            <div className="tw-flex tw-flex-col tw-gap-2">
-              {stepProfessionals.map((p) => (
-                <SelectableRow
-                  key={p.id}
-                  icon={User}
-                  title={p.nome}
-                  subtitle={p.especialidade || p.descricao}
-                  selected={professional?.id === p.id}
-                  onClick={() => selectProfessional(p)}
-                />
-              ))}
-            </div>
+            {professionalRequired && !professionalOptions.length ? (
+              <p className="tw-m-0 tw-rounded-2xl tw-p-4 tw-text-sm" style={{ background: 'var(--surface-soft, #FBFBFE)', color: 'var(--status-cancelado-fg)' }}>
+                Nenhum profissional atende todos os serviços selecionados juntos. Remova um serviço ou agende-os separadamente.
+              </p>
+            ) : (
+              <div className="tw-flex tw-flex-col tw-gap-2">
+                {professionalOptions.map((p) => (
+                  <SelectableRow
+                    key={p.id}
+                    icon={User}
+                    imageUrl={p.avatar_url}
+                    title={p.nome}
+                    subtitle={p.especialidade || p.descricao}
+                    selected={professional?.id === p.id}
+                    onClick={() => selectProfessional(p)}
+                  />
+                ))}
+              </div>
+            )}
           </StepShell>
         )}
 
@@ -227,13 +311,15 @@ export default function BookingWizard({
               className="tw-flex tw-flex-col tw-gap-3 tw-rounded-2xl tw-p-4"
               style={{ background: 'var(--surface, #fff)', border: '1px solid var(--brand-border, #E7E5F5)' }}
             >
-              <SummaryRow label="Serviço" value={service?.nome} />
+              {selectedServices.map((s) => (
+                <SummaryRow key={s.id} label={s.nome} value={s.priceLabel || formatBRL(s.price)} />
+              ))}
+              <div style={{ height: 1, background: 'var(--brand-border, #E7E5F5)' }} />
+              <SummaryRow label="Total" value={formatBRL(totalPrice)} strong />
               {professional && <SummaryRow label="Profissional" value={professional.nome} />}
               <SummaryRow label="Dia" value={fullDateLabel(date)} capitalize />
               <SummaryRow label="Horário" value={hourLabel(slot?.datetime)} strong />
-              {(service?.depositValue != null) && (
-                <SummaryRow label="Sinal (PIX)" value={formatBRL(service.depositValue)} strong />
-              )}
+              {depositTotal != null && <SummaryRow label="Sinal (PIX)" value={formatBRL(depositTotal)} strong />}
             </div>
 
             {collectGuest && (
@@ -346,7 +432,7 @@ function GuestInput({ label, value, onChange, type = 'text', placeholder, autoCo
   );
 }
 
-function SelectableRow({ icon: Icon, title, subtitle, selected, onClick }) {
+function SelectableRow({ icon: Icon, imageUrl, title, subtitle, selected, onClick }) {
   return (
     <button
       type="button"
@@ -360,10 +446,14 @@ function SelectableRow({ icon: Icon, title, subtitle, selected, onClick }) {
       }}
     >
       <span
-        className="tw-flex tw-items-center tw-justify-center tw-rounded-xl"
+        className="tw-flex tw-items-center tw-justify-center tw-overflow-hidden tw-rounded-xl"
         style={{ width: 40, height: 40, background: 'var(--brand-100, #EEEDFC)', color: 'var(--brand)', flexShrink: 0 }}
       >
-        <Icon size={20} strokeWidth={2} aria-hidden="true" />
+        {imageUrl ? (
+          <img src={imageUrl} alt="" style={{ width: 40, height: 40, objectFit: 'cover' }} />
+        ) : (
+          <Icon size={20} strokeWidth={2} aria-hidden="true" />
+        )}
       </span>
       <span className="tw-min-w-0 tw-flex-1">
         <span className="tw-block tw-truncate tw-text-sm tw-font-semibold" style={{ color: 'var(--ink, #1E1B4B)' }}>
@@ -383,7 +473,7 @@ function SelectableRow({ icon: Icon, title, subtitle, selected, onClick }) {
 function SummaryRow({ label, value, strong, capitalize }) {
   return (
     <div className="tw-flex tw-items-center tw-justify-between tw-gap-3">
-      <span className="tw-text-xs tw-font-medium" style={{ color: 'var(--muted-ink, #6B7280)' }}>
+      <span className="tw-min-w-0 tw-flex-1 tw-truncate tw-text-xs tw-font-medium" style={{ color: 'var(--muted-ink, #6B7280)' }}>
         {label}
       </span>
       <span
