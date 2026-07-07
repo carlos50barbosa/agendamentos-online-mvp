@@ -8,7 +8,7 @@
 //   pollStatus(paymentId, token) -> vira o PIX para 'paid'/'expired' sozinho
 //   onConfirm({ services, professional, date, slot, guest }) -> cria o agendamento e devolve o PIX
 import React, { useEffect, useMemo, useState } from 'react';
-import { ChevronLeft, Scissors, Search, User, Check, ArrowRight, Loader2 } from 'lucide-react';
+import { ChevronLeft, Scissors, Search, User, Check, ArrowRight, Loader2, Info, X } from 'lucide-react';
 import LogoAO from '../LogoAO.jsx';
 import DayChips from '../agenda/DayChips.jsx';
 import SlotPicker from '../agenda/SlotPicker.jsx';
@@ -52,6 +52,7 @@ export default function BookingWizard({
   const [error, setError] = useState(null);
   const [guest, setGuest] = useState({ nome: '', email: '', telefone: '', cpf: '' });
   const [slotsState, setSlotsState] = useState({ loading: false, list: [] });
+  const [detailService, setDetailService] = useState(null);
 
   const days = useMemo(() => daysProp || buildDayRange(new Date(), 14), [daysProp]);
 
@@ -215,14 +216,12 @@ export default function BookingWizard({
 
             <div className="tw-mt-3 tw-flex tw-flex-col tw-gap-2 tw-pb-24">
               {filteredServices.map((s) => (
-                <SelectableRow
+                <ServiceRow
                   key={s.id}
-                  icon={Scissors}
-                  imageUrl={s.imagem_url || s.imageUrl}
-                  title={s.nome}
-                  subtitle={[durationLabel({ minutes: s.durationMin }), s.priceLabel || formatBRL(s.price)].filter(Boolean).join(' · ')}
+                  service={s}
                   selected={selectedServices.some((x) => x.id === s.id)}
-                  onClick={() => toggleService(s)}
+                  onToggle={() => toggleService(s)}
+                  onDetails={() => setDetailService(s)}
                 />
               ))}
               {!filteredServices.length && (
@@ -385,6 +384,15 @@ export default function BookingWizard({
           </StepShell>
         )}
       </main>
+
+      {detailService && (
+        <ServiceDetailsModal
+          service={detailService}
+          selected={selectedServices.some((x) => x.id === detailService.id)}
+          onToggle={() => toggleService(detailService)}
+          onClose={() => setDetailService(null)}
+        />
+      )}
     </div>
   );
 }
@@ -429,6 +437,127 @@ function GuestInput({ label, value, onChange, type = 'text', placeholder, autoCo
         style={{ minHeight: 44, background: 'var(--surface, #fff)', border: '1px solid var(--brand-border, #E7E5F5)', color: 'var(--ink, #1E1B4B)' }}
       />
     </label>
+  );
+}
+
+// Card do serviço com seleção (toggle) + botão de detalhes (abre o modal). Dois botões
+// irmãos num div (não aninhados) para HTML válido.
+function ServiceRow({ service, selected, onToggle, onDetails }) {
+  const subtitle = [durationLabel({ minutes: service.durationMin }), service.priceLabel || formatBRL(service.price)]
+    .filter(Boolean)
+    .join(' · ');
+  return (
+    <div
+      className="tw-flex tw-w-full tw-items-center tw-gap-1 tw-rounded-2xl tw-transition"
+      style={{
+        minHeight: 60,
+        background: selected ? 'var(--brand-100, #EEEDFC)' : 'var(--surface, #fff)',
+        border: `1px solid ${selected ? 'var(--brand)' : 'var(--brand-border, #E7E5F5)'}`,
+      }}
+    >
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-pressed={selected}
+        className="tw-flex tw-min-w-0 tw-flex-1 tw-items-center tw-gap-3 tw-border-0 tw-bg-transparent tw-p-3 tw-text-left"
+        style={{ cursor: 'pointer' }}
+      >
+        <span
+          className="tw-flex tw-items-center tw-justify-center tw-overflow-hidden tw-rounded-xl"
+          style={{ width: 40, height: 40, background: 'var(--brand-100, #EEEDFC)', color: 'var(--brand)', flexShrink: 0 }}
+        >
+          {service.imagem_url ? (
+            <img src={service.imagem_url} alt="" style={{ width: 40, height: 40, objectFit: 'cover' }} />
+          ) : (
+            <Scissors size={20} strokeWidth={2} aria-hidden="true" />
+          )}
+        </span>
+        <span className="tw-min-w-0 tw-flex-1">
+          <span className="tw-block tw-truncate tw-text-sm tw-font-semibold" style={{ color: 'var(--ink, #1E1B4B)' }}>
+            {service.nome}
+          </span>
+          {subtitle && (
+            <span className="tw-block tw-truncate tw-text-xs" style={{ color: 'var(--muted-ink, #6B7280)' }}>
+              {subtitle}
+            </span>
+          )}
+        </span>
+        {selected && <Check size={20} strokeWidth={2.6} aria-hidden="true" style={{ color: 'var(--brand)', flexShrink: 0 }} />}
+      </button>
+      <button
+        type="button"
+        onClick={onDetails}
+        aria-label={`Detalhes de ${service.nome}`}
+        title="Ver detalhes"
+        className="tw-flex tw-items-center tw-justify-center tw-border-0 tw-bg-transparent tw-pr-3"
+        style={{ minWidth: 40, minHeight: 44, color: 'var(--muted-ink, #6B7280)', flexShrink: 0, cursor: 'pointer' }}
+      >
+        <Info size={20} strokeWidth={2} aria-hidden="true" />
+      </button>
+    </div>
+  );
+}
+
+function ServiceDetailsModal({ service, selected, onToggle, onClose }) {
+  const subtitle = [durationLabel({ minutes: service.durationMin }), service.priceLabel || formatBRL(service.price)]
+    .filter(Boolean)
+    .join(' · ');
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      onClick={onClose}
+      className="tw-fixed tw-inset-0 tw-z-50 tw-flex tw-items-center tw-justify-center tw-p-4"
+      style={{ background: 'rgba(30,27,75,0.45)' }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="tw-w-full tw-max-w-md tw-overflow-hidden tw-rounded-2xl"
+        style={{ background: 'var(--surface, #fff)', border: '1px solid var(--brand-border, #E7E5F5)' }}
+      >
+        {service.imagem_url ? (
+          <img src={service.imagem_url} alt={service.nome} style={{ width: '100%', maxHeight: 200, objectFit: 'cover', display: 'block' }} />
+        ) : null}
+        <div className="tw-flex tw-flex-col tw-gap-2 tw-p-4">
+          <div className="tw-flex tw-items-start tw-justify-between tw-gap-3">
+            <div className="tw-min-w-0">
+              <h2 className="tw-m-0 tw-text-base tw-font-bold" style={{ color: 'var(--brand-deep, #1E1B4B)' }}>
+                {service.nome}
+              </h2>
+              {subtitle && (
+                <p className="tw-m-0 tw-text-sm tw-font-semibold" style={{ color: 'var(--brand)' }}>{subtitle}</p>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Fechar"
+              className="tw-inline-flex tw-items-center tw-justify-center tw-border-0 tw-rounded-xl"
+              style={{ minWidth: 40, minHeight: 40, background: 'var(--surface-soft, #F6F5FB)', color: 'var(--brand-deep, #1E1B4B)', flexShrink: 0, cursor: 'pointer' }}
+            >
+              <X size={20} strokeWidth={2.2} aria-hidden="true" />
+            </button>
+          </div>
+          <p className="tw-m-0 tw-text-sm" style={{ color: 'var(--ink, #1E1B4B)', whiteSpace: 'pre-wrap' }}>
+            {service.descricao || 'Sem descrição para este serviço.'}
+          </p>
+          <button
+            type="button"
+            onClick={() => { onToggle(); onClose(); }}
+            className="tw-mt-2 tw-flex tw-w-full tw-items-center tw-justify-center tw-gap-2 tw-rounded-xl tw-font-semibold"
+            style={{
+              minHeight: 48,
+              cursor: 'pointer',
+              background: selected ? 'var(--surface-soft, #F6F5FB)' : 'var(--brand)',
+              color: selected ? 'var(--brand-deep, #1E1B4B)' : '#fff',
+              border: selected ? '1px solid var(--brand-border, #E7E5F5)' : '1px solid transparent',
+            }}
+          >
+            {selected ? 'Remover do agendamento' : 'Adicionar ao agendamento'}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
