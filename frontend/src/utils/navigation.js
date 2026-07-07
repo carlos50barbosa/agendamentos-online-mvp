@@ -32,7 +32,7 @@ export function buildNavigation(user) {
     const slugSource = user?.slug || user?.nome || ''
     const slug = toSlug(slugSource || (id ? `estabelecimento-${id}` : 'estabelecimento'))
     const query = id ? `?estabelecimento=${encodeURIComponent(id)}` : ''
-    return `/novo/${slug}${query}`
+    return `/agendar/${slug}${query}`
   })()
 
   if (!isAuthenticated) {
