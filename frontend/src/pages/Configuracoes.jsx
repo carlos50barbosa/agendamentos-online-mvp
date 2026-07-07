@@ -2242,7 +2242,7 @@ function _l() {
       const s = E || (n == null ? void 0 : n.nome) || "",
         i = el(s || "estabelecimento-".concat(a));
       try {
-        const l = new URL("/novo/".concat(i), t);
+        const l = new URL("/agendar/".concat(i), t);
         return (l.searchParams.set("estabelecimento", a), l.toString());
       } catch (l) {
         return (console.error("publicLink generation failed", l), "");

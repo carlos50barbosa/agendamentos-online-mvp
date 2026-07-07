@@ -5,7 +5,7 @@
 // vinculados a cada serviço (service.professionals), coerente com a regra do backend
 // (profissional obrigatório só quando o serviço tem profissionais linkados).
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useSearchParams } from 'react-router-dom';
 import BookingWizard from '../components/booking/BookingWizard.jsx';
 import { Api } from '../utils/api.js';
 import { isSameDay } from '../utils/agendaDates.js';
@@ -44,6 +44,10 @@ function mapBookingError(e) {
 
 export default function BookingPublic() {
   const { idOrSlug } = useParams();
+  const [searchParams] = useSearchParams();
+  // Resolve por ?estabelecimento=id (link do cliente, confiável mesmo se o slug divergir)
+  // ou pelo path (id/slug). getEstablishment aceita id ou slug.
+  const resolveKey = searchParams.get('estabelecimento') || searchParams.get('estabelecimentoId') || idOrSlug;
   const [state, setState] = useState({ loading: true, error: '', establishment: null, services: [] });
 
   useEffect(() => {
@@ -51,7 +55,7 @@ export default function BookingPublic() {
     setState((s) => ({ ...s, loading: true, error: '' }));
     (async () => {
       try {
-        const est = await Api.getEstablishment(idOrSlug);
+        const est = await Api.getEstablishment(resolveKey);
         if (!est?.id) throw new Error('not_found');
         const services = await Api.listServices(est.id).catch(() => []);
         if (!alive) return;
@@ -73,7 +77,7 @@ export default function BookingPublic() {
       }
     })();
     return () => { alive = false; };
-  }, [idOrSlug]);
+  }, [resolveKey]);
 
   const establishmentId = state.establishment?.id || null;
 
