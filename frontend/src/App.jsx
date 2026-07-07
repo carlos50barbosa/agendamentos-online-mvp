@@ -104,6 +104,7 @@ const Loading = React.lazy(() => import('./pages/Loading.jsx'));
 // Fase 1 — redesign (demonstração com dados mock, ao lado dos fluxos atuais).
 const AgendaNova = React.lazy(() => import('./pages/AgendaNova.jsx'));
 const BookingNovo = React.lazy(() => import('./pages/BookingNovo.jsx'));
+const BookingPublic = React.lazy(() => import('./pages/BookingPublic.jsx'));
 
 const APP_ROUTES = [
   { path: '/', element: <LandingPublica /> },
@@ -169,6 +170,7 @@ const APP_ROUTES = [
   // Fase 1 — telas do redesign (preview público com mock).
   { path: '/agenda-nova', element: <AgendaNova /> },
   { path: '/agendar', element: <BookingNovo /> },
+  { path: '/agendar/:idOrSlug', element: <BookingPublic /> },
 
 ];
 
