@@ -1,9 +1,12 @@
 // src/components/booking/BookingWizard.jsx
 // Fluxo público do cliente final em passos (um por tela no mobile):
-//   Serviço → Profissional → Dia → Horário → Confirmação → Pagamento (PIX).
-// Na Fase 1 consome dados via props (mock). A Fase 2 injeta os dados reais do
-// Asaas em `onConfirm` (createPixCharge + getPixQrCode).
-import React, { useMemo, useState } from 'react';
+//   Serviço → Profissional → Dia → Horário → Confirmação (+ dados do cliente) → Pagamento (PIX).
+// Consome dados via props: pode ser mock (Fase 1) ou a API real (Fase 2 — BookingPublic.jsx,
+// que injeta getSlots/publicAgendar do backend com sinal via Asaas). Props que ligam o real:
+//   collectGuest=true  -> mostra os campos nome/e-mail/telefone/CPF na confirmação
+//   buildSlots pode ser sync (mock) OU async (Promise, API real)
+//   pollStatus(paymentId, token) -> vira o PIX para 'paid'/'expired' sozinho
+import React, { useEffect, useMemo, useState } from 'react';
 import { ChevronLeft, Scissors, User, Check, ArrowRight, Loader2 } from 'lucide-react';
 import LogoAO from '../LogoAO.jsx';
 import DayChips from '../agenda/DayChips.jsx';
@@ -27,6 +30,8 @@ export default function BookingWizard({
   buildSlots,
   onConfirm,
   days: daysProp,
+  collectGuest = false,
+  pollStatus,
 }) {
   const [step, setStep] = useState(STEP.SERVICO);
   const [service, setService] = useState(null);
@@ -36,12 +41,43 @@ export default function BookingWizard({
   const [submitting, setSubmitting] = useState(false);
   const [pix, setPix] = useState(null);
   const [error, setError] = useState(null);
+  const [guest, setGuest] = useState({ nome: '', email: '', telefone: '', cpf: '' });
+  const [slotsState, setSlotsState] = useState({ loading: false, list: [] });
 
   const days = useMemo(() => daysProp || buildDayRange(new Date(), 14), [daysProp]);
-  const slots = useMemo(
-    () => (date && buildSlots ? buildSlots(date, { serviceId: service?.id, professionalId: professional?.id }) : []),
-    [date, service, professional, buildSlots],
+
+  // Profissionais do passo: os vinculados ao serviço (API real) ou a lista geral (mock).
+  const stepProfessionals = useMemo(
+    () => (service?.professionals?.length ? service.professionals : professionals),
+    [service, professionals],
   );
+
+  // Carrega os horários do dia (suporta buildSlots sync [mock] OU async [Promise, API real]).
+  useEffect(() => {
+    if (step !== STEP.HORARIO || !date || !buildSlots) return undefined;
+    let alive = true;
+    setSlotsState({ loading: true, list: [] });
+    Promise.resolve(buildSlots(date, { serviceId: service?.id, professionalId: professional?.id }))
+      .then((list) => { if (alive) setSlotsState({ loading: false, list: Array.isArray(list) ? list : [] }); })
+      .catch(() => { if (alive) setSlotsState({ loading: false, list: [] }); });
+    return () => { alive = false; };
+  }, [step, date, service?.id, professional?.id, buildSlots]);
+
+  // Poll do status do PIX (API real): vira 'paid'/'expired' automaticamente.
+  useEffect(() => {
+    if (step !== STEP.PAGAMENTO || !pollStatus || !pix?.paymentId || pix?.confirmed) return undefined;
+    if (pix?.status === 'paid' || pix?.status === 'expired') return undefined;
+    let alive = true;
+    const iv = setInterval(async () => {
+      try {
+        const s = await pollStatus(pix.paymentId, pix.token);
+        if (!alive || !s) return;
+        setPix((prev) => (prev ? { ...prev, status: s } : prev));
+        if (s === 'paid' || s === 'expired') clearInterval(iv);
+      } catch { /* silencioso */ }
+    }, 5000);
+    return () => { alive = false; clearInterval(iv); };
+  }, [step, pollStatus, pix?.paymentId, pix?.status, pix?.confirmed]);
 
   const go = (next) => {
     setError(null);
@@ -51,8 +87,10 @@ export default function BookingWizard({
 
   const selectService = (s) => {
     setService(s);
+    setProfessional(null);
     setSlot(null);
-    go(professionals.length ? STEP.PROFISSIONAL : STEP.DIA);
+    const pros = (s?.professionals?.length ? s.professionals : professionals) || [];
+    go(pros.length ? STEP.PROFISSIONAL : STEP.DIA);
   };
   const selectProfessional = (p) => {
     setProfessional(p);
@@ -71,14 +109,24 @@ export default function BookingWizard({
 
   const confirm = async () => {
     if (!onConfirm) return;
+    if (collectGuest) {
+      const nome = guest.nome.trim();
+      const email = guest.email.trim();
+      const telDigits = guest.telefone.replace(/\D/g, '');
+      const cpfDigits = guest.cpf.replace(/\D/g, '');
+      if (!nome) { setError('Informe seu nome.'); return; }
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { setError('Informe um e-mail válido.'); return; }
+      if (telDigits.length < 10) { setError('Informe um telefone válido (com DDD).'); return; }
+      if (cpfDigits && !(cpfDigits.length === 11 || cpfDigits.length === 14)) { setError('CPF/CNPJ inválido.'); return; }
+    }
     setSubmitting(true);
     setError(null);
     try {
-      const result = await onConfirm({ service, professional, date, slot });
+      const result = await onConfirm({ service, professional, date, slot, guest });
       setPix(result);
       go(STEP.PAGAMENTO);
     } catch (e) {
-      setError(e?.message || 'Não foi possível gerar o PIX. Tente novamente.');
+      setError(e?.message || 'Não foi possível concluir o agendamento. Tente novamente.');
     } finally {
       setSubmitting(false);
     }
@@ -136,12 +184,12 @@ export default function BookingWizard({
         {step === STEP.PROFISSIONAL && (
           <StepShell title="Escolha o profissional">
             <div className="tw-flex tw-flex-col tw-gap-2">
-              {professionals.map((p) => (
+              {stepProfessionals.map((p) => (
                 <SelectableRow
                   key={p.id}
                   icon={User}
                   title={p.nome}
-                  subtitle={p.especialidade}
+                  subtitle={p.especialidade || p.descricao}
                   selected={professional?.id === p.id}
                   onClick={() => selectProfessional(p)}
                 />
@@ -163,7 +211,13 @@ export default function BookingWizard({
 
         {step === STEP.HORARIO && (
           <StepShell title="Escolha o horário">
-            <SlotPicker slots={slots} value={slot?.datetime} onSelect={selectSlot} />
+            {slotsState.loading ? (
+              <div className="tw-flex tw-items-center tw-gap-2 tw-py-6" style={{ color: 'var(--muted-ink, #6B7280)' }}>
+                <Loader2 size={20} strokeWidth={2.2} className="tw-animate-spin" aria-hidden="true" /> Carregando horários...
+              </div>
+            ) : (
+              <SlotPicker slots={slotsState.list} value={slot?.datetime} onSelect={selectSlot} />
+            )}
           </StepShell>
         )}
 
@@ -181,6 +235,16 @@ export default function BookingWizard({
                 <SummaryRow label="Sinal (PIX)" value={formatBRL(service.depositValue)} strong />
               )}
             </div>
+
+            {collectGuest && (
+              <div className="tw-mt-3 tw-flex tw-flex-col tw-gap-2">
+                <GuestInput label="Nome" value={guest.nome} onChange={(v) => setGuest((g) => ({ ...g, nome: v }))} placeholder="Seu nome" autoComplete="name" />
+                <GuestInput label="E-mail" type="email" value={guest.email} onChange={(v) => setGuest((g) => ({ ...g, email: v }))} placeholder="voce@email.com" autoComplete="email" />
+                <GuestInput label="Telefone" value={guest.telefone} onChange={(v) => setGuest((g) => ({ ...g, telefone: v }))} placeholder="(11) 99999-9999" autoComplete="tel" inputMode="tel" />
+                <GuestInput label="CPF" value={guest.cpf} onChange={(v) => setGuest((g) => ({ ...g, cpf: v }))} placeholder="Necessário se houver sinal (PIX)" inputMode="numeric" />
+              </div>
+            )}
+
             {error && (
               <p className="tw-mt-3 tw-text-sm" style={{ color: 'var(--status-cancelado-fg)' }}>
                 {error}
@@ -195,11 +259,11 @@ export default function BookingWizard({
             >
               {submitting ? (
                 <>
-                  <Loader2 size={20} strokeWidth={2.2} className="tw-animate-spin" aria-hidden="true" /> Gerando PIX...
+                  <Loader2 size={20} strokeWidth={2.2} className="tw-animate-spin" aria-hidden="true" /> Confirmando...
                 </>
               ) : (
                 <>
-                  Confirmar e pagar sinal <ArrowRight size={20} strokeWidth={2.2} aria-hidden="true" />
+                  Confirmar {collectGuest ? 'agendamento' : 'e pagar sinal'} <ArrowRight size={20} strokeWidth={2.2} aria-hidden="true" />
                 </>
               )}
             </button>
@@ -207,17 +271,31 @@ export default function BookingWizard({
         )}
 
         {step === STEP.PAGAMENTO && (
-          <StepShell title="Pagamento do sinal">
-            <PixCheckout
-              encodedImage={pix?.encodedImage}
-              payload={pix?.payload}
-              value={pix?.value}
-              expirationDate={pix?.expirationDate}
-              status={pix?.status || 'pending'}
-            />
-            <p className="tw-mt-4 tw-text-center tw-text-xs" style={{ color: 'var(--muted-ink, #6B7280)' }}>
-              Assim que o pagamento for confirmado, seu horário fica garantido.
-            </p>
+          <StepShell title={pix?.confirmed ? 'Agendamento confirmado' : 'Pagamento do sinal'}>
+            {pix?.confirmed ? (
+              <div
+                className="tw-flex tw-flex-col tw-items-center tw-gap-3 tw-rounded-2xl tw-p-6 tw-text-center"
+                style={{ background: 'var(--surface, #fff)', border: '1px solid var(--brand-border, #E7E5F5)' }}
+              >
+                <Check size={40} strokeWidth={2.4} aria-hidden="true" style={{ color: 'var(--brand)' }} />
+                <p className="tw-m-0 tw-text-sm" style={{ color: 'var(--ink, #1E1B4B)' }}>
+                  {pix.message || 'Seu agendamento foi registrado. Confirme pelo link enviado no seu e-mail.'}
+                </p>
+              </div>
+            ) : (
+              <>
+                <PixCheckout
+                  encodedImage={pix?.encodedImage}
+                  payload={pix?.payload}
+                  value={pix?.value}
+                  expirationDate={pix?.expirationDate}
+                  status={pix?.status || 'pending'}
+                />
+                <p className="tw-mt-4 tw-text-center tw-text-xs" style={{ color: 'var(--muted-ink, #6B7280)' }}>
+                  Assim que o pagamento for confirmado, seu horário fica garantido.
+                </p>
+              </>
+            )}
           </StepShell>
         )}
       </main>
@@ -247,6 +325,24 @@ function StepShell({ title, children }) {
       </h1>
       {children}
     </section>
+  );
+}
+
+function GuestInput({ label, value, onChange, type = 'text', placeholder, autoComplete, inputMode }) {
+  return (
+    <label className="tw-flex tw-flex-col tw-gap-1">
+      <span className="tw-text-xs tw-font-medium" style={{ color: 'var(--muted-ink, #6B7280)' }}>{label}</span>
+      <input
+        type={type}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        autoComplete={autoComplete}
+        inputMode={inputMode}
+        className="tw-rounded-xl tw-px-3 tw-text-sm"
+        style={{ minHeight: 44, background: 'var(--surface, #fff)', border: '1px solid var(--brand-border, #E7E5F5)', color: 'var(--ink, #1E1B4B)' }}
+      />
+    </label>
   );
 }
 
