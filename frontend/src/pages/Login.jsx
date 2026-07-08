@@ -3,14 +3,13 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 
 import {
   IconBuilding,
-  IconCheck,
   IconEye,
   IconEyeOff,
   IconLock,
   IconMail,
-  IconShield,
   IconUser,
 } from '../components/AuthIcons.jsx';
+import LogoAO from '../components/LogoAO.jsx';
 import { Api } from '../utils/api';
 import { clearPlanCache, saveToken, saveUser } from '../utils/auth';
 
@@ -20,24 +19,19 @@ function ProfileGlyph({ isCliente = false }) {
   return isCliente ? <IconUser /> : <IconBuilding />;
 }
 
+// Estabelecimento primeiro: é quem loga com mais frequência (o cliente agenda
+// como visitante pelo link público, sem login).
 const PROFILE_OPTIONS = [
-  {
-    value: 'CLIENTE',
-    title: 'Cliente',
-    description: 'Acompanhe seus agendamentos e histórico.',
-  },
   {
     value: 'ESTABELECIMENTO',
     title: 'Estabelecimento',
     description: 'Gerencie agenda, equipe, serviços e clientes.',
   },
-];
-
-const OPERATION_HIGHLIGHTS = [
-  'Agenda inteligente',
-  'Clientes organizados',
-  'Gestão de serviços',
-  'Notificações automáticas',
+  {
+    value: 'CLIENTE',
+    title: 'Cliente',
+    description: 'Acompanhe seus agendamentos e histórico.',
+  },
 ];
 
 export default function Login() {
@@ -119,6 +113,16 @@ export default function Login() {
     }
   }, [tipoParam]);
 
+  // Perfil pré-selecionado: o último usado (a URL ?tipo= tem prioridade); senão,
+  // Estabelecimento (perfil primário) — assim o formulário já aparece pronto.
+  useEffect(() => {
+    if (tipoParam) return;
+    let last = '';
+    try { last = localStorage.getItem('ao:last_profile') || ''; } catch {}
+    setTipo(last === 'cliente' ? 'CLIENTE' : 'ESTABELECIMENTO');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const isValidEmail = (value) => EMAIL_REGEX.test(String(value || '').toLowerCase());
   const emailInvalid = Boolean(email) && !isValidEmail(email);
   const senhaInvalid = Boolean(senha) && senha.length < 6;
@@ -129,9 +133,6 @@ export default function Login() {
     if (senha.length < 6) return false;
     return true;
   }, [email, senha]);
-
-  const headerTitle = 'Acesse sua conta';
-  const headerDescription = 'Escolha seu perfil para acessar sua conta com segurança.';
 
   const buildLoginSearch = (value) => {
     const params = new URLSearchParams(loc.search);
@@ -232,32 +233,6 @@ export default function Login() {
     return () => clearTimeout(timeoutId);
   }, [tipo]);
 
-  const Tab = ({ value, title, description }) => {
-    const active = tipo === value;
-    const isCliente = value === 'CLIENTE';
-
-    return (
-      <button
-        type="button"
-        onClick={() => handleTipoSelect(value)}
-        className={`login-preview__tab login-preview__tab--${isCliente ? 'cliente' : 'estab'}${active ? ' is-active' : ''}`}
-        role="tab"
-        aria-selected={active}
-        aria-label={`Selecionar perfil ${title}`}
-        tabIndex={0}
-      >
-        <span className="login-preview__tab-icon" aria-hidden="true">
-          <ProfileGlyph isCliente={isCliente} />
-        </span>
-        <span className="login-preview__tab-body">
-          <span className="login-preview__tab-title">{title}</span>
-          <span className="login-preview__tab-hint">{description}</span>
-        </span>
-        {active ? <span className="login-preview__tab-state">Selecionado</span> : null}
-      </button>
-    );
-  };
-
   return (
     <div
       className="login-preview auth-portal auth-portal--login"
@@ -267,54 +242,35 @@ export default function Login() {
 
       <main className="login-preview__main">
         <section className="login-preview__card">
-          <div className="login-preview__grid">
-            <aside className="login-preview__aside login-preview__info-panel" aria-label="Destaques da plataforma">
-              <div className="login-preview__info-icon" aria-hidden="true">
-                <IconShield />
-              </div>
+          <div className="ao-login">
+            <div className="ao-login__hero">
+              <span className="ao-login__glow" aria-hidden="true" />
+              <span className="ao-login__logo"><LogoAO size={44} /></span>
+              <p className="ao-login__brand">Agendamentos Online</p>
+              <h1 className="ao-login__hi">Bem-vindo <span>de volta</span></h1>
+              <p className="ao-login__tag">Sua agenda, clientes e sinais num só lugar.</p>
+            </div>
 
-              <div className="login-preview__info-copy">
-                <h2 className="login-preview__info-title">Tudo para gerenciar sua operação</h2>
-                <p className="login-preview__info-text">
-                  Organize agenda, clientes, serviços e notificações em uma plataforma simples e segura.
-                </p>
-              </div>
+            <div className="ao-login__sheet">
+              <span className="ao-login__handle" aria-hidden="true" />
 
-              <ul className="login-preview__info-list">
-                {OPERATION_HIGHLIGHTS.map((item) => (
-                  <li key={item} className="login-preview__info-item">
-                    <span className="login-preview__info-check" aria-hidden="true">
-                      <IconCheck />
-                    </span>
-                    <span>{item}</span>
-                  </li>
-                ))}
-              </ul>
-            </aside>
-
-            <div className="login-preview__panel">
-              <span className="auth-portal__panel-badge">ACESSO SEGURO</span>
-
-              <header className="login-preview__header">
-                <h1>{headerTitle}</h1>
-                <p>{headerDescription}</p>
-              </header>
-
-              <div className="login-preview__chooser">
-                <div className="login-preview__chooser-head">
-                  <h2 className="login-preview__chooser-title">Escolha seu tipo de acesso</h2>
-                </div>
-
-                <div className="login-preview__tabs" role="tablist" aria-label="Escolher tipo de acesso">
-                  {PROFILE_OPTIONS.map((option) => (
-                    <Tab
+              <div className="ao-login__seg" role="tablist" aria-label="Escolher tipo de acesso">
+                {PROFILE_OPTIONS.map((option) => {
+                  const active = tipo === option.value;
+                  return (
+                    <button
                       key={option.value}
-                      value={option.value}
-                      title={option.title}
-                      description={option.description}
-                    />
-                  ))}
-                </div>
+                      type="button"
+                      role="tab"
+                      aria-selected={active}
+                      className={`ao-login__seg-opt${active ? ' is-active' : ''}`}
+                      onClick={() => handleTipoSelect(option.value)}
+                    >
+                      <ProfileGlyph isCliente={option.value === 'CLIENTE'} />
+                      {option.title}
+                    </button>
+                  );
+                })}
               </div>
 
               {sessionMsg ? (
@@ -344,8 +300,7 @@ export default function Login() {
                 </div>
               ) : null}
 
-              {tipo ? (
-                <form className="login-preview__form" onSubmit={handleSubmit}>
+              <form className="login-preview__form" onSubmit={handleSubmit}>
                   <div className={`login-preview__field${emailInvalid ? ' is-error' : ''}`}>
                     <label className="login-preview__label" htmlFor="login-email">E-mail</label>
                     <div className={`auth-portal__field-shell${emailInvalid ? ' is-error' : ''}`}>
@@ -442,9 +397,16 @@ export default function Login() {
                         Entrando...
                       </span>
                     ) : (
-                      tipo === 'ESTABELECIMENTO' ? 'Entrar como estabelecimento' : 'Entrar como cliente'
+                      'Entrar'
                     )}
                   </button>
+
+                  <p className="ao-login__secure">
+                    <IconLock aria-hidden="true" />
+                    Acesso seguro · seus dados protegidos
+                  </p>
+
+                  <div className="ao-login__divider">novo por aqui?</div>
 
                   <div className="login-preview__actions">
                     <Link
@@ -456,7 +418,6 @@ export default function Login() {
                     </Link>
                   </div>
                 </form>
-              ) : null}
             </div>
           </div>
         </section>

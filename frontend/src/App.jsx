@@ -1,6 +1,6 @@
 import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { NavLink, Routes, Route, useNavigate, useLocation, Navigate } from 'react-router-dom';
+import { NavLink, Routes, Route, useNavigate, useLocation, Navigate, useParams, useSearchParams } from 'react-router-dom';
 
 import { getUser, logout, USER_EVENT } from './utils/auth';
 
@@ -105,6 +105,33 @@ const Loading = React.lazy(() => import('./pages/Loading.jsx'));
 const AgendaNova = React.lazy(() => import('./pages/AgendaNova.jsx'));
 const BookingNovo = React.lazy(() => import('./pages/BookingNovo.jsx'));
 const BookingPublic = React.lazy(() => import('./pages/BookingPublic.jsx'));
+const BookingDiscovery = React.lazy(() => import('./pages/BookingDiscovery.jsx'));
+
+// Deep-link público de agendamento (/novo?estabelecimento=…&servico=… ou /novo/:slug):
+// redireciona para o fluxo novo (/agendar), mantendo o mesmo padrão visual do redesign.
+// A decisão é congelada no mount: o fluxo autenticado do cliente (/novo sem estabelecimento
+// na URL) segue no componente legado, mesmo quando ele grava ?estabelecimento= depois.
+function NovoRoute() {
+  const [searchParams] = useSearchParams();
+  const { estabelecimentoSlug } = useParams();
+  const decisionRef = useRef(undefined);
+  if (decisionRef.current === undefined) {
+    const estId = (searchParams.get('estabelecimento') || searchParams.get('estabelecimentoId') || '').trim();
+    const key = estId || String(estabelecimentoSlug || '').trim();
+    if (key) {
+      const qs = new URLSearchParams();
+      if (estId) qs.set('estabelecimento', estId);
+      const servico = (searchParams.get('servico') || '').trim();
+      if (servico) qs.set('servico', servico);
+      const query = qs.toString();
+      decisionRef.current = `/agendar/${encodeURIComponent(key)}${query ? `?${query}` : ''}`;
+    } else {
+      decisionRef.current = '';
+    }
+  }
+  // Sem estabelecimento na URL: tela de descoberta no design novo (índigo).
+  return decisionRef.current ? <Navigate to={decisionRef.current} replace /> : <BookingDiscovery />;
+}
 
 const APP_ROUTES = [
   { path: '/', element: <LandingPublica /> },
@@ -132,9 +159,9 @@ const APP_ROUTES = [
 
   { path: '/profissionais', element: <ProfissionaisEstabelecimento />, auth: true, role: 'estabelecimento' },
 
-  { path: '/novo/:estabelecimentoSlug', element: <NovoAgendamento /> },
+  { path: '/novo/:estabelecimentoSlug', element: <NovoRoute /> },
 
-  { path: '/novo', element: <NovoAgendamento /> },
+  { path: '/novo', element: <NovoRoute /> },
 
   { path: '/novo-agendamento', element: <NovoAgendamento /> },
 
@@ -639,9 +666,6 @@ function Sidebar({ open, user, isDesktop, isDark, isPlanos, toggleTheme }) {
     : '/login?tipo=cliente';
 
   const navigation = useMemo(() => buildNavigation(resolvedUser), [resolvedUser]);
-  const dashboardTarget = navigation.isAuthenticated
-    ? (resolvedUser?.tipo === 'estabelecimento' ? '/estab' : '/cliente')
-    : '/';
 
   const showActive = true;
 
@@ -685,13 +709,10 @@ function Sidebar({ open, user, isDesktop, isDark, isPlanos, toggleTheme }) {
 
       <div className="sidebar__inner">
         <div className="sidebar__brand-block">
-          <NavLink to={dashboardTarget} className="brand brand--sidebar">
-            <LogoAO size={32} />
-            <span className="brand__text">
-              <strong>Agendamentos Online</strong>
-              <small>{navigation.isAuthenticated ? 'Workspace operacional' : 'Acesso da plataforma'}</small>
-            </span>
-          </NavLink>
+          {/* Marca (logo + nome) removida: já aparece na topbar. Mantém só o rótulo de contexto. */}
+          <span className="sidelist__heading">
+            {navigation.isAuthenticated ? 'Workspace operacional' : 'Acesso da plataforma'}
+          </span>
           {navigation.isAuthenticated && (
             <span className="sidebar__account-pill">
               {resolvedUser?.tipo === 'estabelecimento' ? 'Perfil profissional' : 'Conta do cliente'}
@@ -896,6 +917,10 @@ export default function App() {
     pathname.startsWith('/novo') ||
     pathname.startsWith('/novo-agendamento');
   const isPublicAppointmentPage = /^\/novo\/[^/]+/.test(pathname);
+  // Perfil público do estabelecimento (/agendar[/:id]): página guest, escopada a um
+  // estabelecimento — standalone, sem sidebar/topbar. O /novo (descoberta, autenticado)
+  // mantém o shell: sidebar no desktop e o menu no mobile.
+  const isPublicBooking = pathname.startsWith('/agendar');
   const [currentUser, setCurrentUser] = useState(() => getUser());
   const [onboardingGate, setOnboardingGate] = useState({ loading: false, data: null, error: '' });
 
@@ -913,7 +938,7 @@ export default function App() {
     (loc?.pathname || '').startsWith('/assinatura') ||
     (loc?.pathname || '').startsWith('/whatsappbusiness') ||
     (loc?.pathname || '').startsWith('/sinal');
-  const hideShell = isLanding;
+  const hideShell = isLanding || isPublicBooking;
   const topbarRef = useRef(null);
   const topbarMenuButtonRef = useRef(null);
   const topbarMenuPanelRef = useRef(null);

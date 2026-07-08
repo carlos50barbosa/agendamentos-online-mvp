@@ -41,7 +41,7 @@ const DEFAULT_DEPOSIT_MODAL = {
   pix: null,
 };
 
-const NEW_APPOINTMENT_ROUTE = '/novo-agendamento';
+const NEW_APPOINTMENT_ROUTE = '/novo';
 
 function normalizeText(value) {
   return String(value || '')
@@ -154,9 +154,9 @@ function resolveCancelErrorMessage(error) {
 
 function DetailsField({ label, value }) {
   return (
-    <div className="tw-rounded-lg tw-border tw-border-slate-200 tw-bg-slate-50 tw-p-3">
-      <p className="tw-m-0 tw-text-xs tw-font-medium tw-uppercase tw-tracking-wide tw-text-slate-500">{label}</p>
-      <p className="tw-m-0 tw-mt-1 tw-text-sm tw-font-semibold tw-text-slate-800">{value || '-'}</p>
+    <div className="tw-rounded-xl tw-border tw-border-[color:var(--brand-border,#E7E5F5)] tw-bg-[color:var(--surface-soft,#FBFBFE)] tw-p-3">
+      <p className="tw-m-0 tw-text-xs tw-font-medium tw-uppercase tw-tracking-wide" style={{ color: 'var(--muted-ink, #6B7280)' }}>{label}</p>
+      <p className="tw-m-0 tw-mt-1 tw-text-sm tw-font-semibold tw-text-ink">{value || '-'}</p>
     </div>
   );
 }
@@ -384,7 +384,7 @@ export default function ClientAppointmentsPage() {
               <span className="tw-inline-flex tw-min-h-[28px] tw-items-center tw-rounded-full tw-border tw-border-slate-200 tw-bg-slate-50 tw-px-3 tw-text-[0.68rem] tw-font-semibold tw-uppercase tw-tracking-[0.18em] tw-text-slate-600">
                 Painel do cliente
               </span>
-              <h1 className="tw-m-0 tw-mt-3 tw-text-2xl tw-font-semibold tw-text-slate-900">Meus Agendamentos</h1>
+              <h1 className="tw-m-0 tw-mt-3 tw-text-2xl tw-font-semibold tw-text-ink">Meus Agendamentos</h1>
               <p className="tw-m-0 tw-mt-1 tw-text-sm tw-text-slate-500">
                 Acompanhe seus horarios, pagamentos e status em uma visao unificada.
               </p>
@@ -394,7 +394,7 @@ export default function ClientAppointmentsPage() {
               <label className="tw-flex tw-flex-col tw-gap-1 tw-text-xs tw-font-medium tw-text-slate-500">
                 Status
                 <select
-                  className="tw-h-10 tw-rounded-lg tw-border tw-border-slate-200 tw-bg-white tw-px-3 tw-text-sm tw-text-slate-700 focus-visible:tw-outline-none focus-visible:tw-ring-2 focus-visible:tw-ring-sky-100 focus-visible:tw-ring-offset-2"
+                  className="tw-h-10 tw-rounded-xl tw-border tw-border-slate-200 tw-bg-white tw-px-3 tw-text-sm tw-text-slate-700 focus-visible:tw-outline-none focus-visible:tw-ring-2 focus-visible:tw-ring-brand-200 focus-visible:tw-ring-offset-2"
                   value={statusFilter}
                   onChange={(event) => setStatusFilter(event.target.value)}
                   aria-label="Filtrar agendamentos por status"
@@ -412,7 +412,7 @@ export default function ClientAppointmentsPage() {
                 <span className="tw-relative tw-flex tw-items-center">
                   <IconSearch className="tw-pointer-events-none tw-absolute tw-left-3 tw-h-4 tw-w-4 tw-text-slate-400" aria-hidden="true" />
                   <input
-                    className="tw-h-10 tw-w-full tw-rounded-lg tw-border tw-border-slate-200 tw-bg-white tw-pl-9 tw-pr-3 tw-text-sm tw-text-slate-700 tw-placeholder:text-slate-400 focus-visible:tw-outline-none focus-visible:tw-ring-2 focus-visible:tw-ring-sky-100 focus-visible:tw-ring-offset-2"
+                    className="tw-h-10 tw-w-full tw-rounded-xl tw-border tw-border-slate-200 tw-bg-white tw-pl-9 tw-pr-3 tw-text-sm tw-text-slate-700 tw-placeholder:text-slate-400 focus-visible:tw-outline-none focus-visible:tw-ring-2 focus-visible:tw-ring-brand-200 focus-visible:tw-ring-offset-2"
                     placeholder="Serviço ou estabelecimento"
                     value={search}
                     onChange={(event) => setSearch(event.target.value)}
@@ -441,9 +441,9 @@ export default function ClientAppointmentsPage() {
                   key={chip.value}
                   type="button"
                   onClick={() => setStatusFilter(chip.value)}
-                  className={`tw-whitespace-nowrap tw-rounded-lg tw-border tw-px-3 tw-py-1.5 tw-text-sm tw-font-semibold tw-transition-colors tw-duration-150 focus-visible:tw-outline-none focus-visible:tw-ring-2 focus-visible:tw-ring-slate-300 focus-visible:tw-ring-offset-2 ${
+                  className={`tw-whitespace-nowrap tw-rounded-xl tw-border tw-px-3 tw-py-1.5 tw-text-sm tw-font-semibold tw-transition-colors tw-duration-150 focus-visible:tw-outline-none focus-visible:tw-ring-2 focus-visible:tw-ring-brand-200 focus-visible:tw-ring-offset-2 ${
                     selected
-                      ? 'tw-border-[#123e63] tw-bg-[#123e63] tw-text-white'
+                      ? 'tw-border-brand tw-bg-brand tw-text-white'
                       : 'tw-border-slate-200 tw-bg-white tw-text-slate-600 hover:tw-bg-slate-50'
                   }`}
                   aria-pressed={selected}
@@ -564,8 +564,8 @@ export default function ClientAppointmentsPage() {
                 <DetailsField label="Serviço" value={detailsModal.item?.serviceLabel} />
                 <DetailsField label="Estabelecimento" value={detailsModal.item?.establishmentLabel} />
                 <DetailsField label="Quando" value={detailsModal.item?.whenTooltip || detailsModal.item?.whenLabel} />
-                <div className="tw-rounded-lg tw-border tw-border-slate-200 tw-bg-slate-50 tw-p-3">
-                  <p className="tw-m-0 tw-text-xs tw-font-medium tw-uppercase tw-tracking-wide tw-text-slate-500">Status</p>
+                <div className="tw-rounded-xl tw-border tw-border-[color:var(--brand-border,#E7E5F5)] tw-bg-[color:var(--surface-soft,#FBFBFE)] tw-p-3">
+                  <p className="tw-m-0 tw-text-xs tw-font-medium tw-uppercase tw-tracking-wide" style={{ color: 'var(--muted-ink, #6B7280)' }}>Status</p>
                   <div className="tw-mt-1">
                     <StatusBadge status={detailsModal.item?.effectiveStatus} />
                   </div>
@@ -613,7 +613,7 @@ export default function ClientAppointmentsPage() {
                 : 'Aguardando pagamento do sinal.'}
             </div>
             {depositAmountLabel && (
-              <p className="tw-m-0 tw-text-sm tw-font-semibold tw-text-slate-800">
+              <p className="tw-m-0 tw-text-sm tw-font-semibold tw-text-ink">
                 Valor do sinal: {depositAmountLabel}
               </p>
             )}
@@ -621,7 +621,7 @@ export default function ClientAppointmentsPage() {
               <img
                 src={`data:image/png;base64,${depositQrBase64}`}
                 alt="QR Code PIX"
-                className="tw-mx-auto tw-max-h-64 tw-w-full tw-max-w-xs tw-rounded-xl tw-border tw-border-slate-200 tw-bg-white tw-p-3"
+                className="tw-mx-auto tw-max-h-64 tw-w-full tw-max-w-xs tw-rounded-xl tw-border tw-border-[color:var(--brand-border,#E7E5F5)] tw-bg-white tw-p-3"
               />
             ) : (
               <p className="tw-m-0 tw-text-sm tw-text-slate-500">Abra o link para visualizar o QR Code.</p>
@@ -633,7 +633,7 @@ export default function ClientAppointmentsPage() {
                   readOnly
                   value={depositPixCode}
                   rows={3}
-                  className="tw-w-full tw-rounded-lg tw-border tw-border-slate-200 tw-bg-slate-50 tw-p-2 tw-text-sm tw-text-slate-700 focus-visible:tw-outline-none focus-visible:tw-ring-2 focus-visible:tw-ring-indigo-200 focus-visible:tw-ring-offset-2"
+                  className="tw-w-full tw-rounded-xl tw-border tw-border-[color:var(--brand-border,#E7E5F5)] tw-bg-[color:var(--surface-soft,#FBFBFE)] tw-p-2 tw-text-sm tw-text-ink focus-visible:tw-outline-none focus-visible:tw-ring-2 focus-visible:tw-ring-brand-200 focus-visible:tw-ring-offset-2"
                 />
               </label>
             )}

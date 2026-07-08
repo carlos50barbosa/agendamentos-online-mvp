@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
+import { formatBRPhone } from '../utils/masks.js';
 
 const PLAN_LABELS = {
   starter: 'Plano Starter',
@@ -80,7 +81,8 @@ export default function Contato() {
 
   const handleChange = (event) => {
     const { name, value } = event.target;
-    setForm((prev) => ({ ...prev, [name]: value }));
+    const nextValue = name === 'telefone' ? formatBRPhone(value) : value;
+    setForm((prev) => ({ ...prev, [name]: nextValue }));
   };
 
   const handleSubmit = (event) => {

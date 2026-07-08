@@ -9,7 +9,7 @@ export default function SkeletonList({ count = 6 }) {
 
   return (
     <div className="tw-space-y-4">
-      <div className="tw-hidden tw-overflow-hidden tw-rounded-lg tw-border tw-border-slate-200/80 tw-bg-white/95 tw-shadow-sm md:tw-block">
+      <div className="tw-hidden tw-overflow-hidden tw-rounded-2xl tw-border tw-border-[color:var(--brand-border,#E7E5F5)] tw-bg-white tw-shadow-sm md:tw-block">
         <div className="tw-grid tw-grid-cols-[2.2fr_1.3fr_1fr_1.3fr] tw-gap-4 tw-border-b tw-border-slate-100 tw-bg-slate-50 tw-p-4">
           <SkeletonBar className="tw-h-3.5 tw-w-24" />
           <SkeletonBar className="tw-h-3.5 tw-w-20" />
@@ -39,7 +39,7 @@ export default function SkeletonList({ count = 6 }) {
         {items.map((_, index) => (
           <div
             key={`card-skeleton-${index}`}
-            className="tw-rounded-lg tw-border tw-border-slate-200/80 tw-bg-white/95 tw-p-4 tw-shadow-sm"
+            className="tw-rounded-2xl tw-border tw-border-[color:var(--brand-border,#E7E5F5)] tw-bg-white tw-p-4 tw-shadow-sm"
           >
             <div className="tw-flex tw-items-start tw-justify-between tw-gap-3">
               <SkeletonBar className="tw-h-4 tw-w-40" />

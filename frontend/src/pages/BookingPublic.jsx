@@ -8,6 +8,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import BookingWizard from '../components/booking/BookingWizard.jsx';
 import { Api } from '../utils/api.js';
+import { getUser } from '../utils/auth.js';
 import { isSameDay } from '../utils/agendaDates.js';
 
 function ymd(d) {
@@ -48,6 +49,12 @@ export default function BookingPublic() {
   // Resolve por ?estabelecimento=id (link do cliente, confiável mesmo se o slug divergir)
   // ou pelo path (id/slug). getEstablishment aceita id ou slug.
   const resolveKey = searchParams.get('estabelecimento') || searchParams.get('estabelecimentoId') || idOrSlug;
+  // Pré-seleção de serviço via ?servico=id (ou id,id) — o serviço já entra marcado no wizard.
+  const servicoParam = searchParams.get('servico') || '';
+  const preselectedServiceIds = useMemo(
+    () => servicoParam.split(',').map((s) => s.trim()).filter(Boolean),
+    [servicoParam],
+  );
   const [state, setState] = useState({ loading: true, error: '', establishment: null, services: [] });
 
   useEffect(() => {
@@ -81,10 +88,24 @@ export default function BookingPublic() {
 
   const establishmentId = state.establishment?.id || null;
 
+  // Cliente logado (fluxo /novo -> /agendar): pré-preenche os dados p/ não redigitar.
+  const initialGuest = useMemo(() => {
+    const viewer = getUser();
+    if (viewer?.tipo !== 'cliente') return null;
+    return {
+      nome: viewer.nome || viewer.name || '',
+      email: viewer.email || '',
+      telefone: viewer.telefone || viewer.whatsapp || viewer.phone || viewer.celular || '',
+      cpf: viewer.cpf_cnpj || viewer.cpf || '',
+    };
+  }, []);
+
   const wizardServices = useMemo(
     () => (state.services || []).map((s) => ({
       id: s.id,
       nome: s.nome,
+      descricao: s.descricao,
+      imagem_url: s.imagem_url,
       durationMin: s.duracao_min,
       price: (s.preco_centavos || 0) / 100,
       // Profissionais vinculados ao serviço (o passo só aparece quando há algum).
@@ -99,10 +120,10 @@ export default function BookingPublic() {
   );
 
   // Slots reais: getSlots devolve 7 dias a partir de weekStart -> filtra o dia escolhido.
-  const buildSlots = useCallback(async (date, { serviceId, professionalId } = {}) => {
+  const buildSlots = useCallback(async (date, { serviceIds, professionalId } = {}) => {
     if (!establishmentId || !date) return [];
     const resp = await Api.getSlots(establishmentId, ymd(date), {
-      serviceIds: serviceId ? [serviceId] : undefined,
+      serviceIds: serviceIds && serviceIds.length ? serviceIds : undefined,
       professionalId: professionalId || undefined,
     });
     const all = resp?.slots || [];
@@ -111,12 +132,12 @@ export default function BookingPublic() {
       .map((s) => ({ datetime: s.datetime, available: s.status === 'free' }));
   }, [establishmentId]);
 
-  const onConfirm = useCallback(async ({ service, professional, date, slot, guest }) => {
+  const onConfirm = useCallback(async ({ services, professional, date, slot, guest }) => {
     const cpfDigits = (guest?.cpf || '').replace(/\D/g, '');
     const inicio = typeof slot?.datetime === 'string' ? slot.datetime : new Date(slot.datetime).toISOString();
     const payload = {
       estabelecimento_id: Number(establishmentId),
-      servico_ids: [service.id],
+      servico_ids: (services || []).map((s) => s.id),
       inicio,
       nome: (guest?.nome || '').trim(),
       email: (guest?.email || '').trim(),
@@ -171,10 +192,13 @@ export default function BookingPublic() {
     <div style={{ background: 'var(--bg-lav, #F6F5FB)', minHeight: '100%' }}>
       <BookingWizard
         establishmentName={state.establishment?.nome || 'Agendamento'}
+        establishment={state.establishment}
         services={wizardServices}
         buildSlots={buildSlots}
         onConfirm={onConfirm}
         pollStatus={pollStatus}
+        preselectedServiceIds={preselectedServiceIds}
+        initialGuest={initialGuest}
         collectGuest
       />
     </div>

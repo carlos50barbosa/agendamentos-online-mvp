@@ -53,23 +53,23 @@ export default function ConfirmModal({
 
   return (
     <div
-      className="tw-fixed tw-inset-0 tw-z-50 tw-flex tw-items-center tw-justify-center tw-bg-slate-900/45 tw-p-4"
+      className="tw-fixed tw-inset-0 tw-z-50 tw-flex tw-items-center tw-justify-center tw-bg-[rgba(30,27,75,0.45)] tw-p-4"
       role="presentation"
       onClick={() => {
         if (!loading) onCancel?.();
       }}
     >
       <div
-        className="tw-w-full tw-max-w-md tw-rounded-lg tw-border tw-border-slate-200/80 tw-bg-white/95 tw-p-6 tw-shadow-xl"
+        className="tw-w-full tw-max-w-md tw-rounded-2xl tw-border tw-border-[color:var(--brand-border,#E7E5F5)] tw-bg-white tw-p-6 tw-shadow-xl"
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
         onClick={(event) => event.stopPropagation()}
       >
-        <h3 id={titleId} className="tw-m-0 tw-text-lg tw-font-semibold tw-text-slate-900">
+        <h3 id={titleId} className="tw-m-0 tw-text-lg tw-font-semibold tw-text-ink">
           {title}
         </h3>
-        <p className="tw-mt-2 tw-text-sm tw-leading-relaxed tw-text-slate-600">{description}</p>
+        <p className="tw-mt-2 tw-text-sm tw-leading-relaxed" style={{ color: 'var(--muted-ink, #6B7280)' }}>{description}</p>
         <div className="tw-mt-6 tw-flex tw-justify-end tw-gap-2">
           <Button
             ref={cancelRef}

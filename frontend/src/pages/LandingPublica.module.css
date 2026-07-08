@@ -53,17 +53,6 @@
   text-decoration: none;
   color: inherit;
 }
-.brandMark {
-  width: 34px;
-  height: 34px;
-  border-radius: 11px;
-  flex: none;
-  display: grid;
-  place-items: center;
-  color: #fff;
-  background: linear-gradient(140deg, var(--lp-brand), color-mix(in srgb, var(--lp-brand) 55%, #ffffff));
-  box-shadow: var(--lp-shadow-md);
-}
 .brandName {
   font-weight: 750;
   font-size: 15px;

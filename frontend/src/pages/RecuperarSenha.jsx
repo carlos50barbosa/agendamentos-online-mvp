@@ -3,11 +3,8 @@ import { Link } from 'react-router-dom';
 
 import {
   IconArrowUpRight,
-  IconKey,
   IconMail,
   IconPhone,
-  IconShield,
-  IconSpark,
 } from '../components/AuthIcons.jsx';
 import LogoAO from '../components/LogoAO.jsx';
 import { Api } from '../utils/api';
@@ -47,52 +44,17 @@ export default function RecuperarSenha() {
 
       <main className="login-preview__main">
         <section className="login-preview__card">
-          <div className="login-preview__grid">
-            <aside className="login-preview__aside" aria-label="Informações sobre recuperação">
-              <div className="auth-portal__brand">
-                <LogoAO size={40} className="login-preview__logo-mark" />
-                <div className="auth-portal__brand-copy">
-                  <div className="auth-portal__brand-title">Agendamentos Online</div>
-                  <div className="auth-portal__brand-subtitle">Recuperacao de acesso com clareza</div>
-                </div>
-              </div>
+          <div className="ao-login">
+            <div className="ao-login__hero">
+              <span className="ao-login__glow" aria-hidden="true" />
+              <span className="ao-login__logo"><LogoAO size={44} /></span>
+              <p className="ao-login__brand">Agendamentos Online</p>
+              <h1 className="ao-login__hi">Recuperar <span>acesso</span></h1>
+              <p className="ao-login__tag">Enviamos um link seguro para redefinir sua senha.</p>
+            </div>
 
-              <span className="auth-portal__aside-badge">Recuperacao segura</span>
-
-              <div>
-                <h2 className="auth-portal__aside-title">Recupere sua conta sem perder o contexto do próximo acesso.</h2>
-                <p className="auth-portal__aside-copy">
-                  Informe o e-mail usado na plataforma. Se houver uma conta vinculada, enviaremos um link para redefinir a senha com segurança.
-                </p>
-              </div>
-
-              <ul className="auth-portal__list">
-                <li className="auth-portal__list-item">
-                  <IconShield className="auth-portal__list-icon" />
-                  <span>Resposta neutra para não expor a existência de contas.</span>
-                </li>
-                <li className="auth-portal__list-item">
-                  <IconKey className="auth-portal__list-icon" />
-                  <span>Fluxo alinhado com login e redefinição de senha.</span>
-                </li>
-                <li className="auth-portal__list-item">
-                  <IconSpark className="auth-portal__list-icon" />
-                  <span>Experiencia consistente em desktop e mobile.</span>
-                </li>
-              </ul>
-
-              <div className="auth-portal__aside-footer">
-                Se você não lembrar o e-mail usado, o suporte pode ajudar a retomar o acesso com mais contexto.
-              </div>
-            </aside>
-
-            <div className="login-preview__panel">
-              <span className="auth-portal__panel-badge">Recupere seu acesso</span>
-
-              <header className="login-preview__header">
-                <h1>Recupere seu acesso</h1>
-                <p>Enviaremos um link para redefinir sua senha de forma segura.</p>
-              </header>
+            <div className="ao-login__sheet">
+              <span className="ao-login__handle" aria-hidden="true" />
 
               {sent ? (
                 <div className="login-preview__alert login-preview__alert--success" role="status">

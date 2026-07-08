@@ -4100,7 +4100,9 @@ button.danger:disabled,
   .sidebar-overlay{ display: none !important; }
   .app-main{ min-height: 100dvh; padding-bottom: calc(var(--mobile-nav-h) + env(safe-area-inset-bottom, 0px)); }
   /* Topbar compacto e em linha */
-  .app-topbar__inner{ flex-direction: row; align-items: baseline; gap: 8px; }
+  .app-topbar__inner{ flex-direction: row; align-items: center; gap: 8px; }
+  /* No mobile o slogan do produto polui a barra (e é redundante com o conteudo) */
+  .app-topbar .brand__text small{ display: none; }
 }
 /* Topbar simples no conteúdo */
 .app-topbar{

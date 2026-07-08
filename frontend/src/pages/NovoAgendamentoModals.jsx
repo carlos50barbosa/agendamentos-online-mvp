@@ -8,6 +8,8 @@ import { IconPhone } from "../components/Icons.jsx";
 
 import { resolveAssetUrl } from "../utils/api";
 
+import { formatCpfCnpj } from "../utils/masks.js";
+
 
 
 export default function NovoAgendamentoModals(props) {
@@ -1747,9 +1749,9 @@ export default function NovoAgendamentoModals(props) {
 
                             placeholder="Necessário para o sinal via PIX"
 
-                            value={guestModal.cpf}
+                            value={formatCpfCnpj(guestModal.cpf)}
 
-                            onChange={(e) => setGuestModal((prev) => ({ ...prev, cpf: e.target.value }))}
+                            onChange={(e) => setGuestModal((prev) => ({ ...prev, cpf: formatCpfCnpj(e.target.value) }))}
 
                             disabled={guestModal.loading}
 

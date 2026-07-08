@@ -5,10 +5,7 @@ import {
   IconCheck,
   IconEye,
   IconEyeOff,
-  IconKey,
   IconLock,
-  IconShield,
-  IconSpark,
 } from '../components/AuthIcons.jsx';
 import LogoAO from '../components/LogoAO.jsx';
 import { Api } from '../utils/api';
@@ -56,52 +53,17 @@ export default function DefinirSenha() {
 
       <main className="login-preview__main">
         <section className="login-preview__card">
-          <div className="login-preview__grid">
-            <aside className="login-preview__aside" aria-label="Informações da redefinição">
-              <div className="auth-portal__brand">
-                <LogoAO size={40} className="login-preview__logo-mark" />
-                <div className="auth-portal__brand-copy">
-                  <div className="auth-portal__brand-title">Agendamentos Online</div>
-                  <div className="auth-portal__brand-subtitle">Nova senha com o mesmo padrao premium</div>
-                </div>
-              </div>
+          <div className="ao-login">
+            <div className="ao-login__hero">
+              <span className="ao-login__glow" aria-hidden="true" />
+              <span className="ao-login__logo"><LogoAO size={44} /></span>
+              <p className="ao-login__brand">Agendamentos Online</p>
+              <h1 className="ao-login__hi">Nova <span>senha</span></h1>
+              <p className="ao-login__tag">Crie uma senha segura para voltar ao login.</p>
+            </div>
 
-              <span className="auth-portal__aside-badge">Redefinicao protegida</span>
-
-              <div>
-                <h2 className="auth-portal__aside-title">Finalize a recuperação com uma senha nova e segura.</h2>
-                <p className="auth-portal__aside-copy">
-                  Defina uma senha forte para voltar ao login com continuidade. O fluxo foi desenhado para ser simples e legivel em qualquer tela.
-                </p>
-              </div>
-
-              <ul className="auth-portal__list">
-                <li className="auth-portal__list-item">
-                  <IconShield className="auth-portal__list-icon" />
-                  <span>Link de redefinição validado antes do envio da nova senha.</span>
-                </li>
-                <li className="auth-portal__list-item">
-                  <IconKey className="auth-portal__list-icon" />
-                  <span>Senha nova pronta para o próximo acesso com o perfil correto.</span>
-                </li>
-                <li className="auth-portal__list-item">
-                  <IconSpark className="auth-portal__list-icon" />
-                  <span>Experiência consistente com login, cadastro e recuperação.</span>
-                </li>
-              </ul>
-
-              <div className="auth-portal__aside-footer">
-                Escolha uma senha exclusiva e com no mínimo 6 caracteres para reforçar a segurança do acesso.
-              </div>
-            </aside>
-
-            <div className="login-preview__panel">
-              <span className="auth-portal__panel-badge">Defina uma nova senha</span>
-
-              <header className="login-preview__header">
-                <h1>Defina uma nova senha</h1>
-                <p>Crie uma senha segura para voltar ao login com confianca.</p>
-              </header>
+            <div className="ao-login__sheet">
+              <span className="ao-login__handle" aria-hidden="true" />
 
               {!token ? (
                 <div className="login-preview__alert login-preview__alert--error" role="alert">

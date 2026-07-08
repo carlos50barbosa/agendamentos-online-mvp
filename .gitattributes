@@ -1,0 +1,18 @@
+# Normaliza fins de linha: LF no repositório e no working tree.
+# Evita o ruído de CRLF/LF entre plataformas (Windows/macOS/Linux) e os avisos
+# "LF will be replaced by CRLF" ao fazer stage no Windows.
+* text=auto eol=lf
+
+# Binários — nunca normalizar/converter.
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.webp binary
+*.svg  text
+*.pdf  binary
+*.woff  binary
+*.woff2 binary
+*.ttf  binary
+*.eot  binary
