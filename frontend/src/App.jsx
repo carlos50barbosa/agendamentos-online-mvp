@@ -14,10 +14,6 @@ import {
 
   IconMenu,
 
-  IconSun,
-
-  IconMoon,
-
 } from './components/Icons.jsx';
 
 import LogoAO from './components/LogoAO.jsx';
@@ -495,23 +491,16 @@ function BillingStatusBanner({ status, user, planInfo }) {
 
 function useAppPreferences() {
 
-  const initial = useMemo(() => {
-
-    const stored = mergePreferences(readPreferences());
-
-    const resolved = applyThemePreference(stored.theme);
-
-    return { stored, resolved };
-
-  }, []);
-
-
-
-  const [preferences, setPreferences] = useState(initial.stored);
-
-  const [resolvedTheme, setResolvedTheme] = useState(initial.resolved);
+  const [preferences, setPreferences] = useState(() => mergePreferences(readPreferences()));
 
   const prefsDirtyRef = useRef(false);
+
+  // Tema escuro removido: garante o modo claro no boot.
+  useEffect(() => {
+
+    applyThemePreference('light');
+
+  }, []);
 
 
 
@@ -523,41 +512,6 @@ function useAppPreferences() {
 
 
 
-  useEffect(() => {
-
-    let cleanup = () => {};
-
-    const nextResolved = applyThemePreference(preferences.theme);
-
-    setResolvedTheme(nextResolved);
-
-
-
-    if (preferences.theme === 'auto' && typeof window !== 'undefined' && window.matchMedia) {
-
-      const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
-
-      const listener = () => setResolvedTheme(applyThemePreference('auto'));
-
-      if (mediaQuery.addEventListener) mediaQuery.addEventListener('change', listener);
-
-      else mediaQuery.addListener(listener);
-
-      cleanup = () => {
-
-        if (mediaQuery.removeEventListener) mediaQuery.removeEventListener('change', listener);
-
-        else mediaQuery.removeListener(listener);
-
-      };
-
-    }
-
-
-
-    return cleanup;
-
-  }, [preferences.theme]);
 
 
 
@@ -629,27 +583,13 @@ function useAppPreferences() {
 
 
 
-  const toggleTheme = useCallback(() => {
-
-    const nextTheme = resolvedTheme === 'dark' ? 'light' : 'dark';
-
-    prefsDirtyRef.current = true;
-
-    updatePreferences({ theme: nextTheme });
-
-    prefsDirtyRef.current = false;
-
-  }, [resolvedTheme, updatePreferences]);
-
-
-
   return {
 
     preferences,
 
-    isDark: resolvedTheme === 'dark',
+    updatePreferences,
 
-    toggleTheme,
+    isDark: false,
 
   };
 
@@ -657,7 +597,7 @@ function useAppPreferences() {
 
 
 
-function Sidebar({ open, user, isDesktop, isDark, isPlanos, toggleTheme }) {
+function Sidebar({ open, user, isDesktop, isPlanos }) {
   const nav = useNavigate();
 
   const resolvedUser = user || getUser();
@@ -882,21 +822,6 @@ function Sidebar({ open, user, isDesktop, isDark, isPlanos, toggleTheme }) {
           )}
 
         </nav>
-        {navigation.isAuthenticated && isDesktop && (
-          <div className="sidebar__actions">
-            <button
-              type="button"
-              className={`theme-toggle theme-toggle--text sidebar__theme-toggle${isPlanos ? ' is-disabled' : ''}`}
-              onClick={isPlanos ? undefined : toggleTheme}
-              disabled={isPlanos}
-              aria-label={isPlanos ? 'Tema fixo no modo claro' : `Ativar tema ${isDark ? 'claro' : 'escuro'}`}
-              title={isPlanos ? 'Tema fixo no modo claro' : isDark ? 'Alternar para tema claro' : 'Alternar para tema escuro'}
-            >
-              {isPlanos ? <IconSun aria-hidden="true" /> : isDark ? <IconSun aria-hidden="true" /> : <IconMoon aria-hidden="true" />}
-              <span className="app-topbar__theme-label">{isPlanos ? 'Tema claro' : isDark ? 'Tema escuro' : 'Tema claro'}</span>
-            </button>
-          </div>
-        )}
       </div>
     </aside>
   );
@@ -926,7 +851,7 @@ export default function App() {
 
   const [billingStatus, setBillingStatus] = useState(null);
 
-  const { preferences, isDark, toggleTheme } = useAppPreferences();
+  const { preferences } = useAppPreferences();
 
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
@@ -1468,9 +1393,7 @@ const topbarAlert = useMemo(() => {
             open={sidebarOpen}
             user={currentUser}
             isDesktop={isDesktop}
-            isDark={isDark}
             isPlanos={isPlanos}
-            toggleTheme={toggleTheme}
           />
         )}
         {!hideShell && (
@@ -1533,17 +1456,6 @@ const topbarAlert = useMemo(() => {
                       </span>
                       <strong>{currentUser?.nome || currentUser?.name || 'Usuário'}</strong>
                     </div>
-                    <button
-                      type="button"
-                      className={`theme-toggle theme-toggle--text${isPlanos ? ' is-disabled' : ''}`}
-                      onClick={isPlanos ? undefined : toggleTheme}
-                      disabled={isPlanos}
-                      aria-label={isPlanos ? 'Tema fixo no modo claro' : `Ativar tema ${isDark ? 'claro' : 'escuro'}`}
-                      title={isPlanos ? 'Tema fixo no modo claro' : isDark ? 'Alternar para tema claro' : 'Alternar para tema escuro'}
-                    >
-                      {isPlanos ? <IconSun aria-hidden="true" /> : isDark ? <IconSun aria-hidden="true" /> : <IconMoon aria-hidden="true" />}
-                      <span className="app-topbar__theme-label">{isPlanos ? 'Tema claro' : isDark ? 'Tema escuro' : 'Tema claro'}</span>
-                    </button>
                   </div>
                 ) : (
                   <div className="app-topbar__menu">
@@ -1604,24 +1516,6 @@ const topbarAlert = useMemo(() => {
                             ))}
                           </div>
                         </nav>
-                        {topbarNavigation.isAuthenticated && (
-                          <>
-                            <div className="app-topbar__menu-divider" />
-                            <div className="app-topbar__actions">
-                              <button
-                                type="button"
-                                className={`theme-toggle theme-toggle--text${isPlanos ? ' is-disabled' : ''}`}
-                                onClick={isPlanos ? undefined : toggleTheme}
-                                disabled={isPlanos}
-                                aria-label={isPlanos ? 'Tema fixo no modo claro' : `Ativar tema ${isDark ? 'claro' : 'escuro'}`}
-                                title={isPlanos ? 'Tema fixo no modo claro' : isDark ? 'Alternar para tema claro' : 'Alternar para tema escuro'}
-                              >
-                                {isPlanos ? <IconSun aria-hidden="true" /> : isDark ? <IconSun aria-hidden="true" /> : <IconMoon aria-hidden="true" />}
-                                <span className="app-topbar__theme-label">{isPlanos ? 'Tema claro' : isDark ? 'Tema escuro' : 'Tema claro'}</span>
-                              </button>
-                            </div>
-                          </>
-                        )}
                       </div>
                     )}
                   </div>

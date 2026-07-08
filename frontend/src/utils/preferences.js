@@ -20,11 +20,10 @@ export function mergePreferences(raw = {}) {
 
   const input = isObjectLike(raw) ? raw : {};
 
-  const theme = ['dark', 'light', 'auto'].includes(input.theme) ? input.theme : DEFAULT_PREFERENCES.theme;
-
+  // Tema escuro removido: o app é sempre claro.
   return {
 
-    theme,
+    theme: 'light',
 
     chatWidget: input.chatWidget !== false,
 
@@ -70,51 +69,32 @@ export function writePreferences(next) {
 
 
 
-export function resolveThemePreference(pref) {
+export function resolveThemePreference() {
 
-  if (pref === 'dark' || pref === 'light') return pref;
-
-  if (pref === 'auto' || !pref) {
-
-    try {
-
-      if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
-
-        return 'dark';
-
-      }
-
-    } catch {}
-
-    return 'light';
-
-  }
-
-  return DEFAULT_PREFERENCES.theme;
+  // Tema escuro removido: sempre claro.
+  return 'light';
 
 }
 
 
 
-export function applyThemePreference(pref) {
-
-  const resolved = resolveThemePreference(pref);
+export function applyThemePreference() {
 
   try {
 
     if (typeof document !== 'undefined') {
 
-      document.documentElement?.setAttribute('data-theme', resolved);
+      document.documentElement?.setAttribute('data-theme', 'light');
 
     }
 
-    localStorage.setItem('theme', resolved);
+    localStorage.setItem('theme', 'light');
 
-    localStorage.setItem('theme_preference', pref || DEFAULT_PREFERENCES.theme);
+    localStorage.setItem('theme_preference', 'light');
 
   } catch {}
 
-  return resolved;
+  return 'light';
 
 }
 
