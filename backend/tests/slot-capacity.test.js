@@ -107,10 +107,14 @@ function makeAppointment({
   };
 }
 
-async function fetchSlots({ baseUrl, professionalId } = {}) {
+// Data futura fixa: evita que o filtro de "horário passado" do slots.js afete os
+// testes de capacidade conforme o tempo real avança.
+const FUTURE_WEEK_START = '2099-01-05';
+
+async function fetchSlots({ baseUrl, professionalId, weekStart = FUTURE_WEEK_START } = {}) {
   const params = new URLSearchParams({
     establishmentId: '1',
-    weekStart: '2026-05-04',
+    weekStart,
     servico_id: '10',
   });
   if (professionalId != null) {
@@ -126,7 +130,7 @@ function findSlot(payload, start) {
 }
 
 test('GET /slots keeps same-service slot available until capacity is reached', async () => {
-  const start = makeUtcFromLocalYMDHM(2026, 5, 4, 10, 0, EST_TZ_OFFSET_MIN);
+  const start = makeUtcFromLocalYMDHM(2099, 1, 5, 10, 0, EST_TZ_OFFSET_MIN);
   const restore = installSlotsPoolMock({
     appointments: [makeAppointment({ start })],
     capacity: 2,
@@ -148,7 +152,7 @@ test('GET /slots keeps same-service slot available until capacity is reached', a
 });
 
 test('GET /slots applies capacity when professional is not provided', async () => {
-  const start = makeUtcFromLocalYMDHM(2026, 5, 4, 10, 0, EST_TZ_OFFSET_MIN);
+  const start = makeUtcFromLocalYMDHM(2099, 1, 5, 10, 0, EST_TZ_OFFSET_MIN);
   const restore = installSlotsPoolMock({
     appointments: [makeAppointment({ start })],
     capacity: 2,
@@ -168,7 +172,7 @@ test('GET /slots applies capacity when professional is not provided', async () =
 });
 
 test('GET /slots marks slot booked when service capacity is reached', async () => {
-  const start = makeUtcFromLocalYMDHM(2026, 5, 4, 10, 0, EST_TZ_OFFSET_MIN);
+  const start = makeUtcFromLocalYMDHM(2099, 1, 5, 10, 0, EST_TZ_OFFSET_MIN);
   const restore = installSlotsPoolMock({
     appointments: [
       makeAppointment({ start }),
@@ -192,8 +196,8 @@ test('GET /slots marks slot booked when service capacity is reached', async () =
 });
 
 test('GET /slots still blocks different overlapping starts', async () => {
-  const slotStart = makeUtcFromLocalYMDHM(2026, 5, 4, 10, 0, EST_TZ_OFFSET_MIN);
-  const overlappingStart = makeUtcFromLocalYMDHM(2026, 5, 4, 10, 15, EST_TZ_OFFSET_MIN);
+  const slotStart = makeUtcFromLocalYMDHM(2099, 1, 5, 10, 0, EST_TZ_OFFSET_MIN);
+  const overlappingStart = makeUtcFromLocalYMDHM(2099, 1, 5, 10, 15, EST_TZ_OFFSET_MIN);
   const restore = installSlotsPoolMock({
     appointments: [makeAppointment({ start: overlappingStart })],
     capacity: 2,
@@ -206,6 +210,43 @@ test('GET /slots still blocks different overlapping starts', async () => {
     assert.ok(slot, 'expected 10:00 slot');
     assert.equal(slot.status, 'booked');
     assert.equal(slot.vagas_restantes, 0);
+  } finally {
+    await server.close();
+    restore();
+  }
+});
+
+test('GET /slots marca horários já passados como indisponíveis', async () => {
+  // Semana bem no passado -> todos os slots já decorreram (agora >> início).
+  const pastWeekStart = '2020-01-06';
+  const pastStart = makeUtcFromLocalYMDHM(2020, 1, 6, 10, 0, EST_TZ_OFFSET_MIN);
+  const restore = installSlotsPoolMock({ appointments: [], capacity: 2 });
+  const server = await startSlotsServer();
+
+  try {
+    const payload = await fetchSlots({ baseUrl: server.baseUrl, weekStart: pastWeekStart });
+    const slot = findSlot(payload, pastStart);
+    assert.ok(slot, 'expected 10:00 slot on past date');
+    assert.equal(slot.status, 'unavailable');
+    assert.equal(slot.label, 'bloqueado');
+    assert.equal(slot.vagas_restantes, 0);
+  } finally {
+    await server.close();
+    restore();
+  }
+});
+
+test('GET /slots mantém horários futuros como disponíveis', async () => {
+  const futureStart = makeUtcFromLocalYMDHM(2099, 1, 5, 10, 0, EST_TZ_OFFSET_MIN);
+  const restore = installSlotsPoolMock({ appointments: [], capacity: 2 });
+  const server = await startSlotsServer();
+
+  try {
+    const payload = await fetchSlots({ baseUrl: server.baseUrl });
+    const slot = findSlot(payload, futureStart);
+    assert.ok(slot, 'expected 10:00 slot on future date');
+    assert.equal(slot.status, 'free');
+    assert.equal(slot.label, 'disponivel');
   } finally {
     await server.close();
     restore();
@@ -247,7 +288,7 @@ function createCapacityDb({ blockingRows = [], sameSlotRows = [], capacity = 2 }
 }
 
 test('capacity transaction permits another booking in the same minute below capacity', async () => {
-  const inicioDate = makeUtcFromLocalYMDHM(2026, 5, 4, 10, 0, EST_TZ_OFFSET_MIN);
+  const inicioDate = makeUtcFromLocalYMDHM(2099, 1, 5, 10, 0, EST_TZ_OFFSET_MIN);
   const fimDate = new Date(inicioDate.getTime() + 30 * 60_000);
   const { db, sqlLog } = createCapacityDb({
     sameSlotRows: [{ id: 1 }],
@@ -272,7 +313,7 @@ test('capacity transaction permits another booking in the same minute below capa
 });
 
 test('capacity transaction rejects when capacity is reached', async () => {
-  const inicioDate = makeUtcFromLocalYMDHM(2026, 5, 4, 10, 0, EST_TZ_OFFSET_MIN);
+  const inicioDate = makeUtcFromLocalYMDHM(2099, 1, 5, 10, 0, EST_TZ_OFFSET_MIN);
   const fimDate = new Date(inicioDate.getTime() + 30 * 60_000);
   const { db } = createCapacityDb({
     sameSlotRows: [{ id: 1 }, { id: 2 }],
@@ -295,7 +336,7 @@ test('capacity transaction rejects when capacity is reached', async () => {
 });
 
 test('capacity transaction preserves blocking for other overlapping appointments', async () => {
-  const inicioDate = makeUtcFromLocalYMDHM(2026, 5, 4, 10, 0, EST_TZ_OFFSET_MIN);
+  const inicioDate = makeUtcFromLocalYMDHM(2099, 1, 5, 10, 0, EST_TZ_OFFSET_MIN);
   const fimDate = new Date(inicioDate.getTime() + 30 * 60_000);
   const { db } = createCapacityDb({
     blockingRows: [{ id: 99 }],

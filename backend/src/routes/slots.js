@@ -17,6 +17,15 @@ const APPOINTMENT_BUFFER_MIN = (() => {
   const parsed = Number(raw);
   return Number.isFinite(parsed) && parsed > 0 ? Math.round(parsed) : 0;
 })();
+// Antecedência mínima para agendar: slots que começam <= agora + esta folga são
+// marcados como indisponíveis (nunca "free"). Default 0 = filtra só o passado.
+// Mantido consistente com a checagem past_datetime do POST /public/agendamentos.
+const MIN_LEAD_MIN = (() => {
+  const raw = process.env.AGENDAMENTO_MIN_LEAD_MIN ?? process.env.SLOT_MIN_LEAD_MIN;
+  if (raw === undefined || raw === null || String(raw).trim() === '') return 0;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.round(parsed) : 0;
+})();
 const DAY_MS = 24 * 60 * 60 * 1000;
 const DAY_MINUTES = 24 * 60;
 
@@ -240,6 +249,7 @@ router.get('/', async (req, res) => {
     const capacityAwareService = serviceIds.length === 1 ? Number(serviceIds[0]) : null;
 
     // Monta grade da semana em passos de 30min
+    const nowMs = Date.now();
     const slots = [];
     for (let d = 0; d < 7; d++) {
       const localDay = addDaysLocal(weekStartLocal.year, weekStartLocal.month, weekStartLocal.day, d);
@@ -355,9 +365,11 @@ router.get('/', async (req, res) => {
           const bloqueadoHorario = Array.isArray(interval.breaks) &&
             interval.breaks.some(([startMin, endMin]) => minute < endMin && slotEndWindow > startMin);
           const bloqueado = ultrapassaFim || bloqueadoDb || bloqueadoHorario;
+          // Horário já passado (ou dentro da antecedência mínima) nunca fica "free".
+          const isPast = sMs <= nowMs + MIN_LEAD_MIN * 60_000;
 
-          const label = ocupado ? 'agendado' : (bloqueado ? 'bloqueado' : 'disponivel');
-          const status = ocupado ? 'booked' : (bloqueado ? 'unavailable' : 'free');
+          const label = ocupado ? 'agendado' : ((bloqueado || isPast) ? 'bloqueado' : 'disponivel');
+          const status = ocupado ? 'booked' : ((bloqueado || isPast) ? 'unavailable' : 'free');
 
           slots.push({
             datetime: slotStartUtc.toISOString(), // ISO-8601 em UTC equivalente ao hor rio local

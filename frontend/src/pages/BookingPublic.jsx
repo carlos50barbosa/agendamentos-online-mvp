@@ -37,7 +37,7 @@ function mapBookingError(e) {
     case 'plan_limit_agendamentos':
       return 'O estabelecimento atingiu o limite de agendamentos do plano.';
     case 'cliente_conflito':
-      return 'Você já tem um agendamento nesse horário.';
+      return 'Esse e-mail ou telefone já está cadastrado com dados diferentes. Use o mesmo e-mail e telefone do seu cadastro anterior.';
     default:
       return msg || 'Não foi possível concluir o agendamento. Tente novamente.';
   }

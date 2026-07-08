@@ -37,6 +37,14 @@ const APPOINTMENT_BUFFER_MIN = (() => {
   const parsed = Number(raw);
   return Number.isFinite(parsed) && parsed > 0 ? Math.round(parsed) : 0;
 })();
+// Antecedência mínima (min) para agendar — consistente com a grade de slots.
+// Default 0 = rejeita apenas horário já passado (comportamento atual inalterado).
+const MIN_LEAD_MIN = (() => {
+  const raw = process.env.AGENDAMENTO_MIN_LEAD_MIN ?? process.env.SLOT_MIN_LEAD_MIN;
+  if (raw === undefined || raw === null || String(raw).trim() === '') return 0;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.round(parsed) : 0;
+})();
 const DEFAULT_DEPOSIT_HOLD_MINUTES = 15;
 const DEPOSIT_ALLOWED_PLANS = new Set(['pro', 'premium']);
 
@@ -598,7 +606,9 @@ router.post('/', ensureSubscriptionOperationalAccess({
     }
     const inicioDate = new Date(inicio);
     if (Number.isNaN(inicioDate.getTime())) return res.status(400).json({ error: 'invalid_date' });
-    if (inicioDate.getTime() <= Date.now()) return res.status(400).json({ error: 'past_datetime' });
+    if (inicioDate.getTime() <= Date.now() + MIN_LEAD_MIN * 60_000) {
+      return res.status(400).json({ error: 'past_datetime', message: 'Escolha um horário futuro.' });
+    }
 
     const { items: serviceItems, missing } = await fetchServicesForAppointment(pool, estabelecimento_id, serviceIds);
     if (missing.length) {
@@ -838,18 +848,13 @@ router.post('/', ensureSubscriptionOperationalAccess({
         message: 'Já existe cliente com este e-mail ou telefone. Revise os dados antes de continuar.',
       });
     }
+    // Reaproveita o cadastro encontrado por e-mail OU telefone (um único match).
+    // O campo divergente (telefone) é atualizado no bloco de UPDATE abaixo. Só há
+    // bloqueio quando e-mail e telefone apontam para dois cadastros DIFERENTES
+    // (ambíguo) — tratado logo acima. Assim um cliente que trocou de número não é
+    // barrado no agendamento público.
     const existingUser = userByEmail || userByPhone;
     if (existingUser) {
-      const existingEmail = existingUser.email ? String(existingUser.email).trim().toLowerCase() : '';
-      const existingPhone = existingUser.telefone ? normalizePhoneBR(existingUser.telefone) : '';
-      const emailMismatch = existingEmail && emailNorm && existingEmail !== emailNorm;
-      const phoneMismatch = existingPhone && telNorm && existingPhone !== telNorm;
-      if (emailMismatch || phoneMismatch) {
-        return res.status(409).json({
-          error: 'cliente_conflito',
-          message: 'Já existe cliente com este e-mail ou telefone. Revise os dados antes de continuar.',
-        });
-      }
       userId = existingUser.id;
     }
     if (!userId) {
