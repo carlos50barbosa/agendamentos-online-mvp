@@ -117,7 +117,7 @@ export default function Cadastro() {
 
     senha: '',
 
-    tipo: '',
+    tipo: 'estabelecimento',
 
     telefone: '',
 
@@ -161,7 +161,7 @@ export default function Cadastro() {
 
   const [showOptionalFields, setShowOptionalFields] = useState(false);
 
-  const [hasChosen, setHasChosen] = useState(false);
+  const [hasChosen, setHasChosen] = useState(true);
 
   const legalMeta = useMemo(() => LEGAL_METADATA, []);
 
@@ -638,67 +638,17 @@ export default function Cadastro() {
 
         <section className="login-preview__card">
 
-          <div className="login-preview__grid">
+          <div className="ao-login">
+            <div className="ao-login__hero">
+              <span className="ao-login__glow" aria-hidden="true" />
+              <span className="ao-login__logo"><LogoAO size={44} /></span>
+              <p className="ao-login__brand">Agendamentos Online</p>
+              <h1 className="ao-login__hi">Criar sua <span>conta</span></h1>
+              <p className="ao-login__tag">Agende, receba e organize — em minutos.</p>
+            </div>
 
-            <aside className="login-preview__aside">
-
-              <div className="auth-portal__brand">
-
-                <LogoAO size={40} className="login-preview__logo-mark" />
-
-                <div className="auth-portal__brand-copy">
-
-                  <div className="auth-portal__brand-title">Agendamentos Online</div>
-
-                  <div className="auth-portal__brand-subtitle">Cadastro premium para clientes e operações</div>
-
-                </div>
-
-              </div>
-
-
-
-              <span className="auth-portal__aside-badge">Criacao de conta segura</span>
-
-              <div className="login-preview__aside-card">
-
-                <h2>Cadastro rápido</h2>
-
-                <p>
-
-                  Crie sua conta para agendar e acompanhar seus horários ou gerenciar sua agenda.
-
-                </p>
-
-                <ul>
-
-                  <li>Escolha o perfil ideal</li>
-
-                  <li>Confirme e-mail e WhatsApp</li>
-
-                  <li>Dados protegidos pela plataforma</li>
-
-                </ul>
-
-                <div className="login-preview__aside-tip">Leva menos de 2 minutos para concluir.</div>
-
-              </div>
-
-            </aside>
-
-
-
-            <div className="login-preview__panel">
-
-              <span className="auth-portal__panel-badge">Crie sua conta</span>
-
-              <header className="login-preview__header">
-
-                <h1>Criar conta</h1>
-
-                <p>Escolha o perfil e preencha os dados abaixo.</p>
-
-              </header>
+            <div className="ao-login__sheet">
+              <span className="ao-login__handle" aria-hidden="true" />
 
 
 
@@ -742,80 +692,27 @@ export default function Cadastro() {
 
 
 
-              <div className="signup-chooser">
-
-                <div className="signup-chooser__label">Como deseja usar?</div>
-
-                <div className="signup-chooser__hint">
-
-                  Cliente agenda serviços. Estabelecimento recebe e organiza agendamentos.
-
-                </div>
-
-                <div className="login-preview__tabs signup-chooser__tabs" role="tablist" aria-label="Tipo de conta">
-
-                  <button
-
-                    type="button"
-
-                    className={`login-preview__tab${form.tipo === 'cliente' ? ' is-active' : ''}`}
-
-                    role="tab"
-
-                    aria-selected={form.tipo === 'cliente'}
-
-                    tabIndex={form.tipo === 'cliente' || !hasChosen ? 0 : -1}
-
-                    onClick={() => handleTipoSelect('cliente')}
-
-                  >
-
-                    <div className="login-preview__tab-icon" aria-hidden="true">
-                      <ProfileGlyph isCliente />
-                    </div>
-
-                    <div className="login-preview__tab-body">
-                      <div className="login-preview__tab-title">Sou Cliente</div>
-                      <div className="login-preview__tab-hint">Acesse seus agendamentos e histórico</div>
-                    </div>
-
-                  </button>
-
-                  <button
-
-                    type="button"
-
-                    className={`login-preview__tab${form.tipo === 'estabelecimento' ? ' is-active' : ''}`}
-
-                    role="tab"
-
-                    aria-selected={form.tipo === 'estabelecimento'}
-
-                    tabIndex={form.tipo === 'estabelecimento' || !hasChosen ? 0 : -1}
-
-                    onClick={() => handleTipoSelect('estabelecimento')}
-
-                  >
-
-                    <div className="login-preview__tab-icon" aria-hidden="true">
-                      <ProfileGlyph />
-                    </div>
-
-                    <div className="login-preview__tab-body">
-                      <div className="login-preview__tab-title">Sou Estabelecimento</div>
-                      <div className="login-preview__tab-hint">Gerencie agenda, serviços e clientes</div>
-                    </div>
-
-                  </button>
-
-                </div>
-
-                {!showForm && (
-
-                  <div className="login-preview__hint is-error">Clique em um perfil para continuar.</div>
-
-                )}
-
+              <div className="ao-login__seg" role="tablist" aria-label="Tipo de conta">
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={form.tipo === 'estabelecimento'}
+                  className={`ao-login__seg-opt${form.tipo === 'estabelecimento' ? ' is-active' : ''}`}
+                  onClick={() => handleTipoSelect('estabelecimento')}
+                >
+                  <ProfileGlyph />
+                  Estabelecimento
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={form.tipo === 'cliente'}
+                  className={`ao-login__seg-opt${form.tipo === 'cliente' ? ' is-active' : ''}`}
+                  onClick={() => handleTipoSelect('cliente')}
+                >
+                  <ProfileGlyph isCliente />
+                  Cliente
+                </button>
               </div>
 
               {showForm ? (

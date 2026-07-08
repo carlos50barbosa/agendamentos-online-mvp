@@ -15,6 +15,7 @@ import {
 } from '../components/Icons.jsx';
 import { Api, resolveAssetUrl } from '../utils/api.js';
 import { getUser } from '../utils/auth.js';
+import LogoAO from '../components/LogoAO.jsx';
 import styles from './LandingPublica.module.css';
 
 const CATEGORIES = [
@@ -106,9 +107,7 @@ export default function LandingPublica() {
       <header className={styles.header}>
         <div className={styles.headerInner}>
           <Link to="/" className={styles.brand} aria-label="Agendamentos Online">
-            <span className={styles.brandMark} aria-hidden="true">
-              <IconCalendar width={18} height={18} />
-            </span>
+            <LogoAO size={34} title="" />
             <span className={styles.brandName}>
               Agendamentos
               <small>Online</small>

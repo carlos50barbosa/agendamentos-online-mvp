@@ -10,10 +10,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { ChevronLeft, Scissors, Search, User, Check, ArrowRight, Loader2, Info, X } from 'lucide-react';
 import LogoAO from '../LogoAO.jsx';
+import EstablishmentHeader from './EstablishmentHeader.jsx';
 import DayChips from '../agenda/DayChips.jsx';
 import SlotPicker from '../agenda/SlotPicker.jsx';
 import PixCheckout from '../agenda/PixCheckout.jsx';
 import { buildDayRange, fullDateLabel, hourLabel, durationLabel } from '../../utils/agendaDates.js';
+import { formatBRPhone, formatCpfCnpj } from '../../utils/masks.js';
 import { site } from '../../config/site.js';
 import { iconSizes } from '../../config/theme.js';
 
@@ -40,6 +42,9 @@ export default function BookingWizard({
   days: daysProp,
   collectGuest = false,
   pollStatus,
+  preselectedServiceIds = [],
+  establishment = null,
+  initialGuest = null,
 }) {
   const [step, setStep] = useState(STEP.SERVICO);
   const [selectedServices, setSelectedServices] = useState([]);
@@ -50,7 +55,12 @@ export default function BookingWizard({
   const [submitting, setSubmitting] = useState(false);
   const [pix, setPix] = useState(null);
   const [error, setError] = useState(null);
-  const [guest, setGuest] = useState({ nome: '', email: '', telefone: '', cpf: '' });
+  const [guest, setGuest] = useState(() => ({
+    nome: initialGuest?.nome || '',
+    email: initialGuest?.email || '',
+    telefone: initialGuest?.telefone ? formatBRPhone(initialGuest.telefone) : '',
+    cpf: initialGuest?.cpf ? formatCpfCnpj(initialGuest.cpf) : '',
+  }));
   const [slotsState, setSlotsState] = useState({ loading: false, list: [] });
   const [detailService, setDetailService] = useState(null);
 
@@ -80,6 +90,16 @@ export default function BookingWizard({
   const showProfessionalStep = professionalRequired || professionalOptions.length > 0;
 
   const selectedServiceKey = selectedServices.map((s) => s.id).join(',');
+
+  // Pré-seleção via URL (?servico=): marca os serviços assim que a lista chega, sem
+  // sobrescrever uma escolha já feita pelo usuário (mantém o multi-serviço editável).
+  const preselectKey = (preselectedServiceIds || []).map(String).join(',');
+  useEffect(() => {
+    if (!preselectKey || !services.length) return;
+    const wanted = new Set(preselectKey.split(','));
+    setSelectedServices((prev) => (prev.length ? prev : services.filter((s) => wanted.has(String(s.id)))));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [preselectKey, services]);
 
   // Carrega os horários do dia (buildSlots sync [mock] OU async [Promise, API real]).
   useEffect(() => {
@@ -166,10 +186,16 @@ export default function BookingWizard({
 
   return (
     <div className="tw-mx-auto tw-flex tw-min-h-full tw-w-full tw-max-w-lg tw-flex-col tw-gap-4 tw-p-4">
-      {/* Marca + progresso */}
+      {/* Cabeçalho rico do estabelecimento (fluxo real). Some no pagamento p/ foco.
+          O botão da capa é o único "voltar": volta uma etapa e some na 1ª (serviços). */}
+      {establishment && step < STEP.PAGAMENTO && (
+        <EstablishmentHeader establishment={establishment} onBack={back} showBack={step > STEP.SERVICO} />
+      )}
+      {/* Marca (mock) / etapa + progresso */}
       <header className="tw-flex tw-flex-col tw-gap-3">
         <div className="tw-flex tw-items-center tw-gap-2">
-          {step > STEP.SERVICO && step < STEP.PAGAMENTO && (
+          {/* Chevron de voltar-etapa só no fluxo mock (sem cabeçalho do estabelecimento) */}
+          {!establishment && step > STEP.SERVICO && step < STEP.PAGAMENTO && (
             <button
               type="button"
               onClick={back}
@@ -180,17 +206,24 @@ export default function BookingWizard({
               <ChevronLeft size={iconSizes.nav} strokeWidth={2.2} aria-hidden="true" />
             </button>
           )}
-          <div className="tw-flex tw-min-w-0 tw-items-center tw-gap-2">
-            <LogoAO size={32} className="" />
-            <div className="tw-min-w-0">
-              <p className="tw-m-0 tw-truncate tw-text-sm tw-font-bold" style={{ color: 'var(--brand-deep, #1E1B4B)' }}>
-                {establishmentName}
-              </p>
-              <p className="tw-m-0 tw-text-xs" style={{ color: 'var(--muted-ink, #6B7280)' }}>
-                {site.bookingSteps[step]?.label}
-              </p>
+          {establishment ? (
+            <p className="tw-m-0 tw-text-xs tw-font-semibold" style={{ color: 'var(--muted-ink, #6B7280)' }}>
+              Etapa {step + 1} de {site.bookingSteps.length} ·{' '}
+              <span style={{ color: 'var(--brand-deep, #1E1B4B)' }}>{site.bookingSteps[step]?.label}</span>
+            </p>
+          ) : (
+            <div className="tw-flex tw-min-w-0 tw-items-center tw-gap-2">
+              <LogoAO size={32} className="" />
+              <div className="tw-min-w-0">
+                <p className="tw-m-0 tw-truncate tw-text-sm tw-font-bold" style={{ color: 'var(--brand-deep, #1E1B4B)' }}>
+                  {establishmentName}
+                </p>
+                <p className="tw-m-0 tw-text-xs" style={{ color: 'var(--muted-ink, #6B7280)' }}>
+                  {site.bookingSteps[step]?.label}
+                </p>
+              </div>
             </div>
-          </div>
+          )}
         </div>
         <ProgressBar current={step} total={site.bookingSteps.length} />
       </header>
@@ -325,8 +358,8 @@ export default function BookingWizard({
               <div className="tw-mt-3 tw-flex tw-flex-col tw-gap-2">
                 <GuestInput label="Nome" value={guest.nome} onChange={(v) => setGuest((g) => ({ ...g, nome: v }))} placeholder="Seu nome" autoComplete="name" />
                 <GuestInput label="E-mail" type="email" value={guest.email} onChange={(v) => setGuest((g) => ({ ...g, email: v }))} placeholder="voce@email.com" autoComplete="email" />
-                <GuestInput label="Telefone" value={guest.telefone} onChange={(v) => setGuest((g) => ({ ...g, telefone: v }))} placeholder="(11) 99999-9999" autoComplete="tel" inputMode="tel" />
-                <GuestInput label="CPF" value={guest.cpf} onChange={(v) => setGuest((g) => ({ ...g, cpf: v }))} placeholder="Necessário se houver sinal (PIX)" inputMode="numeric" />
+                <GuestInput label="Telefone" value={guest.telefone} onChange={(v) => setGuest((g) => ({ ...g, telefone: v }))} format={formatBRPhone} placeholder="(11) 99999-9999" autoComplete="tel" inputMode="tel" />
+                <GuestInput label="CPF/CNPJ" value={guest.cpf} onChange={(v) => setGuest((g) => ({ ...g, cpf: v }))} format={formatCpfCnpj} placeholder="Necessário se houver sinal (PIX)" inputMode="numeric" />
               </div>
             )}
 
@@ -422,14 +455,14 @@ function StepShell({ title, children }) {
   );
 }
 
-function GuestInput({ label, value, onChange, type = 'text', placeholder, autoComplete, inputMode }) {
+function GuestInput({ label, value, onChange, type = 'text', placeholder, autoComplete, inputMode, format }) {
   return (
     <label className="tw-flex tw-flex-col tw-gap-1">
       <span className="tw-text-xs tw-font-medium" style={{ color: 'var(--muted-ink, #6B7280)' }}>{label}</span>
       <input
         type={type}
         value={value}
-        onChange={(e) => onChange(e.target.value)}
+        onChange={(e) => onChange(format ? format(e.target.value) : e.target.value)}
         placeholder={placeholder}
         autoComplete={autoComplete}
         inputMode={inputMode}

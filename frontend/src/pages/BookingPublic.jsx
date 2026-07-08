@@ -8,6 +8,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import BookingWizard from '../components/booking/BookingWizard.jsx';
 import { Api } from '../utils/api.js';
+import { getUser } from '../utils/auth.js';
 import { isSameDay } from '../utils/agendaDates.js';
 
 function ymd(d) {
@@ -48,6 +49,12 @@ export default function BookingPublic() {
   // Resolve por ?estabelecimento=id (link do cliente, confiável mesmo se o slug divergir)
   // ou pelo path (id/slug). getEstablishment aceita id ou slug.
   const resolveKey = searchParams.get('estabelecimento') || searchParams.get('estabelecimentoId') || idOrSlug;
+  // Pré-seleção de serviço via ?servico=id (ou id,id) — o serviço já entra marcado no wizard.
+  const servicoParam = searchParams.get('servico') || '';
+  const preselectedServiceIds = useMemo(
+    () => servicoParam.split(',').map((s) => s.trim()).filter(Boolean),
+    [servicoParam],
+  );
   const [state, setState] = useState({ loading: true, error: '', establishment: null, services: [] });
 
   useEffect(() => {
@@ -80,6 +87,18 @@ export default function BookingPublic() {
   }, [resolveKey]);
 
   const establishmentId = state.establishment?.id || null;
+
+  // Cliente logado (fluxo /novo -> /agendar): pré-preenche os dados p/ não redigitar.
+  const initialGuest = useMemo(() => {
+    const viewer = getUser();
+    if (viewer?.tipo !== 'cliente') return null;
+    return {
+      nome: viewer.nome || viewer.name || '',
+      email: viewer.email || '',
+      telefone: viewer.telefone || viewer.whatsapp || viewer.phone || viewer.celular || '',
+      cpf: viewer.cpf_cnpj || viewer.cpf || '',
+    };
+  }, []);
 
   const wizardServices = useMemo(
     () => (state.services || []).map((s) => ({
@@ -173,10 +192,13 @@ export default function BookingPublic() {
     <div style={{ background: 'var(--bg-lav, #F6F5FB)', minHeight: '100%' }}>
       <BookingWizard
         establishmentName={state.establishment?.nome || 'Agendamento'}
+        establishment={state.establishment}
         services={wizardServices}
         buildSlots={buildSlots}
         onConfirm={onConfirm}
         pollStatus={pollStatus}
+        preselectedServiceIds={preselectedServiceIds}
+        initialGuest={initialGuest}
         collectGuest
       />
     </div>
