@@ -25,7 +25,7 @@ export default function BookingDiscovery() {
 
   // Debounce da digitação -> query efetiva.
   useEffect(() => {
-    const id = setTimeout(() => setQuery(term.trim()), 300);
+    const id = setTimeout(() => setQuery(term.trim()), 160);
     return () => clearTimeout(id);
   }, [term]);
 

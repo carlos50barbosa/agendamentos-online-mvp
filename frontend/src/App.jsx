@@ -1439,9 +1439,9 @@ const topbarAlert = useMemo(() => {
 
                 <span className="brand__text">
 
-                  <strong>Agendamentos Online</strong>
+                  <strong>Agendamentos</strong>
 
-                  <small>Agenda, clientes e operação em um só lugar</small>
+                  <small>Online</small>
 
                 </span>
 

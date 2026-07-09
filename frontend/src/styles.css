@@ -28,12 +28,14 @@
   --ring: 0 0 0 1px rgba(99, 102, 241, 0.55);
   --ring-shadow: 0 0 0 3px rgba(99, 102, 241, 0.25);
   --transition: .18s cubic-bezier(.2,.8,.2,1);
-  --topbar-h: 60px;
+  /* Topbar padronizado com o header da landing (/): limpo, hairline, sem sombra.
+     Fonte única — os duplicados do styles-premium.css foram removidos. */
+  --topbar-h: 58px;
   --topbar-current-h: var(--topbar-h);
   --header-h: var(--topbar-current-h);
-  --topbar-bg: rgba(255,255,255,.92);
-  --topbar-border: var(--brand-200);
-  --topbar-shadow: 0 8px 24px rgba(99, 102, 241, 0.12);
+  --topbar-bg: rgba(255,255,255,.85);
+  --topbar-border: rgba(148,163,184,.22);
+  --topbar-shadow: none;
   --mobile-nav-h: 64px;
   --mobile-nav-item-h: 48px;
   --mobile-nav-padding: 8px;
@@ -3744,8 +3746,7 @@ button.danger:disabled,
   .app-main{ min-height: 100dvh; padding-bottom: calc(var(--mobile-nav-h) + env(safe-area-inset-bottom, 0px)); }
   /* Topbar compacto e em linha */
   .app-topbar__inner{ flex-direction: row; align-items: center; gap: 8px; }
-  /* No mobile o slogan do produto polui a barra (e é redundante com o conteudo) */
-  .app-topbar .brand__text small{ display: none; }
+  /* "Online" (subtítulo curto) aparece também no mobile, igual ao header da /. */
 }
 /* Topbar simples no conteúdo */
 .app-topbar{
@@ -3753,7 +3754,8 @@ button.danger:disabled,
   min-height: var(--topbar-h);
   display: flex; flex-direction: column; align-items: stretch; gap: 0;
   background: var(--topbar-bg);
-  backdrop-filter: saturate(160%) blur(8px);
+  backdrop-filter: saturate(140%) blur(12px);
+  -webkit-backdrop-filter: saturate(140%) blur(12px);
   border-bottom: 1px solid var(--topbar-border);
   box-shadow: var(--topbar-shadow);
 }
@@ -12273,3 +12275,93 @@ body.planos-no-scrollbar .container--wide::-webkit-scrollbar{
     flex-basis:9px !important;
   }
 }
+
+/* ============================================================
+   /planos — repaginada sóbria e profissional (menos efeitos de cor).
+   Overrides escopados em .planos-landing: tira gradientes/glows,
+   animações, glassmorphism e sombras pesadas; mantém o layout e um
+   único acento (índigo) usado com parcimônia. Fácil de reverter:
+   basta remover este bloco.
+   ============================================================ */
+/* Blobs de gradiente ao fundo — fora */
+.planos-landing::before,
+.planos-landing::after{ display:none !important; }
+
+/* Hero: fundo limpo (sem os 3 gradientes, o brilho e a sombra pesada) */
+.planos-landing .hero{
+  background: var(--surface);
+  border:1px solid var(--border, rgba(148,163,184,.22));
+  box-shadow:0 1px 2px rgba(15,23,42,.04);
+}
+.planos-landing .hero::after{ display:none; }
+
+/* Ilustração: sem pulso animado; cards estáticos e discretos */
+.planos-landing .hero__pulse{ display:none; }
+.planos-landing .hero__card{
+  animation:none;
+  box-shadow:0 1px 3px rgba(15,23,42,.06);
+  border:1px solid var(--border, rgba(148,163,184,.22));
+}
+
+/* Badges e stat-cards: sem glassmorphism, fundo sólido, sombra sutil */
+.planos-landing .hero__badge{ background: var(--surface-soft, #f1f5f9); backdrop-filter:none; }
+.planos-landing .stat-card{
+  background: var(--surface);
+  backdrop-filter:none;
+  border:1px solid var(--border, rgba(148,163,184,.2));
+  box-shadow:0 1px 2px rgba(15,23,42,.04);
+}
+
+/* Tag "Planos para estabelecimentos": neutra em vez de índigo forte */
+.planos-landing .tag--accent{
+  background: var(--surface-soft, #f1f5f9);
+  color: var(--text);
+  border:1px solid var(--border, rgba(148,163,184,.28));
+}
+
+/* Cards de preço: sombra sutil, sem sheen no hover */
+.planos-landing .pricing-card{
+  border:1px solid var(--border, rgba(148,163,184,.22));
+  box-shadow:0 1px 3px rgba(15,23,42,.06);
+}
+.planos-landing .pricing-card::after{ display:none; }
+.planos-landing .pricing-card:hover{ box-shadow:0 4px 14px rgba(15,23,42,.08); }
+
+/* Card em destaque: ênfase pela borda, sem lift nem glow colorido */
+.planos-landing .pricing-card.is-featured{
+  transform:none;
+  border:1px solid var(--brand);
+  box-shadow:0 4px 16px rgba(15,23,42,.08);
+}
+.planos-landing .pricing-card.is-featured::before{ background: var(--brand); }
+.planos-landing .pricing-card.is-featured .pricing-badge{
+  color: var(--primary-600);
+  background: var(--brand-100);
+  border-color: rgba(99,102,241,.22);
+}
+
+/* Ícones dos benefícios/incluídos: um único acento (índigo) */
+.planos-landing .pricing-included__icon{
+  color: var(--primary-600);
+  background: var(--brand-100);
+}
+
+/* Nota do WhatsApp: neutra (sem tint azul) */
+.planos-landing .pricing-note{
+  background: var(--surface-soft, #f8fafc);
+  border:1px solid var(--border, rgba(148,163,184,.22));
+}
+
+/* "Incluído" e "pacotes extras": planos, sem gradiente/sombra pesada */
+.planos-landing .pricing-included__item{ background: var(--surface); box-shadow:none; }
+.planos-landing .pricing-extras{ background: var(--surface); box-shadow:none; }
+
+/* Seção inferior (FAQ + CTA final): sem blobs de gradiente */
+.planos-landing .faq::before,
+.planos-landing .cta-final::before{ display:none; }
+.planos-landing .faq-item{ box-shadow:0 1px 3px rgba(15,23,42,.05); }
+.planos-landing .faq-item:hover{
+  border-color: var(--border, rgba(148,163,184,.35));
+  box-shadow:0 4px 14px rgba(15,23,42,.08);
+}
+.planos-landing .cta-final__inner{ box-shadow:0 1px 3px rgba(15,23,42,.06); }

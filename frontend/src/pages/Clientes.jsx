@@ -189,7 +189,7 @@ export default function Clientes() {
 
   const [period, setPeriod] = useState('30d');
   const [searchText, setSearchText] = useState('');
-  const debouncedSearch = useDebouncedValue(searchText, 400);
+  const debouncedSearch = useDebouncedValue(searchText, 160);
   const [statusFilters, setStatusFilters] = useState([]);
   const [riskOnly, setRiskOnly] = useState(false);
   const [vipOnly, setVipOnly] = useState(false);
