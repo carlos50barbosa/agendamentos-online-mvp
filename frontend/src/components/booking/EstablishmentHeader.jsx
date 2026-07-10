@@ -267,11 +267,11 @@ export default function EstablishmentHeader({ establishment, onBack, showBack = 
           </h1>
           {address && (
             <p
-              className="tw-m-0 tw-mt-1 tw-flex tw-items-center tw-justify-center tw-gap-1 tw-text-xs"
+              className="tw-m-0 tw-mt-1 tw-flex tw-items-start tw-justify-center tw-gap-1 tw-text-xs tw-text-center"
               style={{ color: 'var(--muted-ink, #6B7280)' }}
             >
-              <MapPin size={13} strokeWidth={2} aria-hidden="true" style={{ flexShrink: 0 }} />
-              <span className="tw-truncate">{address}</span>
+              <MapPin size={13} strokeWidth={2} aria-hidden="true" style={{ flexShrink: 0, marginTop: 2 }} />
+              <span>{address}</span>
             </p>
           )}
 
