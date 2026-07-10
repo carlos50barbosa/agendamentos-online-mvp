@@ -158,7 +158,7 @@ export default function BookingPublic() {
     if (!hasDeposit) {
       return {
         confirmed: true,
-        message: 'Agendamento registrado! Confirme pelo link enviado no seu e-mail para garantir o horário.',
+        message: 'Agendamento registrado! Confirme pelo link enviado no seu e-mail ou WhatsApp para garantir o horário.',
       };
     }
 

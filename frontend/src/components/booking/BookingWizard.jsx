@@ -395,9 +395,14 @@ export default function BookingWizard({
                 className="tw-flex tw-flex-col tw-items-center tw-gap-3 tw-rounded-2xl tw-p-6 tw-text-center"
                 style={{ background: 'var(--surface, #fff)', border: '1px solid var(--brand-border, #E7E5F5)' }}
               >
-                <Check size={40} strokeWidth={2.4} aria-hidden="true" style={{ color: 'var(--brand)' }} />
+                <span
+                  aria-hidden="true"
+                  style={{ display: 'grid', placeItems: 'center', width: 56, height: 56, borderRadius: '50%', background: '#16A34A', boxShadow: '0 6px 16px rgba(22,163,74,.28)' }}
+                >
+                  <Check size={30} strokeWidth={3} style={{ color: '#fff' }} />
+                </span>
                 <p className="tw-m-0 tw-text-sm" style={{ color: 'var(--ink, #1E1B4B)' }}>
-                  {pix.message || 'Seu agendamento foi registrado. Confirme pelo link enviado no seu e-mail.'}
+                  {pix.message || 'Seu agendamento foi registrado. Confirme pelo link enviado no seu e-mail ou WhatsApp.'}
                 </p>
               </div>
             ) : (
