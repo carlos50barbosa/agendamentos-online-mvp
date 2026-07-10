@@ -12365,3 +12365,66 @@ body.planos-no-scrollbar .container--wide::-webkit-scrollbar{
   box-shadow:0 4px 14px rgba(15,23,42,.08);
 }
 .planos-landing .cta-final__inner{ box-shadow:0 1px 3px rgba(15,23,42,.06); }
+
+/* ============================================================
+   Configurações — polish sóbrio/profissional (mesma linha do /planos e
+   do topbar): menos gradientes/glows, sombras sutis, sem "lift" no hover,
+   um único acento (índigo). Escopado em .config-page/.settings-hub.
+   Só CSS (não toca no JS minificado). Fácil de reverter: remover o bloco.
+   ============================================================ */
+/* Hero: sem o blob radial; fundo limpo com borda fininha */
+.config-page__hero{
+  background: var(--surface, #fff);
+  border:1px solid var(--border, rgba(148,163,184,.22));
+}
+.config-page__hero::after{ display:none; }
+
+/* Cards e hub do menu: sombras sutis, fundo sólido */
+.config-page .card{
+  box-shadow:0 1px 3px rgba(15,23,42,.06);
+  border-color: var(--border, rgba(148,163,184,.22));
+}
+.settings-hub{
+  background: var(--surface, #fff);
+  border:1px solid var(--border, rgba(148,163,184,.22));
+}
+.settings-hub__card{ box-shadow:0 1px 3px rgba(15,23,42,.05); }
+.settings-hub__card:hover,
+.settings-hub__card:focus-visible{
+  transform:none;
+  border-color: var(--brand-200, rgba(99,102,241,.34));
+  box-shadow:0 4px 14px rgba(15,23,42,.08);
+}
+
+/* Seções recolhíveis: sem "pulo" no hover; realce discreto */
+.config-page .config-section:not(.config-section--highlight):hover{
+  transform:none;
+  border-color: var(--brand-200, rgba(99,102,241,.30));
+  box-shadow:0 4px 14px rgba(15,23,42,.07);
+}
+/* Cabeçalho da seção (toggle): fundo sólido em vez de gradiente */
+.config-page .config-section__toggle{
+  background: var(--surface-soft, #f8fafc);
+}
+.config-page .config-section__toggle:hover,
+.config-page .config-section__toggle:focus-visible,
+.config-page .config-section__toggle.is-open{
+  background: var(--brand-100, #eef2ff);
+}
+/* Seção destacada: borda limpa + sombra sutil (sem "ring" pesado) */
+.config-page .config-section--highlight{
+  box-shadow:0 1px 3px rgba(15,23,42,.06);
+}
+/* Título da seção pode quebrar em 2 linhas no mobile (não corta) */
+@media (max-width:520px){
+  .config-page .config-section__title{ white-space:normal; }
+}
+
+/* Botão primário: cor sólida (sem gradiente/glow) */
+.config-page .btn.btn--primary{
+  background: var(--brand, #5049E5);
+  box-shadow:0 2px 8px rgba(80,73,229,.18);
+}
+.config-page .btn.btn--primary:hover{
+  box-shadow:0 4px 14px rgba(80,73,229,.24);
+}
