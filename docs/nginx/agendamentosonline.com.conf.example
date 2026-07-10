@@ -1,8 +1,8 @@
 server {
   listen 80;
-  server_name agendamentosonline.com www.agendamentosonline.com;
+  server_name agenda0.com.br www.agenda0.com.br;
 
-  root /var/www/agendamentosonline.com;
+  root /var/www/agenda0.com.br;
   index index.html;
 
   location = /api {

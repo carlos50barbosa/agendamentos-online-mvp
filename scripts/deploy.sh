@@ -7,8 +7,8 @@ set -euo pipefail
 #   PROJECT_DIR=/opt/apps/agendamentos-online-mvp
 #   FRONT_DIR="$PROJECT_DIR/frontend"
 #   BACK_DIR="$PROJECT_DIR/backend"
-#   DOCROOT=/var/www/agendamentosonline.com
-#   API_URL=https://agendamentosonline.com/api
+#   DOCROOT=/var/www/agenda0.com.br
+#   API_URL=https://agenda0.com.br/api
 #   PM2_PROCESS=agendamento-api
 #   BRANCH=(current)
 #   NGINX_RELOAD=0
@@ -16,14 +16,14 @@ set -euo pipefail
 #   SKIP_FRONTEND=0
 #
 # Usage examples:
-#   API_URL=https://agendamentosonline.com/api ./scripts/deploy.sh
+#   API_URL=https://agenda0.com.br/api ./scripts/deploy.sh
 #   BRANCH=main NGINX_RELOAD=1 ./scripts/deploy.sh
 
 PROJECT_DIR=${PROJECT_DIR:-/opt/apps/agendamentos-online-mvp}
 FRONT_DIR=${FRONT_DIR:-"$PROJECT_DIR/frontend"}
 BACK_DIR=${BACK_DIR:-"$PROJECT_DIR/backend"}
-DOCROOT=${DOCROOT:-/var/www/agendamentosonline.com}
-API_URL=${API_URL:-https://agendamentosonline.com/api}
+DOCROOT=${DOCROOT:-/var/www/agenda0.com.br}
+API_URL=${API_URL:-https://agenda0.com.br/api}
 PM2_PROCESS=${PM2_PROCESS:-agendamento-api}
 BRANCH=${BRANCH:-}
 NGINX_RELOAD=${NGINX_RELOAD:-0}

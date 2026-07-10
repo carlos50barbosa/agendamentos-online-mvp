@@ -3374,13 +3374,13 @@ export default function NovoAgendamento() {
 
     if (!id) return '';
 
-    let origin = 'https://agendamentosonline.com';
+    let origin = 'https://agenda0.com.br';
 
     if (typeof window !== 'undefined') {
 
       const currentOrigin = window.location?.origin || '';
 
-      if (currentOrigin.includes('agendamentosonline.com')) origin = currentOrigin;
+      if (currentOrigin.includes('agenda0.com.br')) origin = currentOrigin;
 
     }
 

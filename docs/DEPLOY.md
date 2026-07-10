@@ -15,13 +15,13 @@ Ou seja: **um merge/push na `main` publica sozinho**, e um teste vermelho **trav
 
 | Secret | Obrigatória | Descrição |
 |--------|:----------:|-----------|
-| `DEPLOY_SSH_HOST` | ✅ | Host/IP do VPS (ex.: `agendamentosonline.com`) |
+| `DEPLOY_SSH_HOST` | ✅ | Host/IP do VPS (ex.: `agenda0.com.br`) |
 | `DEPLOY_SSH_USER` | ✅ | Usuário SSH de deploy (ex.: `deploy`) |
 | `DEPLOY_SSH_KEY` | ✅ | Chave **privada** SSH (conteúdo do arquivo, PEM/OpenSSH) |
 | `DEPLOY_SSH_PORT` | ➖ | Porta SSH (default `22`) |
 | `DEPLOY_DIR` | ➖ | Caminho do projeto no VPS (default `/opt/apps/agendamentos-online-mvp`) |
-| `DEPLOY_API_URL` | ➖ | Vira `VITE_API_URL` no build do front (default do script: `https://agendamentosonline.com/api`) |
-| `DEPLOY_HEALTHCHECK_URL` | ➖ | Se setada, o pipeline faz um smoke check HTTP após o deploy (ex.: `https://agendamentosonline.com/api/webhooks/asaas`) |
+| `DEPLOY_API_URL` | ➖ | Vira `VITE_API_URL` no build do front (default do script: `https://agenda0.com.br/api`) |
+| `DEPLOY_HEALTHCHECK_URL` | ➖ | Se setada, o pipeline faz um smoke check HTTP após o deploy (ex.: `https://agenda0.com.br/api/webhooks/asaas`) |
 
 ### Gerar a chave SSH de deploy
 

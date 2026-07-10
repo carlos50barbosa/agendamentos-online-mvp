@@ -2234,10 +2234,10 @@ function _l() {
       if (!n) return "";
       const a = n.id ? String(n.id) : "";
       if (!a) return "";
-      let t = "https://agendamentosonline.com";
+      let t = "https://agenda0.com.br";
       if (typeof window < "u") {
         const l = ((c = window.location) == null ? void 0 : c.origin) || "";
-        l.includes("agendamentosonline.com") && (t = l);
+        l.includes("agenda0.com.br") && (t = l);
       }
       const s = E || (n == null ? void 0 : n.nome) || "",
         i = el(s || "estabelecimento-".concat(a));
