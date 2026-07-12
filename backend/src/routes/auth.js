@@ -765,7 +765,7 @@ router.post('/forgot', async (req, res) => {
     }catch{}
 
     // Monta link com token JWT de uso único por período curto
-    const appUrl = process.env.APP_URL || 'http://localhost:3001';
+    const appUrl = process.env.FRONTEND_BASE_URL || process.env.APP_URL || 'http://localhost:3001';
     const secret = process.env.JWT_SECRET;
     let link = `${appUrl.replace(/\/$/,'')}/recuperar-senha`;
     if (user && secret) {

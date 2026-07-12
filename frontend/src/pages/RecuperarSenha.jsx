@@ -60,7 +60,7 @@ export default function RecuperarSenha() {
                 <div className="login-preview__alert login-preview__alert--success" role="status">
                   <span className="login-preview__alert-dot" aria-hidden="true" />
                   <div>
-                    <div className="login-preview__alert-title">Solicitacao enviada</div>
+                    <div className="login-preview__alert-title">Solicitação enviada</div>
                     <div className="login-preview__alert-text">
                       Se existir uma conta para <strong>{email}</strong>, você receberá um e-mail com instruções.
                     </div>
