@@ -1874,8 +1874,22 @@ a:hover { opacity: 1; text-decoration: underline; }
 .report-refresh{white-space:nowrap;}
 .report-skeleton{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin-top:16px;}
 .report-skeleton__item{height:72px;border-radius:12px;}
-.report-metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin-top:16px;}
-.report-metric{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:12px;display:flex;flex-direction:column;gap:6px;}
+  /* Enquanto recarrega, o render anterior fica esmaecido: trocar a tela por skeleton a
+     cada mexida de filtro faz a página pular. É uma caixa de verdade (não display:contents,
+     que não tem caixa e portanto ignoraria o opacity). */
+  .report-body{display:flex;flex-direction:column;transition:opacity .15s ease;}
+  .report-body.is-stale{opacity:.5;pointer-events:none;}
+
+  /* Herói + tiles: um número lidera, quatro apoiam, o resto desce para a faixa. */
+  .report-headline{display:grid;gap:10px;margin-top:16px;grid-template-columns:minmax(260px,1fr) 1.6fr;}
+  .report-hero{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px;display:flex;flex-direction:column;justify-content:center;gap:10px;}
+  .report-hero__label{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;}
+  .report-hero__figure{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;}
+  /* algarismos proporcionais: tabular-nums deixaria um número grande "solto" */
+  .report-hero__value{font-size:clamp(36px,5vw,48px);line-height:1.05;font-weight:700;letter-spacing:-.02em;}
+  .report-hero__foot{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:12px;color:var(--muted);}
+  .report-tiles{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));}
+  .report-metric{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:12px;display:flex;flex-direction:column;gap:6px;}
   .report-metric__label{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;}
   .report-metric__value-row{display:flex;align-items:baseline;flex-wrap:wrap;gap:8px;}
   .report-metric__value{font-size:24px;font-weight:700;}
@@ -1884,18 +1898,24 @@ a:hover { opacity: 1; text-decoration: underline; }
   .report-metric__delta.is-bad{color:var(--danger-text);}
   .report-metric__delta.is-flat{color:var(--muted);}
   .report-metric__hint{font-size:12px;color:var(--muted);}
-  .report-insights{display:grid;gap:8px;margin-top:16px;}
-  .report-insight{margin:0;padding:10px 12px;font-size:13px;line-height:1.45;color:var(--text);background:var(--surface);border:1px solid var(--border);border-left:3px solid var(--brand);border-radius:var(--radius-sm);}
-  .report-insight--positive{border-left-color:var(--success-text);background:var(--success-bg);}
-  .report-insight--negative{border-left-color:var(--danger-text);background:var(--danger-bg);}
-  .report-metrics--mini{grid-template-columns:repeat(auto-fit,minmax(140px,1fr));margin-top:6px;}
-  .report-metric--mini{padding:10px;}
-  .report-metric--mini .report-metric__value{font-size:18px;}
+
+  /* Faixa secundária: os números que precisam existir mas não lideram nada. */
+  .report-facts{display:grid;gap:6px 20px;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));margin-top:10px;padding:12px 14px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface-soft);}
+  .report-fact{display:flex;align-items:baseline;justify-content:space-between;gap:10px;font-size:12px;}
+  .report-fact__label{color:var(--muted);}
+  .report-fact__value{font-weight:600;font-variant-numeric:tabular-nums;color:var(--text);}
+
+  /* Insights: um card quieto com réguas coloridas — não quatro blocos tingidos. */
+  .report-insights{display:flex;flex-direction:column;margin-top:16px;padding:4px 14px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);}
+  .report-insight{margin:0;padding:9px 0 9px 12px;border-left:3px solid var(--border);font-size:13px;line-height:1.5;color:var(--text);}
+  .report-insight--positive{border-left-color:var(--success-text);}
+  .report-insight--negative{border-left-color:var(--danger-text);}
   .report-section{display:flex;flex-direction:column;gap:12px;margin-top:20px;}
   .report-section__header{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between;}
   .report-section__header h3{margin:0;font-size:18px;}
   .report-actions{display:flex;gap:8px;}
-  .report-advanced{margin-top:12px;padding:12px;border:1px dashed var(--border);border-radius:var(--radius);background:var(--surface-soft);display:flex;flex-direction:column;gap:10px;}
+  /* Borda sólida: tracejado lê como "inacabado", não como "filtro". */
+  .report-advanced{margin-top:12px;padding:12px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface-soft);display:flex;flex-direction:column;gap:10px;}
   .report-advanced.is-locked{opacity:.7;}
   .report-advanced__header{display:flex;align-items:center;justify-content:space-between;}
   .report-advanced__title{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);}
@@ -1922,43 +1942,57 @@ a:hover { opacity: 1; text-decoration: underline; }
   .report-tabs{display:flex;gap:8px;flex-wrap:wrap;}
   .report-tab{border:1px solid var(--border);background:var(--surface);border-radius:999px;padding:6px 12px;font-size:12px;cursor:pointer;}
   .report-tab.is-active{background:var(--brand-100);border-color:var(--brand-200);color:var(--brand);}
-  .report-chart--compact .report-chart__stack{height:120px;}
-  .report-chart__bar--neutral{background:var(--brand-200);}
-  .report-chart__bar--soft{background:var(--brand-100);}
   .report-inline{font-size:12px;margin-top:8px;}
-.report-chart{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px;display:flex;flex-direction:column;gap:12px;box-shadow:var(--shadow-soft);}
-.report-chart__grid{display:flex;align-items:flex-end;gap:12px;overflow-x:auto;padding:0 4px 8px;position:relative;scroll-snap-type:x mandatory;scrollbar-color:var(--border) transparent;}
-.report-chart__grid::after{content:"";position:absolute;left:4px;right:4px;bottom:0;height:1px;background:var(--border);opacity:.35;}
-.report-chart__grid::-webkit-scrollbar{height:6px;}
-.report-chart__grid::-webkit-scrollbar-thumb{background:var(--border);border-radius:6px;}
-.report-chart__item{display:flex;flex-direction:column;align-items:center;gap:6px;min-width:56px;scroll-snap-align:end;}
-.report-chart__item:focus-within .report-chart__stack,.report-chart__item:hover .report-chart__stack{border-color:var(--brand);box-shadow:0 0 0 1px var(--brand-200);}
-.report-chart__stack{position:relative;width:100%;height:160px;display:flex;flex-direction:column;justify-content:flex-end;gap:4px;padding:8px 8px 10px;border-radius:var(--radius-sm);background:var(--surface-soft);border:1px solid var(--border);box-shadow:inset 0 -1px 0 rgba(15,23,42,.08);}
-
-.report-chart__stack::after{content:"";position:absolute;left:8px;right:8px;bottom:10px;height:1px;background:var(--border);opacity:.25;}
-.report-chart__bar{width:100%;height:0;border-radius:6px;transition:height .24s ease,filter .24s ease;box-shadow:0 8px 14px rgba(15,23,42,.12);}
-.report-chart__bar--confirmados{background:var(--report-confirm);}
-.report-chart__bar--cancelados{background:var(--report-cancel);opacity:.95;}
-.report-chart__item:hover .report-chart__bar{filter:brightness(1.08);}
-.report-chart__label{font-size:11px;color:var(--muted);}
-.report-chart__value{font-size:12px;font-weight:600;font-variant-numeric:tabular-nums;color:var(--text);}
-.report-legend{display:flex;flex-wrap:wrap;gap:12px;font-size:12px;color:var(--muted);justify-content:center;}
-.report-dot{width:10px;height:10px;border-radius:50%;display:inline-block;margin-right:6px;}
-.report-dot--confirmados{background:var(--report-confirm);}
-.report-dot--cancelados{background:var(--report-cancel);}
+/* ---- Gráficos (viz) --------------------------------------------------------
+   O dado é a única coisa que pode ser alta: traço fino, grade recessiva, sem
+   sombra e sem moldura em volta das marcas. Separação é feita por respiro. */
+.viz{margin:0;display:flex;flex-direction:column;gap:10px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:12px 14px;}
+.viz__plot{position:relative;width:100%;}
+.viz__plot:focus-visible{outline:none;box-shadow:var(--ring-shadow);border-radius:var(--radius-sm);}
+.viz svg{display:block;overflow:visible;}
+/* grade e eixo: hairline sólido, um passo fora da superfície — nunca tracejado */
+.viz__grid,.viz__baseline{stroke:var(--border);stroke-width:1;}
+.viz__cursor{stroke:var(--border);stroke-width:1;}
+/* texto do gráfico veste token de texto, nunca a cor da série */
+.viz__tick{fill:var(--muted);font-size:11px;font-variant-numeric:tabular-nums;}
+.viz__cap{fill:var(--text);font-size:11px;font-weight:600;font-variant-numeric:tabular-nums;}
+/* linha 2px, ponta e junta redondas */
+.viz__line{fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;}
+.viz__line--confirmados{stroke:var(--report-confirm);}
+.viz__line--cancelados{stroke:var(--report-cancel);}
+/* área é lavagem de ~10% — nunca bloco saturado */
+.viz__area{stroke:none;}
+.viz__area--confirmados{fill:var(--report-confirm);fill-opacity:.1;}
+/* anel de 2px na cor da superfície mantém o ponto legível onde cruza a linha */
+.viz__dot{stroke:var(--surface);stroke-width:2;}
+.viz__dot--confirmados{fill:var(--report-confirm);}
+.viz__dot--cancelados{fill:var(--report-cancel);}
+.viz__bar{fill:var(--report-confirm);}
+.viz__spark{display:block;overflow:visible;}
+.viz__tooltip{position:absolute;top:8px;z-index:2;pointer-events:none;display:flex;flex-direction:column;gap:2px;padding:8px 10px;border-radius:var(--radius-sm);background:var(--surface);border:1px solid var(--border);box-shadow:var(--shadow-soft);font-size:12px;color:var(--text);white-space:nowrap;}
+.viz__tooltip strong{font-size:12px;}
+.viz__tooltip span{display:flex;align-items:center;color:var(--muted);}
+.viz__legend{display:flex;flex-wrap:wrap;gap:14px;font-size:12px;color:var(--muted);}
+.viz__key{width:10px;height:10px;border-radius:3px;display:inline-block;margin-right:6px;flex:none;}
+.viz__key--confirmados{background:var(--report-confirm);}
+.viz__key--cancelados{background:var(--report-cancel);}
 .report-table-wrapper{border:1px solid var(--border);border-radius:var(--radius);overflow:auto;background:var(--surface);box-shadow:var(--shadow-soft);-webkit-overflow-scrolling:touch;}
 .report-table-wrapper::-webkit-scrollbar{height:6px;}
 .report-table-wrapper::-webkit-scrollbar-thumb{background:var(--border);border-radius:6px;}
 .report-table{width:100%;min-width:560px;border-collapse:separate;border-spacing:0;}
 .report-table thead th{background:var(--surface-soft);color:var(--muted);font-size:12px;text-align:left;padding:10px 12px;}
 .report-table tbody td{padding:10px 12px;border-top:1px solid var(--border);font-size:14px;}
-.report-table tbody tr:nth-child(odd){background:var(--surface-soft);}
+/* Números à direita e com largura fixa: é o que torna a coluna legível de cima a baixo.
+   A primeira coluna é o rótulo e continua à esquerda. */
+.report-table th+th,.report-table td+td{text-align:right;font-variant-numeric:tabular-nums;}
+/* Zebra nas PARES: nas ímpares, a primeira linha ficava com o mesmo fundo do cabeçalho. */
+.report-table tbody tr:nth-child(even){background:var(--surface-soft);}
 .report-empty{text-align:center;}
+  @media (max-width:860px){
+    .report-headline{grid-template-columns:1fr;}
+  }
   @media (max-width:600px){
-    .report-chart{padding:12px;}
-    .report-chart__grid{gap:10px;}
-    .report-chart__stack{height:140px;}
-    .report-metrics{grid-template-columns:repeat(auto-fit,minmax(160px,1fr));}
+    .viz{padding:10px;}
     .report-advanced__filters{grid-template-columns:1fr;}
     .report-funnel__step{grid-template-columns:1fr;justify-items:start;}
     .report-funnel__rates{flex-direction:column;gap:6px;align-items:flex-start;}
@@ -9983,14 +10017,35 @@ body.planos-no-scrollbar .container--wide::-webkit-scrollbar{
 }
 .crm-sort__icon{ display:inline-flex; align-items:center; justify-content:center; width:16px; height:16px; color:var(--muted); }
 .crm-sort.is-active .crm-sort__icon{ color:var(--brand); }
-.crm-table-wrapper{ border:1px solid var(--border); border-radius:12px; overflow:hidden; background:var(--surface); }
+/* overflow:auto, não hidden: a tabela tem min-width 920px e a partir de 840px o wrapper
+   simplesmente CORTAVA as últimas colunas, sem barra de rolagem para alcançá-las. */
+.crm-table-wrapper{ border:1px solid var(--border); border-radius:12px; overflow-x:auto; background:var(--surface); }
 .crm-table{ width:100%; min-width:920px; font-size:14px; border-collapse:collapse; }
+/* O nome é o controle de verdade da linha: alcançável por teclado e anunciado como botão. */
+.crm-rowlink{ background:none; border:0; padding:0; font:inherit; font-weight:700; color:var(--text); text-align:left; cursor:pointer; }
+.crm-rowlink:hover{ color:var(--brand); text-decoration:underline; }
+.crm-rowlink:focus-visible{ outline:none; box-shadow:var(--ring-shadow); border-radius:4px; }
+.chip__count{ margin-left:6px; font-variant-numeric:tabular-nums; opacity:.7; }
 .crm-table th{ text-align:left; font-size:12px; padding:10px 12px; background:var(--brand-100); border-bottom:1px solid var(--brand-200); }
 .crm-table td{ padding:10px 12px; vertical-align:top; border-bottom:1px solid var(--border); }
 .crm-row{ cursor:pointer; transition:background .15s ease; }
 .crm-row:hover{ background:var(--surface-soft); }
 .crm-actions{ display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
 .crm-empty{ padding:24px; text-align:center; color:var(--muted); }
+
+/* Barra de ação: é ela que transforma um segmento ("87 sumidos") em campanha. */
+.crm-bulk{ justify-content:space-between; border-top:1px solid var(--border); padding-top:10px; margin-top:2px; }
+.crm-bulk__count{ font-size:13px; color:var(--muted); }
+.crm-bulk__count strong{ color:var(--text); }
+
+.wa-queue__intro{ font-size:12px; line-height:1.5; margin:0 0 12px; }
+.wa-queue__templates{ display:flex; flex-wrap:wrap; gap:6px; }
+.wa-queue__progress{ display:flex; align-items:baseline; justify-content:space-between; gap:10px; flex-wrap:wrap; margin:14px 0 8px; font-size:13px; }
+.wa-queue__card{ display:flex; flex-direction:column; gap:10px; padding:14px; border:1px solid var(--border); border-radius:var(--radius); background:var(--surface); }
+.wa-queue__who{ display:flex; flex-direction:column; gap:2px; }
+.wa-queue__who .muted{ font-size:12px; }
+.wa-queue__preview{ padding:10px 12px; border-radius:var(--radius-sm); background:var(--surface-soft); border:1px solid var(--border); font-size:13px; line-height:1.5; white-space:pre-wrap; }
+.wa-queue__done{ display:flex; flex-direction:column; align-items:flex-start; gap:8px; padding:16px; border:1px dashed var(--border); border-radius:var(--radius); }
 .crm-pagination{ display:flex; align-items:center; justify-content:space-between; gap:12px; margin-top:12px; flex-wrap:wrap; }
 .crm-pagination__meta{ color:var(--muted); font-size:13px; }
 .crm-cards{ display:none; gap:12px; }

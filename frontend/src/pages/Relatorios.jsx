@@ -4,17 +4,13 @@ import { useSearchParams } from 'react-router-dom';
 import { Api } from '../utils/api';
 import { getUser } from '../utils/auth';
 import { IconDownload, IconChart } from '../components/Icons.jsx';
+import { DailyTrendChart, CategoryBarChart, Sparkline } from '../components/reports/charts.jsx';
+import { buildDelta, buildRateDelta, formatPercent } from '../utils/metrics.js';
 
 const CURRENCY = new Intl.NumberFormat('pt-BR', {
   style: 'currency',
   currency: 'BRL',
   minimumFractionDigits: 2,
-});
-
-const PERCENT = new Intl.NumberFormat('pt-BR', {
-  style: 'percent',
-  minimumFractionDigits: 1,
-  maximumFractionDigits: 1,
 });
 
 const SHORT_DATE = new Intl.DateTimeFormat('pt-BR', {
@@ -86,11 +82,6 @@ function centsToCurrency(cents) {
   return CURRENCY.format((Number(cents) || 0) / 100);
 }
 
-function formatPercent(value) {
-  if (!value) return PERCENT.format(0);
-  return PERCENT.format(value);
-}
-
 function formatShortDate(dateString) {
   if (!dateString) return '';
   const parsed = new Date(`${dateString}T00:00:00`);
@@ -116,23 +107,6 @@ function ensureDateString(date) {
 
 // Delta vs. período anterior. Sem base de comparação (período anterior zerado) não existe
 // percentual honesto a mostrar — devolve null e o card sai sem o selo.
-function buildDelta(current, previous, { higherIsBetter = true, format = (value) => value } = {}) {
-  const atual = Number(current || 0);
-  const anterior = Number(previous);
-  if (!Number.isFinite(anterior) || anterior === 0) return null;
-
-  const ratio = (atual - anterior) / anterior;
-  const title = `${format(anterior)} no período anterior`;
-  if (Math.abs(ratio) < 0.001) return { text: '= estável', tone: 'flat', title };
-
-  const subiu = ratio > 0;
-  return {
-    text: `${subiu ? '▲' : '▼'} ${formatPercent(Math.abs(ratio))}`,
-    tone: (higherIsBetter ? subiu : !subiu) ? 'good' : 'bad',
-    title,
-  };
-}
-
 function escapeHtml(value) {
   return String(value ?? '')
     .replace(/&/g, '&amp;')
@@ -502,18 +476,28 @@ export default function Relatorios() {
     [data]
   );
 
-  const metrics = useMemo(() => {
+  const previousRates = data?.previous?.rates;
+
+  // O painel lidera com UM número: o dinheiro que efetivamente entrou.
+  const hero = useMemo(() => {
+    if (!totals || !revenue) return null;
+    return {
+      key: 'receitaRealizada',
+      label: 'Receita realizada',
+      value: centsToCurrency(revenue.concluida),
+      hint: `${Number(totals.concluidos_total || 0)} atendimentos concluídos`,
+      delta: buildDelta(revenue.concluida, previousRevenue?.concluida, { format: centsToCurrency }),
+    };
+  }, [totals, revenue, previousRevenue]);
+
+  const tiles = useMemo(() => {
     if (!totals || !revenue || !rates) return [];
     const totalAgendamentos = Number(totals.agendados_total || 0);
     const confirmados = Number(totals.confirmados_total || 0);
-    const cancelados = Number(totals.cancelados_total || 0);
     const concluidos = Number(totals.concluidos_total || 0);
     const noShow = Number(totals.no_show_total || 0);
-
-    const confirmShare = totalAgendamentos ? confirmados / totalAgendamentos : 0;
-    const cancelShare = totalAgendamentos ? cancelados / totalAgendamentos : 0;
-    // Só há comparecimento a medir se algo já aconteceu no período.
     const jaAconteceram = concluidos + noShow;
+    const confirmShare = totalAgendamentos ? confirmados / totalAgendamentos : 0;
 
     return [
       {
@@ -524,36 +508,11 @@ export default function Relatorios() {
         delta: buildDelta(totalAgendamentos, previousTotals?.agendados_total),
       },
       {
-        key: 'concluidos',
-        label: 'Concluídos',
-        value: concluidos,
-        hint: jaAconteceram
-          ? `${formatPercent(rates.taxa_comparecimento || 0)} de comparecimento`
-          : null,
-        delta: buildDelta(concluidos, previousTotals?.concluidos_total),
-      },
-      {
-        key: 'cancelados',
-        label: 'Cancelados',
-        value: cancelados,
-        hint: cancelados ? `${formatPercent(cancelShare)} do total` : null,
-        delta: buildDelta(cancelados, previousTotals?.cancelados_total, { higherIsBetter: false }),
-      },
-      {
-        key: 'receitaConcluida',
-        label: 'Receita realizada',
-        value: centsToCurrency(revenue.concluida),
-        hint: revenue.perdida ? `Perdida: ${centsToCurrency(revenue.perdida)}` : null,
-        delta: buildDelta(revenue.concluida, previousRevenue?.concluida, { format: centsToCurrency }),
-      },
-      {
-        key: 'receitaPrevista',
-        label: 'Receita prevista',
-        value: centsToCurrency(revenue.prevista),
-        hint: 'Confirmados + pendentes',
-        // Sem delta de propósito: o "previsto" de uma janela já encerrada virou passado, e
-        // comparar com o previsto da janela atual (ainda por acontecer) mede coisas diferentes.
-        delta: null,
+        key: 'comparecimento',
+        label: 'Comparecimento',
+        value: formatPercent(rates.taxa_comparecimento || 0),
+        hint: jaAconteceram ? `${concluidos} de ${jaAconteceram} já realizados` : 'Nada realizado ainda',
+        delta: buildRateDelta(rates.taxa_comparecimento, previousRates?.taxa_comparecimento),
       },
       {
         key: 'ticketMedio',
@@ -562,75 +521,44 @@ export default function Relatorios() {
         hint: concluidos ? 'Por atendimento concluído' : 'Sem atendimentos concluídos',
         delta: buildDelta(revenue.ticket_medio, previousRevenue?.ticket_medio, { format: centsToCurrency }),
       },
-    ];
-  }, [totals, revenue, rates, previousTotals, previousRevenue]);
-
-  const miniMetrics = useMemo(() => {
-    if (!totals || !rates || !revenue) return [];
-    return [
-      {
-        key: 'taxaConfirmacao',
-        label: 'Taxa de confirmação',
-        value: formatPercent(rates.taxa_confirmacao || 0),
-      },
-      {
-        key: 'taxaComparecimento',
-        label: 'Taxa de comparecimento',
-        value: formatPercent(rates.taxa_comparecimento || 0),
-      },
-      {
-        key: 'taxaCancelamento',
-        label: 'Taxa de cancelamento',
-        value: formatPercent(rates.taxa_cancelamento || 0),
-      },
-      {
-        key: 'pendentes',
-        label: 'Pendentes',
-        value: Number(totals.pendentes_total || 0),
-      },
-      {
-        key: 'aguardandoSinal',
-        label: 'Aguardando sinal',
-        value: Number(totals.aguardando_sinal_total || 0),
-      },
       {
         key: 'receitaPerdida',
         label: 'Receita perdida',
-        value: centsToCurrency(revenue.perdida || 0),
+        value: centsToCurrency(revenue.perdida),
+        hint: 'Cancelamentos e faltas',
+        delta: buildDelta(revenue.perdida, previousRevenue?.perdida, {
+          higherIsBetter: false,
+          format: centsToCurrency,
+        }),
       },
-      {
-        key: 'noShow',
-        label: 'No-show',
-        value: Number(totals.no_show_total || 0),
-      },
-      {
-        key: 'clientesNovos',
-        label: 'Clientes novos',
-        value: Number(customerMix?.new_clients || 0),
-      },
-      {
-        key: 'clientesRecorrentes',
-        label: 'Clientes recorrentes',
-        value: Number(customerMix?.recurring_clients || 0),
-      },
+    ];
+  }, [totals, revenue, rates, previousTotals, previousRevenue, previousRates]);
+
+  // O resto continua acessível, mas não disputa atenção com o herói.
+  const facts = useMemo(() => {
+    if (!totals || !rates || !revenue) return [];
+    return [
+      { key: 'confirmados', label: 'Confirmados', value: Number(totals.confirmados_total || 0) },
+      { key: 'concluidos', label: 'Concluídos', value: Number(totals.concluidos_total || 0) },
+      { key: 'cancelados', label: 'Cancelados', value: Number(totals.cancelados_total || 0) },
+      { key: 'pendentes', label: 'Pendentes', value: Number(totals.pendentes_total || 0) },
+      { key: 'aguardandoSinal', label: 'Aguardando sinal', value: Number(totals.aguardando_sinal_total || 0) },
+      { key: 'noShow', label: 'No-show', value: Number(totals.no_show_total || 0) },
+      { key: 'receitaPrevista', label: 'Receita prevista', value: centsToCurrency(revenue.prevista) },
+      { key: 'taxaConfirmacao', label: 'Taxa de confirmação', value: formatPercent(rates.taxa_confirmacao || 0) },
+      { key: 'taxaCancelamento', label: 'Taxa de cancelamento', value: formatPercent(rates.taxa_cancelamento || 0) },
+      { key: 'clientesNovos', label: 'Clientes novos', value: Number(customerMix?.new_clients || 0) },
+      { key: 'clientesRecorrentes', label: 'Clientes recorrentes', value: Number(customerMix?.recurring_clients || 0) },
     ];
   }, [totals, rates, revenue, customerMix]);
 
   const dailyData = data?.series_daily || [];
 
-  const displayDaily = useMemo(() => {
-    if (!dailyData.length) return [];
-    if (dailyData.length <= 30) return dailyData;
-    return dailyData.slice(dailyData.length - 30);
-  }, [dailyData]);
-
-  const maxVolume = useMemo(() => {
-    if (!displayDaily.length) return 0;
-    return displayDaily.reduce((acc, item) => {
-      const total = Number(item.confirmados || 0) + Number(item.cancelados || 0);
-      return Math.max(acc, total);
-    }, 0);
-  }, [displayDaily]);
+  // A linha cabe no card inteiro: não há mais recorte dos "últimos 30 de 90 dias".
+  const heroSpark = useMemo(
+    () => dailyData.map((item) => Number(item.receita_concluida || 0)),
+    [dailyData]
+  );
 
   const services = data?.top_services || [];
 
@@ -647,19 +575,9 @@ export default function Relatorios() {
     });
   }, [data]);
 
-  const maxDayOfWeek = useMemo(
-    () => Math.max(...daysOfWeek.map((item) => item.total), 1),
-    [daysOfWeek]
-  );
-
   const leadTime = useMemo(() => (
     Array.isArray(data?.lead_time) ? data.lead_time : []
   ), [data]);
-
-  const maxLeadTime = useMemo(
-    () => Math.max(...leadTime.map((item) => Number(item.total || 0)), 1),
-    [leadTime]
-  );
 
   const funnelTotals = useMemo(() => {
     if (!funilData.length) return null;
@@ -722,8 +640,9 @@ export default function Relatorios() {
       establishment: user?.nome || '',
       generatedAt: new Date().toLocaleString('pt-BR'),
       rangeLabel: renderRangeSummary(true),
-      metrics,
-      miniMetrics,
+      // O PDF herda a mesma hierarquia da tela: o herói vem primeiro.
+      metrics: hero ? [hero, ...tiles] : tiles,
+      miniMetrics: facts,
       insights,
       // O PDF é para arquivar: leva o período inteiro, não uma amostra dos últimos 14 dias.
       dailyRows: dailyData,
@@ -975,14 +894,15 @@ export default function Relatorios() {
           )}
         </div>
 
-        {loading ? (
+        {loading && !data ? (
           <div className="day-skeleton report-skeleton">
             {Array.from({ length: 6 }).map((_, index) => (
               <div key={index} className="shimmer report-skeleton__item" />
             ))}
           </div>
         ) : (
-          <>
+          // Em recarga, o render anterior só esmaece — sem trocar a tela por skeleton.
+          <div className={`report-body ${loading ? 'is-stale' : ''}`}>
             {!!insights.length && (
               <section className="report-insights" aria-label="Destaques do período">
                 {insights.map((item) => (
@@ -993,41 +913,60 @@ export default function Relatorios() {
               </section>
             )}
 
-            <div className="report-metrics">
-              {metrics.length ? (
-                metrics.map((metric) => (
-                  <div key={metric.key} className="report-metric">
-                    <span className="report-metric__label">{metric.label}</span>
-                    <div className="report-metric__value-row">
-                      <strong className="report-metric__value">{metric.value}</strong>
-                      {metric.delta && (
+            {!hero ? (
+              <div className="empty report-empty">Nenhum dado disponível para o período selecionado.</div>
+            ) : (
+              <>
+                <div className="report-headline">
+                  <div className="report-hero">
+                    <span className="report-hero__label">{hero.label}</span>
+                    <div className="report-hero__figure">
+                      <strong className="report-hero__value">{hero.value}</strong>
+                      <Sparkline values={heroSpark} />
+                    </div>
+                    <div className="report-hero__foot">
+                      {hero.delta && (
                         <span
-                          className={`report-metric__delta is-${metric.delta.tone}`}
-                          title={metric.delta.title}
+                          className={`report-metric__delta is-${hero.delta.tone}`}
+                          title={hero.delta.title}
                         >
-                          {metric.delta.text}
+                          {hero.delta.text}
                         </span>
                       )}
+                      <span>{hero.hint}</span>
                     </div>
-                    {metric.hint && (
-                      <span className="report-metric__hint">{metric.hint}</span>
-                    )}
                   </div>
-                ))
-              ) : (
-                <div className="empty report-empty">Nenhum dado disponível para o período selecionado.</div>
-              )}
-            </div>
 
-            {!!miniMetrics.length && (
-              <div className="report-metrics report-metrics--mini">
-                {miniMetrics.map((metric) => (
-                  <div key={metric.key} className="report-metric report-metric--mini">
-                    <span className="report-metric__label">{metric.label}</span>
-                    <strong className="report-metric__value">{metric.value}</strong>
+                  <div className="report-tiles">
+                    {tiles.map((tile) => (
+                      <div key={tile.key} className="report-metric">
+                        <span className="report-metric__label">{tile.label}</span>
+                        <div className="report-metric__value-row">
+                          <strong className="report-metric__value">{tile.value}</strong>
+                          {tile.delta && (
+                            <span
+                              className={`report-metric__delta is-${tile.delta.tone}`}
+                              title={tile.delta.title}
+                            >
+                              {tile.delta.text}
+                            </span>
+                          )}
+                        </div>
+                        {tile.hint && <span className="report-metric__hint">{tile.hint}</span>}
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
+                </div>
+
+                <dl className="report-facts">
+                  {facts.map((fact) => (
+                    <div key={fact.key} className="report-fact">
+                      <dt className="report-fact__label">{fact.label}</dt>
+                      <dd className="report-fact__value">{fact.value}</dd>
+                    </div>
+                  ))}
+                </dl>
+              </>
             )}
 
             <section className="report-section">
@@ -1035,53 +974,14 @@ export default function Relatorios() {
                 <h3>Volume diário</h3>
               </div>
 
-              {!displayDaily.length ? (
+              {!dailyData.length ? (
                 <div className="empty">Nenhum agendamento no período selecionado.</div>
               ) : (
-                <>
-                  {/* As barras são decoração: os números vão para o leitor de tela como uma
-                      frase por dia. O role="img" anterior escondia os dados inteiros. */}
-                  <div className="report-chart" role="group" aria-label="Volume diário de confirmados e cancelados">
-                    <div className="report-chart__grid">
-                      {displayDaily.map((item) => {
-                        const confirmados = Number(item.confirmados || 0);
-                        const cancelados = Number(item.cancelados || 0);
-                        const total = confirmados + cancelados;
-                        const confirmedHeight = !maxVolume ? 0 : (confirmados / maxVolume) * 100;
-                        const cancelledHeight = !maxVolume ? 0 : (cancelados / maxVolume) * 100;
-                        const resumo = `${formatDetailedDate(item.date)}: ${confirmados} confirmados, ${cancelados} cancelados`;
-                        return (
-                          <div key={item.date} className="report-chart__item">
-                            <div className="report-chart__stack" title={resumo} aria-hidden="true">
-                              <div
-                                className="report-chart__bar report-chart__bar--confirmados"
-                                style={{ height: `${Math.min(confirmedHeight, 100)}%` }}
-                              />
-                              <div
-                                className="report-chart__bar report-chart__bar--cancelados"
-                                style={{ height: `${Math.min(cancelledHeight, 100)}%` }}
-                              />
-                            </div>
-                            <span className="report-chart__label" aria-hidden="true">{formatShortDate(item.date)}</span>
-                            <span className="report-chart__value" aria-hidden="true">{total}</span>
-                            <span className="sr-only">{resumo}</span>
-                          </div>
-                        );
-                      })}
-                    </div>
-                    <div className="report-legend" aria-hidden="true">
-                      <span className="report-dot report-dot--confirmados" /> Confirmados
-                      <span className="report-dot report-dot--cancelados" /> Cancelados
-                    </div>
-                  </div>
-
-                  {dailyData.length > displayDaily.length && (
-                    <p className="report-inline muted">
-                      O gráfico mostra os últimos {displayDaily.length} de {dailyData.length} dias.
-                      O período inteiro está em Detalhamento → Por dia.
-                    </p>
-                  )}
-                </>
+                <DailyTrendChart
+                  points={dailyData}
+                  formatShort={formatShortDate}
+                  formatLong={formatDetailedDate}
+                />
               )}
             </section>
 
@@ -1147,28 +1047,17 @@ export default function Relatorios() {
                   {!daysOfWeek.length ? (
                     <div className="empty">Sem dados para o período.</div>
                   ) : (
-                    <div className="report-chart report-chart--compact">
-                      <div className="report-chart__grid">
-                        {daysOfWeek.map((item) => {
-                          const height = (item.total / maxDayOfWeek) * 100;
-                          return (
-                            <div key={item.dow} className="report-chart__item">
-                              <div
-                                className="report-chart__stack"
-                                title={`${item.label} | ${item.total} agendamentos | ${centsToCurrency(item.receita)} realizados`}
-                              >
-                                <div
-                                  className="report-chart__bar report-chart__bar--neutral"
-                                  style={{ height: `${Math.min(height, 100)}%` }}
-                                />
-                              </div>
-                              <span className="report-chart__label">{item.label}</span>
-                              <span className="report-chart__value">{item.total}</span>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
+                    <CategoryBarChart
+                      items={daysOfWeek.map((item) => ({
+                        key: item.dow,
+                        label: item.label,
+                        value: item.total,
+                        receita: item.receita,
+                      }))}
+                      describe={(item) => (
+                        `${item.label}: ${item.value} agendamentos, ${centsToCurrency(item.receita)} realizados`
+                      )}
+                    />
                   )}
                 </div>
 
@@ -1179,25 +1068,14 @@ export default function Relatorios() {
                   {!leadTime.length ? (
                     <div className="empty">Sem dados para o período.</div>
                   ) : (
-                    <div className="report-chart report-chart--compact">
-                      <div className="report-chart__grid">
-                        {leadTime.map((item) => {
-                          const height = (Number(item.total || 0) / maxLeadTime) * 100;
-                          return (
-                            <div key={item.key || item.label} className="report-chart__item">
-                              <div className="report-chart__stack" title={`${item.label} | ${item.total} agendamentos`}>
-                                <div
-                                  className="report-chart__bar report-chart__bar--soft"
-                                  style={{ height: `${Math.min(height, 100)}%` }}
-                                />
-                              </div>
-                              <span className="report-chart__label">{item.label}</span>
-                              <span className="report-chart__value">{item.total}</span>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
+                    <CategoryBarChart
+                      items={leadTime.map((item) => ({
+                        key: item.key || item.label,
+                        label: item.label,
+                        value: Number(item.total || 0),
+                      }))}
+                      describe={(item) => `${item.label}: ${item.value} agendamentos`}
+                    />
                   )}
                 </div>
               </div>
@@ -1359,7 +1237,7 @@ export default function Relatorios() {
                 </div>
               )}
             </section>
-          </>
+          </div>
         )}
       </div>
     </div>
