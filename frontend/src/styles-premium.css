@@ -110,6 +110,11 @@ h4 {
   color: var(--muted);
 }
 
+/* O recuo da esquerda é uma VARIÁVEL, não um valor fixo, porque este arquivo é importado DEPOIS
+   do styles.css: um `padding: 0 14px` em shorthand aqui apagava qualquer `padding-left` que uma
+   barra de busca tivesse declarado lá para abrir espaço à lupa — e o ícone acabava em cima do
+   placeholder. Com a var, a barra declara `--input-pad-left: 44px` e o recuo sobrevive à cascata,
+   não importa a ordem dos arquivos. */
 .input,
 .label select,
 .label input[type='date'],
@@ -117,7 +122,7 @@ h4 {
 .label textarea,
 textarea.input {
   min-height: 46px;
-  padding: 0 14px;
+  padding: 0 14px 0 var(--input-pad-left, 14px);
   border-radius: var(--radius);
   border-color: var(--border);
   background: rgba(255, 255, 255, 0.98);
@@ -1067,6 +1072,13 @@ textarea.input:focus {
   font-size: 0.875rem;
   color: var(--ink, #1e1b4b);
   transition: border-color .18s ease, box-shadow .18s ease;
+}
+
+/* Com lupa sobreposta: o texto começa depois do ícone. Uma classe (e não a utilitária tw-pl-9)
+   porque o @tailwind utilities é a linha 1 do styles.css — este arquivo vem depois e o shorthand
+   `padding` acima venceria a utilitária, jogando o placeholder por baixo da lupa. */
+.appointments-hero__control--search {
+  padding-left: 36px;
 }
 
 .appointments-hero__control:focus-visible,

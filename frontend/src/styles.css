@@ -4432,6 +4432,9 @@ button.danger:disabled,
 .professionals-page__search-input{
   width:100%;
   min-height:44px;
+  /* Espaço para a lupa sobreposta. A var é lida pela regra .input do styles-premium.css, que é
+     carregado depois — declarar só `padding-left` aqui não sobrevive ao shorthand de lá. */
+  --input-pad-left:44px;
   padding-left:44px;
 }
 .professionals-page__filters{

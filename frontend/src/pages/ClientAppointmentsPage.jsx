@@ -438,7 +438,7 @@ export default function ClientAppointmentsPage() {
                     aria-hidden="true"
                   />
                   <input
-                    className="appointments-hero__control tw-w-full tw-pl-9"
+                    className="appointments-hero__control appointments-hero__control--search tw-w-full"
                     placeholder="Serviço ou estabelecimento"
                     value={search}
                     onChange={(event) => setSearch(event.target.value)}
