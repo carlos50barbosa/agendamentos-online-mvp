@@ -101,7 +101,7 @@ function resolveRange({ start, end, range, allowCustom, tzOffsetMin }) {
     startLocal = parseLocalDate(start);
     endLocal = parseLocalDate(end);
     if (!startLocal || !endLocal) {
-      return { error: 'invalid_range', message: 'Datas invalidas no filtro.' };
+      return { error: 'invalid_range', message: 'Datas inválidas no filtro.' };
     }
   } else if (allowCustom && (start || end)) {
     return { error: 'invalid_range', message: 'Informe data inicial e final.' };
@@ -119,7 +119,7 @@ function resolveRange({ start, end, range, allowCustom, tzOffsetMin }) {
   const endUtcText = formatDateTimeUtc(endUtc);
 
   if (!startUtcText || !endUtcText) {
-    return { error: 'invalid_range', message: 'Datas invalidas no filtro.' };
+    return { error: 'invalid_range', message: 'Datas inválidas no filtro.' };
   }
 
   if (startUtc.getTime() > endUtc.getTime()) {

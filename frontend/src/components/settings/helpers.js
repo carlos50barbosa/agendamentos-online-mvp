@@ -18,6 +18,34 @@ export function formatCep(s) {
 
 export const UFS = ['AC', 'AL', 'AP', 'AM', 'BA', 'CE', 'DF', 'ES', 'GO', 'MA', 'MT', 'MS', 'MG', 'PA', 'PB', 'PR', 'PE', 'PI', 'RJ', 'RN', 'RS', 'RO', 'RR', 'SC', 'SP', 'SE', 'TO'];
 
+// Origem pública usada nos links divulgados (sempre o domínio de produção, mesmo em dev).
+export function publicOrigin() {
+  let origin = 'https://agenda0.com.br';
+  if (typeof window !== 'undefined' && window.location?.origin?.includes('agenda0.com.br')) {
+    origin = window.location.origin;
+  }
+  return origin;
+}
+
+// Link curto da página pública: agenda0.com.br/<slug>. Sem slug, cai no formato antigo por id.
+export function publicLinkFor({ slug, id } = {}) {
+  const s = String(slug || '').trim();
+  if (s) return `${publicOrigin()}/${s}`;
+  return id ? `${publicOrigin()}/agendar/${id}` : '';
+}
+
+export const SLUG_RE = /^([a-z0-9]+(?:-[a-z0-9]+)*)$/;
+
+export function slugify(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 160);
+}
+
 // Mensagem amigável a partir do erro do backend do perfil público (details[].code).
 export function mapProfileError(err) {
   const detail = err?.data?.details?.[0];

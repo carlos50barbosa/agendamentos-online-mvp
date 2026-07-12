@@ -18,6 +18,7 @@ function serializeUserRow(row) {
     cidade: row.cidade || null,
     estado: row.estado || null,
     avatar_url: row.avatar_url || null,
+    slug: row.slug || null,
     tipo: row.tipo || 'cliente',
     notify_email_estab: Boolean(row.notify_email_estab ?? 0),
     notify_whatsapp_estab: Boolean(row.notify_whatsapp_estab ?? 0),
@@ -46,7 +47,7 @@ export async function resolveUserFromToken(token) {
   }
 
   const [rows] = await pool.query(
-    "SELECT id, nome, email, telefone, data_nascimento, cpf_cnpj, cep, endereco, numero, complemento, bairro, cidade, estado, avatar_url, tipo, notify_email_estab, notify_whatsapp_estab, plan, plan_status, plan_trial_ends_at, plan_active_until, plan_subscription_id, onboarding_concluido, onboarding_etapa FROM usuarios WHERE id=? LIMIT 1",
+    "SELECT id, nome, email, telefone, data_nascimento, cpf_cnpj, cep, endereco, numero, complemento, bairro, cidade, estado, avatar_url, slug, tipo, notify_email_estab, notify_whatsapp_estab, plan, plan_status, plan_trial_ends_at, plan_active_until, plan_subscription_id, onboarding_concluido, onboarding_etapa FROM usuarios WHERE id=? LIMIT 1",
     [userId]
   );
 

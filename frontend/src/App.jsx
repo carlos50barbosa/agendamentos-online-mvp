@@ -79,6 +79,8 @@ const Financeiro = React.lazy(() => import('./pages/Financeiro.jsx'));
 
 const Divulgacao = React.lazy(() => import('./pages/Divulgacao.jsx'));
 
+const NotFound = React.lazy(() => import('./pages/NotFound.jsx'));
+
 const Planos = React.lazy(() => import('./pages/Planos.jsx'));
 
 const RecuperarSenha = React.lazy(() => import('./pages/RecuperarSenha.jsx'));
@@ -201,8 +203,34 @@ const APP_ROUTES = [
   { path: '/agendar', element: <BookingNovo /> },
   { path: '/agendar/:idOrSlug', element: <BookingPublic /> },
 
+  // Link curto na raiz: agenda0.com.br/<slug>. Precisa ser a ÚLTIMA rota — o React Router
+  // prioriza segmentos estáticos, então /login, /planos, /configuracoes seguem ganhando.
+  // Slugs que colidiriam com rotas do app são bloqueados no backend (RESERVED_SLUGS).
+  { path: '/:idOrSlug', element: <BookingPublic /> },
+
+  // Qualquer outra URL desconhecida (multi-segmento) cai numa 404 de verdade, em vez de
+  // renderizar a área de conteúdo em branco.
+  { path: '*', element: <NotFound /> },
+
 ];
 
+// Segmentos de topo "reais" do app, derivados das próprias rotas (/login, /planos, /estab...).
+// Servem para distinguir uma rota do app de um link curto de estabelecimento (/<slug>).
+const APP_TOP_SEGMENTS = new Set(
+  APP_ROUTES
+    .map((r) => r.path)
+    .filter((p) => p && p !== '/' && !p.includes(':'))
+    .map((p) => p.split('/')[1])
+    .filter(Boolean)
+);
+
+// /<slug> na raiz é a página pública de agendamento: precisa rodar standalone (sem shell),
+// exatamente como /agendar/:idOrSlug.
+function isRootSlugPath(pathname) {
+  const match = /^\/([^/]+)\/?$/.exec(pathname || '');
+  if (!match) return false;
+  return !APP_TOP_SEGMENTS.has(match[1]);
+}
 
 
 const BILLING_ALERT_STATES = new Set(['due_soon', 'overdue', 'pending', 'blocked']);
@@ -851,7 +879,7 @@ export default function App() {
   // Perfil público do estabelecimento (/agendar[/:id]): página guest, escopada a um
   // estabelecimento — standalone, sem sidebar/topbar. O /novo (descoberta, autenticado)
   // mantém o shell: sidebar no desktop e o menu no mobile.
-  const isPublicBooking = pathname.startsWith('/agendar');
+  const isPublicBooking = pathname.startsWith('/agendar') || isRootSlugPath(pathname);
   const [currentUser, setCurrentUser] = useState(() => getUser());
   const [onboardingGate, setOnboardingGate] = useState({ loading: false, data: null, error: '' });
 

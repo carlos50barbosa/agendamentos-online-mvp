@@ -82,7 +82,7 @@ export default function Ajuda() {
         key: 'profile',
         title: isEstab ? 'Atualizar cadastro da empresa' : 'Atualizar dados pessoais',
         description: isEstab
-           ? 'Edite razão social, telefone principal e senha em Perfil e Segurança.'
+           ? 'Edite nome, e-mail, telefone e a foto do perfil. A senha fica no tópico "Alterar senha".'
           : 'Revise nome, e-mail e senha para continuar recebendo notificações.',
         section: 'profile',
         cta: 'Abrir perfil',
@@ -92,17 +92,17 @@ export default function Ajuda() {
       items.push(
         {
           key: 'public-profile',
-          title: 'Configurar vitrine e horários',
-          description: 'Defina texto de apresentação, contatos e disponibilidade para clientes.',
-          section: 'public-profile',
-          cta: 'Editar vitrine',
+          title: 'Configurar sua página pública',
+          description: 'Descrição, fotos, horários, cores e redes sociais — cada um em seu próprio tópico.',
+          section: 'description',
+          cta: 'Editar página pública',
         },
         {
           key: 'plan',
           title: 'Gerenciar plano e cobranças',
           description: 'Acompanhe faturas e gere novos PIX sempre que precisar.',
-          section: 'plan',
-          cta: 'Abrir painel financeiro',
+          to: '/assinatura',
+          cta: 'Abrir assinatura',
         },
       );
     }

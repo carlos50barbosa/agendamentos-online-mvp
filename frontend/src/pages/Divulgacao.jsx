@@ -1,12 +1,14 @@
 // src/pages/Divulgacao.jsx
-// Rota dedicada /divulgacao: cartão com o QR Code da página pública de agendamento do
-// estabelecimento, para BAIXAR EM PNG e IMPRIMIR (colar no balcão/recepção).
-// Client-side: QR via qrserver (CORS liberado); o cartão é montado em SVG e rasterizado
-// para PNG num canvas — o mesmo PNG serve para exibir, baixar e imprimir.
-import React, { useEffect, useState } from 'react';
+// Rota /divulgacao ("Meu QR Code"): editor do link curto (agenda0.com.br/<slug>) + cartão com o
+// QR Code da página pública, para BAIXAR EM PNG e IMPRIMIR (colar no balcão/recepção).
+// Client-side: QR via qrserver (CORS liberado); o cartão é montado em SVG e rasterizado para PNG
+// num canvas — o mesmo PNG serve para exibir, baixar e imprimir. Ao salvar o link, o QR é regerado.
+import React, { useEffect, useMemo, useState } from 'react';
 import { Api } from '../utils/api';
 import { getUser } from '../utils/auth';
 import { normalizeHexColor } from '../utils/publicTheme.js';
+import PublicLinkSection from '../components/settings/PublicLinkSection.jsx';
+import { publicLinkFor } from '../components/settings/helpers.js';
 import '../components/settings/settings.css';
 
 const CARD_W = 360;
@@ -43,7 +45,7 @@ function buildCardSvg({ name, tagline, instruction, urlLabel, qrDataUrl, accent 
   <text x="${CARD_W / 2}" y="145" text-anchor="middle" font-family="Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="13" font-weight="700" fill="${accent}">${xmlEscape(tagline)}</text>
   <image href="${qrDataUrl}" x="${qrX}" y="166" width="${qrSize}" height="${qrSize}"/>
   <text x="${CARD_W / 2}" y="392" text-anchor="middle" font-family="Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="11.5" fill="#6b7280">${xmlEscape(instruction)}</text>
-  <text x="${CARD_W / 2}" y="414" text-anchor="middle" font-family="Consolas, Menlo, monospace" font-size="10.5" fill="#9ca3af">${xmlEscape(urlLabel)}</text>
+  <text x="${CARD_W / 2}" y="414" text-anchor="middle" font-family="Consolas, Menlo, monospace" font-size="11.5" fill="#9ca3af">${xmlEscape(urlLabel)}</text>
 </svg>`;
 }
 
@@ -67,10 +69,12 @@ function rasterizeToPng(svg, scale = 3) {
 
 export default function Divulgacao() {
   const [status, setStatus] = useState('loading'); // loading | ready | error | forbidden
+  const [cardStatus, setCardStatus] = useState('idle'); // idle | generating | ready | error
+  const [info, setInfo] = useState({ id: null, name: '', accent: '#5049E5' });
+  const [slug, setSlug] = useState('');
   const [pngUrl, setPngUrl] = useState('');
-  const [publicUrl, setPublicUrl] = useState('');
-  const [fileSlug, setFileSlug] = useState('estabelecimento');
 
+  // 1) carrega o estabelecimento (nome, cor e slug atual)
   useEffect(() => {
     let alive = true;
     const user = getUser();
@@ -80,36 +84,46 @@ export default function Divulgacao() {
       try {
         const est = await Api.getEstablishment(user.id);
         if (!alive) return;
-        const id = user.id;
-        const slug = est?.slug || String(id);
-        const name = est?.nome || est?.profile?.nome || 'Meu estabelecimento';
-        const accent = normalizeHexColor(est?.profile?.accent_color) || '#5049E5';
-
-        let origin = 'https://agenda0.com.br';
-        if (typeof window !== 'undefined' && window.location?.origin?.includes('agenda0.com.br')) origin = window.location.origin;
-        const url = `${origin}/agendar/${slug}?estabelecimento=${id}`;
-
-        const qrDataUrl = await fetchQrDataUrl(url);
-        const svg = buildCardSvg({
-          name,
-          tagline: 'Agende pelo celular',
-          instruction: 'Aponte a câmera do celular para o código',
-          urlLabel: url.replace(/^https?:\/\//, ''),
-          qrDataUrl,
-          accent,
+        setInfo({
+          id: user.id,
+          name: est?.nome || 'Meu estabelecimento',
+          accent: normalizeHexColor(est?.profile?.accent_color) || '#5049E5',
         });
-        const png = await rasterizeToPng(svg, 3);
-        if (!alive) return;
-        setPublicUrl(url);
-        setFileSlug(slug);
-        setPngUrl(png);
+        setSlug(String(est?.slug || ''));
         setStatus('ready');
-      } catch {
-        if (alive) setStatus('error');
-      }
+      } catch { if (alive) setStatus('error'); }
     })();
     return () => { alive = false; };
   }, []);
+
+  const publicUrl = useMemo(() => publicLinkFor({ slug, id: info.id }), [slug, info.id]);
+
+  // 2) (re)gera o cartão sempre que o link, o nome ou a cor mudarem
+  useEffect(() => {
+    if (status !== 'ready' || !publicUrl) return () => {};
+    let alive = true;
+    (async () => {
+      setCardStatus('generating');
+      try {
+        const qrDataUrl = await fetchQrDataUrl(publicUrl);
+        const svg = buildCardSvg({
+          name: info.name,
+          tagline: 'Agende pelo celular',
+          instruction: 'Aponte a câmera do celular para o código',
+          urlLabel: publicUrl.replace(/^https?:\/\//, ''),
+          qrDataUrl,
+          accent: info.accent,
+        });
+        const png = await rasterizeToPng(svg, 3);
+        if (!alive) return;
+        setPngUrl(png);
+        setCardStatus('ready');
+      } catch { if (alive) setCardStatus('error'); }
+    })();
+    return () => { alive = false; };
+  }, [status, publicUrl, info.name, info.accent]);
+
+  const fileSlug = slug || String(info.id || 'estabelecimento');
 
   const downloadPng = () => {
     if (!pngUrl) return;
@@ -142,32 +156,57 @@ export default function Divulgacao() {
           <h2>Meu QR Code</h2>
           <p className="muted">Imprima o QR Code e deixe no balcão ou na recepção. O cliente aponta a câmera e abre sua página de agendamento.</p>
         </div>
-        {publicUrl ? (
+        {status === 'ready' && publicUrl ? (
           <div className="settings-module-hero__meta">
             <a className="btn btn--outline btn--sm" href={publicUrl} target="_blank" rel="noreferrer">Abrir página pública</a>
           </div>
         ) : null}
       </section>
 
-      <section className="card">
-        {status === 'loading' && (
-          <div className="row" style={{ gap: 8, alignItems: 'center' }}>
-            <span className="spinner" aria-hidden="true" /> <span className="muted">Gerando o cartão de divulgação…</span>
-          </div>
-        )}
-        {status === 'forbidden' && <div className="notice notice--info">Disponível apenas para contas de estabelecimento.</div>}
-        {status === 'error' && <div className="notice notice--error">Não foi possível gerar o QR Code agora. Verifique sua conexão e recarregue a página.</div>}
-        {status === 'ready' && (
-          <div className="set-promo">
-            <img className="set-promo__card" src={pngUrl} alt="Cartão de divulgação com QR Code" />
-            <div className="set-promo__actions">
-              <button type="button" className="btn btn--primary" onClick={downloadPng}>Baixar PNG</button>
-              <button type="button" className="btn btn--outline" onClick={printCard}>Imprimir</button>
-            </div>
-            <a className="set-promo__link" href={publicUrl} target="_blank" rel="noreferrer">{publicUrl.replace(/^https?:\/\//, '')}</a>
-          </div>
-        )}
-      </section>
+      {status === 'loading' && (
+        <section className="card row" style={{ gap: 8, alignItems: 'center' }}>
+          <span className="spinner" aria-hidden="true" /> <span className="muted">Carregando…</span>
+        </section>
+      )}
+      {status === 'forbidden' && <div className="notice notice--info">Disponível apenas para contas de estabelecimento.</div>}
+      {status === 'error' && <div className="notice notice--error">Não foi possível carregar. Recarregue a página.</div>}
+
+      {status === 'ready' && (
+        <>
+          {/* Editor do link curto — ao salvar, o QR abaixo é regerado */}
+          <section className="card">
+            <h3 style={{ margin: '0 0 4px' }}>Link da página</h3>
+            <p className="muted" style={{ margin: '0 0 12px' }}>
+              Personalize o endereço curto que você divulga. O QR Code abaixo é regerado na hora.
+            </p>
+            <PublicLinkSection compact onSaved={(s) => setSlug(s)} />
+          </section>
+
+          {/* Cartão com o QR Code */}
+          <section className="card">
+            {cardStatus === 'generating' && (
+              <div className="row" style={{ gap: 8, alignItems: 'center' }}>
+                <span className="spinner" aria-hidden="true" /> <span className="muted">Gerando o cartão…</span>
+              </div>
+            )}
+            {cardStatus === 'error' && (
+              <div className="notice notice--error">Não foi possível gerar o QR Code agora. Verifique sua conexão e recarregue a página.</div>
+            )}
+            {cardStatus === 'ready' && (
+              <div className="set-promo">
+                <img className="set-promo__card" src={pngUrl} alt="Cartão de divulgação com QR Code" />
+                <div className="set-promo__actions">
+                  <button type="button" className="btn btn--primary" onClick={downloadPng}>Baixar PNG</button>
+                  <button type="button" className="btn btn--outline" onClick={printCard}>Imprimir</button>
+                </div>
+                <a className="set-promo__link" href={publicUrl} target="_blank" rel="noreferrer">
+                  {publicUrl.replace(/^https?:\/\//, '')}
+                </a>
+              </div>
+            )}
+          </section>
+        </>
+      )}
     </div>
   );
 }

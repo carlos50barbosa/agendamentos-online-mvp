@@ -11,6 +11,7 @@ import { Api } from '../utils/api.js';
 import { getUser } from '../utils/auth.js';
 import { isSameDay } from '../utils/agendaDates.js';
 import { buildPublicThemeStyle, resolvePublicAccent } from '../utils/publicTheme.js';
+import NotFound from './NotFound.jsx';
 
 function ymd(d) {
   const dt = new Date(d);
@@ -78,7 +79,8 @@ export default function BookingPublic() {
         const notFound = e?.data?.error === 'not_found' || e?.message === 'not_found';
         setState({
           loading: false,
-          error: notFound ? 'Estabelecimento não encontrado.' : 'Não foi possível carregar o estabelecimento.',
+          notFound,
+          error: notFound ? '' : 'Não foi possível carregar o estabelecimento.',
           establishment: null,
           services: [],
         });
@@ -197,6 +199,7 @@ export default function BookingPublic() {
   }, [state.establishment, searchParams]);
 
   if (state.loading) return <CenterMsg>Carregando…</CenterMsg>;
+  if (state.notFound) return <NotFound />;
   if (state.error) return <CenterMsg>{state.error}</CenterMsg>;
 
   return (

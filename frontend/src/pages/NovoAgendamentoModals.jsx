@@ -1561,7 +1561,7 @@ export default function NovoAgendamentoModals(props) {
 
                     <div className="booking-modal__intro">
 
-                      <span className="booking-modal__eyebrow">Conclusao da reserva</span>
+                      <span className="booking-modal__eyebrow">Conclusão da reserva</span>
 
                     <h3>Finalizar agendamento</h3>
 
@@ -2201,7 +2201,7 @@ export default function NovoAgendamentoModals(props) {
                 <div className="booking-modal booking-modal--confirm">
 
                 <div className="booking-modal__intro">
-                  <span className="booking-modal__eyebrow">Revisao final</span>
+                  <span className="booking-modal__eyebrow">Revisão final</span>
                   <h3>Confirmar agendamento?</h3>
                 </div>
 

@@ -382,7 +382,7 @@ router.post('/login', async (req, res) => {
     }
 
     const [rows] = await pool.query(
-      'SELECT id, nome, email, telefone, data_nascimento, cpf_cnpj, cep, endereco, numero, complemento, bairro, cidade, estado, avatar_url, senha_hash, tipo, notify_email_estab, notify_whatsapp_estab, plan, plan_status, plan_trial_ends_at, plan_active_until, plan_subscription_id, onboarding_concluido, onboarding_etapa FROM usuarios WHERE LOWER(email)=? LIMIT 1',
+      'SELECT id, nome, email, telefone, data_nascimento, cpf_cnpj, cep, endereco, numero, complemento, bairro, cidade, estado, avatar_url, slug, senha_hash, tipo, notify_email_estab, notify_whatsapp_estab, plan, plan_status, plan_trial_ends_at, plan_active_until, plan_subscription_id, onboarding_concluido, onboarding_etapa FROM usuarios WHERE LOWER(email)=? LIMIT 1',
       [email]
     );
     if (!rows.length) return res.status(401).json({ error: 'invalid_credentials' });
@@ -416,6 +416,7 @@ router.post('/login', async (req, res) => {
       cidade: u.cidade || null,
       estado: u.estado || null,
       avatar_url: u.avatar_url || null,
+      slug: u.slug || null,
       tipo: u.tipo || 'cliente',
       notify_email_estab: toBool(u.notify_email_estab),
       notify_whatsapp_estab: toBool(u.notify_whatsapp_estab),
@@ -625,7 +626,7 @@ router.put('/me', auth, async (req, res) => {
       const html = `<p>Olá!</p><p>Use o código <strong>${code}</strong> para confirmar seu novo e-mail.</p><p>O código expira em 30 minutos.</p>`;
       try { await notifyEmail(emailNorm, subject, html); } catch (err) { console.error('[auth/me][email]', err); }
 
-      const [[userRow]] = await pool.query("SELECT id, nome, email, telefone, data_nascimento, cpf_cnpj, cep, endereco, numero, complemento, bairro, cidade, estado, avatar_url, tipo, notify_email_estab, notify_whatsapp_estab, plan, plan_status, plan_trial_ends_at, plan_active_until, plan_subscription_id, onboarding_concluido, onboarding_etapa FROM usuarios WHERE id=? LIMIT 1", [userId]);
+      const [[userRow]] = await pool.query("SELECT id, nome, email, telefone, data_nascimento, cpf_cnpj, cep, endereco, numero, complemento, bairro, cidade, estado, avatar_url, slug, tipo, notify_email_estab, notify_whatsapp_estab, plan, plan_status, plan_trial_ends_at, plan_active_until, plan_subscription_id, onboarding_concluido, onboarding_etapa FROM usuarios WHERE id=? LIMIT 1", [userId]);
       if (!userRow) {
         return res.status(404).json({ error: 'not_found', message: 'Usuário não encontrado.' });
       }
@@ -658,7 +659,7 @@ router.put('/me', auth, async (req, res) => {
       });
     }
 
-    const [[userRow]] = await pool.query("SELECT id, nome, email, telefone, data_nascimento, cpf_cnpj, cep, endereco, numero, complemento, bairro, cidade, estado, avatar_url, tipo, notify_email_estab, notify_whatsapp_estab, plan, plan_status, plan_trial_ends_at, plan_active_until, plan_subscription_id, onboarding_concluido, onboarding_etapa FROM usuarios WHERE id=? LIMIT 1", [userId]);
+    const [[userRow]] = await pool.query("SELECT id, nome, email, telefone, data_nascimento, cpf_cnpj, cep, endereco, numero, complemento, bairro, cidade, estado, avatar_url, slug, tipo, notify_email_estab, notify_whatsapp_estab, plan, plan_status, plan_trial_ends_at, plan_active_until, plan_subscription_id, onboarding_concluido, onboarding_etapa FROM usuarios WHERE id=? LIMIT 1", [userId]);
     if (!userRow) {
       return res.status(404).json({ error: 'not_found', message: 'Usuário não encontrado.' });
     }
@@ -716,7 +717,7 @@ router.post('/me/email-confirm', auth, async (req, res) => {
     await pool.query('UPDATE usuarios SET email=? WHERE id=?', [newEmail, userId]);
     await pool.query('DELETE FROM email_change_tokens WHERE id=?', [token.id]);
 
-    const [[userRow]] = await pool.query("SELECT id, nome, email, telefone, data_nascimento, cpf_cnpj, cep, endereco, numero, complemento, bairro, cidade, estado, avatar_url, tipo, notify_email_estab, notify_whatsapp_estab, plan, plan_status, plan_trial_ends_at, plan_active_until, plan_subscription_id, onboarding_concluido, onboarding_etapa FROM usuarios WHERE id=? LIMIT 1", [userId]);
+    const [[userRow]] = await pool.query("SELECT id, nome, email, telefone, data_nascimento, cpf_cnpj, cep, endereco, numero, complemento, bairro, cidade, estado, avatar_url, slug, tipo, notify_email_estab, notify_whatsapp_estab, plan, plan_status, plan_trial_ends_at, plan_active_until, plan_subscription_id, onboarding_concluido, onboarding_etapa FROM usuarios WHERE id=? LIMIT 1", [userId]);
     if (!userRow) {
       return res.status(404).json({ error: 'not_found', message: 'Usuário não encontrado.' });
     }

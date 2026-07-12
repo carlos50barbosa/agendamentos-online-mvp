@@ -2391,6 +2391,21 @@ router.put('/:id/messages', auth, isEstabelecimento, async (req, res) => {
 
 
 
+// Slugs reservados: o link público vive na raiz (agenda0.com.br/<slug>), então um slug igual
+// a uma rota do app (ex.: "login") ou a um caminho de infra (ex.: "api") sequestraria a rota.
+const RESERVED_SLUGS = new Set([
+  // rotas do app
+  'admin-tools', 'agenda-nova', 'agendar', 'ajuda', 'assinatura', 'cadastro', 'cliente', 'clientes',
+  'configuracao-inicial', 'configuracoes', 'contato', 'definir-senha', 'divulgacao', 'estab',
+  'financeiro', 'implantacao', 'link-phone', 'loading', 'login', 'login-cliente',
+  'login-estabelecimento', 'novo', 'novo-agendamento', 'planos', 'politica-privacidade',
+  'profissionais', 'recuperar-senha', 'relatorios', 'servicos', 'sinal', 'termos', 'whatsappbusiness',
+  // infra e reservas futuras
+  'api', 'admin', 'app', 'assets', 'auth', 'blog', 'checkout', 'conta', 'dashboard', 'favicon',
+  'health', 'index', 'pagamento', 'pagamentos', 'painel', 'perfil', 'privacidade', 'public',
+  'robots', 'sitemap', 'sobre', 'static', 'suporte', 'uploads', 'webhook', 'webhooks', 'www',
+]);
+
 // Atualizar slug do estabelecimento
 
 router.put('/:id/slug', auth, isEstabelecimento, async (req, res) => {
@@ -2405,8 +2420,12 @@ router.put('/:id/slug', auth, isEstabelecimento, async (req, res) => {
 
     if (!/^([a-z0-9]+(?:-[a-z0-9]+)*)$/.test(slugRaw) || slugRaw.length < 3 || slugRaw.length > 160) {
 
-      return res.status(400).json({ error: 'invalid_slug', message: 'Use apenas letras, numeros e hifens. Min 3, max 160.' });
+      return res.status(400).json({ error: 'invalid_slug', message: 'Use apenas letras, números e hífens. Mínimo 3, máximo 160 caracteres.' });
 
+    }
+
+    if (RESERVED_SLUGS.has(slugRaw)) {
+      return res.status(409).json({ error: 'slug_reserved', message: 'Esse link é reservado pelo sistema. Escolha outro.' });
     }
 
     // checa unicidade
@@ -2935,7 +2954,7 @@ router.post('/:id/images', auth, isEstabelecimento, async (req, res) => {
 
       if (err?.code === 'GALLERY_IMAGE_INVALID') {
 
-        return res.status(400).json({ error: 'gallery_image_invalid', message: 'Envie PNG, JPG ou WEBP validos.' });
+        return res.status(400).json({ error: 'gallery_image_invalid', message: 'Envie PNG, JPG ou WEBP válidos.' });
 
       }
 
