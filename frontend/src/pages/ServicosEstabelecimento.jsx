@@ -934,7 +934,7 @@ export default function ServicosEstabelecimento() {
 
           </div>
 
-          <Link className="btn btn--primary btn--sm" to="/planos" style={{ minWidth: 120, textAlign: 'center' }}>Experimentar Pro</Link>
+          <Link className="btn btn--primary btn--sm" to="/planos?motivo=profissionais" style={{ minWidth: 120, textAlign: 'center' }}>Experimentar Pro</Link>
 
         </div>
 
@@ -1513,7 +1513,7 @@ export default function ServicosEstabelecimento() {
 
             <Link className="btn btn--outline" to="/configuracoes" onClick={() => setPlanLimitOpen(false)}>Ir para Configurações</Link>
 
-            <Link className="btn btn--primary" to="/planos" onClick={() => setPlanLimitOpen(false)}>Ver planos</Link>
+            <Link className="btn btn--primary" to="/planos?motivo=profissionais" onClick={() => setPlanLimitOpen(false)}>Ver planos</Link>
 
           </div>
 

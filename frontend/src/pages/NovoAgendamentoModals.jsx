@@ -1983,7 +1983,7 @@ export default function NovoAgendamentoModals(props) {
 
                     </Link>
 
-                    <Link className="btn btn--primary" to="/planos" onClick={() => setPlanLimitModal({ open: false, message: '', details: null })}>
+                    <Link className="btn btn--primary" to="/planos?motivo=profissionais" onClick={() => setPlanLimitModal({ open: false, message: '', details: null })}>
 
                       Ver planos
 

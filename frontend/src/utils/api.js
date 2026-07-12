@@ -601,6 +601,10 @@ export const Api = {
 
   relatoriosFunil: (params = {}) => req(`/relatorios/estabelecimento/funil${toQuery(params)}`),
 
+  // Catálogo público de planos — /planos é acessível sem login. Vem do plans.js do backend,
+  // para preço e limite na vitrine nunca divergirem do que é realmente aplicado.
+  plansCatalog: () => req('/billing/plans/public'),
+
   getEstablishmentClientContacts: (establishmentId, params = {}) =>
     req(`/establishments/${establishmentId}/clients/contacts${toQuery(params)}`),
 

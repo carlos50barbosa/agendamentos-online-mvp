@@ -1,21 +1,49 @@
 // src/components/settings/GalleryManager.jsx
-// Galeria de fotos do estabelecimento com noção explícita de CAPA (a 1ª foto).
-// Auto-carrega via Api.listEstablishmentImages; adiciona/remove/reordena com feedback próprio.
-// A capa é definida pela ordem: "Tornar capa" move a foto para a 1ª posição.
+// Galeria de fotos do estabelecimento, com noção explícita de CAPA (a 1ª foto).
+// UX: dropzone (arrastar-e-soltar ou clicar), legenda/descrição só aparecem depois de escolher
+// a foto (com preview), e a ordem pode ser mudada arrastando os cards — com ↑/↓ e "Tornar capa"
+// como alternativa acessível. A capa é definida pela ordem: a primeira foto é a capa.
 import React, { useEffect, useRef, useState } from 'react';
 import { Api, resolveAssetUrl } from '../../utils/api';
+import './settings.css';
 
 const MAX_BYTES = 3 * 1024 * 1024;
+const ACCEPT = 'image/png,image/jpeg,image/webp';
+
+function IconUpload(props) {
+  return (
+    <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" strokeWidth="1.8"
+      strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" {...props}>
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+      <path d="M17 8l-5-5-5 5" />
+      <path d="M12 3v13" />
+    </svg>
+  );
+}
+
+function IconTrash(props) {
+  return (
+    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2"
+      strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" {...props}>
+      <path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" />
+    </svg>
+  );
+}
+
+const formatSize = (bytes) => `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 
 export default function GalleryManager({ establishmentId }) {
   const [images, setImages] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [preview, setPreview] = useState(null); // { dataUrl, name }
+  const [pending, setPending] = useState(null); // { dataUrl, name, size }
   const [titulo, setTitulo] = useState('');
   const [descricao, setDescricao] = useState('');
   const [busy, setBusy] = useState(false);
-  const [actingId, setActingId] = useState(null); // id em remoção, ou 'reorder'
-  const [msg, setMsg] = useState(null); // { type, message }
+  const [acting, setActing] = useState(null); // id em ação, ou 'reorder'
+  const [dragOver, setDragOver] = useState(false);
+  const [dragFrom, setDragFrom] = useState(null);
+  const [dragTo, setDragTo] = useState(null);
+  const [msg, setMsg] = useState(null);
   const fileRef = useRef(null);
 
   const reload = async () => {
@@ -30,38 +58,53 @@ export default function GalleryManager({ establishmentId }) {
     if (!establishmentId) { setLoading(false); return () => {}; }
     (async () => {
       setLoading(true);
-      try { await reload(); } catch { if (alive) setMsg({ type: 'error', message: 'Não foi possível carregar as fotos.' }); }
+      try { await reload(); }
+      catch { if (alive) setMsg({ type: 'error', message: 'Não foi possível carregar as fotos.' }); }
       finally { if (alive) setLoading(false); }
     })();
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [establishmentId]);
 
-  const onPick = (e) => {
+  // ---- seleção de arquivo (clique ou drop) ----
+  const acceptFile = (file) => {
     setMsg(null);
-    const f = e.target.files?.[0];
-    if (!f) { setPreview(null); return; }
-    if (f.size > MAX_BYTES) {
-      setMsg({ type: 'error', message: 'A imagem deve ter no máximo 3 MB.' });
-      e.target.value = ''; setPreview(null); return;
+    if (!file) return;
+    if (!/^image\/(png|jpe?g|webp)$/i.test(file.type)) {
+      setMsg({ type: 'error', message: 'Formato não aceito. Envie PNG, JPG ou WEBP.' });
+      return;
+    }
+    if (file.size > MAX_BYTES) {
+      setMsg({ type: 'error', message: `A imagem tem ${formatSize(file.size)} — o limite é 3 MB.` });
+      return;
     }
     const reader = new FileReader();
-    reader.onload = () => setPreview({ dataUrl: reader.result, name: f.name });
+    reader.onload = () => setPending({ dataUrl: reader.result, name: file.name, size: file.size });
     reader.onerror = () => setMsg({ type: 'error', message: 'Não foi possível ler a imagem.' });
-    reader.readAsDataURL(f);
+    reader.readAsDataURL(file);
+  };
+
+  const clearPending = () => {
+    setPending(null); setTitulo(''); setDescricao('');
+    if (fileRef.current) fileRef.current.value = '';
+  };
+
+  const onDrop = (e) => {
+    e.preventDefault();
+    setDragOver(false);
+    acceptFile(e.dataTransfer?.files?.[0]);
   };
 
   const add = async () => {
-    if (!preview?.dataUrl) { setMsg({ type: 'error', message: 'Escolha uma imagem.' }); return; }
+    if (!pending?.dataUrl) return;
     setBusy(true); setMsg(null);
     try {
       await Api.addEstablishmentImage(establishmentId, {
-        image: preview.dataUrl,
+        image: pending.dataUrl,
         titulo: titulo.trim() || undefined,
         descricao: descricao.trim() || undefined,
       });
-      setPreview(null); setTitulo(''); setDescricao('');
-      if (fileRef.current) fileRef.current.value = '';
+      clearPending();
       await reload();
       setMsg({ type: 'success', message: 'Foto adicionada.' });
     } catch (err) {
@@ -69,19 +112,20 @@ export default function GalleryManager({ establishmentId }) {
     } finally { setBusy(false); }
   };
 
+  // ---- ações sobre as fotos já enviadas ----
   const remove = async (id) => {
     if (!window.confirm('Remover esta foto da galeria?')) return;
-    setActingId(id); setMsg(null);
+    setActing(id); setMsg(null);
     try { await Api.deleteEstablishmentImage(establishmentId, id); await reload(); setMsg({ type: 'success', message: 'Foto removida.' }); }
     catch (err) { setMsg({ type: 'error', message: err?.data?.message || 'Falha ao remover a foto.' }); }
-    finally { setActingId(null); }
+    finally { setActing(null); }
   };
 
   const applyOrder = async (order) => {
-    setActingId('reorder'); setMsg(null);
+    setActing('reorder'); setMsg(null);
     try { await Api.reorderEstablishmentImages(establishmentId, order); await reload(); }
     catch { setMsg({ type: 'error', message: 'Falha ao reordenar as fotos.' }); }
-    finally { setActingId(null); }
+    finally { setActing(null); }
   };
 
   const move = (idx, dir) => {
@@ -94,75 +138,136 @@ export default function GalleryManager({ establishmentId }) {
 
   const makeCover = (id) => applyOrder([id, ...images.filter((i) => i.id !== id).map((i) => i.id)]);
 
+  // ---- reordenar arrastando ----
+  const resetDrag = () => { setDragFrom(null); setDragTo(null); };
+  const onCardDrop = (to) => {
+    if (dragFrom == null || dragFrom === to) { resetDrag(); return; }
+    const ids = images.map((i) => i.id);
+    const [moved] = ids.splice(dragFrom, 1);
+    ids.splice(to, 0, moved);
+    resetDrag();
+    applyOrder(ids);
+  };
+
   if (!establishmentId) return <p className="muted">Disponível apenas para contas de estabelecimento.</p>;
 
-  const acting = actingId != null;
+  const isActing = acting != null;
 
   return (
-    <div className="set-gallery">
-      <div className="set-gallery__add">
-        <label className="set-file">
-          <span className="set-file__label">Escolher foto</span>
-          <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp" onChange={onPick} disabled={busy} />
-        </label>
-        <label className="label"><span>Legenda <em className="muted">(opcional)</em></span>
-          <input className="input" maxLength={120} value={titulo} onChange={(e) => setTitulo(e.target.value)} placeholder="Ex.: Ambiente" />
-        </label>
-        <label className="label"><span>Descrição <em className="muted">(opcional)</em></span>
-          <input className="input" maxLength={240} value={descricao} onChange={(e) => setDescricao(e.target.value)} placeholder="Ex.: Nossa recepção" />
-        </label>
-        <button type="button" className="btn btn--primary btn--sm" onClick={add} disabled={busy || !preview}>
-          {busy ? 'Enviando…' : 'Adicionar foto'}
-        </button>
-      </div>
-
-      <p className="set-gallery__hint muted">
-        PNG, JPG ou WEBP · até 3 MB. A <strong>primeira foto é a capa</strong> da sua página pública.
-      </p>
-
-      {preview && (
-        <div className="set-gallery__preview">
-          <img src={preview.dataUrl} alt="Pré-visualização" />
-          <span className="muted">{preview.name}</span>
+    <div className="set-gal">
+      {/* Área de envio: dropzone -> depois vira preview + campos */}
+      {!pending ? (
+        <div
+          className={`set-drop${dragOver ? ' is-over' : ''}`}
+          role="button"
+          tabIndex={0}
+          onClick={() => fileRef.current?.click()}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileRef.current?.click(); } }}
+          onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+          onDragLeave={() => setDragOver(false)}
+          onDrop={onDrop}
+        >
+          <IconUpload className="set-drop__icon" />
+          <strong>Arraste uma foto aqui ou clique para escolher</strong>
+          <span className="muted">PNG, JPG ou WEBP · até 3 MB</span>
+        </div>
+      ) : (
+        <div className="set-gal__new">
+          <img className="set-gal__new-thumb" src={pending.dataUrl} alt="Pré-visualização da foto escolhida" />
+          <div className="set-gal__new-fields">
+            <div className="set-gal__new-head">
+              <span className="set-gal__new-name" title={pending.name}>{pending.name}</span>
+              <span className="muted">{formatSize(pending.size)}</span>
+            </div>
+            <label className="label">
+              <span>Legenda <em className="muted">(opcional)</em></span>
+              <input className="input" maxLength={120} value={titulo} onChange={(e) => setTitulo(e.target.value)} placeholder="Ex.: Ambiente" />
+            </label>
+            <label className="label">
+              <span>Descrição <em className="muted">(opcional)</em></span>
+              <input className="input" maxLength={240} value={descricao} onChange={(e) => setDescricao(e.target.value)} placeholder="Ex.: Nossa recepção" />
+            </label>
+            <div className="set-gal__new-actions">
+              <button type="button" className="btn btn--ghost btn--sm" onClick={clearPending} disabled={busy}>Cancelar</button>
+              <button type="button" className="btn btn--primary btn--sm" onClick={add} disabled={busy}>
+                {busy ? 'Enviando…' : 'Adicionar foto'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
+      <input ref={fileRef} type="file" accept={ACCEPT} onChange={(e) => acceptFile(e.target.files?.[0])} style={{ display: 'none' }} />
 
       {msg && <div className={`notice notice--${msg.type}`} role="status">{msg.message}</div>}
 
+      {/* Fotos já enviadas */}
       {loading ? (
-        <p className="muted">Carregando fotos…</p>
-      ) : images.length === 0 ? (
-        <div className="set-gallery__empty">Nenhuma foto ainda. Adicione a primeira — ela será a capa da página pública.</div>
-      ) : (
-        <div className="set-gallery__grid">
-          {images.map((img, idx) => {
-            const src = resolveAssetUrl(img.url);
-            return (
-              <figure key={img.id} className="set-card">
-                <div className="set-card__media">
-                  {src ? <img src={src} alt={img.titulo || 'Foto do estabelecimento'} loading="lazy" /> : <span className="muted">Imagem indisponível</span>}
-                  {idx === 0 && <span className="set-card__cover">★ Capa</span>}
-                </div>
-                {(img.titulo || img.descricao) && (
-                  <figcaption className="set-card__cap">
-                    {img.titulo && <strong>{img.titulo}</strong>}
-                    {img.descricao && <span>{img.descricao}</span>}
-                  </figcaption>
-                )}
-                <div className="set-card__actions">
-                  {idx !== 0 && (
-                    <button type="button" className="btn btn--outline btn--sm" onClick={() => makeCover(img.id)} disabled={acting}>Tornar capa</button>
-                  )}
-                  <button type="button" className="btn btn--sm set-icon" onClick={() => move(idx, -1)} disabled={acting || idx === 0} aria-label="Mover para cima" title="Subir">↑</button>
-                  <button type="button" className="btn btn--sm set-icon" onClick={() => move(idx, 1)} disabled={acting || idx === images.length - 1} aria-label="Mover para baixo" title="Descer">↓</button>
-                  <button type="button" className="btn btn--sm set-danger" onClick={() => remove(img.id)} disabled={actingId === img.id}>
-                    {actingId === img.id ? '…' : 'Remover'}
-                  </button>
-                </div>
-              </figure>
-            );
-          })}
+        <div className="set-gal__grid">
+          {[0, 1, 2].map((i) => <div key={i} className="set-gal__skeleton" />)}
         </div>
+      ) : images.length === 0 ? (
+        <div className="set-gal__empty">
+          <strong>Nenhuma foto ainda</strong>
+          <span className="muted">A primeira que você adicionar vira a capa da sua página pública.</span>
+        </div>
+      ) : (
+        <>
+          <p className="set-gal__count muted">
+            {images.length === 1 ? '1 foto' : `${images.length} fotos`} · arraste para reordenar — a primeira é a capa.
+          </p>
+
+          <div className="set-gal__grid">
+            {images.map((img, idx) => {
+              const src = resolveAssetUrl(img.url);
+              const isCover = idx === 0;
+              return (
+                <figure
+                  key={img.id}
+                  className={[
+                    'set-gal__card',
+                    isCover ? 'is-cover' : '',
+                    dragFrom === idx ? 'is-dragging' : '',
+                    dragTo === idx && dragFrom !== idx ? 'is-drop-target' : '',
+                  ].filter(Boolean).join(' ')}
+                  draggable={!isActing}
+                  onDragStart={() => setDragFrom(idx)}
+                  onDragOver={(e) => { e.preventDefault(); setDragTo(idx); }}
+                  onDragLeave={() => setDragTo((t) => (t === idx ? null : t))}
+                  onDrop={() => onCardDrop(idx)}
+                  onDragEnd={resetDrag}
+                >
+                  <div className="set-gal__media">
+                    {src
+                      ? <img src={src} alt={img.titulo || 'Foto do estabelecimento'} loading="lazy" draggable={false} />
+                      : <span className="muted">Imagem indisponível</span>}
+                    {isCover && <span className="set-gal__badge">★ Capa</span>}
+                  </div>
+
+                  {(img.titulo || img.descricao) && (
+                    <figcaption className="set-gal__cap">
+                      {img.titulo && <strong>{img.titulo}</strong>}
+                      {img.descricao && <span>{img.descricao}</span>}
+                    </figcaption>
+                  )}
+
+                  <div className="set-gal__actions">
+                    {!isCover && (
+                      <button type="button" className="set-gal__link" onClick={() => makeCover(img.id)} disabled={isActing}>
+                        Tornar capa
+                      </button>
+                    )}
+                    <div className="set-gal__spacer" />
+                    <button type="button" className="set-gal__icon" onClick={() => move(idx, -1)} disabled={isActing || idx === 0} title="Mover para trás" aria-label="Mover para trás">↑</button>
+                    <button type="button" className="set-gal__icon" onClick={() => move(idx, 1)} disabled={isActing || idx === images.length - 1} title="Mover para frente" aria-label="Mover para frente">↓</button>
+                    <button type="button" className="set-gal__icon set-gal__icon--danger" onClick={() => remove(img.id)} disabled={acting === img.id} title="Remover foto" aria-label="Remover foto">
+                      <IconTrash />
+                    </button>
+                  </div>
+                </figure>
+              );
+            })}
+          </div>
+        </>
       )}
     </div>
   );

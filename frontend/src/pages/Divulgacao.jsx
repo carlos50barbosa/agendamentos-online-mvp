@@ -4,7 +4,7 @@
 // Client-side: QR via qrserver (CORS liberado); o cartão é montado em SVG e rasterizado para PNG
 // num canvas — o mesmo PNG serve para exibir, baixar e imprimir. Ao salvar o link, o QR é regerado.
 import React, { useEffect, useMemo, useState } from 'react';
-import { Api } from '../utils/api';
+import { Api, resolveAssetUrl } from '../utils/api';
 import { getUser } from '../utils/auth';
 import { normalizeHexColor } from '../utils/publicTheme.js';
 import PublicLinkSection from '../components/settings/PublicLinkSection.jsx';
@@ -20,10 +20,11 @@ function xmlEscape(value) {
   ));
 }
 
-async function fetchQrDataUrl(url) {
-  const qr = `https://api.qrserver.com/v1/create-qr-code/?size=640x640&margin=0&ecc=M&data=${encodeURIComponent(url)}`;
-  const resp = await fetch(qr);
-  if (!resp.ok) throw new Error('qr_failed');
+// Baixa uma imagem e devolve como data URL — o SVG do cartão é rasterizado num canvas
+// (img.src = data:image/svg+xml), e nesse modo hrefs externos não são carregados.
+async function fetchImageDataUrl(url) {
+  const resp = await fetch(url);
+  if (!resp.ok) throw new Error('image_failed');
   const blob = await resp.blob();
   return await new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -33,14 +34,28 @@ async function fetchQrDataUrl(url) {
   });
 }
 
-function buildCardSvg({ name, tagline, instruction, urlLabel, qrDataUrl, accent }) {
+function fetchQrDataUrl(url) {
+  return fetchImageDataUrl(
+    `https://api.qrserver.com/v1/create-qr-code/?size=640x640&margin=0&ecc=M&data=${encodeURIComponent(url)}`
+  );
+}
+
+function buildCardSvg({ name, tagline, instruction, urlLabel, qrDataUrl, logoDataUrl, accent }) {
   const initial = ((name || '?').trim().charAt(0) || '?').toUpperCase();
   const qrSize = 196;
   const qrX = (CARD_W - qrSize) / 2;
+  const cx = CARD_W / 2;
+  const cy = 62;
+  const r = 30;
+  const brand = logoDataUrl
+    ? `<clipPath id="logoClip"><circle cx="${cx}" cy="${cy}" r="${r}"/></clipPath>
+  <image href="${logoDataUrl}" x="${cx - r}" y="${cy - r}" width="${r * 2}" height="${r * 2}" preserveAspectRatio="xMidYMid slice" clip-path="url(#logoClip)"/>
+  <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${accent}" stroke-width="2"/>`
+    : `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${accent}" fill-opacity="0.12"/>
+  <text x="${cx}" y="${cy}" text-anchor="middle" dominant-baseline="central" font-family="Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="28" font-weight="800" fill="${accent}">${xmlEscape(initial)}</text>`;
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${CARD_W}" height="${CARD_H}" viewBox="0 0 ${CARD_W} ${CARD_H}">
   <rect x="2" y="2" width="${CARD_W - 4}" height="${CARD_H - 4}" rx="22" fill="#ffffff" stroke="${accent}" stroke-width="2.5"/>
-  <circle cx="${CARD_W / 2}" cy="62" r="27" fill="${accent}" fill-opacity="0.12"/>
-  <text x="${CARD_W / 2}" y="62" text-anchor="middle" dominant-baseline="central" font-family="Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="28" font-weight="800" fill="${accent}">${xmlEscape(initial)}</text>
+  ${brand}
   <text x="${CARD_W / 2}" y="120" text-anchor="middle" font-family="Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="21" font-weight="800" fill="#1e1b4b">${xmlEscape(name)}</text>
   <text x="${CARD_W / 2}" y="145" text-anchor="middle" font-family="Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="13" font-weight="700" fill="${accent}">${xmlEscape(tagline)}</text>
   <image href="${qrDataUrl}" x="${qrX}" y="166" width="${qrSize}" height="${qrSize}"/>
@@ -70,7 +85,7 @@ function rasterizeToPng(svg, scale = 3) {
 export default function Divulgacao() {
   const [status, setStatus] = useState('loading'); // loading | ready | error | forbidden
   const [cardStatus, setCardStatus] = useState('idle'); // idle | generating | ready | error
-  const [info, setInfo] = useState({ id: null, name: '', accent: '#5049E5' });
+  const [info, setInfo] = useState({ id: null, name: '', accent: '#5049E5', logo: '' });
   const [slug, setSlug] = useState('');
   const [pngUrl, setPngUrl] = useState('');
 
@@ -88,6 +103,7 @@ export default function Divulgacao() {
           id: user.id,
           name: est?.nome || 'Meu estabelecimento',
           accent: normalizeHexColor(est?.profile?.accent_color) || '#5049E5',
+          logo: resolveAssetUrl(est?.avatar_url || '') || '',
         });
         setSlug(String(est?.slug || ''));
         setStatus('ready');
@@ -105,13 +121,18 @@ export default function Divulgacao() {
     (async () => {
       setCardStatus('generating');
       try {
-        const qrDataUrl = await fetchQrDataUrl(publicUrl);
+        const [qrDataUrl, logoDataUrl] = await Promise.all([
+          fetchQrDataUrl(publicUrl),
+          // sem foto (ou se ela não puder ser embutida), o cartão cai na inicial do nome
+          info.logo ? fetchImageDataUrl(info.logo).catch(() => '') : Promise.resolve(''),
+        ]);
         const svg = buildCardSvg({
           name: info.name,
           tagline: 'Agende pelo celular',
           instruction: 'Aponte a câmera do celular para o código',
           urlLabel: publicUrl.replace(/^https?:\/\//, ''),
           qrDataUrl,
+          logoDataUrl,
           accent: info.accent,
         });
         const png = await rasterizeToPng(svg, 3);
@@ -121,7 +142,7 @@ export default function Divulgacao() {
       } catch { if (alive) setCardStatus('error'); }
     })();
     return () => { alive = false; };
-  }, [status, publicUrl, info.name, info.accent]);
+  }, [status, publicUrl, info.name, info.accent, info.logo]);
 
   const fileSlug = slug || String(info.id || 'estabelecimento');
 

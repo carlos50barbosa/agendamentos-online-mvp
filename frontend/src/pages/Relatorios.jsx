@@ -889,7 +889,7 @@ export default function Relatorios() {
           {!allowAdvanced && (
             <div className="report-advanced__cta">
               Desbloqueie filtros por profissional, origem e status avançado no plano Pro.
-              <a className="btn btn--outline btn--sm" href="/planos">Ver planos</a>
+              <a className="btn btn--outline btn--sm" href="/planos?motivo=relatorios">Ver planos</a>
             </div>
           )}
         </div>

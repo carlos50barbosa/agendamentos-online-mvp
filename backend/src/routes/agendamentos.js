@@ -2,7 +2,7 @@
 import { Router } from 'express';
 import { pool } from '../lib/db.js';
 import { assertDentroExpediente, formatExpedienteMessage, getExpediente, getLocalRangeMinutes } from '../lib/expediente.js';
-import { getPlanContext, isDelinquentStatus, formatPlanLimitExceeded } from '../lib/plans.js';
+import { getPlanContext, isDelinquentStatus, formatPlanLimitExceeded, planAllowsDeposit } from '../lib/plans.js';
 import { auth as authRequired, isCliente, isEstabelecimento } from '../middleware/auth.js';
 import { notifyEmail } from '../lib/notifications.js';
 import { sendAppointmentWhatsApp } from '../lib/whatsapp_outbox.js';
@@ -91,7 +91,6 @@ const APPOINTMENT_BUFFER_MIN = (() => {
   return Number.isFinite(parsed) && parsed > 0 ? Math.round(parsed) : 0;
 })();
 const DEFAULT_DEPOSIT_HOLD_MINUTES = 15;
-const DEPOSIT_ALLOWED_PLANS = new Set(['pro', 'premium']);
 
 const safeJson = (payload) => {
   try {
@@ -125,7 +124,7 @@ function resolveBillingWebhookUrl(apiBase) {
 }
 
 async function resolveDepositConfig(estabelecimentoId, planContext) {
-  const allowed = DEPOSIT_ALLOWED_PLANS.has(String(planContext?.plan || '').toLowerCase());
+  const allowed = planAllowsDeposit(planContext?.plan);
   if (!allowed) {
     return {
       allowed: false, enabled: false, percent: null, holdMinutes: DEFAULT_DEPOSIT_HOLD_MINUTES,

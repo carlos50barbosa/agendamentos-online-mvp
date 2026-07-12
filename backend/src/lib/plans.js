@@ -19,6 +19,11 @@ const PLAN_CONFIG = {
     maxGalleryImages: 5,
     allowWhatsApp: true,
     allowAdvancedReports: false,
+    // O sinal via PIX vivia como `new Set(['pro','premium'])` copiado em QUATRO arquivos
+    // (agendamentos, agendamentos_public, estabelecimento_settings, mercadopago) e não
+    // existia aqui. Um plano novo seria esquecido em três deles — e a página de planos
+    // prometeria um recurso que o backend nega.
+    allowDeposit: false,
     whatsappIncludedMessages: 250,
     whatsappMaxMessagesPerAppointment: 5,
   },
@@ -33,6 +38,7 @@ const PLAN_CONFIG = {
     maxGalleryImages: 15,
     allowWhatsApp: true,
     allowAdvancedReports: true,
+    allowDeposit: true,
     whatsappIncludedMessages: 500,
     whatsappMaxMessagesPerAppointment: 5,
   },
@@ -47,10 +53,46 @@ const PLAN_CONFIG = {
     maxGalleryImages: LIMIT_UNLIMITED,
     allowWhatsApp: true,
     allowAdvancedReports: true,
+    allowDeposit: true,
     whatsappIncludedMessages: 1500,
     whatsappMaxMessagesPerAppointment: 5,
   },
 };
+
+// Uma pergunta, uma resposta. Substitui os quatro DEPOSIT_ALLOWED_PLANS espalhados.
+export function planAllowsDeposit(plan) {
+  return Boolean(resolvePlanConfig(plan).allowDeposit);
+}
+
+// Catálogo para a página pública de planos. Sai daqui, e não de uma cópia hardcoded no
+// frontend — preço e limite que divergem entre a vitrine e o backend viram promessa falsa.
+export function getPublicPlanCatalog() {
+  return {
+    trial_days: MAX_TRIAL_DAYS,
+    plans: PLAN_TIERS.map((tier) => {
+      const config = PLAN_CONFIG[tier];
+      return {
+        code: config.code,
+        label: config.label,
+        price_cents: config.priceCents,
+        annual_price_cents: config.annualPriceCents,
+        // 12 meses pelo preço de N: o desconto anual dito como número, não como "equivalente".
+        annual_months_equivalent: config.priceCents
+          ? Math.round(config.annualPriceCents / config.priceCents)
+          : null,
+        max_professionals: config.maxProfessionals,
+        max_gallery_images: config.maxGalleryImages,
+        max_monthly_appointments: config.maxMonthlyAppointments,
+        max_services: config.maxServices,
+        whatsapp_included_messages: config.whatsappIncludedMessages,
+        whatsapp_max_per_appointment: config.whatsappMaxMessagesPerAppointment,
+        allow_whatsapp: config.allowWhatsApp,
+        allow_advanced_reports: config.allowAdvancedReports,
+        allow_deposit: config.allowDeposit,
+      };
+    }),
+  };
+}
 
 export const BILLING_CYCLES = {
   mensal: {

@@ -1,6 +1,6 @@
 import { Router } from 'express'
 import { auth, isEstabelecimento } from '../middleware/auth.js'
-import { getPlanContext } from '../lib/plans.js'
+import { getPlanContext, planAllowsDeposit } from '../lib/plans.js'
 import { config } from '../lib/config.js'
 import { buildOAuthState, describeOAuthStateError, verifyOAuthState } from '../lib/oauth_state.js'
 import { encryptMpToken } from '../services/mpCrypto.js'
@@ -13,7 +13,6 @@ import {
 
 const router = Router()
 
-const DEPOSIT_ALLOWED_PLANS = new Set(['pro', 'premium'])
 const FRONTEND_BASE = String(process.env.FRONTEND_BASE_URL || process.env.APP_URL || 'http://localhost:3001').replace(/\/$/, '')
 const MP_AUTH_URL = process.env.MP_AUTH_URL || 'https://auth.mercadopago.com/authorization'
 const MP_TOKEN_URL = process.env.MP_TOKEN_URL || 'https://api.mercadopago.com/oauth/token'
@@ -151,7 +150,7 @@ async function assertCapabilityAllowed(estabelecimentoId, capability) {
     error.code = 'plan_context_not_found'
     throw error
   }
-  const allowed = DEPOSIT_ALLOWED_PLANS.has(String(planContext.plan || '').toLowerCase())
+  const allowed = planAllowsDeposit(planContext.plan)
   if (!allowed) {
     const error = new Error('Disponível apenas para planos Pro ou Premium.')
     error.status = 403

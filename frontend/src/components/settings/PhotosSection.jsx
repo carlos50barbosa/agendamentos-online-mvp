@@ -15,7 +15,7 @@ export default function PhotosSection() {
       <div className="set-block">
         <div className="set-block__head">
           <h4 className="set-block__title">Minhas fotos</h4>
-          <p className="set-block__sub">Aparecem na sua página pública de agendamento. A primeira foto é a capa.</p>
+          <p className="set-block__sub">Aparecem na sua página pública de agendamento.</p>
         </div>
         <GalleryManager establishmentId={user?.id} />
       </div>

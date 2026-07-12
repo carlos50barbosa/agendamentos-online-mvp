@@ -89,7 +89,7 @@ export default function Financeiro() {
 
       {allowed === false ? (
         <div className="notice notice--info">
-          O sinal é um recurso dos planos Pro e Premium. <Link to="/planos">Conhecer planos</Link>
+          O sinal é um recurso dos planos Pro e Premium. <Link to="/planos?motivo=sinal">Conhecer planos</Link>
         </div>
       ) : null}
 
