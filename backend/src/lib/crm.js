@@ -73,6 +73,86 @@ export function classifyRelationship({
   return { code: 'novo', label: CRM_RELATIONSHIP_LABELS.novo };
 }
 
+export const CRM_RISK_CANCEL_RATE = 0.35;
+// Sem amostra mínima, "1 agendamento, 1 cancelado" vira 100% e o cliente entra em risco.
+export const CRM_RISK_MIN_SAMPLE = 3;
+
+// Uma única definição de "em risco". Antes ela existia duas vezes — no JS sobre a taxa
+// ARREDONDADA e no SQL sobre a taxa crua — e as duas discordavam na fronteira: 34,5%
+// virava 35 no JS (linha marcada) e continuava 0,345 no SQL (KPI não contava).
+export function isAtRisk({
+  daysSinceLastVisit = null,
+  lifetimeTotal = 0,
+  lifetimeCancelled = 0,
+  dormantAfterDays = CRM_DEFAULT_DORMANT_DAYS,
+} = {}) {
+  const dormant = daysSinceLastVisit != null && Number(daysSinceLastVisit) >= dormantAfterDays;
+  const total = Number(lifetimeTotal || 0);
+  const cancelled = Number(lifetimeCancelled || 0);
+  const cancelHeavy = total >= CRM_RISK_MIN_SAMPLE
+    && (cancelled / total) >= CRM_RISK_CANCEL_RATE;
+  return dormant || cancelHeavy;
+}
+
+// A MESMA regra em SQL, para o KPI contar exatamente as linhas que a lista marca.
+export function buildCrmRiskSql(alias = 'base') {
+  return `(
+    COALESCE(${alias}.days_since_last_visit, 0) >= ${CRM_DEFAULT_DORMANT_DAYS}
+    OR (
+      ${alias}.lifetime_total >= ${CRM_RISK_MIN_SAMPLE}
+      AND (${alias}.lifetime_cancelled / ${alias}.lifetime_total) >= ${CRM_RISK_CANCEL_RATE}
+    )
+  )`;
+}
+
+// Janela FECHADA. A cláusula antiga só tinha piso (`a.inicio >= agora-30d`), então
+// "últimos 30 dias" deixava passar todo o futuro junto. E o fuso: a.inicio é gravado em
+// UTC, NOW() segue o fuso do MySQL.
+// periodDays vem de um mapa congelado (7/30/90) — nunca do usuário —, então entra como
+// literal e o predicado pode ser repetido na agregação condicional sem embaralhar params.
+export function buildCrmPeriodSql(periodDays) {
+  const days = Number(periodDays);
+  if (!Number.isInteger(days) || days <= 0) return '1=1';
+  return `(a.inicio >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL ${days} DAY) AND a.inicio <= UTC_TIMESTAMP())`;
+}
+
+// A janela ANTERIOR, do mesmo tamanho e imediatamente antes — a régua dos deltas dos KPIs.
+export function buildCrmPreviousPeriodSql(periodDays) {
+  const days = Number(periodDays);
+  if (!Number.isInteger(days) || days <= 0) return '1=0'; // sem período, não há anterior
+  return `(a.inicio >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL ${days * 2} DAY) AND a.inicio < DATE_SUB(UTC_TIMESTAMP(), INTERVAL ${days} DAY))`;
+}
+
+// A MESMA cascata de classifyRelationship, em SQL. Serve tanto para filtrar um segmento
+// quanto para contá-lo — e os cinco predicados são mutuamente exclusivos e exaustivos,
+// então as contagens somam o total.
+//
+// Corrige um bug: "novo" testava `days < ${CRM_INACTIVE_DAYS}` (90), mas o JS já chama de
+// "sumido" quem passa de 45. Um cliente com 50 dias era contado como novo E como sumido,
+// e o filtro "Novos" trazia gente sumida junto.
+export function buildCrmRelationshipSql(code, alias = 'base') {
+  const vip = `${alias}.is_vip = 1`;
+  const naoVip = `${alias}.is_vip = 0`;
+  const dias = `${alias}.days_since_last_visit`;
+  // Sem visita registrada não há de quando sumir: cai para novo/recorrente, como no JS.
+  const recente = `(${dias} IS NULL OR ${dias} < ${CRM_DEFAULT_DORMANT_DAYS})`;
+
+  switch (code) {
+    case 'vip':
+      return vip;
+    case 'inativo':
+      return `${naoVip} AND COALESCE(${dias}, 0) >= ${CRM_INACTIVE_DAYS}`;
+    case 'sumido':
+      return `${naoVip} AND COALESCE(${dias}, 0) >= ${CRM_DEFAULT_DORMANT_DAYS} AND COALESCE(${dias}, 0) < ${CRM_INACTIVE_DAYS}`;
+    case 'recorrente':
+      return `${naoVip} AND ${recente} AND ${alias}.lifetime_appointments >= 2`;
+    case 'novo':
+      return `${naoVip} AND ${recente} AND ${alias}.lifetime_appointments < 2`;
+    default:
+      return null;
+  }
+}
+
 export function normalizeCrmTags(rawTags = [], { maxItems = 8, maxLength = 40 } = {}) {
   if (!Array.isArray(rawTags)) return [];
   const seen = new Set();

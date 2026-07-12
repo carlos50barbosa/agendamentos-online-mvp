@@ -601,13 +601,19 @@ export const Api = {
 
   relatoriosFunil: (params = {}) => req(`/relatorios/estabelecimento/funil${toQuery(params)}`),
 
-  downloadRelatorio: async (typeOrParams = {}, maybeParams = {}) => {
+  getEstablishmentClientContacts: (establishmentId, params = {}) =>
+    req(`/establishments/${establishmentId}/clients/contacts${toQuery(params)}`),
 
-    const params = typeof typeOrParams === 'string' ? maybeParams : typeOrParams;
+  downloadClientesCsv: (establishmentId, params = {}) =>
+    Api.downloadCsv(`/establishments/${establishmentId}/clients/export.csv`, params, 'clientes.csv'),
+
+  // Baixa um CSV autenticado e devolve { blob, filename }. Um lugar só: duplicar o
+  // tratamento de blob/Content-Disposition era garantir que as duas cópias divergissem.
+  downloadCsv: async (path, params = {}, fallbackName = 'export.csv') => {
 
     const token = getToken();
 
-    const url = join(BASE, `/relatorios/estabelecimento/export.csv${toQuery(params)}`);
+    const url = join(BASE, `${path}${toQuery(params)}`);
 
     const headers = {
 
@@ -665,7 +671,7 @@ export const Api = {
 
     const filenameMatch = disposition.match(/filename="?([^";]+)"?/i);
 
-    const rawName = filenameMatch ? filenameMatch[1] : 'relatorio.csv';
+    const rawName = filenameMatch ? filenameMatch[1] : fallbackName;
 
     let filename = rawName;
 
@@ -679,6 +685,11 @@ export const Api = {
 
     return { blob, filename };
 
+  },
+
+  downloadRelatorio: (typeOrParams = {}, maybeParams = {}) => {
+    const params = typeof typeOrParams === 'string' ? maybeParams : typeOrParams;
+    return Api.downloadCsv('/relatorios/estabelecimento/export.csv', params, 'relatorio.csv');
   },
 
   // Loyalty / Fidelidade

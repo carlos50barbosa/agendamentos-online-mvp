@@ -14,11 +14,24 @@ import {
 import {
   CRM_DEFAULT_DORMANT_DAYS,
   CRM_INACTIVE_DAYS,
+  buildCrmPeriodSql,
+  buildCrmPreviousPeriodSql,
+  buildCrmRelationshipSql,
+  buildCrmRiskSql,
   classifyRelationship,
   computeAverageReturnDays,
   computeBirthdayInfo,
+  isAtRisk,
   normalizeCrmTags,
 } from "../lib/crm.js";
+import { EST_TZ_OFFSET_MIN } from "../lib/datetime_tz.js";
+import {
+  csvLine,
+  formatCsvBoolean,
+  formatCsvMoney,
+  sanitizeFilenameSegment,
+  startCsvResponse,
+} from "../lib/csv.js";
 
 import { auth, isEstabelecimento, isCliente } from "../middleware/auth.js";
 
@@ -85,7 +98,10 @@ const CRM_PERIOD_DAYS = Object.freeze({
 });
 const CRM_SORT_COLUMNS = Object.freeze({
   name: 'base.nome',
-  last: 'base.last_appointment_at',
+  // "last" agora é a última VISITA realizada, não o último agendamento: um cancelamento
+  // de ontem fazia um cliente sumido há 60 dias parecer ativo no topo da lista.
+  last: 'base.last_visit_at',
+  booked: 'base.last_appointment_at',
   appointments: 'base.total_appointments',
   cancelled: 'base.total_cancelled',
   revenue: 'base.revenue_centavos',
@@ -94,7 +110,10 @@ const CRM_SORT_COLUMNS = Object.freeze({
 });
 const CRM_RELATIONSHIP_FILTERS = new Set(['novo', 'recorrente', 'vip', 'inativo', 'sumido']);
 const CRM_DAY_FILTER_OPTIONS = Object.freeze([15, 30, 45, 60, 90]);
-const CRM_REALIZED_VISIT_SQL = "(a.status='concluido' OR (a.status='confirmado' AND a.fim < NOW())) AND COALESCE(a.no_show,0)=0";
+// a.inicio/a.fim são gravados em UTC; NOW() seguiria o fuso do MySQL.
+const CRM_REALIZED_VISIT_SQL = "(a.status='concluido' OR (a.status='confirmado' AND a.fim < UTC_TIMESTAMP())) AND COALESCE(a.no_show,0)=0";
+// Receita prevista: mesma régua de /relatorios (confirmados + pendentes + concluídos, sem no-show).
+const CRM_EXPECTED_REVENUE_SQL = "a.status IN ('confirmado','pendente','concluido') AND COALESCE(a.no_show,0)=0";
 
 
 const toFiniteOrNull = (value) => {
@@ -1515,7 +1534,8 @@ function resolveCrmFilters(query = {}) {
     periodDays: CRM_PERIOD_DAYS[normalizedPeriod] || null,
     statuses: parseCrmStatuses(query.status),
     riskOnly: String(query.risk || '').trim() === '1',
-    vipOnly: String(query.vip || '').trim() === '1',
+    // `vip=1` foi removido: gerava exatamente o mesmo SQL que relationship=vip. Eram dois
+    // controles na tela para um filtro só, com comportamentos diferentes.
     sortKey: Object.prototype.hasOwnProperty.call(CRM_SORT_COLUMNS, sortRaw) ? sortRaw : 'last',
     sortDir: dirRaw === 'asc' ? 'asc' : 'desc',
     relationship: CRM_RELATIONSHIP_FILTERS.has(relationshipRaw) ? relationshipRaw : 'all',
@@ -1527,17 +1547,16 @@ function resolveCrmFilters(query = {}) {
     ),
     origin: normalizeCrmOrigin(query.origem || query.origin || query.canal),
     dormantDays: CRM_DAY_FILTER_OPTIONS.includes(dormantDaysRaw) ? dormantDaysRaw : null,
+    birthdayMonth: String(query.birthday || query.aniversario || '').trim().toLowerCase() === 'mes',
   };
 }
 
+// Recortes de DIMENSÃO: definem QUEM entra na lista (quem já agendou aquele serviço, com
+// aquele profissional, por aquele canal). O período NÃO entra aqui — era ele que escondia
+// justamente os clientes sumidos, que é quem a página existe para achar.
 function buildCrmAppointmentFilterSql(estabelecimentoId, filters) {
   const clauses = ['a.estabelecimento_id = ?'];
   const params = [estabelecimentoId];
-
-  if (filters.period !== 'all' && filters.periodDays) {
-    clauses.push('a.inicio >= DATE_SUB(NOW(), INTERVAL ? DAY)');
-    params.push(filters.periodDays);
-  }
 
   if (filters.statuses.length) {
     const placeholders = filters.statuses.map(() => '?').join(', ');
@@ -1573,36 +1592,10 @@ function buildCrmAppointmentFilterSql(estabelecimentoId, filters) {
   };
 }
 
-function buildCrmRelationshipClause(relationship) {
-  switch (relationship) {
-    case 'vip':
-      return { clause: 'base.is_vip = 1', params: [] };
-    case 'inativo':
-      return { clause: 'base.is_vip = 0 AND COALESCE(base.days_since_last_visit, 0) >= ?', params: [CRM_INACTIVE_DAYS] };
-    case 'sumido':
-      return {
-        clause:
-          'base.is_vip = 0 AND COALESCE(base.days_since_last_visit, 0) >= ? AND COALESCE(base.days_since_last_visit, 0) < ?',
-        params: [CRM_DEFAULT_DORMANT_DAYS, CRM_INACTIVE_DAYS],
-      };
-    case 'recorrente':
-      return {
-        clause:
-          'base.is_vip = 0 AND base.lifetime_appointments >= 2 AND COALESCE(base.days_since_last_visit, 0) < ?',
-        params: [CRM_DEFAULT_DORMANT_DAYS],
-      };
-    case 'novo':
-      return {
-        clause:
-          'base.is_vip = 0 AND base.lifetime_appointments < 2 AND (base.days_since_last_visit IS NULL OR base.days_since_last_visit < ?)',
-        params: [CRM_INACTIVE_DAYS],
-      };
-    default:
-      return { clause: '', params: [] };
-  }
-}
-
-function buildCrmOuterFilters(filters) {
+// `includeRelationship: false` monta o mesmo recorte SEM o filtro de segmento — é o que
+// permite contar quantos há em CADA segmento (com o filtro dentro, "Novos" contaria 0
+// enquanto você olha os "Sumidos").
+function buildCrmOuterFilters(filters, { includeRelationship = true } = {}) {
   const clauses = ['1=1'];
   const params = [];
 
@@ -1616,28 +1609,26 @@ function buildCrmOuterFilters(filters) {
     params.push(like, like, telLike);
   }
 
-  if (filters.vipOnly) {
-    clauses.push('base.is_vip = 1');
-  }
-
   if (filters.dormantDays) {
     clauses.push('COALESCE(base.days_since_last_visit, 0) >= ?');
     params.push(filters.dormantDays);
   }
 
   if (filters.riskOnly) {
-    clauses.push(
-      '(COALESCE(base.days_since_last_visit, 0) >= ? OR (base.total_appointments > 0 AND (base.total_cancelled / base.total_appointments) >= 0.35))'
-    );
-    params.push(CRM_DEFAULT_DORMANT_DAYS);
+    clauses.push(buildCrmRiskSql('base'));
   }
 
-  if (filters.relationship !== 'all') {
-    const relationshipFilter = buildCrmRelationshipClause(filters.relationship);
-    if (relationshipFilter.clause) {
-      clauses.push(relationshipFilter.clause);
-      params.push(...relationshipFilter.params);
-    }
+  if (filters.birthdayMonth) {
+    // Mês LOCAL do estabelecimento. Em UTC puro, no último dia do mês depois das 21h a
+    // lista já mostraria os aniversariantes do mês seguinte.
+    clauses.push(
+      `MONTH(base.data_nascimento) = MONTH(DATE_ADD(UTC_TIMESTAMP(), INTERVAL ${EST_TZ_OFFSET_MIN} MINUTE))`
+    );
+  }
+
+  if (includeRelationship && filters.relationship !== 'all') {
+    const clause = buildCrmRelationshipSql(filters.relationship, 'base');
+    if (clause) clauses.push(`(${clause})`);
   }
 
   return {
@@ -1648,16 +1639,31 @@ function buildCrmOuterFilters(filters) {
 
 function buildCrmBaseQuery(estabelecimentoId, filters) {
   const appointmentFilters = buildCrmAppointmentFilterSql(estabelecimentoId, filters);
+  // Predicado do período como literal (periodDays vem de um mapa congelado, nunca do
+  // usuário), então pode se repetir na agregação condicional sem embaralhar parâmetros.
+  const inPeriod = buildCrmPeriodSql(filters.period === 'all' ? null : filters.periodDays);
+  // Janela anterior, do mesmo tamanho. Vem como mais colunas no MESMO scan — o comparativo
+  // dos KPIs não custa nenhuma query a mais.
+  const inPrevPeriod = buildCrmPreviousPeriodSql(filters.period === 'all' ? null : filters.periodDays);
+
   const statsSql = `
     SELECT
       a.cliente_id,
-      COUNT(*) AS total_appointments,
-      SUM(a.status='cancelado') AS total_cancelled,
+      -- Números DO PERÍODO (agregação condicional). O cliente continua na lista mesmo
+      -- que não tenha nada no período — é exatamente esse o cliente sumido.
+      COUNT(CASE WHEN ${inPeriod} THEN 1 END) AS total_appointments,
+      COUNT(CASE WHEN ${inPrevPeriod} THEN 1 END) AS prev_total_appointments,
+      SUM(CASE WHEN ${inPeriod} AND a.status='cancelado' THEN 1 ELSE 0 END) AS total_cancelled,
+      SUM(CASE WHEN ${inPrevPeriod} AND a.status='cancelado' THEN 1 ELSE 0 END) AS prev_total_cancelled,
+      COALESCE(SUM(CASE WHEN ${inPeriod} AND ${CRM_REALIZED_VISIT_SQL} THEN a.total_centavos ELSE 0 END), 0) AS revenue_centavos,
+      COALESCE(SUM(CASE WHEN ${inPrevPeriod} AND ${CRM_REALIZED_VISIT_SQL} THEN a.total_centavos ELSE 0 END), 0) AS prev_revenue_centavos,
+      COALESCE(SUM(CASE WHEN ${inPeriod} AND ${CRM_EXPECTED_REVENUE_SQL} THEN a.total_centavos ELSE 0 END), 0) AS expected_revenue_centavos,
+      COUNT(CASE WHEN ${inPeriod} AND ${CRM_REALIZED_VISIT_SQL} THEN 1 END) AS billable_appointments,
+      COUNT(CASE WHEN ${inPrevPeriod} AND ${CRM_REALIZED_VISIT_SQL} THEN 1 END) AS prev_billable_appointments,
+      -- Vitalícios: a última vez que agendou (qualquer status) e o status desse agendamento.
       MAX(a.inicio) AS last_appointment_at,
       SUBSTRING_INDEX(GROUP_CONCAT(a.status ORDER BY a.inicio DESC, a.id DESC SEPARATOR ','), ',', 1) AS last_status,
-      SUBSTRING_INDEX(GROUP_CONCAT(a.id ORDER BY a.inicio DESC, a.id DESC SEPARATOR ','), ',', 1) AS last_appointment_id,
-      COALESCE(SUM(CASE WHEN a.status <> 'cancelado' THEN a.total_centavos ELSE 0 END), 0) AS revenue_centavos,
-      COUNT(CASE WHEN a.status <> 'cancelado' THEN 1 END) AS billable_appointments
+      SUBSTRING_INDEX(GROUP_CONCAT(a.id ORDER BY a.inicio DESC, a.id DESC SEPARATOR ','), ',', 1) AS last_appointment_id
     FROM agendamentos a
     WHERE ${appointmentFilters.whereClause}
     GROUP BY a.cliente_id
@@ -1666,6 +1672,9 @@ function buildCrmBaseQuery(estabelecimentoId, filters) {
   const lifetimeSql = `
     SELECT
       a.cliente_id,
+      COUNT(*) AS lifetime_total,
+      SUM(a.status='cancelado') AS lifetime_cancelled,
+      -- lifetime_appointments = visitas REALIZADAS (é o que alimenta novo/recorrente).
       COUNT(DISTINCT CASE WHEN ${CRM_REALIZED_VISIT_SQL} THEN a.id END) AS lifetime_appointments,
       COALESCE(SUM(CASE WHEN ${CRM_REALIZED_VISIT_SQL} THEN a.total_centavos ELSE 0 END), 0) AS total_spent_centavos,
       MAX(CASE WHEN ${CRM_REALIZED_VISIT_SQL} THEN a.inicio END) AS last_visit_at
@@ -1701,16 +1710,26 @@ function buildCrmBaseQuery(estabelecimentoId, filters) {
       stats.last_status,
       stats.last_appointment_id,
       stats.revenue_centavos,
+      stats.expected_revenue_centavos,
+      stats.prev_total_appointments,
+      stats.prev_total_cancelled,
+      stats.prev_revenue_centavos,
+      stats.prev_billable_appointments,
+      -- Ticket médio por ATENDIMENTO realizado (a legenda dizia "por cliente", e dividia
+      -- por agendamentos — errava a conta e o nome).
       CASE
         WHEN stats.billable_appointments > 0 THEN ROUND(stats.revenue_centavos / stats.billable_appointments)
         ELSE 0
       END AS ticket_medio_centavos,
       COALESCE(life.lifetime_appointments, 0) AS lifetime_appointments,
+      COALESCE(life.lifetime_total, 0) AS lifetime_total,
+      COALESCE(life.lifetime_cancelled, 0) AS lifetime_cancelled,
       COALESCE(life.total_spent_centavos, 0) AS total_spent_centavos,
       life.last_visit_at,
+      -- Os dois lados em UTC. Antes era a data local do servidor contra um timestamp UTC.
       CASE
         WHEN life.last_visit_at IS NULL THEN NULL
-        ELSE DATEDIFF(CURDATE(), DATE(life.last_visit_at))
+        ELSE DATEDIFF(UTC_DATE(), DATE(life.last_visit_at))
       END AS days_since_last_visit,
       COALESCE(vip.is_vip, 0) AS is_vip
     FROM (${statsSql}) stats
@@ -1723,6 +1742,76 @@ function buildCrmBaseQuery(estabelecimentoId, filters) {
     baseSql,
     params: [...appointmentFilters.params, estabelecimentoId, estabelecimentoId],
   };
+}
+
+const CRM_EXPORT_MAX_ROWS = 5000;
+const CRM_CONTACTS_MAX = 500;
+
+// Campos derivados de uma linha do CRM. Uma função só, para a lista, a exportação e a fila
+// nunca discordarem sobre quem é "sumido" ou quem está "em risco".
+function decorateCrmRow(row) {
+  const totalAppointments = Number(row.total_appointments || 0);
+  const totalCancelled = Number(row.total_cancelled || 0);
+  const daysSinceLastVisit = row.days_since_last_visit == null ? null : Number(row.days_since_last_visit);
+
+  return {
+    relationship: classifyRelationship({
+      totalAppointments: Number(row.lifetime_appointments || 0),
+      daysSinceLastVisit,
+      isVip: Boolean(row.is_vip),
+    }),
+    days_since_last_visit: daysSinceLastVisit,
+    cancel_rate: totalAppointments
+      ? Math.round((totalCancelled / Math.max(totalAppointments, 1)) * 100)
+      : 0,
+    is_at_risk: isAtRisk({
+      daysSinceLastVisit,
+      lifetimeTotal: Number(row.lifetime_total || 0),
+      lifetimeCancelled: Number(row.lifetime_cancelled || 0),
+    }),
+    birthday: computeBirthdayInfo(row.data_nascimento),
+  };
+}
+
+// Linhas do CRM já filtradas, sem paginação — para a exportação e para a fila de contatos.
+// `ids` é a seleção manual da tela: restringe dentro do filtro, nunca o contorna.
+async function fetchCrmRows(estabelecimentoId, filters, { ids = [], limit }) {
+  const { baseSql, params: baseParams } = buildCrmBaseQuery(estabelecimentoId, filters);
+  const outerFilters = buildCrmOuterFilters(filters);
+  const orderColumn = CRM_SORT_COLUMNS[filters.sortKey] || CRM_SORT_COLUMNS.last;
+  const orderDir = filters.sortDir === 'asc' ? 'ASC' : 'DESC';
+  const idClause = ids.length ? ` AND base.id IN (${ids.map(() => '?').join(', ')})` : '';
+
+  const sql = `
+    SELECT base.*
+    FROM (${baseSql}) base
+    WHERE ${outerFilters.whereClause}${idClause}
+    ORDER BY ${orderColumn} ${orderDir}, base.nome ASC
+    LIMIT ${Number(limit)}
+  `;
+  // Ordem dos '?': subqueries da derivada, WHERE externo, ids.
+  const [rows] = await pool.query(sql, [...baseParams, ...outerFilters.params, ...ids]);
+  return rows || [];
+}
+
+async function loadCrmTags(estabelecimentoId, clientIds = []) {
+  if (!clientIds.length) return new Map();
+  const placeholders = clientIds.map(() => '?').join(', ');
+  const [rows] = await pool.query(
+    `SELECT cliente_id, tag
+       FROM cliente_tags
+      WHERE estabelecimento_id = ?
+        AND cliente_id IN (${placeholders})
+      ORDER BY tag ASC`,
+    [estabelecimentoId, ...clientIds]
+  );
+  const map = new Map();
+  (rows || []).forEach((row) => {
+    const id = Number(row.cliente_id);
+    if (!map.has(id)) map.set(id, []);
+    map.get(id).push(row.tag);
+  });
+  return map;
 }
 
 async function ensureCrmClient(estabelecimentoId, clientId) {
@@ -1898,68 +1987,41 @@ router.get('/:id/clients', auth, isEstabelecimento, async (req, res) => {
     const orderColumn = CRM_SORT_COLUMNS[filters.sortKey] || CRM_SORT_COLUMNS.last;
     const orderDir = filters.sortDir === 'asc' ? 'ASC' : 'DESC';
 
-    const countSql = `
-      SELECT COUNT(*) AS total
+    // COUNT(*) aqui É o total da paginação — a query de count separada materializava a
+    // derivada (cara) uma terceira vez para chegar ao mesmo número.
+    const aggregationsSql = `
+      SELECT
+        COUNT(*) AS clients,
+        -- A lista agora é vitalícia; este é o número que antes era "Clientes".
+        SUM(CASE WHEN base.total_appointments > 0 THEN 1 ELSE 0 END) AS active_clients,
+        SUM(CASE WHEN base.prev_total_appointments > 0 THEN 1 ELSE 0 END) AS prev_active_clients,
+        COALESCE(SUM(base.total_appointments), 0) AS appointments,
+        COALESCE(SUM(base.prev_total_appointments), 0) AS prev_appointments,
+        COALESCE(SUM(base.total_cancelled), 0) AS cancelled,
+        COALESCE(SUM(base.prev_total_cancelled), 0) AS prev_cancelled,
+        COALESCE(SUM(base.revenue_centavos), 0) AS revenue_centavos,
+        COALESCE(SUM(base.prev_revenue_centavos), 0) AS prev_revenue_centavos,
+        COALESCE(SUM(base.expected_revenue_centavos), 0) AS expected_revenue_centavos,
+        -- Atendimentos realizados no período. Antes era (agendamentos - cancelados), uma
+        -- aproximação que contava pendente e futuro como atendimento.
+        COALESCE(SUM(base.billable_appointments), 0) AS billable_appointments,
+        COALESCE(SUM(base.prev_billable_appointments), 0) AS prev_billable_appointments,
+        SUM(CASE WHEN ${buildCrmRiskSql('base')} THEN 1 ELSE 0 END) AS risk_clients
       FROM (${baseSql}) base
       WHERE ${outerFilters.whereClause}
     `;
 
-    const aggregationsSql = `
+    // Contagem por segmento SEM o filtro de segmento — senão, olhando "Sumidos", o chip
+    // "Novos" mostraria 0. Os cinco predicados são exclusivos e exaustivos: somam o total.
+    const segmentFilters = buildCrmOuterFilters(filters, { includeRelationship: false });
+    const segmentsSql = `
       SELECT
-        COUNT(*) AS clients,
-        COALESCE(SUM(base.total_appointments), 0) AS appointments,
-        COALESCE(SUM(base.total_cancelled), 0) AS cancelled,
-        COALESCE(SUM(base.revenue_centavos), 0) AS revenue_centavos,
-        COALESCE(
-          SUM(CASE WHEN base.total_appointments > base.total_cancelled THEN base.total_appointments - base.total_cancelled ELSE 0 END),
-          0
-        ) AS billable_appointments,
-        SUM(CASE WHEN base.is_vip = 1 THEN 1 ELSE 0 END) AS vip_clients,
-        SUM(
-          CASE
-            WHEN COALESCE(base.days_since_last_visit, 0) >= ${CRM_DEFAULT_DORMANT_DAYS}
-              OR (base.total_appointments > 0 AND (base.total_cancelled / base.total_appointments) >= 0.35)
-            THEN 1
-            ELSE 0
-          END
-        ) AS risk_clients,
-        SUM(CASE WHEN base.is_vip = 1 THEN 1 ELSE 0 END) AS relationship_vip,
-        SUM(
-          CASE
-            WHEN base.is_vip = 0 AND COALESCE(base.days_since_last_visit, 0) >= ${CRM_INACTIVE_DAYS}
-            THEN 1
-            ELSE 0
-          END
-        ) AS relationship_inativo,
-        SUM(
-          CASE
-            WHEN base.is_vip = 0
-              AND COALESCE(base.days_since_last_visit, 0) >= ${CRM_DEFAULT_DORMANT_DAYS}
-              AND COALESCE(base.days_since_last_visit, 0) < ${CRM_INACTIVE_DAYS}
-            THEN 1
-            ELSE 0
-          END
-        ) AS relationship_sumido,
-        SUM(
-          CASE
-            WHEN base.is_vip = 0
-              AND base.lifetime_appointments >= 2
-              AND COALESCE(base.days_since_last_visit, 0) < ${CRM_DEFAULT_DORMANT_DAYS}
-            THEN 1
-            ELSE 0
-          END
-        ) AS relationship_recorrente,
-        SUM(
-          CASE
-            WHEN base.is_vip = 0
-              AND base.lifetime_appointments < 2
-              AND (base.days_since_last_visit IS NULL OR base.days_since_last_visit < ${CRM_INACTIVE_DAYS})
-            THEN 1
-            ELSE 0
-          END
-        ) AS relationship_novo
+        COUNT(*) AS total,
+        ${['novo', 'recorrente', 'vip', 'sumido', 'inativo']
+          .map((code) => `SUM(CASE WHEN ${buildCrmRelationshipSql(code, 'base')} THEN 1 ELSE 0 END) AS ${code}`)
+          .join(',\n        ')}
       FROM (${baseSql}) base
-      WHERE ${outerFilters.whereClause}
+      WHERE ${segmentFilters.whereClause}
     `;
 
     const dataSql = `
@@ -1981,14 +2043,14 @@ router.get('/:id/clients', auth, isEstabelecimento, async (req, res) => {
       LIMIT 12
     `;
 
-    const [[countRows], [aggregationRows], [rows], [originRows]] = await Promise.all([
-      pool.query(countSql, [...baseParams, ...outerFilters.params]),
+    const [[aggregationRows], [segmentRows], [rows], [originRows]] = await Promise.all([
       pool.query(aggregationsSql, [...baseParams, ...outerFilters.params]),
+      pool.query(segmentsSql, [...baseParams, ...segmentFilters.params]),
       pool.query(dataSql, [...baseParams, ...outerFilters.params, pageSize, offset]),
       pool.query(originsSql, [estabelecimentoId]),
     ]);
 
-    const total = Number(countRows?.[0]?.total || 0);
+    const total = Number(aggregationRows?.[0]?.clients || 0);
     const lastAppointmentIds = Array.from(
       new Set(
         (rows || [])
@@ -2020,15 +2082,9 @@ router.get('/:id/clients', auth, isEstabelecimento, async (req, res) => {
     const items = (rows || []).map((row) => {
       const clientId = Number(row.id);
       const derived = derivedMap.get(clientId) || {};
-      const relationship = classifyRelationship({
-        totalAppointments: Number(row.lifetime_appointments || 0),
-        daysSinceLastVisit: row.days_since_last_visit == null ? null : Number(row.days_since_last_visit),
-        isVip: Boolean(row.is_vip),
-      });
-      const cancelRate = Number(row.total_appointments || 0)
-        ? Math.round((Number(row.total_cancelled || 0) / Math.max(Number(row.total_appointments || 0), 1)) * 100)
-        : 0;
-      const birthday = computeBirthdayInfo(row.data_nascimento);
+      // Mesma decoração da exportação e da fila — e o is_at_risk vem da mesma função que
+      // gera o SQL do KPI, então linha marcada e número contado não discordam.
+      const extra = decorateCrmRow(row);
       const serviceLabel = serviceMap.get(Number(row.last_appointment_id)) || derived.last_service || '';
       const { last_appointment_id, ...rest } = row;
       return {
@@ -2037,36 +2093,59 @@ router.get('/:id/clients', auth, isEstabelecimento, async (req, res) => {
         avg_return_days: derived.avg_return_days ?? null,
         preferred_service: derived.preferred_service || null,
         preferred_professional: derived.preferred_professional || null,
-        relationship_status: relationship.code,
-        relationship_label: relationship.label,
-        cancel_rate: cancelRate,
-        is_at_risk:
-          (row.days_since_last_visit != null && Number(row.days_since_last_visit) >= CRM_DEFAULT_DORMANT_DAYS) ||
-          cancelRate >= 35,
-        birthday,
+        relationship_status: extra.relationship.code,
+        relationship_label: extra.relationship.label,
+        cancel_rate: extra.cancel_rate,
+        is_at_risk: extra.is_at_risk,
+        birthday: extra.birthday,
       };
     });
 
     const aggregationRow = aggregationRows?.[0] || {};
-    const aggregationAppointments = Number(aggregationRow.appointments || 0);
-    const aggregationCancelled = Number(aggregationRow.cancelled || 0);
-    const aggregationRevenue = Number(aggregationRow.revenue_centavos || 0);
-    const aggregationBillable = Number(aggregationRow.billable_appointments || 0);
+    const num = (value) => Number(value || 0);
+    const ratePct = (part, whole) => (whole ? Math.round((part / whole) * 100) : 0);
+    const ticket = (revenue, atendimentos) => (atendimentos ? Math.round(revenue / atendimentos) : 0);
+
+    const aggregationAppointments = num(aggregationRow.appointments);
+    const aggregationCancelled = num(aggregationRow.cancelled);
+    const aggregationRevenue = num(aggregationRow.revenue_centavos);
+    const aggregationBillable = num(aggregationRow.billable_appointments);
+
+    const prevAppointments = num(aggregationRow.prev_appointments);
+    const prevCancelled = num(aggregationRow.prev_cancelled);
+    const prevRevenue = num(aggregationRow.prev_revenue_centavos);
+    const prevBillable = num(aggregationRow.prev_billable_appointments);
+
     const aggregations = {
       period: filters.period,
-      clients: Number(aggregationRow.clients || 0),
+      clients: num(aggregationRow.clients),
+      active_clients: num(aggregationRow.active_clients),
       appointments: aggregationAppointments,
       cancelled: aggregationCancelled,
-      cancel_rate: aggregationAppointments ? Math.round((aggregationCancelled / aggregationAppointments) * 100) : 0,
+      cancel_rate: ratePct(aggregationCancelled, aggregationAppointments),
       revenue_centavos: aggregationRevenue,
-      ticket_medio_centavos: aggregationBillable ? Math.round(aggregationRevenue / aggregationBillable) : 0,
-      vip_clients: Number(aggregationRow.vip_clients || 0),
-      risk_clients: Number(aggregationRow.risk_clients || 0),
-      relationship_novo: Number(aggregationRow.relationship_novo || 0),
-      relationship_recorrente: Number(aggregationRow.relationship_recorrente || 0),
-      relationship_vip: Number(aggregationRow.relationship_vip || 0),
-      relationship_inativo: Number(aggregationRow.relationship_inativo || 0),
-      relationship_sumido: Number(aggregationRow.relationship_sumido || 0),
+      expected_revenue_centavos: num(aggregationRow.expected_revenue_centavos),
+      ticket_medio_centavos: ticket(aggregationRevenue, aggregationBillable),
+      risk_clients: num(aggregationRow.risk_clients),
+      // Mesma régua, janela deslocada. Ausente quando period=all: não há "anterior" a "tudo".
+      previous: filters.period === 'all' ? null : {
+        active_clients: num(aggregationRow.prev_active_clients),
+        appointments: prevAppointments,
+        cancelled: prevCancelled,
+        cancel_rate: ratePct(prevCancelled, prevAppointments),
+        revenue_centavos: prevRevenue,
+        ticket_medio_centavos: ticket(prevRevenue, prevBillable),
+      },
+    };
+
+    const segmentRow = segmentRows?.[0] || {};
+    const segments = {
+      all: num(segmentRow.total),
+      novo: num(segmentRow.novo),
+      recorrente: num(segmentRow.recorrente),
+      vip: num(segmentRow.vip),
+      sumido: num(segmentRow.sumido),
+      inativo: num(segmentRow.inativo),
     };
 
     return res.json({
@@ -2076,6 +2155,7 @@ router.get('/:id/clients', auth, isEstabelecimento, async (req, res) => {
       total,
       hasNext: offset + (rows?.length || 0) < total,
       aggregations,
+      segments,
       meta: {
         origins: (originRows || []).map((row) => ({
           origem: row.origem,
@@ -2087,6 +2167,101 @@ router.get('/:id/clients', auth, isEstabelecimento, async (req, res) => {
   } catch (err) {
     console.error('GET /establishments/:id/clients', err);
     return res.status(500).json({ error: 'clients_fetch_failed' });
+  }
+});
+
+// Exporta o recorte atual (ou a seleção da tela) em CSV. Registrado ANTES de
+// /:id/clients/:clientId/* para "export.csv" não ser lido como um clientId.
+router.get('/:id/clients/export.csv', auth, isEstabelecimento, async (req, res) => {
+  try {
+    const estabelecimentoId = Number(req.params.id);
+    if (!Number.isFinite(estabelecimentoId) || req.user.id !== estabelecimentoId) {
+      return res.status(403).json({ error: 'forbidden' });
+    }
+
+    const filters = resolveCrmFilters(req.query || {});
+    const ids = parsePositiveIdList(req.query.ids);
+    const rows = await fetchCrmRows(estabelecimentoId, filters, { ids, limit: CRM_EXPORT_MAX_ROWS });
+    const clientIds = rows.map((row) => Number(row.id)).filter(Boolean);
+    const tagsMap = await loadCrmTags(estabelecimentoId, clientIds);
+
+    const headers = [
+      'Nome', 'Telefone', 'E-mail', 'Relacionamento', 'Última visita', 'Dias sem retorno',
+      `Agendamentos (${filters.period})`, `Cancelamentos (${filters.period})`, '% Cancelamento',
+      `Receita realizada (${filters.period})`, 'Total gasto', 'Ticket médio',
+      'Em risco', 'Aniversário', 'Tags',
+    ];
+
+    const filenameBase = sanitizeFilenameSegment(`clientes-${filters.period}-${new Date().toISOString().slice(0, 10)}`);
+    startCsvResponse(res, `${filenameBase || 'clientes'}.csv`, headers);
+
+    rows.forEach((row) => {
+      const extra = decorateCrmRow(row);
+      const birthday = row.data_nascimento
+        ? String(row.data_nascimento).slice(0, 10).split('-').reverse().join('/')
+        : '';
+      res.write(csvLine([
+        row.nome || '',
+        row.telefone || '',
+        row.email || '',
+        extra.relationship.label,
+        row.last_visit_at ? new Date(row.last_visit_at).toISOString().slice(0, 10) : 'Nunca veio',
+        extra.days_since_last_visit ?? '',
+        Number(row.total_appointments || 0),
+        Number(row.total_cancelled || 0),
+        `${extra.cancel_rate}%`,
+        formatCsvMoney(row.revenue_centavos),
+        formatCsvMoney(row.total_spent_centavos),
+        formatCsvMoney(row.ticket_medio_centavos),
+        formatCsvBoolean(extra.is_at_risk),
+        birthday,
+        (tagsMap.get(Number(row.id)) || []).join(', '),
+      ]));
+    });
+
+    return res.end();
+  } catch (err) {
+    console.error('GET /establishments/:id/clients/export.csv', err);
+    if (!res.headersSent) return res.status(500).json({ error: 'clients_export_failed' });
+    return res.end();
+  }
+});
+
+// Contatos do recorte atual, para montar a fila de WhatsApp sem depender da paginação.
+router.get('/:id/clients/contacts', auth, isEstabelecimento, async (req, res) => {
+  try {
+    const estabelecimentoId = Number(req.params.id);
+    if (!Number.isFinite(estabelecimentoId) || req.user.id !== estabelecimentoId) {
+      return res.status(403).json({ error: 'forbidden' });
+    }
+
+    const filters = resolveCrmFilters(req.query || {});
+    const ids = parsePositiveIdList(req.query.ids);
+    // Pede um a mais que o teto para saber se cortou — cortar em silêncio faria a campanha
+    // parecer completa quando não está.
+    const rows = await fetchCrmRows(estabelecimentoId, filters, { ids, limit: CRM_CONTACTS_MAX + 1 });
+    const truncated = rows.length > CRM_CONTACTS_MAX;
+    const page = truncated ? rows.slice(0, CRM_CONTACTS_MAX) : rows;
+
+    return res.json({
+      items: page.map((row) => {
+        const extra = decorateCrmRow(row);
+        return {
+          id: Number(row.id),
+          nome: row.nome,
+          telefone: row.telefone || null,
+          relationship_label: extra.relationship.label,
+          days_since_last_visit: extra.days_since_last_visit,
+          last_visit_at: toISODate(row.last_visit_at),
+        };
+      }),
+      total: page.length,
+      truncated,
+      limit: CRM_CONTACTS_MAX,
+    });
+  } catch (err) {
+    console.error('GET /establishments/:id/clients/contacts', err);
+    return res.status(500).json({ error: 'clients_contacts_failed' });
   }
 });
 
@@ -2115,15 +2290,20 @@ router.get('/:id/clients/:clientId/details', auth, isEstabelecimento, async (req
       origin: null,
     });
 
+    // O período saiu de buildCrmAppointmentFilterSql (lá ele escondia os sumidos); aqui,
+    // onde o cliente já está fixado, ele volta explicitamente ao WHERE.
+    const inPeriod = buildCrmPeriodSql(periodFilter.period === 'all' ? null : periodFilter.periodDays);
     const metricsSql = `
       SELECT
         COUNT(*) AS total_appointments,
         SUM(a.status='cancelado') AS total_cancelled,
-        COALESCE(SUM(CASE WHEN a.status <> 'cancelado' THEN a.total_centavos ELSE 0 END), 0) AS revenue_centavos,
-        COUNT(CASE WHEN a.status <> 'cancelado' THEN 1 END) AS billable_appointments
+        COALESCE(SUM(CASE WHEN ${CRM_REALIZED_VISIT_SQL} THEN a.total_centavos ELSE 0 END), 0) AS revenue_centavos,
+        COALESCE(SUM(CASE WHEN ${CRM_EXPECTED_REVENUE_SQL} THEN a.total_centavos ELSE 0 END), 0) AS expected_revenue_centavos,
+        COUNT(CASE WHEN ${CRM_REALIZED_VISIT_SQL} THEN 1 END) AS billable_appointments
       FROM agendamentos a
       WHERE ${periodAppointmentFilters.whereClause}
         AND a.cliente_id = ?
+        AND ${inPeriod}
     `;
 
     const lastAppointmentSql = `
@@ -2241,6 +2421,7 @@ router.get('/:id/clients/:clientId/details', auth, isEstabelecimento, async (req
         total_cancelled: totalCancelled,
         cancel_rate: totalAppointments ? Math.round((totalCancelled / totalAppointments) * 100) : 0,
         revenue_centavos: revenueCentavos,
+        expected_revenue_centavos: Number(periodMetrics.expected_revenue_centavos || 0),
         ticket_medio_centavos: billableAppointments ? Math.round(revenueCentavos / billableAppointments) : 0,
         total_spent_centavos: Number(lifetimeMetrics.total_spent_centavos || 0),
         lifetime_appointments: Number(lifetimeMetrics.lifetime_appointments || 0),
