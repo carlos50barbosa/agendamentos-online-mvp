@@ -10,6 +10,7 @@ import BookingWizard from '../components/booking/BookingWizard.jsx';
 import { Api } from '../utils/api.js';
 import { getUser } from '../utils/auth.js';
 import { isSameDay } from '../utils/agendaDates.js';
+import { buildPublicThemeStyle, resolvePublicAccent } from '../utils/publicTheme.js';
 
 function ymd(d) {
   const dt = new Date(d);
@@ -185,11 +186,21 @@ export default function BookingPublic() {
     }
   }, []);
 
+  // Identidade visual: aplica a cor de destaque do estabelecimento (perfil.accent_color)
+  // como CSS vars no wrapper — cascateia p/ wizard e header. Sem cor customizada => null,
+  // mantendo o índigo global padrão para quem não configurou nada.
+  const themeStyle = useMemo(() => {
+    const profile = state.establishment?.profile || null;
+    const { accent, accentStrong } = resolvePublicAccent(profile, searchParams);
+    if (!accent) return null;
+    return buildPublicThemeStyle({ accent, accentStrong });
+  }, [state.establishment, searchParams]);
+
   if (state.loading) return <CenterMsg>Carregando…</CenterMsg>;
   if (state.error) return <CenterMsg>{state.error}</CenterMsg>;
 
   return (
-    <div style={{ background: 'var(--bg-lav, #F6F5FB)', minHeight: '100%' }}>
+    <div style={{ ...(themeStyle || {}), background: 'var(--bg-lav, #F6F5FB)', minHeight: '100%' }}>
       <BookingWizard
         establishmentName={state.establishment?.nome || 'Agendamento'}
         establishment={state.establishment}

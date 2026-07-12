@@ -62,6 +62,25 @@ export function IconFilter(props){
   );
 }
 
+export function IconQrCode(props){
+  return (
+    <svg {...base} viewBox="0 0 24 24" aria-hidden="true" {...props}>
+      <rect x="3" y="3" width="6" height="6" rx="1"/>
+      <rect x="15" y="3" width="6" height="6" rx="1"/>
+      <rect x="3" y="15" width="6" height="6" rx="1"/>
+      <path d="M15 15h2v2M21 15v.01M15 19h.01M19 19h2v2M21 21v.01M12 3v6M12 12h.01M3 12h6M18 12h.01"/>
+    </svg>
+  );
+}
+
+export function IconClose(props){
+  return (
+    <svg {...base} viewBox="0 0 24 24" aria-hidden="true" {...props}>
+      <path d="M18 6L6 18M6 6l12 12"/>
+    </svg>
+  );
+}
+
 export function IconGear(props){
   return (
     <svg {...base} viewBox="0 0 24 24" aria-hidden="true" {...props}>

@@ -14,6 +14,8 @@ import {
 
   IconMenu,
 
+  IconClose,
+
 } from './components/Icons.jsx';
 
 import LogoAO from './components/LogoAO.jsx';
@@ -74,6 +76,8 @@ const Ajuda = React.lazy(() => import('./pages/Ajuda.jsx'));
 const Relatorios = React.lazy(() => import('./pages/Relatorios.jsx'));
 
 const Financeiro = React.lazy(() => import('./pages/Financeiro.jsx'));
+
+const Divulgacao = React.lazy(() => import('./pages/Divulgacao.jsx'));
 
 const Planos = React.lazy(() => import('./pages/Planos.jsx'));
 
@@ -175,6 +179,8 @@ const APP_ROUTES = [
   { path: '/relatorios', element: <Relatorios />, auth: true, role: 'estabelecimento' },
 
   { path: '/financeiro', element: <Financeiro />, auth: true, role: 'estabelecimento' },
+
+  { path: '/divulgacao', element: <Divulgacao />, auth: true, role: 'estabelecimento' },
 
   { path: '/planos', element: <Planos /> },
 
@@ -1465,10 +1471,10 @@ const topbarAlert = useMemo(() => {
                       onClick={() => setTopbarMenuOpen((open) => !open)}
                       aria-expanded={topbarMenuOpen}
                       aria-controls="app-topbar-menu"
-                      aria-label="Abrir menu"
+                      aria-label={topbarMenuOpen ? 'Fechar menu' : 'Abrir menu'}
                       ref={topbarMenuButtonRef}
                     >
-                      <IconMenu aria-hidden="true" />
+                      {topbarMenuOpen ? <IconClose aria-hidden="true" /> : <IconMenu aria-hidden="true" />}
                     </button>
                     {topbarMenuOpen && (
                       <div

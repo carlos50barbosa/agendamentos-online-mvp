@@ -7,6 +7,15 @@ import walletStyles from "../components/WhatsAppWalletPanel.module.css";
 import { Api, resolveAssetUrl } from "../utils/api";
 import { getUser, saveUser, saveToken } from "../utils/auth";
 import { trackAnalyticsEvent, trackMetaEvent } from "../utils/analytics.js";
+import AccountProfileSection from "../components/settings/AccountProfileSection.jsx";
+import AddressSection from "../components/settings/AddressSection.jsx";
+import NotificationsSection from "../components/settings/NotificationsSection.jsx";
+import SecuritySection from "../components/settings/SecuritySection.jsx";
+import DescriptionSection from "../components/settings/DescriptionSection.jsx";
+import PhotosSection from "../components/settings/PhotosSection.jsx";
+import VisualIdentitySection from "../components/settings/VisualIdentitySection.jsx";
+import SocialLinksSection from "../components/settings/SocialLinksSection.jsx";
+import WorkingHoursSection from "../components/settings/WorkingHoursSection.jsx";
 const e = { jsx, jsxs, Fragment };
 const at = Modal;
 const Wo = IconChevronRight;
@@ -5836,7 +5845,32 @@ function _l() {
             ],
           }),
         }),
-        a
+        a.flatMap((S) => {
+          if (!S) return [S];
+          if (S.id === "profile") {
+            const isEstab = (getUser() || {}).tipo === "estabelecimento";
+            if (!isEstab) {
+              return [
+                { ...S, title: "Perfil", content: e.jsx(AccountProfileSection, {}) },
+                { id: "security", title: "Alterar senha", content: e.jsx(SecuritySection, {}) },
+              ];
+            }
+            return [
+              { ...S, title: "Perfil", content: e.jsx(AccountProfileSection, {}) },
+              { id: "photos", title: "Minhas fotos", content: e.jsx(PhotosSection, {}) },
+              { id: "description", title: "Descrição", content: e.jsx(DescriptionSection, {}) },
+              { id: "visual-identity", title: "Identidade visual", content: e.jsx(VisualIdentitySection, {}) },
+              { id: "address", title: "Endereço", content: e.jsx(AddressSection, {}) },
+              { id: "working-hours", title: "Horários de funcionamento", content: e.jsx(WorkingHoursSection, {}) },
+              { id: "notifications", title: "Notificações", content: e.jsx(NotificationsSection, {}) },
+              { id: "social-links", title: "Redes sociais", content: e.jsx(SocialLinksSection, {}) },
+              { id: "security", title: "Alterar senha", content: e.jsx(SecuritySection, {}) },
+            ];
+          }
+          if (S.id === "public-profile") return [];
+          if (["whatsapp-connect", "plan", "mercadopago-connect", "deposit"].includes(S.id)) return [];
+          return [S];
+        })
       );
     }, [
       r,
@@ -6059,7 +6093,7 @@ function _l() {
           }),
         ],
       }),
-      businessHubCards.length
+      false
         ? e.jsxs("section", {
             className: "card settings-hub",
             children: [
