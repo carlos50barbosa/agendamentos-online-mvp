@@ -7583,6 +7583,33 @@ body.planos-no-scrollbar .container--wide::-webkit-scrollbar{
   border-color:rgba(15,118,110,.28);
   box-shadow:0 0 0 1px rgba(15,118,110,.18) inset, 0 24px 52px rgba(15,118,110,.12);
 }
+
+/* Assinatura vencida: o card fica visível (o cliente pode estar procurando por ele) mas recusa a
+   seleção — em vez de deixar avançar e só barrar no último passo, depois de escolher tudo. */
+.establishment-card--disabled{
+  cursor:not-allowed;
+  opacity:.72;
+  background:var(--surface-soft, #fbfbfe);
+}
+.establishment-card--disabled:hover,
+.establishment-card--disabled:focus-visible{
+  border-color:var(--border);
+  box-shadow:none;
+  transform:none;
+}
+.establishment-card__unavailable{
+  display:flex;
+  align-items:center;
+  gap:6px;
+  margin:0 0 10px;
+  padding:6px 10px;
+  border-radius:8px;
+  border:1px solid #fde68a;
+  background:#fffbeb;
+  color:#92400e;
+  font-size:12px;
+  font-weight:600;
+}
 .establishment-card__top{display:flex;gap:10px;align-items:flex-start;}
 .establishment-card__avatar{
   width:54px;

@@ -27,6 +27,7 @@ import { buildPublicDepositToken, verifyPublicDepositToken } from '../lib/public
 import { applyClientLoyaltyBenefitsTx, previewClientLoyaltyBenefits } from '../lib/client_loyalty_credits.js'
 import { cancelPendingPaymentAppointmentTx, cancelPublicPendingAppointmentTx } from '../lib/appointment_loyalty.js'
 import { checkAppointmentSlotCapacityTx, normalizeServiceSlotCapacity } from '../lib/service_capacity.js';
+import { normalizePhoneBR, toDigits } from '../lib/phone_br.js';
 
 const router = Router();
 const TZ = 'America/Sao_Paulo';
@@ -316,17 +317,6 @@ function brDateTime(iso) {
   return new Date(iso).toLocaleString('pt-BR', {
     hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit', year: 'numeric', timeZone: TZ,
   });
-}
-
-function toDigits(s){ return String(s || '').replace(/\D/g, ''); }
-
-function normalizePhoneBR(value){
-  let digits = toDigits(value);
-  if (!digits) return '';
-  digits = digits.replace(/^0+/, '');
-  if (digits.startsWith('55')) return digits;
-  if (digits.length >= 10 && digits.length <= 11) return `55${digits}`;
-  return digits;
 }
 
 const normalizeBirthdate = (value) => {

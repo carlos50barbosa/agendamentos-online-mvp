@@ -40,6 +40,10 @@ function mapBookingError(e) {
       return 'O estabelecimento atingiu o limite de agendamentos do plano.';
     case 'cliente_conflito':
       return 'Esse e-mail ou telefone já está cadastrado com dados diferentes. Use o mesmo e-mail e telefone do seu cadastro anterior.';
+    case 'subscription_access_blocked':
+      // Rede de segurança: a página pública é acessada direto pelo link do estabelecimento, então
+      // não há etapa 1 onde avisar antes. Aqui a mensagem ao menos explica o que aconteceu.
+      return 'Este estabelecimento não está aceitando agendamentos no momento. Entre em contato com ele.';
     default:
       return msg || 'Não foi possível concluir o agendamento. Tente novamente.';
   }

@@ -12,18 +12,18 @@ export default function AppointmentTable({
   return (
     <div className="tw-hidden tw-overflow-hidden tw-rounded-2xl tw-border tw-border-[color:var(--brand-border,#E7E5F5)] tw-bg-white tw-shadow-sm md:tw-block">
       <table className="tw-min-w-full tw-border-separate tw-border-spacing-0">
-        <thead className="tw-bg-slate-50">
+        <thead className="tw-bg-[color:var(--surface-soft,#FBFBFE)]">
           <tr>
-            <th className="tw-border-b tw-border-slate-200 tw-px-4 tw-py-3 tw-text-left tw-text-xs tw-font-semibold tw-uppercase tw-tracking-wide tw-text-slate-600">
+            <th className="tw-border-b tw-border-[color:var(--brand-border,#E7E5F5)] tw-px-4 tw-py-3 tw-text-left tw-text-xs tw-font-semibold tw-uppercase tw-tracking-wide tw-text-[color:var(--muted-ink,#6B7280)]">
               Serviço
             </th>
-            <th className="tw-border-b tw-border-slate-200 tw-px-4 tw-py-3 tw-text-left tw-text-xs tw-font-semibold tw-uppercase tw-tracking-wide tw-text-slate-600">
+            <th className="tw-border-b tw-border-[color:var(--brand-border,#E7E5F5)] tw-px-4 tw-py-3 tw-text-left tw-text-xs tw-font-semibold tw-uppercase tw-tracking-wide tw-text-[color:var(--muted-ink,#6B7280)]">
               Data/Hora
             </th>
-            <th className="tw-border-b tw-border-slate-200 tw-px-4 tw-py-3 tw-text-left tw-text-xs tw-font-semibold tw-uppercase tw-tracking-wide tw-text-slate-600">
+            <th className="tw-border-b tw-border-[color:var(--brand-border,#E7E5F5)] tw-px-4 tw-py-3 tw-text-left tw-text-xs tw-font-semibold tw-uppercase tw-tracking-wide tw-text-[color:var(--muted-ink,#6B7280)]">
               Status
             </th>
-            <th className="tw-border-b tw-border-slate-200 tw-px-4 tw-py-3 tw-text-right tw-text-xs tw-font-semibold tw-uppercase tw-tracking-wide tw-text-slate-600">
+            <th className="tw-border-b tw-border-[color:var(--brand-border,#E7E5F5)] tw-px-4 tw-py-3 tw-text-right tw-text-xs tw-font-semibold tw-uppercase tw-tracking-wide tw-text-[color:var(--muted-ink,#6B7280)]">
               Ações
             </th>
           </tr>
@@ -32,13 +32,13 @@ export default function AppointmentTable({
           {appointments.map((appointment, index) => (
             <tr
               key={appointment.id}
-              className={`${index % 2 === 1 ? 'tw-bg-slate-50/40' : 'tw-bg-white'} hover:tw-bg-slate-50`}
+              className={`${index % 2 === 1 ? 'tw-bg-[color:var(--surface-soft,#FBFBFE)]/50' : 'tw-bg-white'} hover:tw-bg-brand-100/40`}
             >
-              <td className="tw-border-b tw-border-slate-100 tw-px-4 tw-py-4">
+              <td className="tw-border-b tw-border-[color:var(--brand-border,#E7E5F5)]/60 tw-px-4 tw-py-4">
                 <p className="tw-m-0 tw-text-sm tw-font-semibold tw-text-ink">{appointment.serviceLabel}</p>
                 <p className="tw-m-0 tw-mt-1 tw-text-xs" style={{ color: 'var(--muted-ink, #6B7280)' }}>{appointment.establishmentLabel}</p>
               </td>
-              <td className="tw-border-b tw-border-slate-100 tw-px-4 tw-py-4 tw-text-sm tw-text-slate-700">
+              <td className="tw-border-b tw-border-[color:var(--brand-border,#E7E5F5)]/60 tw-px-4 tw-py-4 tw-text-sm tw-text-ink">
                 <span className="tw-inline-flex tw-items-center tw-gap-2">
                   <span className="tw-inline-flex tw-h-5 tw-w-5 tw-items-center tw-justify-center tw-rounded-full tw-bg-brand-100 tw-text-brand" aria-hidden="true">
                     <svg viewBox="0 0 24 24" className="tw-h-3.5 tw-w-3.5" fill="none" stroke="currentColor" strokeWidth="2">
@@ -55,10 +55,10 @@ export default function AppointmentTable({
                   {appointment.whenLabel}
                 </span>
               </td>
-              <td className="tw-border-b tw-border-slate-100 tw-px-4 tw-py-4">
+              <td className="tw-border-b tw-border-[color:var(--brand-border,#E7E5F5)]/60 tw-px-4 tw-py-4">
                 <StatusBadge status={appointment.effectiveStatus} />
               </td>
-              <td className="tw-border-b tw-border-slate-100 tw-px-4 tw-py-4">
+              <td className="tw-border-b tw-border-[color:var(--brand-border,#E7E5F5)]/60 tw-px-4 tw-py-4">
                 <div className="tw-flex tw-justify-end tw-gap-2">
                   <Button
                     variant="secondaryOutline"

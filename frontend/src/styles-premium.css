@@ -1022,18 +1022,147 @@ textarea.input:focus {
   box-shadow: 0 14px 28px rgba(18, 62, 99, 0.16);
 }
 
-.appointments-page__metric {
-  border-radius: var(--radius);
-  border: 1px solid rgba(18, 62, 99, 0.08);
-  background: rgba(255, 255, 255, 0.88);
+/* ---- /cliente: herói, filtros e KPIs -------------------------------------- */
+/* A página vinha em cinza-ardósia genérico enquanto o resto do app é índigo.
+   Tudo aqui puxa dos tokens (theme.js), sem hex novo. */
+
+.appointments-hero {
+  border: 1px solid var(--brand-border, #e7e5f5);
+  /* Leve tinta da marca no topo: dá identidade ao cabeçalho sem virar bloco colorido. */
+  background:
+    linear-gradient(180deg, var(--brand-100, #eef2ff) 0%, rgba(255, 255, 255, 0) 190px),
+    #fff;
 }
 
-.appointments-page__metric span {
-  color: var(--muted);
+.appointments-hero__eyebrow {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid var(--brand-200, #c7d2fe);
+  background: #fff;
+  color: var(--brand-deep, #3730a3);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
 }
 
-.appointments-page__metric strong {
-  color: var(--text);
+.appointments-hero__label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--muted-ink, #6b7280);
+}
+
+.appointments-hero__control {
+  height: 40px;
+  border-radius: 12px;
+  border: 1px solid var(--brand-border, #e7e5f5);
+  background: #fff;
+  padding: 0 12px;
+  font-size: 0.875rem;
+  color: var(--ink, #1e1b4b);
+  transition: border-color .18s ease, box-shadow .18s ease;
+}
+
+.appointments-hero__control:focus-visible,
+.appointments-hero__control:focus {
+  outline: none;
+  border-color: var(--brand, #5049e5);
+  box-shadow: 0 0 0 3px var(--brand-100, #eef2ff);
+}
+
+.appointments-chip {
+  white-space: nowrap;
+  border-radius: 12px;
+  border: 1px solid var(--brand-border, #e7e5f5);
+  background: #fff;
+  padding: 7px 14px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--muted-ink, #6b7280);
+  cursor: pointer;
+  transition: background .15s ease, border-color .15s ease, color .15s ease;
+}
+
+.appointments-chip:hover {
+  border-color: var(--brand-200, #c7d2fe);
+  color: var(--brand-deep, #3730a3);
+}
+
+.appointments-chip.is-active {
+  border-color: var(--brand, #5049e5);
+  background: var(--brand, #5049e5);
+  color: #fff;
+}
+
+/* KPI clicável: o número que o cliente lê é o mesmo que ele clica para filtrar. */
+.appointments-metric {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  padding: 14px 16px;
+  text-align: left;
+  border-radius: 14px;
+  border: 1px solid var(--brand-border, #e7e5f5);
+  background: #fff;
+  cursor: pointer;
+  transition: border-color .16s ease, box-shadow .16s ease, transform .16s ease;
+}
+
+.appointments-metric:hover {
+  border-color: var(--brand-200, #c7d2fe);
+  box-shadow: 0 4px 16px -8px rgba(30, 27, 75, 0.16);
+  transform: translateY(-1px);
+}
+
+.appointments-metric.is-active {
+  border-color: var(--brand, #5049e5);
+  box-shadow: 0 0 0 3px var(--brand-100, #eef2ff);
+}
+
+.appointments-metric:focus-visible {
+  outline: 2px solid var(--brand, #5049e5);
+  outline-offset: 2px;
+}
+
+.appointments-metric__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.appointments-metric__label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted-ink, #6b7280);
+}
+
+/* O ponto colorido usa a MESMA cor do StatusPill da lista: o olho liga o KPI à linha. */
+.appointments-metric__dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  border: 1px solid;
+  flex: none;
+}
+
+.appointments-metric__value {
+  font-size: 1.75rem;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .appointments-metric:hover { transform: none; }
 }
 
 @media (max-width: 1024px) {

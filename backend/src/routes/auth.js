@@ -14,6 +14,7 @@ import { config } from '../lib/config.js';
 import { buildRateLimitClientKey, consumeRateLimit, setRateLimitHeaders } from '../lib/request_rate_limit.js';
 import { logSecurityEvent } from '../lib/route_access.js';
 import { setAudit } from '../lib/audit.js';
+import { normalizePhoneBR } from '../lib/phone_br.js';
 
 const router = Router();
 const DAY_MS = 86400000;
@@ -144,12 +145,15 @@ router.post('/register', async (req, res) => {
       return res.status(400).json({ error: 'invalid_payload' });
     }
 
-    const telefoneTrim = telefone === undefined || telefone === null ? null : String(telefone).trim();
-    if (!telefoneTrim) {
+    // O frontend já manda em E.164, mas a API é pública: normaliza aqui também, senão qualquer
+    // cliente que chame /auth/register direto grava telefone fora do padrão.
+    const telefoneRaw = telefone === undefined || telefone === null ? '' : String(telefone).trim();
+    if (!telefoneRaw) {
       return res.status(400).json({ error: 'telefone_obrigatorio', message: 'Informe um telefone com DDD.' });
     }
-    if (telefoneTrim.length > 20) {
-      return res.status(400).json({ error: 'telefone_invalido' });
+    const telefoneTrim = normalizePhoneBR(telefoneRaw);
+    if (!telefoneTrim) {
+      return res.status(400).json({ error: 'telefone_invalido', message: 'Telefone inválido. Informe DDD + número.' });
     }
 
     const nomeTrim = String(nome).trim();
@@ -517,12 +521,21 @@ router.put('/me', auth, async (req, res) => {
     }
 
     // ---- telefone (parcial) ----
+    // Normaliza para E.164-BR, como fazem o cadastro, o booking e o bot. Antes este era o único
+    // caminho de escrita que gravava o telefone cru, e era ele que deixava a base com 11 dígitos
+    // enquanto o resto do sistema grava 13.
     let phoneClean = req.user?.telefone || null;
     if (has('telefone')) {
-      const t = body.telefone == null ? null : String(body.telefone).trim();
-      const clean = t ? t.replace(/[^\d+]/g, '') : null;
-      if (clean && clean.length > 25) return res.status(400).json({ error: 'telefone_invalido', message: 'Telefone inválido.' });
-      phoneClean = clean || null;
+      const raw = body.telefone == null ? null : String(body.telefone).trim();
+      if (!raw) {
+        phoneClean = null;
+      } else {
+        const normalized = normalizePhoneBR(raw);
+        if (!normalized) {
+          return res.status(400).json({ error: 'telefone_invalido', message: 'Telefone inválido. Informe DDD + número.' });
+        }
+        phoneClean = normalized;
+      }
     }
 
     // ---- endereço (parcial; obrigatório só quando um estabelecimento está editando o endereço) ----

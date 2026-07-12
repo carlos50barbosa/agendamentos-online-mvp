@@ -232,11 +232,33 @@ export default function ClientAppointmentsPage() {
     });
   }, [appointments, search, statusFilter]);
 
+  // Os cartões viram o filtro: o número que o cliente vê é o mesmo que ele clica para ver a lista.
+  // `filter` casa com os valores de statusFilter, e `accent` puxa as cores de status do theme.
   const appointmentMetrics = useMemo(() => ([
-    { label: 'Total', value: appointments.length },
-    { label: 'Confirmados', value: appointments.filter((item) => item.effectiveStatus === 'confirmado').length },
-    { label: 'Concluídos', value: appointments.filter((item) => item.effectiveStatus === 'concluido').length },
-    { label: 'Pendentes', value: appointments.filter((item) => ['pendente', 'pendente_pagamento'].includes(item.effectiveStatus)).length },
+    {
+      label: 'Total',
+      filter: 'todos',
+      value: appointments.length,
+      accent: { bg: 'var(--brand-100)', fg: 'var(--brand-deep)' },
+    },
+    {
+      label: 'Confirmados',
+      filter: 'confirmado',
+      value: appointments.filter((item) => item.effectiveStatus === 'confirmado').length,
+      accent: { bg: 'var(--status-confirmado-bg)', fg: 'var(--status-confirmado-fg)' },
+    },
+    {
+      label: 'Concluídos',
+      filter: 'concluido',
+      value: appointments.filter((item) => item.effectiveStatus === 'concluido').length,
+      accent: { bg: 'var(--status-concluido-bg)', fg: 'var(--status-concluido-fg)' },
+    },
+    {
+      label: 'Pendentes',
+      filter: 'pendente',
+      value: appointments.filter((item) => ['pendente', 'pendente_pagamento'].includes(item.effectiveStatus)).length,
+      accent: { bg: 'var(--status-aguardando_sinal-bg)', fg: 'var(--status-aguardando_sinal-fg)' },
+    },
   ]), [appointments]);
 
   const isBaseEmpty = appointments.length === 0;
@@ -378,23 +400,23 @@ export default function ClientAppointmentsPage() {
       <div
         className="appointments-page tw-mx-auto tw-min-h-full tw-w-full tw-max-w-6xl tw-min-w-0 tw-space-y-5 tw-rounded-2xl tw-bg-transparent tw-px-4 tw-py-4 tw-pb-40 md:tw-px-6 md:tw-pb-0"
       >
-        <section className="tw-rounded-2xl tw-border tw-border-slate-200/80 tw-bg-white/95 tw-p-4 tw-shadow-sm md:tw-p-6">
+        <section className="appointments-hero tw-rounded-2xl tw-p-4 tw-shadow-card md:tw-p-6">
           <div className="tw-flex tw-flex-col tw-gap-4 md:tw-flex-row md:tw-items-end md:tw-justify-between">
             <div>
-              <span className="tw-inline-flex tw-min-h-[28px] tw-items-center tw-rounded-full tw-border tw-border-slate-200 tw-bg-slate-50 tw-px-3 tw-text-[0.68rem] tw-font-semibold tw-uppercase tw-tracking-[0.18em] tw-text-slate-600">
-                Painel do cliente
-              </span>
-              <h1 className="tw-m-0 tw-mt-3 tw-text-2xl tw-font-semibold tw-text-ink">Meus Agendamentos</h1>
-              <p className="tw-m-0 tw-mt-1 tw-text-sm tw-text-slate-500">
-                Acompanhe seus horarios, pagamentos e status em uma visao unificada.
+              <span className="appointments-hero__eyebrow">Painel do cliente</span>
+              <h1 className="tw-m-0 tw-mt-3 tw-text-2xl tw-font-semibold tw-text-ink md:tw-text-[1.75rem]">
+                Meus agendamentos
+              </h1>
+              <p className="tw-m-0 tw-mt-1 tw-text-sm" style={{ color: 'var(--muted-ink, #6B7280)' }}>
+                Acompanhe seus horários, pagamentos e status em uma visão unificada.
               </p>
             </div>
 
             <div className="tw-grid tw-w-full tw-gap-3 sm:tw-grid-cols-2 md:tw-w-auto md:tw-grid-cols-[12rem_16rem_auto]">
-              <label className="tw-flex tw-flex-col tw-gap-1 tw-text-xs tw-font-medium tw-text-slate-500">
+              <label className="appointments-hero__label">
                 Status
                 <select
-                  className="tw-h-10 tw-rounded-xl tw-border tw-border-slate-200 tw-bg-white tw-px-3 tw-text-sm tw-text-slate-700 focus-visible:tw-outline-none focus-visible:tw-ring-2 focus-visible:tw-ring-brand-200 focus-visible:tw-ring-offset-2"
+                  className="appointments-hero__control"
                   value={statusFilter}
                   onChange={(event) => setStatusFilter(event.target.value)}
                   aria-label="Filtrar agendamentos por status"
@@ -407,12 +429,16 @@ export default function ClientAppointmentsPage() {
                 </select>
               </label>
 
-              <label className="tw-flex tw-flex-col tw-gap-1 tw-text-xs tw-font-medium tw-text-slate-500">
+              <label className="appointments-hero__label">
                 Buscar
                 <span className="tw-relative tw-flex tw-items-center">
-                  <IconSearch className="tw-pointer-events-none tw-absolute tw-left-3 tw-h-4 tw-w-4 tw-text-slate-400" aria-hidden="true" />
+                  <IconSearch
+                    className="tw-pointer-events-none tw-absolute tw-left-3 tw-h-4 tw-w-4"
+                    style={{ color: 'var(--muted-ink, #6B7280)' }}
+                    aria-hidden="true"
+                  />
                   <input
-                    className="tw-h-10 tw-w-full tw-rounded-xl tw-border tw-border-slate-200 tw-bg-white tw-pl-9 tw-pr-3 tw-text-sm tw-text-slate-700 tw-placeholder:text-slate-400 focus-visible:tw-outline-none focus-visible:tw-ring-2 focus-visible:tw-ring-brand-200 focus-visible:tw-ring-offset-2"
+                    className="appointments-hero__control tw-w-full tw-pl-9"
                     placeholder="Serviço ou estabelecimento"
                     value={search}
                     onChange={(event) => setSearch(event.target.value)}
@@ -441,11 +467,7 @@ export default function ClientAppointmentsPage() {
                   key={chip.value}
                   type="button"
                   onClick={() => setStatusFilter(chip.value)}
-                  className={`tw-whitespace-nowrap tw-rounded-xl tw-border tw-px-3 tw-py-1.5 tw-text-sm tw-font-semibold tw-transition-colors tw-duration-150 focus-visible:tw-outline-none focus-visible:tw-ring-2 focus-visible:tw-ring-brand-200 focus-visible:tw-ring-offset-2 ${
-                    selected
-                      ? 'tw-border-brand tw-bg-brand tw-text-white'
-                      : 'tw-border-slate-200 tw-bg-white tw-text-slate-600 hover:tw-bg-slate-50'
-                  }`}
+                  className={`appointments-chip${selected ? ' is-active' : ''}`}
                   aria-pressed={selected}
                 >
                   {chip.label}
@@ -455,12 +477,31 @@ export default function ClientAppointmentsPage() {
           </div>
 
           <div className="tw-mt-5 tw-grid tw-gap-3 sm:tw-grid-cols-2 xl:tw-grid-cols-4">
-            {appointmentMetrics.map((metric) => (
-              <div key={metric.label} className="appointments-page__metric tw-flex tw-flex-col tw-gap-2 tw-p-4">
-                <span className="tw-text-[0.72rem] tw-font-semibold tw-uppercase tw-tracking-[0.14em]">{metric.label}</span>
-                <strong className="tw-text-2xl tw-font-semibold">{metric.value}</strong>
-              </div>
-            ))}
+            {appointmentMetrics.map((metric) => {
+              const active = statusFilter === metric.filter;
+              return (
+                <button
+                  key={metric.label}
+                  type="button"
+                  onClick={() => setStatusFilter(metric.filter)}
+                  className={`appointments-metric${active ? ' is-active' : ''}`}
+                  aria-pressed={active}
+                  aria-label={`Filtrar por ${metric.label.toLowerCase()} (${metric.value})`}
+                >
+                  <span className="appointments-metric__top">
+                    <span className="appointments-metric__label">{metric.label}</span>
+                    <span
+                      className="appointments-metric__dot"
+                      style={{ background: metric.accent.bg, borderColor: metric.accent.fg }}
+                      aria-hidden="true"
+                    />
+                  </span>
+                  <strong className="appointments-metric__value" style={{ color: metric.accent.fg }}>
+                    {metric.value}
+                  </strong>
+                </button>
+              );
+            })}
           </div>
         </section>
 
@@ -658,7 +699,7 @@ export default function ClientAppointmentsPage() {
 
       {toast && (
         <div
-          className={`tw-fixed tw-right-4 tw-z-50 tw-max-w-sm tw-rounded-xl tw-border tw-px-4 tw-py-3 tw-shadow-lg tw-relative ${
+          className={`tw-fixed tw-left-4 tw-right-4 tw-z-50 tw-flex tw-items-start tw-gap-3 tw-rounded-xl tw-border tw-px-4 tw-py-3 tw-shadow-soft sm:tw-left-auto sm:tw-max-w-sm ${
             toast.type === 'success'
               ? 'tw-border-emerald-200 tw-bg-emerald-50 tw-text-emerald-800'
               : 'tw-border-rose-200 tw-bg-rose-50 tw-text-rose-800'
@@ -667,14 +708,23 @@ export default function ClientAppointmentsPage() {
           role="status"
           aria-live="polite"
         >
-          <p className="tw-m-0 tw-pr-6 tw-text-sm tw-font-medium">{toast.message}</p>
+          <span aria-hidden="true" className="tw-mt-0.5 tw-flex-none">
+            <svg viewBox="0 0 24 24" className="tw-h-4 tw-w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              {toast.type === 'success'
+                ? <path d="M20 6 9 17l-5-5" />
+                : <><circle cx="12" cy="12" r="9" /><path d="M12 8v5" /><path d="M12 16h.01" /></>}
+            </svg>
+          </span>
+          <p className="tw-m-0 tw-flex-1 tw-text-sm tw-font-medium">{toast.message}</p>
           <button
             type="button"
-            className="tw-absolute tw-right-2 tw-top-1.5 tw-rounded-md tw-border-0 tw-bg-transparent tw-text-lg tw-leading-none tw-text-current focus-visible:tw-outline-none focus-visible:tw-ring-2 focus-visible:tw-ring-slate-300 focus-visible:tw-ring-offset-2"
+            className="tw-flex-none tw-rounded-md tw-border-0 tw-bg-transparent tw-p-0.5 tw-leading-none tw-text-current tw-opacity-60 hover:tw-opacity-100 focus-visible:tw-outline-none focus-visible:tw-ring-2 focus-visible:tw-ring-current focus-visible:tw-ring-offset-2"
             onClick={() => setToast(null)}
             aria-label="Fechar aviso"
           >
-            x
+            <svg viewBox="0 0 24 24" className="tw-h-4 tw-w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+              <path d="M18 6 6 18M6 6l12 12" />
+            </svg>
           </button>
         </div>
       )}

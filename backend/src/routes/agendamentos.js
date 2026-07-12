@@ -27,20 +27,12 @@ import { applyClientLoyaltyBenefitsTx, previewClientLoyaltyBenefits } from '../l
 import { cancelPendingPaymentAppointmentTx, restoreAppointmentLoyaltyBenefitsTx } from '../lib/appointment_loyalty.js'
 import { checkAppointmentSlotCapacityTx, normalizeServiceSlotCapacity } from '../lib/service_capacity.js';
 import { setAudit } from '../lib/audit.js';
+import { normalizePhoneBR, toDigits } from '../lib/phone_br.js';
 
 const router = Router();
 
 const TZ = 'America/Sao_Paulo';
 const FRONTEND_BASE = String(process.env.FRONTEND_BASE_URL || process.env.APP_URL || 'http://localhost:3001').replace(/\/$/, '');
-const toDigits = (s) => String(s || '').replace(/\D/g, ''); // normaliza telefone para apenas digitos
-const normalizePhoneBR = (value) => {
-  let digits = toDigits(value);
-  if (!digits) return '';
-  digits = digits.replace(/^0+/, '');
-  if (digits.startsWith('55')) return digits;
-  if (digits.length >= 10 && digits.length <= 11) return `55${digits}`;
-  return digits;
-};
 const normalizeBirthdate = (value) => {
   if (value === undefined || value === null) return null;
   const raw = String(value).trim();

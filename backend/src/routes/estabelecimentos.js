@@ -58,6 +58,7 @@ import {
 } from "../lib/plans.js";
 import { getLatestSubscriptionForEstabelecimento } from "../lib/subscriptions.js";
 import { setAudit } from "../lib/audit.js";
+import { computeSubscriptionState } from "../lib/subscription_state.js";
 
 
 
@@ -80,6 +81,10 @@ SELECT
   u.cidade,
   u.estado,
   u.avatar_url,
+  u.plan,
+  u.plan_status,
+  u.plan_trial_ends_at,
+  u.plan_active_until,
   r.avg_rating AS rating_average,
   r.total_reviews AS rating_count
 FROM usuarios u
@@ -1070,7 +1075,29 @@ async function listEstablishmentsHandler(req, res) {
     const includeCoords = String((req.query?.coords ?? '1')).toLowerCase() !== '0';
     const payload = await attachCoordinates(pageRows, includeCoords);
 
-    res.json({ items: payload, page, limit, has_more: hasMore });
+    // booking_enabled: o cliente precisa saber JÁ NA LISTA que um estabelecimento com assinatura
+    // vencida não aceita agendamento — antes, isso só aparecia no 402 da última etapa.
+    // Deriva do mesmo computeSubscriptionState que o middleware usa (nada de heurística paralela),
+    // porém sem tocar o banco: loadEffectiveSubscriptionContext faz N queries e ainda escreve.
+    const items = payload.map((row) => {
+      const {
+        plan, plan_status, plan_trial_ends_at, plan_active_until, ...rest
+      } = row;
+      const computed = computeSubscriptionState({
+        planContext: {
+          status: plan_status,
+          trialEndsAt: plan_trial_ends_at,
+          activeUntil: plan_active_until,
+        },
+      });
+      return {
+        ...rest,
+        booking_enabled: Boolean(computed?.coreFeaturesAllowed),
+        subscription_state: computed?.state || null,
+      };
+    });
+
+    res.json({ items, page, limit, has_more: hasMore });
 
   } catch (e) {
 
@@ -1186,9 +1213,23 @@ router.get('/:idOrSlug', async (req, res) => {
 
 
 
+    // Mesma verdade da lista e do middleware: o front não precisa (nem deve) reinventar a regra
+    // de "pode agendar" a partir de plan_status — antes ele fazia isso e divergia do backend.
+    const bookingState = computeSubscriptionState({
+      planContext: {
+        status: est?.plan_status,
+        trialEndsAt: est?.plan_trial_ends_at,
+        activeUntil: est?.plan_active_until,
+      },
+    });
+
     const payload = {
 
       ...est,
+
+      booking_enabled: Boolean(bookingState?.coreFeaturesAllowed),
+
+      subscription_state: bookingState?.state || null,
 
       plan_context: serializePlanContext(planContext),
 

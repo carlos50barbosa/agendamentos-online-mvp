@@ -8,9 +8,25 @@ export function onlyDigits(value = '') {
   return String(value ?? '').replace(/\D/g, '');
 }
 
+/**
+ * Dígitos locais (DDD + número), sem o código do país.
+ *
+ * O telefone é gravado em E.164 (5511999998888) no cadastro, no booking e no bot; quem editou o
+ * perfil pode ter 11 dígitos. Aqui os dois casos convergem para o formato local.
+ *
+ * O 55 só é removido acima de 11 dígitos: 55 TAMBÉM É DDD (Santa Maria/RS), e um número local
+ * nunca passa de 11 dígitos — cortar "55" de um (55) 99999-8888 apagaria o DDD de quem é de lá.
+ */
+export function onlyLocalDigits(value = '') {
+  let digits = onlyDigits(value);
+  if (digits.length > 11 && digits.startsWith('55')) digits = digits.slice(2);
+  if (digits.length > 11) digits = digits.slice(-11);
+  return digits;
+}
+
 /** Telefone BR: (99) 99999-9999 (celular) ou (99) 9999-9999 (fixo). */
 export function formatBRPhone(value = '') {
-  const digits = onlyDigits(value).slice(0, 11);
+  const digits = onlyLocalDigits(value);
   if (digits.length <= 2) return digits;
   if (digits.length <= 6) return `(${digits.slice(0, 2)}) ${digits.slice(2)}`;
   if (digits.length <= 10) return `(${digits.slice(0, 2)}) ${digits.slice(2, 6)}-${digits.slice(6)}`;

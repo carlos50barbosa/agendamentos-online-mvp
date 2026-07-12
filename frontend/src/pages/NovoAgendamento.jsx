@@ -2403,6 +2403,11 @@ const EstablishmentCardLegacy = ({ est, selected, onSelect }) => {
 
 const EstablishmentCard = ({ est, selected, onSelect, distanceKm = null }) => {
 
+  // O backend diz se o estabelecimento aceita agendamento (assinatura ativa ou em teste). Antes o
+  // cliente só descobria que não dava no ÚLTIMO passo, ao confirmar, e perdia todo o caminho.
+  // `booking_enabled === false` só quando o backend afirma isso: ausência do campo não bloqueia.
+  const bookingDisabled = est?.booking_enabled === false;
+
   const name = displayEstablishmentName(est) || `Estabelecimento #${est?.id || ''}`;
 
   const address = formatAddress(est);
@@ -2473,6 +2478,8 @@ const EstablishmentCard = ({ est, selected, onSelect, distanceKm = null }) => {
 
       event.preventDefault();
 
+      if (bookingDisabled) return;
+
       onSelect(est);
 
     }
@@ -2505,6 +2512,8 @@ const EstablishmentCard = ({ est, selected, onSelect, distanceKm = null }) => {
 
     event.stopPropagation();
 
+    if (bookingDisabled) return;
+
     onSelect(est);
 
   };
@@ -2513,19 +2522,41 @@ const EstablishmentCard = ({ est, selected, onSelect, distanceKm = null }) => {
 
     <article
 
-      className={`establishment-card${selected ? ' establishment-card--selected' : ''}`}
+      className={`establishment-card${selected ? ' establishment-card--selected' : ''}${bookingDisabled ? ' establishment-card--disabled' : ''}`}
 
       role="button"
 
-      tabIndex={0}
+      tabIndex={bookingDisabled ? -1 : 0}
 
       aria-pressed={selected}
 
-      onClick={() => onSelect(est)}
+      aria-disabled={bookingDisabled || undefined}
+
+      onClick={() => { if (!bookingDisabled) onSelect(est); }}
 
       onKeyDown={handleKeyDown}
 
     >
+
+      {bookingDisabled ? (
+
+        <p className="establishment-card__unavailable" role="status">
+
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
+
+            <circle cx="12" cy="12" r="9" />
+
+            <path d="M12 7v5" />
+
+            <path d="M12 16h.01" />
+
+          </svg>
+
+          Não está aceitando agendamentos no momento.
+
+        </p>
+
+      ) : null}
 
       <div className="establishment-card__top">
 
@@ -2665,9 +2696,19 @@ const EstablishmentCard = ({ est, selected, onSelect, distanceKm = null }) => {
 
         )}
 
-        <button type="button" className="btn btn--primary establishment-card__cta" onClick={handlePrimaryAction}>
+        <button
 
-          Ver horários
+          type="button"
+
+          className="btn btn--primary establishment-card__cta"
+
+          onClick={handlePrimaryAction}
+
+          disabled={bookingDisabled}
+
+        >
+
+          {bookingDisabled ? 'Indisponível' : 'Ver horários'}
 
         </button>
 
@@ -3788,7 +3829,15 @@ export default function NovoAgendamento() {
     ['unpaid', 'expired', 'canceled', 'cancelled'].includes(planStatus) ||
     ['unpaid', 'expired', 'canceled', 'cancelled'].includes(subscriptionStatus);
 
-  const bookingBlocked = subscriptionBlocked || (!subscriptionActive && (planExpired || trialExpired));
+  // O backend agora devolve booking_enabled, calculado pela MESMA regra que o middleware usa para
+  // recusar o POST (computeSubscriptionState). Quando ele vem, mandamos nele: a heurística local
+  // abaixo divergia — tratava past_due/pending_pix como liberado, enquanto o backend só libera
+  // dentro da janela de graça. Era essa divergência que produzia o bloqueio-surpresa no confirm.
+  const bookingEnabledFromApi = selectedExtras?.booking_enabled;
+
+  const bookingBlocked = typeof bookingEnabledFromApi === 'boolean'
+    ? !bookingEnabledFromApi
+    : (subscriptionBlocked || (!subscriptionActive && (planExpired || trialExpired)));
 
   const bookingBlockedMessage = 'Agendamentos indisponíveis no momento. Entre em contato com o estabelecimento.';
 
@@ -4711,6 +4760,8 @@ export default function NovoAgendamento() {
 
             plan_context: data?.plan_context || null,
 
+            booking_enabled: data?.booking_enabled,
+
           },
 
         }));
@@ -5606,7 +5657,12 @@ useEffect(() => {
         showToast("success", "Agendado com sucesso!");
       }
     } catch (e) {
-      if (e?.data?.error === 'mp_not_connected' || e?.data?.error === 'mp_not_connected_for_deposit') {
+      if (e?.data?.error === 'subscription_access_blocked') {
+        // Rede de segurança: com booking_enabled na etapa 1 isso não deveria mais acontecer, mas a
+        // assinatura pode vencer no meio do fluxo. Mensagem clara em vez do erro cru do backend.
+        showToast('error', bookingBlockedMessage);
+        setModal((p) => ({ ...p, isOpen: false }));
+      } else if (e?.data?.error === 'mp_not_connected' || e?.data?.error === 'mp_not_connected_for_deposit') {
         showToast('error', 'Estabelecimento ainda não configurou recebimento do sinal.');
       } else if (e?.data?.error === 'plan_limit_agendamentos') {
         const details = e?.data?.details || {};
