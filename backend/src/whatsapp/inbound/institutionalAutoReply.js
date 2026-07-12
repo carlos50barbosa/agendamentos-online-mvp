@@ -8,7 +8,7 @@ const INSTITUTIONAL_AUTO_REPLY_TEXT = [
   '',
   'Para marcar, reagendar ou cancelar, use nosso site.',
   '',
-  'Se tiver qualquer d\u00favida, chamar no WhatsApp: 11915155349 ou acesse: https://agendamentosonline.com/ajuda.',
+  'Se tiver qualquer d\u00favida, chamar no WhatsApp: 11915155349 ou acesse: https://agenda0.com.br/ajuda.',
   '',
   'Obrigado!',
 ].join('\n');

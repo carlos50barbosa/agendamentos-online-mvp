@@ -80,8 +80,8 @@ const WHATSAPP_LIMIT_NOTICE = 'Ao atingir o limite de WhatsApp, os avisos contin
 const WHATSAPP_TOOLTIP = {
   title: 'Mensagens automáticas',
   items: [
-    'Usadas para confirmações, lembretes e avisos do agendamento.',
-    'Cada agendamento pode enviar até 5 mensagens automáticas.',
+    'Cada agendamento envia confirmação e lembretes automáticos (até 5 mensagens por agendamento).',
+    'A franquia é mensal e renova a cada ciclo.',
     WHATSAPP_LIMIT_NOTICE,
   ],
 };
@@ -111,7 +111,7 @@ const PRICING_PLANS = [
       { key: 'starter-gallery', label: 'Galeria pública com até 5 imagens' },
       {
         key: 'starter-whatsapp',
-        label: '250 mensagens automáticas de WhatsApp por mês',
+        label: '250 mensagens de WhatsApp/mês (~100 agendamentos com confirmação + lembrete)',
         tooltip: WHATSAPP_TOOLTIP,
       },
       { key: 'starter-reports', label: 'Relatórios básicos' },
@@ -135,7 +135,7 @@ const PRICING_PLANS = [
       { key: 'pro-gallery', label: 'Galeria pública com até 15 imagens' },
       {
         key: 'pro-whatsapp',
-        label: '500 mensagens automáticas de WhatsApp por mês',
+        label: '500 mensagens de WhatsApp/mês (~200 agendamentos com confirmação + lembrete)',
         tooltip: WHATSAPP_TOOLTIP,
       },
       { key: 'pro-reports', label: 'Relatórios avançados com filtros por período, serviço e profissional' },
@@ -159,7 +159,7 @@ const PRICING_PLANS = [
       { key: 'premium-gallery', label: 'Galeria pública sem limite de imagens' },
       {
         key: 'premium-whatsapp',
-        label: '1.500 mensagens automáticas de WhatsApp por mês',
+        label: '1.500 mensagens de WhatsApp/mês (~600 agendamentos com confirmação + lembrete)',
         tooltip: WHATSAPP_TOOLTIP,
       },
       { key: 'premium-reports', label: 'Relatórios completos para alto volume' },
@@ -309,7 +309,7 @@ export default function Planos() {
       <section className="hero">
         <div className="hero__content">
           <span className="tag tag--accent">Planos para estabelecimentos</span>
-          <h1>Planos simples, limites claros</h1>
+          <h1>Planos simples, com WhatsApp automático</h1>
           <p>Cartão de crédito é o formato principal da assinatura com renovação automática. O PIX segue como alternativa manual para contratar, renovar, reativar e cobrir contingências.</p>
           <div className="hero__badge-row">
             <span className="hero__badge">Cartão com renovação automática</span>
@@ -334,8 +334,8 @@ export default function Planos() {
         <div className="hero__illustration" aria-hidden>
           <div className="hero__pulse" />
           <div className="hero__card hero__card--primary">
-            <strong>WhatsApp mensal</strong>
-            <span>250 / 500 / 1.500 mensagens por mês</span>
+            <strong>WhatsApp automático</strong>
+            <span>Confirmações e lembretes por agendamento</span>
           </div>
           <div className="hero__card hero__card--secondary">
             <strong>Profissionais</strong>
@@ -512,7 +512,6 @@ export default function Planos() {
           </div>
           <div className="pricing-note" role="note">
             <strong>WhatsApp:</strong> {WHATSAPP_LIMIT_NOTICE}
-            <span>Limite de até 5 mensagens por agendamento.</span>
           </div>
           <section className="pricing-included" aria-labelledby="included-plans-heading">
             <div className="pricing-included__header">

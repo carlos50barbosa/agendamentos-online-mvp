@@ -386,7 +386,7 @@ export default function LandingImplantacao() {
                     <img src="/static/logo-v3.png" alt="" />
                     <div>
                       <strong>Studio Bella</strong>
-                      <span>agenda.agendamentosonline.com/studiobella</span>
+                      <span>agenda0.com.br/studiobella</span>
                     </div>
                   </div>
                   <span className="implantacao-status">

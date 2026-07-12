@@ -1317,6 +1317,32 @@ router.put('/:id/profile', auth, isEstabelecimento, async (req, res) => {
       return res.status(400).json({ error: 'invalid_profile_payload', details: errors });
     }
 
+    // Save PARCIAL: cada bloco do perfil público tem menu próprio. Os campos que este request
+    // NÃO enviou são preservados com o valor atual do banco (evita um menu zerar os outros).
+    const has = (k) => Object.prototype.hasOwnProperty.call(req.body || {}, k);
+    const [[cur]] = await pool.query(
+      `SELECT sobre, contato_telefone, site_url, instagram_url, facebook_url, linkedin_url,
+              youtube_url, tiktok_url, accent_color, accent_strong_color, horarios_json
+         FROM estabelecimento_perfis WHERE estabelecimento_id=? LIMIT 1`,
+      [estabelecimentoId]
+    );
+    if (cur) {
+      const keep = (field, ...bodyKeys) => {
+        if (!bodyKeys.some(has)) values[field] = cur[field] ?? null;
+      };
+      keep('sobre', 'sobre');
+      keep('contato_telefone', 'contato_telefone');
+      keep('site_url', 'site_url');
+      keep('instagram_url', 'instagram_url');
+      keep('facebook_url', 'facebook_url');
+      keep('linkedin_url', 'linkedin_url');
+      keep('youtube_url', 'youtube_url');
+      keep('tiktok_url', 'tiktok_url');
+      keep('accent_color', 'accent_color', 'brand_color', 'cor_primaria');
+      keep('accent_strong_color', 'accent_strong_color', 'secondary_color', 'cor_secundaria');
+      keep('horarios_json', 'horarios', 'horarios_json', 'horarios_raw', 'horarios_text');
+    }
+
     await pool.query(
       `INSERT INTO estabelecimento_perfis (
          estabelecimento_id, sobre, contato_telefone,
@@ -1365,6 +1391,48 @@ router.put('/:id/profile', auth, isEstabelecimento, async (req, res) => {
   } catch (err) {
     console.error('PUT /establishments/:id/profile', err);
     return res.status(500).json({ error: 'profile_save_failed' });
+  }
+});
+
+// Horários de funcionamento têm menu próprio nas Configurações; este save toca SÓ em horarios_json,
+// preservando os demais campos do perfil (sobre, redes, cores).
+router.put('/:id/hours', auth, isEstabelecimento, async (req, res) => {
+  try {
+    const estabelecimentoId = Number(req.params.id);
+    if (!Number.isFinite(estabelecimentoId) || req.user.id !== estabelecimentoId) {
+      return res.status(403).json({ error: 'forbidden' });
+    }
+
+    const est = await ensureEstabelecimento(estabelecimentoId);
+    if (!est) return res.status(404).json({ error: 'not_found' });
+
+    const horariosInput =
+      req.body?.horarios ??
+      req.body?.horarios_json ??
+      req.body?.horarios_raw ??
+      (typeof req.body?.horarios_text === 'string' ? req.body.horarios_text : null);
+    const horarios_json = sanitizeHorariosInput(horariosInput);
+
+    await pool.query(
+      `INSERT INTO estabelecimento_perfis (estabelecimento_id, horarios_json)
+       VALUES (?, ?)
+       ON DUPLICATE KEY UPDATE horarios_json=VALUES(horarios_json)`,
+      [estabelecimentoId, horarios_json]
+    );
+
+    const [profileRows] = await pool.query(
+      `SELECT estabelecimento_id, sobre, contato_telefone,
+              site_url, instagram_url, facebook_url, linkedin_url,
+              youtube_url, tiktok_url, accent_color, accent_strong_color, horarios_json, updated_at
+         FROM estabelecimento_perfis
+        WHERE estabelecimento_id=? LIMIT 1`,
+      [estabelecimentoId]
+    );
+    const profile = normalizeProfile(est, profileRows?.[0] || null);
+    return res.json({ ok: true, profile });
+  } catch (err) {
+    console.error('PUT /establishments/:id/hours', err);
+    return res.status(500).json({ error: 'hours_save_failed' });
   }
 });
 
@@ -2323,6 +2391,21 @@ router.put('/:id/messages', auth, isEstabelecimento, async (req, res) => {
 
 
 
+// Slugs reservados: o link público vive na raiz (agenda0.com.br/<slug>), então um slug igual
+// a uma rota do app (ex.: "login") ou a um caminho de infra (ex.: "api") sequestraria a rota.
+const RESERVED_SLUGS = new Set([
+  // rotas do app
+  'admin-tools', 'agenda-nova', 'agendar', 'ajuda', 'assinatura', 'cadastro', 'cliente', 'clientes',
+  'configuracao-inicial', 'configuracoes', 'contato', 'definir-senha', 'divulgacao', 'estab',
+  'financeiro', 'implantacao', 'link-phone', 'loading', 'login', 'login-cliente',
+  'login-estabelecimento', 'novo', 'novo-agendamento', 'planos', 'politica-privacidade',
+  'profissionais', 'recuperar-senha', 'relatorios', 'servicos', 'sinal', 'termos', 'whatsappbusiness',
+  // infra e reservas futuras
+  'api', 'admin', 'app', 'assets', 'auth', 'blog', 'checkout', 'conta', 'dashboard', 'favicon',
+  'health', 'index', 'pagamento', 'pagamentos', 'painel', 'perfil', 'privacidade', 'public',
+  'robots', 'sitemap', 'sobre', 'static', 'suporte', 'uploads', 'webhook', 'webhooks', 'www',
+]);
+
 // Atualizar slug do estabelecimento
 
 router.put('/:id/slug', auth, isEstabelecimento, async (req, res) => {
@@ -2337,8 +2420,12 @@ router.put('/:id/slug', auth, isEstabelecimento, async (req, res) => {
 
     if (!/^([a-z0-9]+(?:-[a-z0-9]+)*)$/.test(slugRaw) || slugRaw.length < 3 || slugRaw.length > 160) {
 
-      return res.status(400).json({ error: 'invalid_slug', message: 'Use apenas letras, numeros e hifens. Min 3, max 160.' });
+      return res.status(400).json({ error: 'invalid_slug', message: 'Use apenas letras, números e hífens. Mínimo 3, máximo 160 caracteres.' });
 
+    }
+
+    if (RESERVED_SLUGS.has(slugRaw)) {
+      return res.status(409).json({ error: 'slug_reserved', message: 'Esse link é reservado pelo sistema. Escolha outro.' });
     }
 
     // checa unicidade
@@ -2867,7 +2954,7 @@ router.post('/:id/images', auth, isEstabelecimento, async (req, res) => {
 
       if (err?.code === 'GALLERY_IMAGE_INVALID') {
 
-        return res.status(400).json({ error: 'gallery_image_invalid', message: 'Envie PNG, JPG ou WEBP validos.' });
+        return res.status(400).json({ error: 'gallery_image_invalid', message: 'Envie PNG, JPG ou WEBP válidos.' });
 
       }
 

@@ -9,6 +9,10 @@ import {
   shiftLocalDate,
   fillDailySeries,
   normalizeLeadTimeRows,
+  buildServiceItemJoin,
+  buildCustomerMixQuery,
+  summarizeTotals,
+  buildInsights,
 } from '../lib/reporting.js';
 
 const router = Router();
@@ -25,8 +29,11 @@ const TZ_OFFSET_MIN = EST_TZ_OFFSET_MIN;
 
 const STATUS_CONFIRMED_SQL = "a.status IN ('confirmado','concluido')";
 const STATUS_PLANNED_SQL = "a.status IN ('confirmado','pendente','concluido')";
-const STATUS_CONCLUDED_SQL = "(a.status='concluido' OR (a.status='confirmado' AND a.fim < NOW()))";
+// a.inicio/a.fim são gravados em UTC (ver EST_TZ_OFFSET_MIN); NOW() seguiria o fuso do MySQL.
+const STATUS_CONCLUDED_SQL = "(a.status='concluido' OR (a.status='confirmado' AND a.fim < UTC_TIMESTAMP()))";
 const STATUS_CANCELED_SQL = "a.status='cancelado'";
+const STATUS_PENDING_SQL = "a.status='pendente'";
+const STATUS_AWAITING_DEPOSIT_SQL = "a.status='pendente_pagamento'";
 const NO_SHOW_SQL = 'COALESCE(a.no_show,0)=1';
 const NOT_NO_SHOW_SQL = 'COALESCE(a.no_show,0)=0';
 
@@ -68,11 +75,9 @@ function buildStatusFilterClause(statuses) {
   const set = new Set(statuses);
   const clauses = [];
   if (set.has('confirmado')) clauses.push("a.status='confirmado'");
-  if (set.has('pendente')) clauses.push("a.status='pendente'");
-  if (set.has('cancelado')) clauses.push("a.status='cancelado'");
-  if (set.has('concluido')) {
-    clauses.push("(a.status='concluido' OR (a.status='confirmado' AND a.fim < NOW()))");
-  }
+  if (set.has('pendente')) clauses.push(STATUS_PENDING_SQL);
+  if (set.has('cancelado')) clauses.push(STATUS_CANCELED_SQL);
+  if (set.has('concluido')) clauses.push(STATUS_CONCLUDED_SQL);
   if (!clauses.length) return null;
   return `(${clauses.join(' OR ')})`;
 }
@@ -94,6 +99,21 @@ function getLocalToday(tzOffsetMin) {
   };
 }
 
+// Um dia local [00:00, 23:59:59.999] convertido para os limites UTC gravados em a.inicio.
+function toUtcBounds(startLocal, endLocal, tzOffsetMin) {
+  const startUtcDate = makeUtcFromLocalYMDHM(startLocal.year, startLocal.month, startLocal.day, 0, 0, tzOffsetMin);
+  const endUtcDate = makeUtcFromLocalYMDHM(endLocal.year, endLocal.month, endLocal.day, 23, 59, tzOffsetMin);
+  endUtcDate.setUTCSeconds(59, 999);
+  return {
+    startLocal,
+    endLocal,
+    startUtcDate,
+    endUtcDate,
+    startUtc: formatDateTimeUtc(startUtcDate),
+    endUtc: formatDateTimeUtc(endUtcDate),
+  };
+}
+
 function resolveRange({ start, end, range, allowCustom, tzOffsetMin }) {
   let startLocal = null;
   let endLocal = null;
@@ -101,7 +121,7 @@ function resolveRange({ start, end, range, allowCustom, tzOffsetMin }) {
     startLocal = parseLocalDate(start);
     endLocal = parseLocalDate(end);
     if (!startLocal || !endLocal) {
-      return { error: 'invalid_range', message: 'Datas invalidas no filtro.' };
+      return { error: 'invalid_range', message: 'Datas inválidas no filtro.' };
     }
   } else if (allowCustom && (start || end)) {
     return { error: 'invalid_range', message: 'Informe data inicial e final.' };
@@ -111,33 +131,26 @@ function resolveRange({ start, end, range, allowCustom, tzOffsetMin }) {
     startLocal = shiftLocalDate(endLocal, -(days - 1));
   }
 
-  const startUtc = makeUtcFromLocalYMDHM(startLocal.year, startLocal.month, startLocal.day, 0, 0, tzOffsetMin);
-  const endUtc = makeUtcFromLocalYMDHM(endLocal.year, endLocal.month, endLocal.day, 23, 59, tzOffsetMin);
-  endUtc.setUTCSeconds(59, 999);
+  const current = toUtcBounds(startLocal, endLocal, tzOffsetMin);
 
-  const startUtcText = formatDateTimeUtc(startUtc);
-  const endUtcText = formatDateTimeUtc(endUtc);
-
-  if (!startUtcText || !endUtcText) {
-    return { error: 'invalid_range', message: 'Datas invalidas no filtro.' };
+  if (!current.startUtc || !current.endUtc) {
+    return { error: 'invalid_range', message: 'Datas inválidas no filtro.' };
   }
 
-  if (startUtc.getTime() > endUtc.getTime()) {
+  if (current.startUtcDate.getTime() > current.endUtcDate.getTime()) {
     return { error: 'invalid_range', message: 'Data inicial maior que a data final.' };
   }
 
   const days = Math.round((Date.UTC(endLocal.year, endLocal.month - 1, endLocal.day) -
     Date.UTC(startLocal.year, startLocal.month - 1, startLocal.day)) / (24 * 60 * 60 * 1000)) + 1;
 
-  return {
-    startLocal,
-    endLocal,
-    startUtc: startUtcText,
-    endUtc: endUtcText,
-    startUtcDate: startUtc,
-    endUtcDate: endUtc,
+  // Período anterior: mesma duração, imediatamente antes. É a régua dos deltas dos KPIs.
+  const previous = {
+    ...toUtcBounds(shiftLocalDate(startLocal, -days), shiftLocalDate(startLocal, -1), tzOffsetMin),
     days,
   };
+
+  return { ...current, days, previous };
 }
 
 function buildBaseFilters({
@@ -183,6 +196,38 @@ function buildBaseFilters({
   };
 }
 
+// Excel pt-BR usa ';' como separador de lista e ',' como decimal. Com ',' o arquivo inteiro
+// cai na coluna A e o valor vira texto.
+const CSV_SEPARATOR = ';';
+
+const CSV_STATUS_LABELS = {
+  confirmado: 'Confirmado',
+  pendente: 'Pendente',
+  pendente_pagamento: 'Aguardando sinal',
+  cancelado: 'Cancelado',
+  concluido: 'Concluído',
+};
+
+// Mesma consulta de totais para o período atual e para o anterior — os deltas só significam
+// alguma coisa se as duas janelas forem medidas pela mesma régua.
+function buildTotalsSql(itemJoinSql, whereClause) {
+  return `
+      SELECT
+        COUNT(DISTINCT a.id) AS agendados_total,
+        COUNT(DISTINCT CASE WHEN ${STATUS_CONFIRMED_SQL} THEN a.id END) AS confirmados_total,
+        COUNT(DISTINCT CASE WHEN ${STATUS_CONCLUDED_SQL} AND ${NOT_NO_SHOW_SQL} THEN a.id END) AS concluidos_total,
+        COUNT(DISTINCT CASE WHEN ${STATUS_CANCELED_SQL} THEN a.id END) AS cancelados_total,
+        COUNT(DISTINCT CASE WHEN ${STATUS_PENDING_SQL} THEN a.id END) AS pendentes_total,
+        COUNT(DISTINCT CASE WHEN ${STATUS_AWAITING_DEPOSIT_SQL} THEN a.id END) AS aguardando_sinal_total,
+        COUNT(DISTINCT CASE WHEN ${NO_SHOW_SQL} THEN a.id END) AS no_show_total,
+        COALESCE(SUM(CASE WHEN ${STATUS_PLANNED_SQL} AND ${NOT_NO_SHOW_SQL} THEN ai.preco_snapshot ELSE 0 END), 0) AS receita_prevista,
+        COALESCE(SUM(CASE WHEN ${STATUS_CONCLUDED_SQL} AND ${NOT_NO_SHOW_SQL} THEN ai.preco_snapshot ELSE 0 END), 0) AS receita_concluida,
+        COALESCE(SUM(CASE WHEN ${STATUS_CANCELED_SQL} OR ${NO_SHOW_SQL} THEN ai.preco_snapshot ELSE 0 END), 0) AS receita_perdida
+      FROM agendamentos a
+      ${itemJoinSql}
+      WHERE ${whereClause}`;
+}
+
 function buildCsvHeaders() {
   return [
     { key: 'data', label: 'Data' },
@@ -192,10 +237,25 @@ function buildCsvHeaders() {
     { key: 'inicio', label: 'Início' },
     { key: 'fim', label: 'Fim' },
     { key: 'status', label: 'Status' },
+    // no_show é gravado junto de status='concluido'; sem esta coluna o export não os separa.
+    { key: 'no_show', label: 'No-show' },
     { key: 'valor', label: 'Valor (BRL)' },
     { key: 'origem', label: 'Origem' },
     { key: 'criado_em', label: 'Criado em' },
   ];
+}
+
+function formatCsvCell(row, key) {
+  if (key === 'valor') {
+    return (Number(row.valor_centavos || 0) / 100).toFixed(2).replace('.', ',');
+  }
+  if (key === 'status') {
+    return CSV_STATUS_LABELS[row.status] || row.status;
+  }
+  if (key === 'no_show') {
+    return Number(row.no_show || 0) === 1 ? 'Sim' : 'Não';
+  }
+  return row[key];
 }
 
 function escapeCsv(value) {
@@ -297,13 +357,13 @@ async function handleOverview(req, res) {
     }
 
     const { estId, allowAdvanced, rangeData, filters, planPayload } = context;
-    const { startLocal, endLocal, startUtc, endUtc, startUtcDate, endUtcDate, days } = rangeData;
+    const { startLocal, endLocal, startUtc, endUtc, startUtcDate, endUtcDate, days, previous } = rangeData;
     const { statusClause, statusFilters, serviceIds, profissionalId, origem } = filters;
 
-    const baseFilters = buildBaseFilters({
+    const filtersFor = (windowStartUtc, windowEndUtc) => buildBaseFilters({
       estId,
-      startUtc,
-      endUtc,
+      startUtc: windowStartUtc,
+      endUtc: windowEndUtc,
       statusClause,
       profissionalId,
       origem,
@@ -311,56 +371,13 @@ async function handleOverview(req, res) {
       useServiceExists: true,
     });
 
-    const totalsSql = `
-      SELECT
-        COUNT(DISTINCT a.id) AS agendados_total,
-        COUNT(DISTINCT CASE WHEN ${STATUS_CONFIRMED_SQL} THEN a.id END) AS confirmados_total,
-        COUNT(DISTINCT CASE WHEN ${STATUS_CONCLUDED_SQL} AND ${NOT_NO_SHOW_SQL} THEN a.id END) AS concluidos_total,
-        COUNT(DISTINCT CASE WHEN ${STATUS_CANCELED_SQL} THEN a.id END) AS cancelados_total,
-        COUNT(DISTINCT CASE WHEN ${NO_SHOW_SQL} THEN a.id END) AS no_show_total,
-        COALESCE(SUM(CASE WHEN ${STATUS_PLANNED_SQL} AND ${NOT_NO_SHOW_SQL} THEN ai.preco_snapshot ELSE 0 END), 0) AS receita_prevista,
-        COALESCE(SUM(CASE WHEN ${STATUS_CONCLUDED_SQL} AND ${NOT_NO_SHOW_SQL} THEN ai.preco_snapshot ELSE 0 END), 0) AS receita_concluida,
-        COALESCE(SUM(CASE WHEN ${STATUS_CANCELED_SQL} OR ${NO_SHOW_SQL} THEN ai.preco_snapshot ELSE 0 END), 0) AS receita_perdida
-      FROM agendamentos a
-      LEFT JOIN agendamento_itens ai ON ai.agendamento_id = a.id
-      WHERE ${baseFilters.whereClause}`;
+    const baseFilters = filtersFor(startUtc, endUtc);
+    // Restringe os itens aos serviços filtrados, para que a receita dos KPIs bata com a
+    // da tabela "Por serviço" (ver buildServiceItemJoin).
+    const itemJoin = buildServiceItemJoin(serviceIds);
 
-    const [[totalsRow]] = await pool.query(totalsSql, baseFilters.params);
-
-    // Totais por status (base para KPIs principais).
-    const totals = {
-      agendados_total: Number(totalsRow?.agendados_total || 0),
-      confirmados_total: Number(totalsRow?.confirmados_total || 0),
-      concluidos_total: Number(totalsRow?.concluidos_total || 0),
-      cancelados_total: Number(totalsRow?.cancelados_total || 0),
-      no_show_total: Number(totalsRow?.no_show_total || 0),
-    };
-
-    const revenuePrevista = Number(totalsRow?.receita_prevista || 0);
-    const revenueConcluida = Number(totalsRow?.receita_concluida || 0);
-    const revenuePerdida = Number(totalsRow?.receita_perdida || 0);
-
-    const confirmadosBase = Math.max(totals.confirmados_total - totals.no_show_total, 0);
-    const attendanceBase = totals.no_show_total > 0
-      ? totals.no_show_total + totals.concluidos_total
-      : totals.confirmados_total;
-
-    const rates = {
-      // Taxa de confirmacao: confirmados / total agendado
-      taxa_confirmacao: totals.agendados_total ? totals.confirmados_total / totals.agendados_total : 0,
-      taxa_cancelamento: totals.agendados_total ? totals.cancelados_total / totals.agendados_total : 0,
-      // Taxa de comparecimento: concluidos / (concluidos + no_show) quando houver no_show
-      taxa_comparecimento: attendanceBase ? totals.concluidos_total / attendanceBase : 0,
-    };
-
-    // Receitas em centavos (prevista: confirmados+pendentes; concluida: realizados; perdida: cancelados+no_show).
-    const revenue = {
-      // Valores em centavos para evitar flutuacao
-      prevista: revenuePrevista,
-      concluida: revenueConcluida,
-      perdida: revenuePerdida,
-      ticket_medio: confirmadosBase ? Math.round(revenuePrevista / Math.max(confirmadosBase, 1)) : 0,
-    };
+    // Período anterior: mesmos filtros, janela deslocada.
+    const previousFilters = filtersFor(previous.startUtc, previous.endUtc);
 
     const dailySql = `
       SELECT
@@ -369,15 +386,16 @@ async function handleOverview(req, res) {
         COUNT(DISTINCT CASE WHEN ${STATUS_CANCELED_SQL} THEN a.id END) AS cancelados,
         COUNT(DISTINCT CASE WHEN ${STATUS_CONCLUDED_SQL} AND ${NOT_NO_SHOW_SQL} THEN a.id END) AS concluidos,
         COUNT(DISTINCT CASE WHEN ${NO_SHOW_SQL} THEN a.id END) AS no_show,
-        COALESCE(SUM(CASE WHEN ${STATUS_PLANNED_SQL} AND ${NOT_NO_SHOW_SQL} THEN ai.preco_snapshot ELSE 0 END), 0) AS receita_centavos
+        COALESCE(SUM(CASE WHEN ${STATUS_PLANNED_SQL} AND ${NOT_NO_SHOW_SQL} THEN ai.preco_snapshot ELSE 0 END), 0) AS receita_prevista,
+        COALESCE(SUM(CASE WHEN ${STATUS_CONCLUDED_SQL} AND ${NOT_NO_SHOW_SQL} THEN ai.preco_snapshot ELSE 0 END), 0) AS receita_concluida
       FROM agendamentos a
-      LEFT JOIN agendamento_itens ai ON ai.agendamento_id = a.id
+      ${itemJoin.sql}
       WHERE ${baseFilters.whereClause}
       GROUP BY dia
       ORDER BY dia`;
-    const [dailyRows] = await pool.query(dailySql, [TZ_OFFSET_MIN, ...baseFilters.params]);
-    const seriesDaily = fillDailySeries(dailyRows || [], startLocal, endLocal);
 
+    // A tabela por serviço agrega no nível do item (uma linha por serviço), então o recorte
+    // por serviço entra no WHERE em vez do EXISTS usado nas demais.
     const serviceFilters = buildBaseFilters({
       estId,
       startUtc,
@@ -404,47 +422,27 @@ async function handleOverview(req, res) {
         COUNT(DISTINCT CASE WHEN ${STATUS_CONFIRMED_SQL} THEN a.id END) AS confirmados,
         COUNT(DISTINCT CASE WHEN ${STATUS_CONCLUDED_SQL} AND ${NOT_NO_SHOW_SQL} THEN a.id END) AS concluidos,
         COUNT(DISTINCT CASE WHEN ${STATUS_CANCELED_SQL} THEN a.id END) AS cancelados,
-        COALESCE(SUM(CASE WHEN ${STATUS_PLANNED_SQL} AND ${NOT_NO_SHOW_SQL} THEN ai.preco_snapshot ELSE 0 END), 0) AS receita_centavos
+        COALESCE(SUM(CASE WHEN ${STATUS_PLANNED_SQL} AND ${NOT_NO_SHOW_SQL} THEN ai.preco_snapshot ELSE 0 END), 0) AS receita_prevista,
+        COALESCE(SUM(CASE WHEN ${STATUS_CONCLUDED_SQL} AND ${NOT_NO_SHOW_SQL} THEN ai.preco_snapshot ELSE 0 END), 0) AS receita_concluida
       FROM agendamentos a
       JOIN agendamento_itens ai ON ai.agendamento_id = a.id
       JOIN servicos s ON s.id = ai.servico_id
       WHERE ${serviceWhere}
       GROUP BY s.id, s.nome
-      ORDER BY total DESC, receita_centavos DESC, s.nome ASC
+      ORDER BY total DESC, receita_prevista DESC, s.nome ASC
       ${serviceIds.length ? '' : 'LIMIT 10'}`;
-    const [servicesRows] = await pool.query(servicesSql, serviceParams);
-
-    const topServices = (servicesRows || []).map((row) => {
-      const confirmados = Number(row.confirmados || 0);
-      const receita = Number(row.receita_centavos || 0);
-      return {
-        servico_id: row.servico_id,
-        nome: row.nome,
-        total: Number(row.total || 0),
-        confirmados,
-        concluidos: Number(row.concluidos || 0),
-        cancelados: Number(row.cancelados || 0),
-        receita,
-        ticket_medio: confirmados ? Math.round(receita / Math.max(confirmados, 1)) : 0,
-      };
-    });
 
     const dowSql = `
       SELECT
         MOD(WEEKDAY(DATE_ADD(a.inicio, INTERVAL ? MINUTE)) + 1, 7) AS dow,
         COUNT(DISTINCT a.id) AS total,
-        COALESCE(SUM(CASE WHEN ${STATUS_PLANNED_SQL} AND ${NOT_NO_SHOW_SQL} THEN ai.preco_snapshot ELSE 0 END), 0) AS receita_centavos
+        COALESCE(SUM(CASE WHEN ${STATUS_PLANNED_SQL} AND ${NOT_NO_SHOW_SQL} THEN ai.preco_snapshot ELSE 0 END), 0) AS receita_prevista,
+        COALESCE(SUM(CASE WHEN ${STATUS_CONCLUDED_SQL} AND ${NOT_NO_SHOW_SQL} THEN ai.preco_snapshot ELSE 0 END), 0) AS receita_concluida
       FROM agendamentos a
-      LEFT JOIN agendamento_itens ai ON ai.agendamento_id = a.id
+      ${itemJoin.sql}
       WHERE ${baseFilters.whereClause}
       GROUP BY dow
       ORDER BY dow`;
-    const [dowRows] = await pool.query(dowSql, [TZ_OFFSET_MIN, ...baseFilters.params]);
-    const topDaysOfWeek = (dowRows || []).map((row) => ({
-      dow: Number(row.dow),
-      total: Number(row.total || 0),
-      receita: Number(row.receita_centavos || 0),
-    }));
 
     const leadSql = `
       SELECT
@@ -459,39 +457,18 @@ async function handleOverview(req, res) {
       FROM agendamentos a
       WHERE ${baseFilters.whereClause}
       GROUP BY bucket`;
-    const [leadRows] = await pool.query(leadSql, baseFilters.params);
-    const leadTime = normalizeLeadTimeRows(leadRows || []);
 
-    const customerMixSql = `
-      SELECT
-        SUM(CASE WHEN first_seen.first_seen_at BETWEEN ? AND ? THEN 1 ELSE 0 END) AS new_clients,
-        SUM(CASE WHEN first_seen.first_seen_at < ? THEN 1 ELSE 0 END) AS recurring_clients
-      FROM (
-        SELECT DISTINCT a.cliente_id
-        FROM agendamentos a
-        WHERE ${baseFilters.whereClause}
-      ) current_clients
-      LEFT JOIN (
-        SELECT cliente_id, MIN(inicio) AS first_seen_at
-        FROM agendamentos
-        WHERE estabelecimento_id = ?
-        GROUP BY cliente_id
-      ) first_seen ON first_seen.cliente_id = current_clients.cliente_id`;
-    const [[customerMixRow]] = await pool.query(customerMixSql, [
+    const customerMixQuery = buildCustomerMixQuery({
+      estId,
       startUtc,
       endUtc,
-      startUtc,
-      estId,
-      ...baseFilters.params,
-    ]);
-    const customerMix = {
-      new_clients: Number(customerMixRow?.new_clients || 0),
-      recurring_clients: Number(customerMixRow?.recurring_clients || 0),
-    };
+      whereClause: baseFilters.whereClause,
+      whereParams: baseFilters.params,
+    });
 
-    let origins = [];
-    if (allowAdvanced) {
-      const originsFilters = buildBaseFilters({
+    // O select de origens ignora o filtro de origem — é ele que popula a própria lista de opções.
+    const originsFilters = allowAdvanced
+      ? buildBaseFilters({
         estId,
         startUtc,
         endUtc,
@@ -500,22 +477,93 @@ async function handleOverview(req, res) {
         origem: null,
         serviceIds,
         useServiceExists: true,
-      });
-      const originsSql = `
+      })
+      : null;
+    const originsSql = `
         SELECT
           COALESCE(NULLIF(a.origem,''), 'desconhecido') AS origem,
           COUNT(DISTINCT a.id) AS total
         FROM agendamentos a
-        WHERE ${originsFilters.whereClause}
+        WHERE ${originsFilters?.whereClause || '1=0'}
         GROUP BY origem
         ORDER BY total DESC, origem ASC
         LIMIT 12`;
-      const [origRows] = await pool.query(originsSql, originsFilters.params);
-      origins = (origRows || []).map((row) => ({
-        origem: row.origem,
+
+    // As agregações são independentes entre si: uma rodada em paralelo em vez de 8 idas ao banco.
+    const [
+      [[totalsRow]],
+      [[previousRow]],
+      [dailyRows],
+      [servicesRows],
+      [dowRows],
+      [leadRows],
+      [[customerMixRow]],
+      [originsRows],
+    ] = await Promise.all([
+      pool.query(
+        buildTotalsSql(itemJoin.sql, baseFilters.whereClause),
+        [...itemJoin.params, ...baseFilters.params]
+      ),
+      pool.query(
+        buildTotalsSql(itemJoin.sql, previousFilters.whereClause),
+        [...itemJoin.params, ...previousFilters.params]
+      ),
+      pool.query(dailySql, [TZ_OFFSET_MIN, ...itemJoin.params, ...baseFilters.params]),
+      pool.query(servicesSql, serviceParams),
+      pool.query(dowSql, [TZ_OFFSET_MIN, ...itemJoin.params, ...baseFilters.params]),
+      pool.query(leadSql, baseFilters.params),
+      pool.query(customerMixQuery.sql, customerMixQuery.params),
+      originsFilters ? pool.query(originsSql, originsFilters.params) : Promise.resolve([[]]),
+    ]);
+
+    const { totals, rates, revenue } = summarizeTotals(totalsRow);
+    const previousSummary = summarizeTotals(previousRow);
+    const seriesDaily = fillDailySeries(dailyRows || [], startLocal, endLocal);
+    const leadTime = normalizeLeadTimeRows(leadRows || []);
+
+    const topServices = (servicesRows || []).map((row) => {
+      const concluidos = Number(row.concluidos || 0);
+      const receitaConcluida = Number(row.receita_concluida || 0);
+      return {
+        servico_id: row.servico_id,
+        nome: row.nome,
         total: Number(row.total || 0),
-      }));
-    }
+        confirmados: Number(row.confirmados || 0),
+        concluidos,
+        cancelados: Number(row.cancelados || 0),
+        receita_prevista: Number(row.receita_prevista || 0),
+        receita_concluida: receitaConcluida,
+        ticket_medio: concluidos ? Math.round(receitaConcluida / concluidos) : 0,
+      };
+    });
+
+    const topDaysOfWeek = (dowRows || []).map((row) => ({
+      dow: Number(row.dow),
+      total: Number(row.total || 0),
+      receita_prevista: Number(row.receita_prevista || 0),
+      receita_concluida: Number(row.receita_concluida || 0),
+    }));
+
+    const customerMixTotals = {
+      new_clients: Number(customerMixRow?.new_clients || 0),
+      recurring_clients: Number(customerMixRow?.recurring_clients || 0),
+    };
+
+    const origins = (originsRows || []).map((row) => ({
+      origem: row.origem,
+      total: Number(row.total || 0),
+    }));
+
+    const insights = buildInsights({
+      totals,
+      revenue,
+      previous: { totals: previousSummary.totals, revenue: previousSummary.revenue },
+      topDaysOfWeek,
+      leadTime,
+      topServices,
+      customerMix: customerMixTotals,
+      rangeDays: days,
+    });
 
     const now = new Date();
     res.json({
@@ -527,6 +575,19 @@ async function handleOverview(req, res) {
         end_local: formatLocalDate(endLocal),
         days,
       },
+      previous: {
+        range: {
+          start: previous.startUtcDate.toISOString(),
+          end: previous.endUtcDate.toISOString(),
+          start_local: formatLocalDate(previous.startLocal),
+          end_local: formatLocalDate(previous.endLocal),
+          days: previous.days,
+        },
+        totals: previousSummary.totals,
+        rates: previousSummary.rates,
+        revenue: previousSummary.revenue,
+      },
+      insights,
       filters: {
         status: statusFilters.length ? statusFilters : ['all'],
         serviceIds,
@@ -541,7 +602,7 @@ async function handleOverview(req, res) {
       top_services: topServices,
       top_days_of_week: topDaysOfWeek,
       lead_time: leadTime,
-      customer_mix: customerMix,
+      customer_mix: customerMixTotals,
       origins,
     });
   } catch (err) {
@@ -574,6 +635,7 @@ router.get('/estabelecimento/profissionais', authRequired, isEstabelecimento, as
       serviceIds,
       useServiceExists: true,
     });
+    const itemJoin = buildServiceItemJoin(serviceIds);
 
     const profSql = `
       SELECT
@@ -589,13 +651,14 @@ router.get('/estabelecimento/profissionais', authRequired, isEstabelecimento, as
       LEFT JOIN agendamentos a
         ON a.profissional_id = p.id
        AND ${baseFilters.whereClause}
-      LEFT JOIN agendamento_itens ai ON ai.agendamento_id = a.id
+      ${itemJoin.sql}
       WHERE p.estabelecimento_id = ?
       GROUP BY p.id, p.nome
       HAVING total > 0
       ORDER BY total DESC, receita_concluida DESC, p.nome ASC`;
 
-    const params = [...baseFilters.params, estId];
+    // Ordem dos '?': join de agendamentos, join de itens, WHERE.
+    const params = [...baseFilters.params, ...itemJoin.params, estId];
     const [rows] = await pool.query(profSql, params);
 
     const profissionais = (rows || []).map((row) => {
@@ -713,6 +776,7 @@ router.get('/estabelecimento/export.csv', authRequired, isEstabelecimento, async
       useServiceExists: true,
     });
 
+    const itemJoin = buildServiceItemJoin(serviceIds);
     const tzParams = [TZ_OFFSET_MIN, TZ_OFFSET_MIN, TZ_OFFSET_MIN, TZ_OFFSET_MIN];
     const exportSql = `
       SELECT
@@ -723,18 +787,20 @@ router.get('/estabelecimento/export.csv', authRequired, isEstabelecimento, async
         DATE_FORMAT(DATE_ADD(a.inicio, INTERVAL ? MINUTE), '%Y-%m-%d %H:%i') AS inicio,
         DATE_FORMAT(DATE_ADD(a.fim, INTERVAL ? MINUTE), '%Y-%m-%d %H:%i') AS fim,
         a.status,
+        COALESCE(a.no_show, 0) AS no_show,
         COALESCE(SUM(ai.preco_snapshot), 0) AS valor_centavos,
         COALESCE(NULLIF(a.origem,''), 'desconhecido') AS origem,
         DATE_FORMAT(DATE_ADD(a.criado_em, INTERVAL ? MINUTE), '%Y-%m-%d %H:%i') AS criado_em
       FROM agendamentos a
       JOIN usuarios c ON c.id = a.cliente_id
       LEFT JOIN profissionais p ON p.id = a.profissional_id
-      LEFT JOIN agendamento_itens ai ON ai.agendamento_id = a.id
+      ${itemJoin.sql}
       LEFT JOIN servicos s ON s.id = ai.servico_id
       WHERE ${baseFilters.whereClause}
-      GROUP BY a.id, c.nome, p.nome, a.inicio, a.fim, a.status, a.origem, a.criado_em
+      GROUP BY a.id, c.nome, p.nome, a.inicio, a.fim, a.status, a.no_show, a.origem, a.criado_em
       ORDER BY a.inicio ASC`;
-    const exportParams = [...tzParams, ...baseFilters.params];
+    // Ordem dos '?': SELECT (4x TZ), join de itens, WHERE.
+    const exportParams = [...tzParams, ...itemJoin.params, ...baseFilters.params];
 
     const filenameBase = sanitizeSegment(
       `relatorio-${formatLocalDate(startLocal)}-a-${formatLocalDate(endLocal)}`
@@ -745,7 +811,7 @@ router.get('/estabelecimento/export.csv', authRequired, isEstabelecimento, async
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
 
     const headers = buildCsvHeaders();
-    res.write('\ufeff' + headers.map((h) => escapeCsv(h.label)).join(',') + '\n');
+    res.write('\ufeff' + headers.map((h) => escapeCsv(h.label)).join(CSV_SEPARATOR) + '\n');
 
     const conn = await pool.getConnection();
     try {
@@ -754,13 +820,9 @@ router.get('/estabelecimento/export.csv', authRequired, isEstabelecimento, async
 
       await new Promise((resolve, reject) => {
         stream.on('data', (row) => {
-          const linha = headers.map((h) => {
-            if (h.key === 'valor') {
-              const raw = Number(row.valor_centavos || 0) / 100;
-              return escapeCsv(raw.toFixed(2));
-            }
-            return escapeCsv(row[h.key]);
-          }).join(',');
+          const linha = headers
+            .map((h) => escapeCsv(formatCsvCell(row, h.key)))
+            .join(CSV_SEPARATOR);
           if (!res.write(linha + '\n')) {
             stream.pause();
             res.once('drain', () => stream.resume());

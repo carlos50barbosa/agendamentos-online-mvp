@@ -218,7 +218,7 @@ export function getOperationalHardeningWarnings(env = process.env, cfg = config)
     warnings.push({
       code: 'wa_app_secret_missing',
       severity,
-      message: '[security][wa/webhook] WA_APP_SECRET ausente; POSTs do webhook oficial aceitam payloads sem assinatura valida.',
+      message: '[security][wa/webhook] WA_APP_SECRET ausente; POSTs do webhook oficial aceitam payloads sem assinatura válida.',
     })
   }
   if (waAllowUnsigned) {

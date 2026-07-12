@@ -322,7 +322,7 @@ export default function Login() {
                         aria-invalid={email ? !isValidEmail(email) : false}
                       />
                     </div>
-                    {emailInvalid ? <div className="login-preview__hint is-error">E-mail invalido.</div> : null}
+                    {emailInvalid ? <div className="login-preview__hint is-error">E-mail inválido.</div> : null}
                   </div>
 
                   <div className={`login-preview__field${senhaInvalid ? ' is-error' : ''}`}>

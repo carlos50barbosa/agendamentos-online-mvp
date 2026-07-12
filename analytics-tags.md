@@ -40,7 +40,7 @@ Os eventos `InitiateCheckout` e `Purchase` já nascem com `value` e `currency`. 
 ## Checklist de validação
 
 1. **GTM Preview / Tag Assistant**  
-   - Clique em “Preview” no GTM e abra `https://agendamentosonline.com/configuracoes`.  
+   - Clique em “Preview” no GTM e abra `https://agenda0.com.br/configuracoes`.  
    - Gere um PIX e confirme que os tags `GA4 - initiate_checkout` e `GA4 - purchase` aparecem no painel (o segundo só após o plano voltar como ativo).
 2. **Meta Pixel Helper**  
    - Gere um PIX; confira o evento `InitiateCheckout` com `value`/`currency`.  

@@ -192,13 +192,13 @@ function getStepBlock(step, counts) {
   if (step === 'servicos' && counts.profissionais < 1) {
     return {
       error: 'profissionais_obrigatorios',
-      message: 'Cadastre pelo menos um profissional antes de avancar para servicos.',
+      message: 'Cadastre pelo menos um profissional antes de avançar para serviços.',
     };
   }
   if ((step === 'horarios' || step === 'revisao') && counts.servicos < 1) {
     return {
       error: 'servicos_obrigatorios',
-      message: 'Cadastre pelo menos um servico antes de avancar para horarios.',
+      message: 'Cadastre pelo menos um serviço antes de avançar para horários.',
     };
   }
   if (step === 'revisao' && counts.horarios < 1) {
@@ -302,7 +302,7 @@ router.patch('/', auth, isEstabelecimento, async (req, res) => {
   try {
     const nextStep = normalizeStep(req.body?.etapa, '');
     if (!nextStep) {
-      return res.status(400).json({ error: 'etapa_invalida', message: 'Etapa invalida.' });
+      return res.status(400).json({ error: 'etapa_invalida', message: 'Etapa inválida.' });
     }
 
     const state = await loadOnboardingState(req.user.id);

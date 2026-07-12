@@ -52,7 +52,7 @@ export async function createTenantAsaasSubscription({
   const value = Math.max(0, Math.round(Number(amountCents || 0))) / 100;
   const planLabel = resolvePlanConfig(planKey).label;
   // Após pagar no checkout hospedado do Asaas, redireciona o cliente de volta ao app.
-  const frontBase = String(process.env.FRONTEND_BASE_URL || process.env.APP_URL || 'https://agendamentosonline.com').replace(/\/$/, '');
+  const frontBase = String(process.env.FRONTEND_BASE_URL || process.env.APP_URL || 'https://agenda0.com.br').replace(/\/$/, '');
   const successUrl = `${frontBase}/assinatura?assinatura=sucesso`;
 
   const payer = await loadEstabPayer(estabelecimentoId, db);

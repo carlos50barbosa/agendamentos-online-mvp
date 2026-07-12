@@ -1,5 +1,6 @@
 // src/pages/Relatorios.jsx
 import React, { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Api } from '../utils/api';
 import { getUser } from '../utils/auth';
 import { IconDownload, IconChart } from '../components/Icons.jsx';
@@ -46,6 +47,41 @@ const RANGE_OPTIONS = [
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+const TABLE_TABS = ['daily', 'services', 'profissionais'];
+const DEFAULT_TAB = 'daily';
+const PRINT_FRAME_ID = 'report-print-frame';
+
+// Estado da tela lido da URL, para dar refresh, voltar e compartilhar sem perder o recorte.
+function readFilters(searchParams) {
+  const range = searchParams.get('range');
+  const status = (searchParams.get('status') || '')
+    .split(',')
+    .map((value) => value.trim())
+    .filter((value) => STATUS_FILTERS.some((opt) => opt.value === value));
+  const aba = searchParams.get('aba');
+
+  return {
+    range: RANGE_OPTIONS.some((opt) => opt.value === range) ? range : DEFAULT_RANGE,
+    customStart: searchParams.get('inicio') || '',
+    customEnd: searchParams.get('fim') || '',
+    statusFilters: status,
+    serviceFilter: searchParams.get('servico') || 'all',
+    profissionalFilter: searchParams.get('profissional') || 'all',
+    origemFilter: searchParams.get('origem') || 'all',
+    tableTab: TABLE_TABS.includes(aba) ? aba : DEFAULT_TAB,
+  };
+}
+
+// "4830" não diz nada para quem lê; "80h 30min" diz.
+function formatMinutes(minutes) {
+  const total = Math.max(0, Math.round(Number(minutes) || 0));
+  const hours = Math.floor(total / 60);
+  const rest = total % 60;
+  if (!hours) return `${rest}min`;
+  if (!rest) return `${hours}h`;
+  return `${hours}h ${rest}min`;
+}
+
 function centsToCurrency(cents) {
   return CURRENCY.format((Number(cents) || 0) / 100);
 }
@@ -70,45 +106,95 @@ function formatDetailedDate(dateString) {
 }
 
 function ensureDateString(date) {
-  return new Date(date).toISOString().slice(0, 10);
+  const parsed = new Date(date);
+  if (Number.isNaN(parsed.getTime())) return '';
+  // Componentes locais: toISOString() devolveria o dia seguinte a partir das 21h em UTC-3.
+  const month = String(parsed.getMonth() + 1).padStart(2, '0');
+  const day = String(parsed.getDate()).padStart(2, '0');
+  return `${parsed.getFullYear()}-${month}-${day}`;
 }
 
-function buildPdfHtml({ rangeLabel, metrics, miniMetrics, dailyRows, serviceRows }) {
-  const metricCards = metrics.map((metric) => `
+// Delta vs. período anterior. Sem base de comparação (período anterior zerado) não existe
+// percentual honesto a mostrar — devolve null e o card sai sem o selo.
+function buildDelta(current, previous, { higherIsBetter = true, format = (value) => value } = {}) {
+  const atual = Number(current || 0);
+  const anterior = Number(previous);
+  if (!Number.isFinite(anterior) || anterior === 0) return null;
+
+  const ratio = (atual - anterior) / anterior;
+  const title = `${format(anterior)} no período anterior`;
+  if (Math.abs(ratio) < 0.001) return { text: '= estável', tone: 'flat', title };
+
+  const subiu = ratio > 0;
+  return {
+    text: `${subiu ? '▲' : '▼'} ${formatPercent(Math.abs(ratio))}`,
+    tone: (higherIsBetter ? subiu : !subiu) ? 'good' : 'bad',
+    title,
+  };
+}
+
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function buildPdfHtml({
+  establishment,
+  generatedAt,
+  rangeLabel,
+  metrics,
+  miniMetrics,
+  dailyRows,
+  serviceRows,
+  insights,
+}) {
+  const metricCards = metrics.map((metric) => {
+    const legenda = [metric.delta?.text, metric.hint].filter(Boolean).join(' · ');
+    return `
     <div class="kpi">
-      <span>${metric.label}</span>
-      <strong>${metric.value}</strong>
-      ${metric.hint ? `<small>${metric.hint}</small>` : ''}
+      <span>${escapeHtml(metric.label)}</span>
+      <strong>${escapeHtml(metric.value)}</strong>
+      ${legenda ? `<small>${escapeHtml(legenda)}</small>` : ''}
     </div>
-  `).join('');
+  `;
+  }).join('');
+
+  const insightLines = (insights || [])
+    .map((item) => `<li>${escapeHtml(item.text)}</li>`)
+    .join('');
 
   const miniCards = miniMetrics.map((metric) => `
     <div class="kpi kpi--mini">
-      <span>${metric.label}</span>
-      <strong>${metric.value}</strong>
+      <span>${escapeHtml(metric.label)}</span>
+      <strong>${escapeHtml(metric.value)}</strong>
     </div>
   `).join('');
 
   const dailyLines = dailyRows.map((row) => `
     <tr>
-      <td>${formatDetailedDate(row.date)}</td>
+      <td>${escapeHtml(formatDetailedDate(row.date))}</td>
       <td>${row.confirmados}</td>
       <td>${row.cancelados}</td>
       <td>${row.concluidos}</td>
       <td>${row.no_show}</td>
-      <td>${centsToCurrency(row.receita_dia)}</td>
+      <td>${escapeHtml(centsToCurrency(row.receita_prevista))}</td>
+      <td>${escapeHtml(centsToCurrency(row.receita_concluida))}</td>
     </tr>
   `).join('');
 
   const serviceLines = serviceRows.map((row) => `
     <tr>
-      <td>${row.nome}</td>
+      <td>${escapeHtml(row.nome)}</td>
       <td>${row.total}</td>
       <td>${row.confirmados}</td>
       <td>${row.cancelados}</td>
       <td>${row.concluidos}</td>
-      <td>${centsToCurrency(row.receita)}</td>
-      <td>${centsToCurrency(row.ticket_medio)}</td>
+      <td>${escapeHtml(centsToCurrency(row.receita_prevista))}</td>
+      <td>${escapeHtml(centsToCurrency(row.receita_concluida))}</td>
+      <td>${escapeHtml(centsToCurrency(row.ticket_medio))}</td>
     </tr>
   `).join('');
 
@@ -131,11 +217,15 @@ function buildPdfHtml({ rangeLabel, metrics, miniMetrics, dailyRows, serviceRows
         th, td { text-align:left; padding:8px 10px; border-bottom:1px solid #e2e8f0; font-size:12px; }
         th { background:#f8fafc; font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:#64748b; }
         .section-title { font-size:14px; margin:16px 0 8px; }
+        .insights { margin:0 0 16px; padding-left:18px; }
+        .insights li { font-size:12px; margin-bottom:4px; }
       </style>
     </head>
     <body>
-      <h1>Relatórios do estabelecimento</h1>
-      ${rangeLabel ? `<div class="muted">${rangeLabel}</div>` : ''}
+      <h1>${escapeHtml(establishment || 'Relatórios do estabelecimento')}</h1>
+      ${rangeLabel ? `<div class="muted">${escapeHtml(rangeLabel)}</div>` : ''}
+      ${generatedAt ? `<div class="muted">Gerado em ${escapeHtml(generatedAt)}</div>` : ''}
+      ${insightLines ? `<div class="section-title">Destaques</div><ul class="insights">${insightLines}</ul>` : ''}
       <div class="grid">${metricCards}</div>
       <div class="grid">${miniCards}</div>
       <div class="section-title">Resumo diário</div>
@@ -147,11 +237,12 @@ function buildPdfHtml({ rangeLabel, metrics, miniMetrics, dailyRows, serviceRows
             <th>Cancelados</th>
             <th>Concluídos</th>
             <th>No-show</th>
-            <th>Receita</th>
+            <th>Receita prevista</th>
+            <th>Receita realizada</th>
           </tr>
         </thead>
         <tbody>
-          ${dailyLines || '<tr><td colspan="6">Sem dados no período.</td></tr>'}
+          ${dailyLines || '<tr><td colspan="7">Sem dados no período.</td></tr>'}
         </tbody>
       </table>
       <div class="section-title">Serviços com mais agendamentos</div>
@@ -163,12 +254,13 @@ function buildPdfHtml({ rangeLabel, metrics, miniMetrics, dailyRows, serviceRows
             <th>Confirmados</th>
             <th>Cancelados</th>
             <th>Concluídos</th>
-            <th>Receita</th>
+            <th>Receita prevista</th>
+            <th>Receita realizada</th>
             <th>Ticket médio</th>
           </tr>
         </thead>
         <tbody>
-          ${serviceLines || '<tr><td colspan="7">Sem dados no período.</td></tr>'}
+          ${serviceLines || '<tr><td colspan="8">Sem dados no período.</td></tr>'}
         </tbody>
       </table>
     </body>
@@ -179,18 +271,24 @@ export default function Relatorios() {
   const user = getUser();
   const isEstab = user?.tipo === 'estabelecimento';
 
-  const [range, setRange] = useState(DEFAULT_RANGE);
-  const [customStart, setCustomStart] = useState('');
-  const [customEnd, setCustomEnd] = useState('');
-  const [statusFilters, setStatusFilters] = useState([]);
-  const [serviceFilter, setServiceFilter] = useState('all');
-  const [profissionalFilter, setProfissionalFilter] = useState('all');
-  const [origemFilter, setOrigemFilter] = useState('all');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [initialFilters] = useState(() => readFilters(searchParams));
+
+  const [range, setRange] = useState(initialFilters.range);
+  const [customStart, setCustomStart] = useState(initialFilters.customStart);
+  const [customEnd, setCustomEnd] = useState(initialFilters.customEnd);
+  const [statusFilters, setStatusFilters] = useState(initialFilters.statusFilters);
+  const [serviceFilter, setServiceFilter] = useState(initialFilters.serviceFilter);
+  const [profissionalFilter, setProfissionalFilter] = useState(initialFilters.profissionalFilter);
+  const [origemFilter, setOrigemFilter] = useState(initialFilters.origemFilter);
 
   const [serviceOptions, setServiceOptions] = useState([]);
   const [profissionalOptions, setProfissionalOptions] = useState([]);
 
   const [data, setData] = useState(null);
+  // null enquanto o plano ainda não é conhecido. Guardado à parte de `data` porque um erro de
+  // rede zera `data`, e rebaixar um usuário Pro nesse momento apagaria os filtros dele.
+  const [planAllowAdvanced, setPlanAllowAdvanced] = useState(null);
   const [funilData, setFunilData] = useState([]);
   const [profissionaisData, setProfissionaisData] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -199,10 +297,11 @@ export default function Relatorios() {
   const [error, setError] = useState('');
   const [proError, setProError] = useState('');
   const [refreshKey, setRefreshKey] = useState(0);
-  const [tableTab, setTableTab] = useState('daily');
+  const [tableTab, setTableTab] = useState(initialFilters.tableTab);
 
   const isCustom = range === 'custom';
-  const allowAdvanced = !!data?.plan?.allow_advanced;
+  const planKnown = planAllowAdvanced !== null;
+  const allowAdvanced = planAllowAdvanced === true;
   const rangeOptions = allowAdvanced ? RANGE_OPTIONS : RANGE_OPTIONS.filter((opt) => opt.value !== 'custom');
   const showCustomRangeInputs = allowAdvanced && isCustom;
 
@@ -236,7 +335,9 @@ export default function Relatorios() {
   }, [showCustomRangeInputs, customStart, customEnd]);
 
   useEffect(() => {
-    if (allowAdvanced) return;
+    // Só limpa quando sabemos que o plano não permite: enquanto o plano é desconhecido
+    // (primeiro load ou erro de rede) os filtros ficam como estão.
+    if (!planKnown || allowAdvanced) return;
     if (statusFilters.length) setStatusFilters([]);
     if (serviceFilter !== 'all') setServiceFilter('all');
     if (profissionalFilter !== 'all') setProfissionalFilter('all');
@@ -244,13 +345,44 @@ export default function Relatorios() {
     if (customStart) setCustomStart('');
     if (customEnd) setCustomEnd('');
     if (range === 'custom') setRange(DEFAULT_RANGE);
-  }, [allowAdvanced, statusFilters, serviceFilter, profissionalFilter, origemFilter, customStart, customEnd, range]);
+  }, [planKnown, allowAdvanced, statusFilters, serviceFilter, profissionalFilter, origemFilter, customStart, customEnd, range]);
 
   useEffect(() => {
     if (!allowAdvanced && tableTab === 'profissionais') {
-      setTableTab('daily');
+      setTableTab(DEFAULT_TAB);
     }
   }, [allowAdvanced, tableTab]);
+
+  // Espelha o recorte na URL (só o que sai do padrão, para o link não virar sopa de letrinhas).
+  useEffect(() => {
+    const next = new URLSearchParams();
+    if (range !== DEFAULT_RANGE) next.set('range', range);
+    if (range === 'custom') {
+      if (customStart) next.set('inicio', customStart);
+      if (customEnd) next.set('fim', customEnd);
+    }
+    if (statusFilters.length) next.set('status', statusFilters.join(','));
+    if (serviceFilter !== 'all') next.set('servico', serviceFilter);
+    if (profissionalFilter !== 'all') next.set('profissional', profissionalFilter);
+    if (origemFilter !== 'all') next.set('origem', origemFilter);
+    if (tableTab !== DEFAULT_TAB) next.set('aba', tableTab);
+
+    // replace: mexer num filtro não deve empilhar entrada no histórico do navegador.
+    if (next.toString() !== searchParams.toString()) {
+      setSearchParams(next, { replace: true });
+    }
+  }, [
+    range,
+    customStart,
+    customEnd,
+    statusFilters,
+    serviceFilter,
+    profissionalFilter,
+    origemFilter,
+    tableTab,
+    searchParams,
+    setSearchParams,
+  ]);
 
   const filterError = useMemo(() => {
     if (!showCustomRangeInputs) return '';
@@ -280,6 +412,11 @@ export default function Relatorios() {
     origemFilter,
   ]);
 
+  // Chave por conteúdo. `currentParams` depende de `allowAdvanced`: quando o plano chega e ele
+  // vira true, o objeto é recriado com o mesmo conteúdo — e a identidade nova sozinha refazia
+  // a busca, disparando duas consultas idênticas a cada carga de um usuário Pro.
+  const currentParamsKey = useMemo(() => JSON.stringify(currentParams), [currentParams]);
+
   useEffect(() => {
     if (!isEstab) return undefined;
     if (showCustomRangeInputs && filterError) {
@@ -297,6 +434,7 @@ export default function Relatorios() {
       .then((resp) => {
         if (!active) return;
         setData(resp || null);
+        if (resp?.plan) setPlanAllowAdvanced(!!resp.plan.allow_advanced);
       })
       .catch((err) => {
         if (!active) return;
@@ -310,7 +448,8 @@ export default function Relatorios() {
       });
 
     return () => { active = false; };
-  }, [isEstab, showCustomRangeInputs, filterError, currentParams, refreshKey]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isEstab, showCustomRangeInputs, filterError, currentParamsKey, refreshKey]);
 
   useEffect(() => {
     if (!isEstab || !allowAdvanced) {
@@ -348,23 +487,33 @@ export default function Relatorios() {
       });
 
     return () => { active = false; };
-  }, [isEstab, allowAdvanced, showCustomRangeInputs, filterError, currentParams]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isEstab, allowAdvanced, showCustomRangeInputs, filterError, currentParamsKey, refreshKey]);
 
   const totals = data?.totals;
   const rates = data?.rates;
   const revenue = data?.revenue;
   const customerMix = data?.customer_mix;
+  const previousTotals = data?.previous?.totals;
+  const previousRevenue = data?.previous?.revenue;
+
+  const insights = useMemo(
+    () => (Array.isArray(data?.insights) ? data.insights : []),
+    [data]
+  );
 
   const metrics = useMemo(() => {
-    if (!totals || !revenue) return [];
+    if (!totals || !revenue || !rates) return [];
     const totalAgendamentos = Number(totals.agendados_total || 0);
     const confirmados = Number(totals.confirmados_total || 0);
     const cancelados = Number(totals.cancelados_total || 0);
     const concluidos = Number(totals.concluidos_total || 0);
+    const noShow = Number(totals.no_show_total || 0);
 
     const confirmShare = totalAgendamentos ? confirmados / totalAgendamentos : 0;
     const cancelShare = totalAgendamentos ? cancelados / totalAgendamentos : 0;
-    const realizationRate = confirmados ? concluidos / Math.max(confirmados, 1) : 0;
+    // Só há comparecimento a medir se algo já aconteceu no período.
+    const jaAconteceram = concluidos + noShow;
 
     return [
       {
@@ -372,39 +521,49 @@ export default function Relatorios() {
         label: 'Agendamentos',
         value: totalAgendamentos,
         hint: totalAgendamentos ? `${formatPercent(confirmShare)} confirmados` : null,
+        delta: buildDelta(totalAgendamentos, previousTotals?.agendados_total),
       },
       {
         key: 'concluidos',
         label: 'Concluídos',
         value: concluidos,
-        hint: confirmados ? `${formatPercent(realizationRate)} dos confirmados` : null,
+        hint: jaAconteceram
+          ? `${formatPercent(rates.taxa_comparecimento || 0)} de comparecimento`
+          : null,
+        delta: buildDelta(concluidos, previousTotals?.concluidos_total),
       },
       {
         key: 'cancelados',
         label: 'Cancelados',
         value: cancelados,
         hint: cancelados ? `${formatPercent(cancelShare)} do total` : null,
+        delta: buildDelta(cancelados, previousTotals?.cancelados_total, { higherIsBetter: false }),
       },
       {
         key: 'receitaConcluida',
-        label: 'Receita concluída',
+        label: 'Receita realizada',
         value: centsToCurrency(revenue.concluida),
         hint: revenue.perdida ? `Perdida: ${centsToCurrency(revenue.perdida)}` : null,
+        delta: buildDelta(revenue.concluida, previousRevenue?.concluida, { format: centsToCurrency }),
       },
       {
         key: 'receitaPrevista',
         label: 'Receita prevista',
         value: centsToCurrency(revenue.prevista),
-        hint: null,
+        hint: 'Confirmados + pendentes',
+        // Sem delta de propósito: o "previsto" de uma janela já encerrada virou passado, e
+        // comparar com o previsto da janela atual (ainda por acontecer) mede coisas diferentes.
+        delta: null,
       },
       {
         key: 'ticketMedio',
         label: 'Ticket médio',
         value: centsToCurrency(revenue.ticket_medio),
-        hint: null,
+        hint: concluidos ? 'Por atendimento concluído' : 'Sem atendimentos concluídos',
+        delta: buildDelta(revenue.ticket_medio, previousRevenue?.ticket_medio, { format: centsToCurrency }),
       },
     ];
-  }, [totals, revenue]);
+  }, [totals, revenue, rates, previousTotals, previousRevenue]);
 
   const miniMetrics = useMemo(() => {
     if (!totals || !rates || !revenue) return [];
@@ -423,6 +582,16 @@ export default function Relatorios() {
         key: 'taxaCancelamento',
         label: 'Taxa de cancelamento',
         value: formatPercent(rates.taxa_cancelamento || 0),
+      },
+      {
+        key: 'pendentes',
+        label: 'Pendentes',
+        value: Number(totals.pendentes_total || 0),
+      },
+      {
+        key: 'aguardandoSinal',
+        label: 'Aguardando sinal',
+        value: Number(totals.aguardando_sinal_total || 0),
       },
       {
         key: 'receitaPerdida',
@@ -473,14 +642,24 @@ export default function Relatorios() {
         dow: idx,
         label,
         total: Number(row.total || 0),
-        receita: Number(row.receita || 0),
+        receita: Number(row.receita_concluida || 0),
       };
     });
   }, [data]);
 
+  const maxDayOfWeek = useMemo(
+    () => Math.max(...daysOfWeek.map((item) => item.total), 1),
+    [daysOfWeek]
+  );
+
   const leadTime = useMemo(() => (
     Array.isArray(data?.lead_time) ? data.lead_time : []
   ), [data]);
+
+  const maxLeadTime = useMemo(
+    () => Math.max(...leadTime.map((item) => Number(item.total || 0)), 1),
+    [leadTime]
+  );
 
   const funnelTotals = useMemo(() => {
     if (!funilData.length) return null;
@@ -538,23 +717,36 @@ export default function Relatorios() {
       setError('Exportação disponível a partir do plano Pro.');
       return;
     }
-    const rangeLabel = renderRangeSummary(true);
-    const payload = {
-      rangeLabel,
+
+    const html = buildPdfHtml({
+      establishment: user?.nome || '',
+      generatedAt: new Date().toLocaleString('pt-BR'),
+      rangeLabel: renderRangeSummary(true),
       metrics,
       miniMetrics,
-      dailyRows: dailyData.slice(-14),
+      insights,
+      // O PDF é para arquivar: leva o período inteiro, não uma amostra dos últimos 14 dias.
+      dailyRows: dailyData,
       serviceRows: services,
+    });
+
+    // Um iframe imprime sem depender de permissão de popup (o window.open era bloqueado e
+    // o usuário só via "permita popups"). Um iframe pendurado de uma exportação anterior é
+    // removido antes, então nunca acumula mais de um.
+    document.getElementById(PRINT_FRAME_ID)?.remove();
+    const frame = document.createElement('iframe');
+    frame.id = PRINT_FRAME_ID;
+    frame.setAttribute('aria-hidden', 'true');
+    frame.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;';
+    frame.srcdoc = html;
+    frame.onload = () => {
+      const win = frame.contentWindow;
+      if (!win) return;
+      win.onafterprint = () => frame.remove();
+      win.focus();
+      win.print();
     };
-    const win = window.open('', '_blank');
-    if (!win) {
-      setError('Permita popups para gerar o PDF.');
-      return;
-    }
-    win.document.write(buildPdfHtml(payload));
-    win.document.close();
-    win.focus();
-    win.print();
+    document.body.appendChild(frame);
   };
 
   const renderRangeSummary = (returnText = false) => {
@@ -565,6 +757,11 @@ export default function Relatorios() {
     const parts = [
       `Período analisado: ${startLabel} - ${endLabel} (${days} dias)`,
     ];
+    // Diz contra o que os deltas dos KPIs estão comparando.
+    const prevRange = data.previous?.range;
+    if (prevRange?.start_local && prevRange?.end_local) {
+      parts.push(`Comparado com ${formatDetailedDate(prevRange.start_local)} - ${formatDetailedDate(prevRange.end_local)}`);
+    }
     if (statusFilters.length) {
       const statusLabels = STATUS_FILTERS
         .filter((opt) => statusFilters.includes(opt.value))
@@ -659,6 +856,27 @@ export default function Relatorios() {
             >
               Atualizar
             </button>
+            {allowAdvanced && (
+              <>
+                <button
+                  type="button"
+                  className="btn btn--outline btn--sm"
+                  onClick={handleDownload}
+                  disabled={!dailyData.length || loading || exporting}
+                >
+                  <IconDownload className="btn__icon" aria-hidden />
+                  {exporting ? 'Exportando...' : 'Exportar CSV'}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn--outline btn--sm"
+                  onClick={handleExportPdf}
+                  disabled={!dailyData.length || loading}
+                >
+                  Exportar PDF
+                </button>
+              </>
+            )}
           </div>
         </div>
 
@@ -765,12 +983,32 @@ export default function Relatorios() {
           </div>
         ) : (
           <>
+            {!!insights.length && (
+              <section className="report-insights" aria-label="Destaques do período">
+                {insights.map((item) => (
+                  <p key={item.id} className={`report-insight report-insight--${item.tone}`}>
+                    {item.text}
+                  </p>
+                ))}
+              </section>
+            )}
+
             <div className="report-metrics">
               {metrics.length ? (
                 metrics.map((metric) => (
                   <div key={metric.key} className="report-metric">
                     <span className="report-metric__label">{metric.label}</span>
-                    <strong className="report-metric__value">{metric.value}</strong>
+                    <div className="report-metric__value-row">
+                      <strong className="report-metric__value">{metric.value}</strong>
+                      {metric.delta && (
+                        <span
+                          className={`report-metric__delta is-${metric.delta.tone}`}
+                          title={metric.delta.title}
+                        >
+                          {metric.delta.text}
+                        </span>
+                      )}
+                    </div>
                     {metric.hint && (
                       <span className="report-metric__hint">{metric.hint}</span>
                     )}
@@ -795,44 +1033,26 @@ export default function Relatorios() {
             <section className="report-section">
               <div className="report-section__header">
                 <h3>Volume diário</h3>
-                <div className="report-actions">
-                  {allowAdvanced && (
-                    <>
-                      <button
-                        type="button"
-                        className="btn btn--outline btn--sm"
-                        onClick={handleDownload}
-                        disabled={!dailyData.length || exporting}
-                      >
-                        <IconDownload className="btn__icon" aria-hidden />
-                        Exportar CSV
-                      </button>
-                      <button
-                        type="button"
-                        className="btn btn--outline btn--sm"
-                        onClick={handleExportPdf}
-                        disabled={!dailyData.length}
-                      >
-                        Exportar PDF
-                      </button>
-                    </>
-                  )}
-                </div>
               </div>
 
               {!displayDaily.length ? (
                 <div className="empty">Nenhum agendamento no período selecionado.</div>
               ) : (
                 <>
-                  <div className="report-chart" role="img" aria-label="Comparativo diário de confirmados e cancelados">
+                  {/* As barras são decoração: os números vão para o leitor de tela como uma
+                      frase por dia. O role="img" anterior escondia os dados inteiros. */}
+                  <div className="report-chart" role="group" aria-label="Volume diário de confirmados e cancelados">
                     <div className="report-chart__grid">
                       {displayDaily.map((item) => {
-                        const total = Number(item.confirmados || 0) + Number(item.cancelados || 0);
-                        const confirmedHeight = !maxVolume ? 0 : (Number(item.confirmados || 0) / maxVolume) * 100;
-                        const cancelledHeight = !maxVolume ? 0 : (Number(item.cancelados || 0) / maxVolume) * 100;
+                        const confirmados = Number(item.confirmados || 0);
+                        const cancelados = Number(item.cancelados || 0);
+                        const total = confirmados + cancelados;
+                        const confirmedHeight = !maxVolume ? 0 : (confirmados / maxVolume) * 100;
+                        const cancelledHeight = !maxVolume ? 0 : (cancelados / maxVolume) * 100;
+                        const resumo = `${formatDetailedDate(item.date)}: ${confirmados} confirmados, ${cancelados} cancelados`;
                         return (
                           <div key={item.date} className="report-chart__item">
-                            <div className="report-chart__stack" title={`${formatDetailedDate(item.date)} | ${item.confirmados} confirmados | ${item.cancelados} cancelados`}>
+                            <div className="report-chart__stack" title={resumo} aria-hidden="true">
                               <div
                                 className="report-chart__bar report-chart__bar--confirmados"
                                 style={{ height: `${Math.min(confirmedHeight, 100)}%` }}
@@ -842,44 +1062,25 @@ export default function Relatorios() {
                                 style={{ height: `${Math.min(cancelledHeight, 100)}%` }}
                               />
                             </div>
-                            <span className="report-chart__label">{formatShortDate(item.date)}</span>
-                            <span className="report-chart__value">{total}</span>
+                            <span className="report-chart__label" aria-hidden="true">{formatShortDate(item.date)}</span>
+                            <span className="report-chart__value" aria-hidden="true">{total}</span>
+                            <span className="sr-only">{resumo}</span>
                           </div>
                         );
                       })}
                     </div>
-                    <div className="report-legend">
+                    <div className="report-legend" aria-hidden="true">
                       <span className="report-dot report-dot--confirmados" /> Confirmados
                       <span className="report-dot report-dot--cancelados" /> Cancelados
                     </div>
                   </div>
 
-                  <div className="report-table-wrapper">
-                    <table className="report-table">
-                      <thead>
-                        <tr>
-                          <th>Dia</th>
-                          <th>Confirmados</th>
-                          <th>Cancelados</th>
-                          <th>Concluídos</th>
-                          <th>No-show</th>
-                          <th>Receita (BRL)</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {dailyData.slice(-14).reverse().map((item) => (
-                          <tr key={item.date}>
-                            <td>{formatDetailedDate(item.date)}</td>
-                            <td>{item.confirmados}</td>
-                            <td>{item.cancelados}</td>
-                            <td>{item.concluidos}</td>
-                            <td>{item.no_show}</td>
-                            <td>{centsToCurrency(item.receita_dia)}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+                  {dailyData.length > displayDaily.length && (
+                    <p className="report-inline muted">
+                      O gráfico mostra os últimos {displayDaily.length} de {dailyData.length} dias.
+                      O período inteiro está em Detalhamento → Por dia.
+                    </p>
+                  )}
                 </>
               )}
             </section>
@@ -949,11 +1150,13 @@ export default function Relatorios() {
                     <div className="report-chart report-chart--compact">
                       <div className="report-chart__grid">
                         {daysOfWeek.map((item) => {
-                          const max = Math.max(...daysOfWeek.map((d) => d.total), 1);
-                          const height = (item.total / max) * 100;
+                          const height = (item.total / maxDayOfWeek) * 100;
                           return (
                             <div key={item.dow} className="report-chart__item">
-                              <div className="report-chart__stack" title={`${item.label} | ${item.total} agendamentos`}>
+                              <div
+                                className="report-chart__stack"
+                                title={`${item.label} | ${item.total} agendamentos | ${centsToCurrency(item.receita)} realizados`}
+                              >
                                 <div
                                   className="report-chart__bar report-chart__bar--neutral"
                                   style={{ height: `${Math.min(height, 100)}%` }}
@@ -979,8 +1182,7 @@ export default function Relatorios() {
                     <div className="report-chart report-chart--compact">
                       <div className="report-chart__grid">
                         {leadTime.map((item) => {
-                          const max = Math.max(...leadTime.map((d) => d.total), 1);
-                          const height = (Number(item.total || 0) / max) * 100;
+                          const height = (Number(item.total || 0) / maxLeadTime) * 100;
                           return (
                             <div key={item.key || item.label} className="report-chart__item">
                               <div className="report-chart__stack" title={`${item.label} | ${item.total} agendamentos`}>
@@ -1010,114 +1212,117 @@ export default function Relatorios() {
             <section className="report-section">
               <div className="report-section__header">
                 <h3>Detalhamento</h3>
-                <div className="report-tabs">
-                  <button
-                    type="button"
-                    className={`report-tab ${tableTab === 'daily' ? 'is-active' : ''}`}
-                    onClick={() => setTableTab('daily')}
-                  >
-                    Por dia
-                  </button>
-                  <button
-                    type="button"
-                    className={`report-tab ${tableTab === 'services' ? 'is-active' : ''}`}
-                    onClick={() => setTableTab('services')}
-                  >
-                    Por serviço
-                  </button>
-                  {allowAdvanced && (
+                <div className="report-tabs" role="tablist" aria-label="Detalhamento">
+                  {[
+                    { id: 'daily', label: 'Por dia' },
+                    { id: 'services', label: 'Por serviço' },
+                    ...(allowAdvanced ? [{ id: 'profissionais', label: 'Por profissional' }] : []),
+                  ].map((tab) => (
                     <button
+                      key={tab.id}
                       type="button"
-                      className={`report-tab ${tableTab === 'profissionais' ? 'is-active' : ''}`}
-                      onClick={() => setTableTab('profissionais')}
+                      role="tab"
+                      id={`report-tab-${tab.id}`}
+                      aria-selected={tableTab === tab.id}
+                      aria-controls={`report-panel-${tab.id}`}
+                      className={`report-tab ${tableTab === tab.id ? 'is-active' : ''}`}
+                      onClick={() => setTableTab(tab.id)}
                     >
-                      Por profissional
+                      {tab.label}
                     </button>
-                  )}
+                  ))}
                 </div>
               </div>
 
               {tableTab === 'daily' && (
-                !dailyData.length ? (
-                  <div className="empty">Nenhum agendamento no período selecionado.</div>
-                ) : (
-                  <div className="report-table-wrapper">
-                    <table className="report-table">
-                      <thead>
-                        <tr>
-                          <th>Dia</th>
-                          <th>Confirmados</th>
-                          <th>Cancelados</th>
-                          <th>Concluídos</th>
-                          <th>No-show</th>
-                          <th>Receita (BRL)</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {dailyData.slice().reverse().map((item) => (
-                          <tr key={item.date}>
-                            <td>{formatDetailedDate(item.date)}</td>
-                            <td>{item.confirmados}</td>
-                            <td>{item.cancelados}</td>
-                            <td>{item.concluidos}</td>
-                            <td>{item.no_show}</td>
-                            <td>{centsToCurrency(item.receita_dia)}</td>
+                <div role="tabpanel" id="report-panel-daily" aria-labelledby="report-tab-daily">
+                  {!dailyData.length ? (
+                    <div className="empty">Nenhum agendamento no período selecionado.</div>
+                  ) : (
+                    <div className="report-table-wrapper">
+                      <table className="report-table">
+                        <thead>
+                          <tr>
+                            <th>Dia</th>
+                            <th>Confirmados</th>
+                            <th>Cancelados</th>
+                            <th>Concluídos</th>
+                            <th>No-show</th>
+                            <th>Receita prevista</th>
+                            <th>Receita realizada</th>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )
-              )}
-
-              {tableTab === 'services' && (
-                !services.length ? (
-                  <div className="empty">Nenhum serviço movimentou agendamentos no período.</div>
-                ) : (
-                  <div className="report-table-wrapper">
-                    <table className="report-table">
-                      <thead>
-                        <tr>
-                          <th>Serviço</th>
-                          <th>Total</th>
-                          <th>Confirmados</th>
-                          <th>Cancelados</th>
-                          <th>Concluídos</th>
-                          <th>Receita</th>
-                          <th>Ticket médio</th>
-                          <th>% Cancelamento</th>
-                          <th>% Conclusão</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {services.map((item) => {
-                          const cancelRate = item.total ? Number(item.cancelados || 0) / Math.max(item.total, 1) : 0;
-                          const concluidoRate = item.total ? Number(item.concluidos || 0) / Math.max(item.total, 1) : 0;
-                          return (
-                            <tr key={item.servico_id}>
-                              <td>{item.nome}</td>
-                              <td>{item.total}</td>
+                        </thead>
+                        <tbody>
+                          {dailyData.slice().reverse().map((item) => (
+                            <tr key={item.date}>
+                              <td>{formatDetailedDate(item.date)}</td>
                               <td>{item.confirmados}</td>
                               <td>{item.cancelados}</td>
                               <td>{item.concluidos}</td>
-                              <td>{centsToCurrency(item.receita)}</td>
-                              <td>{centsToCurrency(item.ticket_medio)}</td>
-                              <td>{formatPercent(cancelRate)}</td>
-                              <td>{formatPercent(concluidoRate)}</td>
+                              <td>{item.no_show}</td>
+                              <td>{centsToCurrency(item.receita_prevista)}</td>
+                              <td>{centsToCurrency(item.receita_concluida)}</td>
                             </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                )
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {tableTab === 'services' && (
+                <div role="tabpanel" id="report-panel-services" aria-labelledby="report-tab-services">
+                  {!services.length ? (
+                    <div className="empty">Nenhum serviço movimentou agendamentos no período.</div>
+                  ) : (
+                    <div className="report-table-wrapper">
+                      <table className="report-table">
+                        <thead>
+                          <tr>
+                            <th>Serviço</th>
+                            <th>Total</th>
+                            <th>Confirmados</th>
+                            <th>Cancelados</th>
+                            <th>Concluídos</th>
+                            <th>Receita prevista</th>
+                            <th>Receita realizada</th>
+                            <th>Ticket médio</th>
+                            <th>% Cancelamento</th>
+                            <th>% Conclusão</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {services.map((item) => {
+                            const cancelRate = item.total ? Number(item.cancelados || 0) / Math.max(item.total, 1) : 0;
+                            const concluidoRate = item.total ? Number(item.concluidos || 0) / Math.max(item.total, 1) : 0;
+                            return (
+                              <tr key={item.servico_id}>
+                                <td>{item.nome}</td>
+                                <td>{item.total}</td>
+                                <td>{item.confirmados}</td>
+                                <td>{item.cancelados}</td>
+                                <td>{item.concluidos}</td>
+                                <td>{centsToCurrency(item.receita_prevista)}</td>
+                                <td>{centsToCurrency(item.receita_concluida)}</td>
+                                <td>{centsToCurrency(item.ticket_medio)}</td>
+                                <td>{formatPercent(cancelRate)}</td>
+                                <td>{formatPercent(concluidoRate)}</td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
               )}
 
               {tableTab === 'profissionais' && (
-                !allowAdvanced ? (
-                  <div className="report-lock">Disponível no plano Pro.</div>
-                ) : (
-                  !profissionaisData.length ? (
+                <div role="tabpanel" id="report-panel-profissionais" aria-labelledby="report-tab-profissionais">
+                  {!allowAdvanced ? (
+                    <div className="report-lock">Disponível no plano Pro.</div>
+                  ) : !profissionaisData.length ? (
                     <div className="empty">Nenhum profissional com agendamentos no período.</div>
                   ) : (
                     <div className="report-table-wrapper">
@@ -1129,9 +1334,9 @@ export default function Relatorios() {
                             <th>Concluídos</th>
                             <th>Cancelados</th>
                             <th>No-show</th>
-                            <th>Receita</th>
+                            <th>Receita realizada</th>
                             <th>Ticket médio</th>
-                            <th>Ocupação (min)</th>
+                            <th>Ocupação</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -1144,14 +1349,14 @@ export default function Relatorios() {
                               <td>{item.no_show}</td>
                               <td>{centsToCurrency(item.receita_concluida)}</td>
                               <td>{centsToCurrency(item.ticket_medio)}</td>
-                              <td>{item.ocupacao_estimativa}</td>
+                              <td>{formatMinutes(item.ocupacao_estimativa)}</td>
                             </tr>
                           ))}
                         </tbody>
                       </table>
                     </div>
-                  )
-                )
+                  )}
+                </div>
               )}
             </section>
           </>

@@ -11,17 +11,8 @@ import {
   IconList,
   IconUsers,
   IconLogout,
+  IconQrCode,
 } from '../components/Icons.jsx'
-
-const toSlug = (value = '') => {
-  const normalized = String(value || '')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-  return normalized || 'estabelecimento'
-}
 
 export function buildNavigation(user) {
   const isAuthenticated = Boolean(user)
@@ -29,10 +20,10 @@ export function buildNavigation(user) {
   const publicPagePath = (() => {
     if (!isEstab) return '/novo'
     const id = user?.id ? String(user.id) : ''
-    const slugSource = user?.slug || user?.nome || ''
-    const slug = toSlug(slugSource || (id ? `estabelecimento-${id}` : 'estabelecimento'))
-    const query = id ? `?estabelecimento=${encodeURIComponent(id)}` : ''
-    return `/agendar/${slug}${query}`
+    // Link curto na raiz quando o estabelecimento já tem slug; sem slug, formato antigo por id.
+    const slug = String(user?.slug || '').trim()
+    if (slug) return `/${slug}`
+    return id ? `/agendar/${id}` : '/novo'
   })()
 
   if (!isAuthenticated) {
@@ -63,6 +54,7 @@ export function buildNavigation(user) {
       { key: 'clients', label: 'Clientes', to: '/clientes', icon: IconUsers, type: 'link' },
       { key: 'reports', label: 'Relatórios', to: '/relatorios', icon: IconChart, type: 'link' },
       { key: 'finance', label: 'Financeiro', to: '/financeiro', icon: IconMoney, type: 'link' },
+      { key: 'promotion', label: 'Meu QR Code', to: '/divulgacao', icon: IconQrCode, type: 'link' },
     )
   } else {
     mainItems.push(

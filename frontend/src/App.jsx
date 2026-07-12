@@ -14,9 +14,7 @@ import {
 
   IconMenu,
 
-  IconSun,
-
-  IconMoon,
+  IconClose,
 
 } from './components/Icons.jsx';
 
@@ -78,6 +76,10 @@ const Ajuda = React.lazy(() => import('./pages/Ajuda.jsx'));
 const Relatorios = React.lazy(() => import('./pages/Relatorios.jsx'));
 
 const Financeiro = React.lazy(() => import('./pages/Financeiro.jsx'));
+
+const Divulgacao = React.lazy(() => import('./pages/Divulgacao.jsx'));
+
+const NotFound = React.lazy(() => import('./pages/NotFound.jsx'));
 
 const Planos = React.lazy(() => import('./pages/Planos.jsx'));
 
@@ -180,6 +182,8 @@ const APP_ROUTES = [
 
   { path: '/financeiro', element: <Financeiro />, auth: true, role: 'estabelecimento' },
 
+  { path: '/divulgacao', element: <Divulgacao />, auth: true, role: 'estabelecimento' },
+
   { path: '/planos', element: <Planos /> },
 
   { path: '/contato', element: <Contato /> },
@@ -199,8 +203,34 @@ const APP_ROUTES = [
   { path: '/agendar', element: <BookingNovo /> },
   { path: '/agendar/:idOrSlug', element: <BookingPublic /> },
 
+  // Link curto na raiz: agenda0.com.br/<slug>. Precisa ser a ÚLTIMA rota — o React Router
+  // prioriza segmentos estáticos, então /login, /planos, /configuracoes seguem ganhando.
+  // Slugs que colidiriam com rotas do app são bloqueados no backend (RESERVED_SLUGS).
+  { path: '/:idOrSlug', element: <BookingPublic /> },
+
+  // Qualquer outra URL desconhecida (multi-segmento) cai numa 404 de verdade, em vez de
+  // renderizar a área de conteúdo em branco.
+  { path: '*', element: <NotFound /> },
+
 ];
 
+// Segmentos de topo "reais" do app, derivados das próprias rotas (/login, /planos, /estab...).
+// Servem para distinguir uma rota do app de um link curto de estabelecimento (/<slug>).
+const APP_TOP_SEGMENTS = new Set(
+  APP_ROUTES
+    .map((r) => r.path)
+    .filter((p) => p && p !== '/' && !p.includes(':'))
+    .map((p) => p.split('/')[1])
+    .filter(Boolean)
+);
+
+// /<slug> na raiz é a página pública de agendamento: precisa rodar standalone (sem shell),
+// exatamente como /agendar/:idOrSlug.
+function isRootSlugPath(pathname) {
+  const match = /^\/([^/]+)\/?$/.exec(pathname || '');
+  if (!match) return false;
+  return !APP_TOP_SEGMENTS.has(match[1]);
+}
 
 
 const BILLING_ALERT_STATES = new Set(['due_soon', 'overdue', 'pending', 'blocked']);
@@ -495,23 +525,16 @@ function BillingStatusBanner({ status, user, planInfo }) {
 
 function useAppPreferences() {
 
-  const initial = useMemo(() => {
-
-    const stored = mergePreferences(readPreferences());
-
-    const resolved = applyThemePreference(stored.theme);
-
-    return { stored, resolved };
-
-  }, []);
-
-
-
-  const [preferences, setPreferences] = useState(initial.stored);
-
-  const [resolvedTheme, setResolvedTheme] = useState(initial.resolved);
+  const [preferences, setPreferences] = useState(() => mergePreferences(readPreferences()));
 
   const prefsDirtyRef = useRef(false);
+
+  // Tema escuro removido: garante o modo claro no boot.
+  useEffect(() => {
+
+    applyThemePreference('light');
+
+  }, []);
 
 
 
@@ -523,41 +546,6 @@ function useAppPreferences() {
 
 
 
-  useEffect(() => {
-
-    let cleanup = () => {};
-
-    const nextResolved = applyThemePreference(preferences.theme);
-
-    setResolvedTheme(nextResolved);
-
-
-
-    if (preferences.theme === 'auto' && typeof window !== 'undefined' && window.matchMedia) {
-
-      const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
-
-      const listener = () => setResolvedTheme(applyThemePreference('auto'));
-
-      if (mediaQuery.addEventListener) mediaQuery.addEventListener('change', listener);
-
-      else mediaQuery.addListener(listener);
-
-      cleanup = () => {
-
-        if (mediaQuery.removeEventListener) mediaQuery.removeEventListener('change', listener);
-
-        else mediaQuery.removeListener(listener);
-
-      };
-
-    }
-
-
-
-    return cleanup;
-
-  }, [preferences.theme]);
 
 
 
@@ -629,27 +617,13 @@ function useAppPreferences() {
 
 
 
-  const toggleTheme = useCallback(() => {
-
-    const nextTheme = resolvedTheme === 'dark' ? 'light' : 'dark';
-
-    prefsDirtyRef.current = true;
-
-    updatePreferences({ theme: nextTheme });
-
-    prefsDirtyRef.current = false;
-
-  }, [resolvedTheme, updatePreferences]);
-
-
-
   return {
 
     preferences,
 
-    isDark: resolvedTheme === 'dark',
+    updatePreferences,
 
-    toggleTheme,
+    isDark: false,
 
   };
 
@@ -657,7 +631,7 @@ function useAppPreferences() {
 
 
 
-function Sidebar({ open, user, isDesktop, isDark, isPlanos, toggleTheme }) {
+function Sidebar({ open, user, isDesktop, isPlanos }) {
   const nav = useNavigate();
 
   const resolvedUser = user || getUser();
@@ -882,21 +856,6 @@ function Sidebar({ open, user, isDesktop, isDark, isPlanos, toggleTheme }) {
           )}
 
         </nav>
-        {navigation.isAuthenticated && isDesktop && (
-          <div className="sidebar__actions">
-            <button
-              type="button"
-              className={`theme-toggle theme-toggle--text sidebar__theme-toggle${isPlanos ? ' is-disabled' : ''}`}
-              onClick={isPlanos ? undefined : toggleTheme}
-              disabled={isPlanos}
-              aria-label={isPlanos ? 'Tema fixo no modo claro' : `Ativar tema ${isDark ? 'claro' : 'escuro'}`}
-              title={isPlanos ? 'Tema fixo no modo claro' : isDark ? 'Alternar para tema claro' : 'Alternar para tema escuro'}
-            >
-              {isPlanos ? <IconSun aria-hidden="true" /> : isDark ? <IconSun aria-hidden="true" /> : <IconMoon aria-hidden="true" />}
-              <span className="app-topbar__theme-label">{isPlanos ? 'Tema claro' : isDark ? 'Tema escuro' : 'Tema claro'}</span>
-            </button>
-          </div>
-        )}
       </div>
     </aside>
   );
@@ -920,13 +879,13 @@ export default function App() {
   // Perfil público do estabelecimento (/agendar[/:id]): página guest, escopada a um
   // estabelecimento — standalone, sem sidebar/topbar. O /novo (descoberta, autenticado)
   // mantém o shell: sidebar no desktop e o menu no mobile.
-  const isPublicBooking = pathname.startsWith('/agendar');
+  const isPublicBooking = pathname.startsWith('/agendar') || isRootSlugPath(pathname);
   const [currentUser, setCurrentUser] = useState(() => getUser());
   const [onboardingGate, setOnboardingGate] = useState({ loading: false, data: null, error: '' });
 
   const [billingStatus, setBillingStatus] = useState(null);
 
-  const { preferences, isDark, toggleTheme } = useAppPreferences();
+  const { preferences } = useAppPreferences();
 
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
@@ -1468,9 +1427,7 @@ const topbarAlert = useMemo(() => {
             open={sidebarOpen}
             user={currentUser}
             isDesktop={isDesktop}
-            isDark={isDark}
             isPlanos={isPlanos}
-            toggleTheme={toggleTheme}
           />
         )}
         {!hideShell && (
@@ -1516,9 +1473,9 @@ const topbarAlert = useMemo(() => {
 
                 <span className="brand__text">
 
-                  <strong>Agendamentos Online</strong>
+                  <strong>Agendamentos</strong>
 
-                  <small>Agenda, clientes e operação em um só lugar</small>
+                  <small>Online</small>
 
                 </span>
 
@@ -1533,17 +1490,6 @@ const topbarAlert = useMemo(() => {
                       </span>
                       <strong>{currentUser?.nome || currentUser?.name || 'Usuário'}</strong>
                     </div>
-                    <button
-                      type="button"
-                      className={`theme-toggle theme-toggle--text${isPlanos ? ' is-disabled' : ''}`}
-                      onClick={isPlanos ? undefined : toggleTheme}
-                      disabled={isPlanos}
-                      aria-label={isPlanos ? 'Tema fixo no modo claro' : `Ativar tema ${isDark ? 'claro' : 'escuro'}`}
-                      title={isPlanos ? 'Tema fixo no modo claro' : isDark ? 'Alternar para tema claro' : 'Alternar para tema escuro'}
-                    >
-                      {isPlanos ? <IconSun aria-hidden="true" /> : isDark ? <IconSun aria-hidden="true" /> : <IconMoon aria-hidden="true" />}
-                      <span className="app-topbar__theme-label">{isPlanos ? 'Tema claro' : isDark ? 'Tema escuro' : 'Tema claro'}</span>
-                    </button>
                   </div>
                 ) : (
                   <div className="app-topbar__menu">
@@ -1553,10 +1499,10 @@ const topbarAlert = useMemo(() => {
                       onClick={() => setTopbarMenuOpen((open) => !open)}
                       aria-expanded={topbarMenuOpen}
                       aria-controls="app-topbar-menu"
-                      aria-label="Abrir menu"
+                      aria-label={topbarMenuOpen ? 'Fechar menu' : 'Abrir menu'}
                       ref={topbarMenuButtonRef}
                     >
-                      <IconMenu aria-hidden="true" />
+                      {topbarMenuOpen ? <IconClose aria-hidden="true" /> : <IconMenu aria-hidden="true" />}
                     </button>
                     {topbarMenuOpen && (
                       <div
@@ -1604,24 +1550,6 @@ const topbarAlert = useMemo(() => {
                             ))}
                           </div>
                         </nav>
-                        {topbarNavigation.isAuthenticated && (
-                          <>
-                            <div className="app-topbar__menu-divider" />
-                            <div className="app-topbar__actions">
-                              <button
-                                type="button"
-                                className={`theme-toggle theme-toggle--text${isPlanos ? ' is-disabled' : ''}`}
-                                onClick={isPlanos ? undefined : toggleTheme}
-                                disabled={isPlanos}
-                                aria-label={isPlanos ? 'Tema fixo no modo claro' : `Ativar tema ${isDark ? 'claro' : 'escuro'}`}
-                                title={isPlanos ? 'Tema fixo no modo claro' : isDark ? 'Alternar para tema claro' : 'Alternar para tema escuro'}
-                              >
-                                {isPlanos ? <IconSun aria-hidden="true" /> : isDark ? <IconSun aria-hidden="true" /> : <IconMoon aria-hidden="true" />}
-                                <span className="app-topbar__theme-label">{isPlanos ? 'Tema claro' : isDark ? 'Tema escuro' : 'Tema claro'}</span>
-                              </button>
-                            </div>
-                          </>
-                        )}
                       </div>
                     )}
                   </div>

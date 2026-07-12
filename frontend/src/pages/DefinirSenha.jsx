@@ -69,7 +69,7 @@ export default function DefinirSenha() {
                 <div className="login-preview__alert login-preview__alert--error" role="alert">
                   <span className="login-preview__alert-dot" aria-hidden="true" />
                   <div>
-                    <div className="login-preview__alert-title">Link invalido</div>
+                    <div className="login-preview__alert-title">Link inválido</div>
                     <div className="login-preview__alert-text">
                       Solicite um novo link em <Link to="/recuperar-senha">Recuperar senha</Link>.
                     </div>

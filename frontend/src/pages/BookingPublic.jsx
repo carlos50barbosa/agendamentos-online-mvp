@@ -10,6 +10,8 @@ import BookingWizard from '../components/booking/BookingWizard.jsx';
 import { Api } from '../utils/api.js';
 import { getUser } from '../utils/auth.js';
 import { isSameDay } from '../utils/agendaDates.js';
+import { buildPublicThemeStyle, resolvePublicAccent } from '../utils/publicTheme.js';
+import NotFound from './NotFound.jsx';
 
 function ymd(d) {
   const dt = new Date(d);
@@ -77,7 +79,8 @@ export default function BookingPublic() {
         const notFound = e?.data?.error === 'not_found' || e?.message === 'not_found';
         setState({
           loading: false,
-          error: notFound ? 'Estabelecimento não encontrado.' : 'Não foi possível carregar o estabelecimento.',
+          notFound,
+          error: notFound ? '' : 'Não foi possível carregar o estabelecimento.',
           establishment: null,
           services: [],
         });
@@ -158,7 +161,7 @@ export default function BookingPublic() {
     if (!hasDeposit) {
       return {
         confirmed: true,
-        message: 'Agendamento registrado! Confirme pelo link enviado no seu e-mail para garantir o horário.',
+        message: 'Agendamento registrado! Confirme pelo link enviado no seu e-mail ou WhatsApp para garantir o horário.',
       };
     }
 
@@ -185,11 +188,22 @@ export default function BookingPublic() {
     }
   }, []);
 
+  // Identidade visual: aplica a cor de destaque do estabelecimento (perfil.accent_color)
+  // como CSS vars no wrapper — cascateia p/ wizard e header. Sem cor customizada => null,
+  // mantendo o índigo global padrão para quem não configurou nada.
+  const themeStyle = useMemo(() => {
+    const profile = state.establishment?.profile || null;
+    const { accent, accentStrong } = resolvePublicAccent(profile, searchParams);
+    if (!accent) return null;
+    return buildPublicThemeStyle({ accent, accentStrong });
+  }, [state.establishment, searchParams]);
+
   if (state.loading) return <CenterMsg>Carregando…</CenterMsg>;
+  if (state.notFound) return <NotFound />;
   if (state.error) return <CenterMsg>{state.error}</CenterMsg>;
 
   return (
-    <div style={{ background: 'var(--bg-lav, #F6F5FB)', minHeight: '100%' }}>
+    <div style={{ ...(themeStyle || {}), background: 'var(--bg-lav, #F6F5FB)', minHeight: '100%' }}>
       <BookingWizard
         establishmentName={state.establishment?.nome || 'Agendamento'}
         establishment={state.establishment}

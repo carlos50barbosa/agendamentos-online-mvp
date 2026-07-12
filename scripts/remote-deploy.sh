@@ -5,7 +5,7 @@ set -euo pipefail
 # Usage:
 #   scripts/remote-deploy.sh user@host [-p port] [-i identity] [-D /remote/project] [VAR=VALUE ...]
 # Examples:
-#   scripts/remote-deploy.sh usuario@seu_servidor BRANCH=main API_URL=https://agendamentosonline.com/api
+#   scripts/remote-deploy.sh usuario@seu_servidor BRANCH=main API_URL=https://agenda0.com.br/api
 #   scripts/remote-deploy.sh usuario@seu_servidor -i ~/.ssh/id_rsa -p 22 NGINX_RELOAD=1
 
 PORT=22
