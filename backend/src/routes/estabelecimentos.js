@@ -57,6 +57,7 @@ import {
 
 } from "../lib/plans.js";
 import { getLatestSubscriptionForEstabelecimento } from "../lib/subscriptions.js";
+import { setAudit } from "../lib/audit.js";
 
 
 
@@ -2185,6 +2186,15 @@ router.get('/:id/clients/export.csv', auth, isEstabelecimento, async (req, res) 
     const clientIds = rows.map((row) => Number(row.id)).filter(Boolean);
     const tagsMap = await loadCrmTags(estabelecimentoId, clientIds);
 
+    // Extração em massa de dados pessoais de clientes: é leitura, mas é exatamente o evento que
+    // uma auditoria de LGPD precisa conseguir reconstruir.
+    setAudit(req, {
+      acao: 'cliente.export_csv',
+      entidade: 'cliente',
+      estabelecimento_id: estabelecimentoId,
+      metadados: { total_registros: rows.length, periodo: filters.period, filtro_ids: ids?.length || 0 },
+    });
+
     const headers = [
       'Nome', 'Telefone', 'E-mail', 'Relacionamento', 'Última visita', 'Dias sem retorno',
       `Agendamentos (${filters.period})`, `Cancelamentos (${filters.period})`, '% Cancelamento',
@@ -2816,6 +2826,15 @@ router.put('/:id/plan', auth, isEstabelecimento, async (req, res) => {
       return res.status(404).json({ error: 'not_found' });
 
     }
+
+    setAudit(req, {
+      acao: 'plano.alterar',
+      entidade: 'plano',
+      entidade_id: id,
+      estabelecimento_id: id,
+      dados_antes: { plan: currentPlan, status: currentStatus },
+      dados_depois: { plan: updatedContext.plan, status: updatedContext.status },
+    });
 
 
 

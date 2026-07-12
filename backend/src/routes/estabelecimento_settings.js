@@ -5,6 +5,7 @@ import { auth, isEstabelecimento } from '../middleware/auth.js';
 import { getPlanContext, planAllowsDeposit } from '../lib/plans.js';
 import { resolveDepositProvider } from '../lib/deposit_provider.js';
 import { config } from '../lib/config.js';
+import { setAudit, diffFields } from '../lib/audit.js';
 
 const router = Router();
 const DEFAULT_DEPOSIT_HOLD_MINUTES = 15;
@@ -223,6 +224,21 @@ router.put('/settings/deposit', auth, isEstabelecimento, async (req, res) => {
     );
 
     const settings = await fetchDepositSettings(estId);
+    const AUDITED = [
+      'deposit_enabled', 'deposit_type', 'deposit_percent', 'deposit_fixed_centavos',
+      'deposit_min_centavos', 'deposit_max_centavos', 'refund_window_hours',
+      'retain_on_no_show', 'asaas_wallet_id',
+    ];
+    const diff = diffFields(current, settings, AUDITED);
+    setAudit(req, {
+      acao: 'config.sinal',
+      entidade: 'configuracao',
+      entidade_id: estId,
+      estabelecimento_id: estId,
+      dados_antes: diff?.antes || null,
+      dados_depois: diff?.depois || null,
+      metadados: { wallet_alterada: walletChanged },
+    });
     return res.json({
       ok: true,
       deposit: serializeDeposit(settings, true),

@@ -5,6 +5,7 @@ import { syncMercadoPagoPayment } from '../lib/billing.js';
 import { cleanupPasswordResets } from '../lib/maintenance.js';
 import { enrichMercadoPagoSubscriptionEvent } from '../lib/mercadopago_payment_outcome.js';
 import { getTenantBotSettings, upsertTenantBotSettings } from '../bot/storage/settingsStore.js';
+import { setAudit, diffFields } from '../lib/audit.js';
 
 const IDENT_RE = /^[a-zA-Z0-9_]+$/;
 function isIdent(s = '') { return IDENT_RE.test(String(s)); }
@@ -15,8 +16,29 @@ function checkAdmin(req, res, next){
   const adminToken = process.env.ADMIN_TOKEN;
   if (!adminToken) return res.status(404).json({ error: 'admin_disabled' });
   const header = req.headers['x-admin-token'] || (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
-  if (header && header === adminToken) return next();
+  if (header && header === adminToken) {
+    // Admin não tem JWT: sem esta marca o ator sairia como "anônimo" na trilha.
+    req.isAdminRequest = true;
+    return next();
+  }
+  // Tentativa de acesso admin com token errado é o tipo de evento que só faz sentido se for
+  // registrado no momento em que acontece.
+  setAudit(req, {
+    acao: 'admin.acesso_negado',
+    ator_tipo: 'anonimo',
+    resultado: 'negado',
+    motivo: header ? 'token_invalido' : 'token_ausente',
+  });
   return res.status(403).json({ error: 'forbidden' });
+}
+
+// Toda rota admin é auditável por natureza: GET inclusive (listar usuários, ler tabela do banco).
+// O middleware genérico só persiste mutações, então aqui marcamos tudo explicitamente.
+function auditAdmin(acao, extra = {}) {
+  return (req, _res, next) => {
+    setAudit(req, { acao, ator_tipo: 'admin', ...extra });
+    next();
+  };
 }
 
 function parseDateParam(value, fallback) {
@@ -132,7 +154,7 @@ router.post('/billing/sync-payment', checkAdmin, async (req, res) => {
 });
 
 // Listar tabelas do banco
-router.get('/db/tables', checkAdmin, async (_req, res) => {
+router.get('/db/tables', checkAdmin, auditAdmin('admin.db.tables', { entidade: 'banco' }), async (_req, res) => {
   try {
     const [rows] = await pool.query('SHOW TABLES');
     const list = rows.map((r) => Object.values(r)[0]);
@@ -157,6 +179,8 @@ router.get('/db/table/:name/columns', checkAdmin, async (req, res) => {
 // Obter linhas de uma tabela (simples, sem filtros complexos)
 router.get('/db/table/:name/rows', checkAdmin, async (req, res) => {
   const table = String(req.params.name || '').trim();
+  // Leitura direta de dados de produção: fica na trilha com o nome da tabela lida.
+  setAudit(req, { acao: 'admin.db.rows', ator_tipo: 'admin', entidade: 'banco', entidade_id: table });
   if (!isIdent(table)) return res.status(400).json({ error: 'invalid_table' });
   const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 500);
   const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
@@ -183,22 +207,35 @@ router.post('/db/exec', checkAdmin, async (req, res) => {
   const sql = String(req.body?.sql || '').trim();
   const params = Array.isArray(req.body?.params) ? req.body.params : [];
   const allowWrite = String(req.headers['x-admin-allow-write'] || req.query.write || '') === '1';
-  if (!sql) return res.status(400).json({ error: 'sql_missing' });
   const first = sql.split(/\s+/)[0].toUpperCase();
   const isRead = ['SELECT', 'SHOW', 'DESCRIBE', 'EXPLAIN'].includes(first);
+
+  // A rota mais perigosa do sistema: SQL arbitrário contra o banco de produção. A trilha guarda o
+  // comando exato, sempre — inclusive quando ele é recusado.
+  setAudit(req, {
+    acao: 'admin.db_exec',
+    ator_tipo: 'admin',
+    entidade: 'banco',
+    metadados: { sql, param_count: params.length, escrita: !isRead, write_header: allowWrite },
+  });
+
+  if (!sql) return res.status(400).json({ error: 'sql_missing' });
   if (!isRead && !allowWrite) {
+    setAudit(req, { resultado: 'negado', motivo: 'write_not_allowed' });
     return res.status(403).json({ error: 'write_not_allowed', message: 'Para comandos de escrita, envie X-Admin-Allow-Write: 1' });
   }
   try {
     const [rows] = await pool.query(sql, params);
+    setAudit(req, { metadados: { linhas_afetadas: Array.isArray(rows) ? rows.length : (rows?.affectedRows ?? null) } });
     res.json({ ok: true, rows });
   } catch (e) {
+    setAudit(req, { resultado: 'falha', motivo: (e?.message || String(e)).slice(0, 255) });
     res.status(400).json({ error: 'sql_error', message: e?.message || String(e) });
   }
 });
 
 // Listagem rápida de usuários
-router.get('/users', checkAdmin, async (req, res) => {
+router.get('/users', checkAdmin, auditAdmin('admin.usuarios.listar', { entidade: 'usuario' }), async (req, res) => {
   const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 500);
   const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
   try {
@@ -227,8 +264,19 @@ router.put('/users/:id', checkAdmin, async (req, res) => {
   if (!sets.length) return res.status(400).json({ error: 'no_fields' });
   values.push(id);
   try {
+    const SNAPSHOT = `SELECT id, nome, email, tipo, plan, plan_status, plan_trial_ends_at, plan_active_until FROM usuarios WHERE id=?`;
+    const [[before]] = await pool.query(SNAPSHOT, [id]);
     await pool.query(`UPDATE usuarios SET ${sets.join(', ')} WHERE id=? LIMIT 1`, values);
-    const [[row]] = await pool.query(`SELECT id, nome, email, tipo, plan, plan_status, plan_trial_ends_at, plan_active_until FROM usuarios WHERE id=?`, [id]);
+    const [[row]] = await pool.query(SNAPSHOT, [id]);
+    const diff = diffFields(before, row, allowed);
+    setAudit(req, {
+      acao: 'admin.usuario.update',
+      ator_tipo: 'admin',
+      entidade: 'usuario',
+      entidade_id: id,
+      dados_antes: diff?.antes || null,
+      dados_depois: diff?.depois || null,
+    });
     res.json({ ok: true, user: row });
   } catch (e) {
     res.status(400).json({ error: 'db_error', message: e?.message || String(e) });

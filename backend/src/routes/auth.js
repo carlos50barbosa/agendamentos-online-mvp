@@ -13,6 +13,7 @@ import { MAX_TRIAL_DAYS } from '../lib/plans.js';
 import { config } from '../lib/config.js';
 import { buildRateLimitClientKey, consumeRateLimit, setRateLimitHeaders } from '../lib/request_rate_limit.js';
 import { logSecurityEvent } from '../lib/route_access.js';
+import { setAudit } from '../lib/audit.js';
 
 const router = Router();
 const DAY_MS = 86400000;
@@ -385,15 +386,42 @@ router.post('/login', async (req, res) => {
       'SELECT id, nome, email, telefone, data_nascimento, cpf_cnpj, cep, endereco, numero, complemento, bairro, cidade, estado, avatar_url, slug, senha_hash, tipo, notify_email_estab, notify_whatsapp_estab, plan, plan_status, plan_trial_ends_at, plan_active_until, plan_subscription_id, onboarding_concluido, onboarding_etapa FROM usuarios WHERE LOWER(email)=? LIMIT 1',
       [email]
     );
-    if (!rows.length) return res.status(401).json({ error: 'invalid_credentials' });
+    if (!rows.length) {
+      // A resposta ao cliente continua genérica (não revela se a conta existe), mas a trilha
+      // distingue os dois casos — é o que permite ver força-bruta em conta real vs. varredura.
+      setAudit(req, {
+        acao: 'auth.login_failed',
+        entidade: 'usuario',
+        resultado: 'falha',
+        motivo: 'usuario_inexistente',
+        metadados: { email },
+      });
+      return res.status(401).json({ error: 'invalid_credentials' });
+    }
 
     const u = rows[0];
     if (!u.senha_hash) {
+      setAudit(req, {
+        acao: 'auth.login_failed', entidade: 'usuario', entidade_id: u.id,
+        resultado: 'falha', motivo: 'senha_nao_configurada', ator_email: u.email,
+      });
       return res.status(500).json({ error: 'user_password_not_configured' });
     }
 
     const ok = await bcrypt.compare(String(senha), String(u.senha_hash));
-    if (!ok) return res.status(401).json({ error: 'invalid_credentials' });
+    if (!ok) {
+      setAudit(req, {
+        acao: 'auth.login_failed',
+        entidade: 'usuario',
+        entidade_id: u.id,
+        ator_id: u.id,
+        ator_tipo: u.tipo || null,
+        ator_email: u.email,
+        resultado: 'falha',
+        motivo: 'senha_incorreta',
+      });
+      return res.status(401).json({ error: 'invalid_credentials' });
+    }
 
     const secret = process.env.JWT_SECRET;
     if (!secret) return res.status(500).json({ error: 'server_config', message: 'JWT_SECRET ausente.' });
@@ -428,6 +456,15 @@ router.post('/login', async (req, res) => {
       onboarding_concluido: toBool(u.onboarding_concluido),
       onboarding_etapa: u.onboarding_etapa || 'profissionais',
     };
+    setAudit(req, {
+      acao: 'auth.login',
+      entidade: 'usuario',
+      entidade_id: u.id,
+      ator_id: u.id,
+      ator_tipo: u.tipo || 'cliente',
+      ator_email: u.email,
+      estabelecimento_id: (u.tipo === 'estabelecimento') ? u.id : null,
+    });
     return res.json({ ok: true, token, user });
   } catch (e) {
     console.error('[auth/login] erro:', e);
@@ -608,6 +645,13 @@ router.put('/me', auth, async (req, res) => {
     if (doPasswordChange) {
       const newHash = await bcrypt.hash(String(body.senhaNova), 10);
       await pool.query('UPDATE usuarios SET senha_hash=? WHERE id=?', [newHash, userId]);
+      // Registra o ATO, jamais a senha (o logger redige qualquer chave que contenha "senha").
+      setAudit(req, {
+        acao: 'auth.password_change',
+        entidade: 'usuario',
+        entidade_id: userId,
+        metadados: { via: 'perfil_autenticado' },
+      });
     }
 
     // ---- UPDATE mesclado (nunca altera o email diretamente; ele só muda após confirmação) ----
@@ -880,6 +924,14 @@ router.post('/reset', async (req, res) => {
       console.error('[auth/reset] falha ao invalidar tokens:', e?.message || e);
     }
 
+    setAudit(req, {
+      acao: 'auth.password_reset',
+      entidade: 'usuario',
+      entidade_id: userId,
+      ator_id: userId,
+      ator_email: payload?.email || null,
+      metadados: { via: 'token_email' },
+    });
     return res.json({ ok: true });
   }catch(e){
     console.error('[auth/reset] erro:', e);

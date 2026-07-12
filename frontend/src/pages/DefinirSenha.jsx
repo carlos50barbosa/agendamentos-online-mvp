@@ -36,7 +36,7 @@ export default function DefinirSenha() {
     try {
       await Api.resetPassword(token, senha);
       try {
-        localStorage.setItem('session_message', 'Senha redefinida com sucesso. Faca login.');
+        localStorage.setItem('session_message', 'Senha redefinida com sucesso. Faça login.');
       } catch {}
       nav('/login', { replace: true });
     } catch (error) {
@@ -91,30 +91,28 @@ export default function DefinirSenha() {
                 <form onSubmit={submit} className="login-preview__form">
                   <div className="login-preview__field">
                     <label className="login-preview__label" htmlFor="reset-password">Nova senha</label>
-                    <div className="login-preview__pass-row">
-                      <div className={`auth-portal__field-shell${senha && senha.length < 6 ? ' is-error' : ''}`}>
-                        <IconLock className="auth-portal__field-icon" />
-                        <input
-                          id="reset-password"
-                          className="login-preview__input auth-portal__input-control"
-                          type={show ? 'text' : 'password'}
-                          placeholder="********"
-                          value={senha}
-                          onChange={(event) => setSenha(event.target.value)}
-                          autoComplete="new-password"
-                          minLength={6}
-                          required
-                        />
-                      </div>
-
+                    <div className={`auth-portal__field-shell${senha && senha.length < 6 ? ' is-error' : ''}`}>
+                      <IconLock className="auth-portal__field-icon" />
+                      <input
+                        id="reset-password"
+                        className="login-preview__input auth-portal__input-control"
+                        type={show ? 'text' : 'password'}
+                        placeholder="********"
+                        value={senha}
+                        onChange={(event) => setSenha(event.target.value)}
+                        autoComplete="new-password"
+                        minLength={6}
+                        required
+                      />
                       <button
                         type="button"
                         className="login-preview__toggle"
                         onClick={() => setShow((value) => !value)}
+                        aria-pressed={show}
                         aria-label={show ? 'Ocultar senha' : 'Mostrar senha'}
+                        title={show ? 'Ocultar senha' : 'Mostrar senha'}
                       >
                         {show ? <IconEyeOff /> : <IconEye />}
-                        <span className="auth-portal__toggle-label">{show ? 'Ocultar' : 'Mostrar'}</span>
                       </button>
                     </div>
                     <div className={`login-preview__hint${senha && senha.length < 6 ? ' is-error' : ''}`}>
@@ -124,30 +122,28 @@ export default function DefinirSenha() {
 
                   <div className="login-preview__field">
                     <label className="login-preview__label" htmlFor="reset-password-confirm">Confirmar senha</label>
-                    <div className="login-preview__pass-row">
-                      <div className={`auth-portal__field-shell${confirmMismatch ? ' is-error' : ''}`}>
-                        <IconLock className="auth-portal__field-icon" />
-                        <input
-                          id="reset-password-confirm"
-                          className="login-preview__input auth-portal__input-control"
-                          type={showConfirm ? 'text' : 'password'}
-                          placeholder="Repita a nova senha"
-                          value={confirm}
-                          onChange={(event) => setConfirm(event.target.value)}
-                          autoComplete="new-password"
-                          minLength={6}
-                          required
-                        />
-                      </div>
-
+                    <div className={`auth-portal__field-shell${confirmMismatch ? ' is-error' : ''}`}>
+                      <IconLock className="auth-portal__field-icon" />
+                      <input
+                        id="reset-password-confirm"
+                        className="login-preview__input auth-portal__input-control"
+                        type={showConfirm ? 'text' : 'password'}
+                        placeholder="Repita a nova senha"
+                        value={confirm}
+                        onChange={(event) => setConfirm(event.target.value)}
+                        autoComplete="new-password"
+                        minLength={6}
+                        required
+                      />
                       <button
                         type="button"
                         className="login-preview__toggle"
                         onClick={() => setShowConfirm((value) => !value)}
+                        aria-pressed={showConfirm}
                         aria-label={showConfirm ? 'Ocultar confirmação' : 'Mostrar confirmação'}
+                        title={showConfirm ? 'Ocultar confirmação' : 'Mostrar confirmação'}
                       >
                         {showConfirm ? <IconEyeOff /> : <IconEye />}
-                        <span className="auth-portal__toggle-label">{showConfirm ? 'Ocultar' : 'Mostrar'}</span>
                       </button>
                     </div>
                     {confirmMismatch ? (

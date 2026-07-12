@@ -853,39 +853,28 @@ export default function Cadastro() {
 
                     <label className="login-preview__label" htmlFor="cadastro-senha">Senha</label>
 
-                    <div className="login-preview__pass-row">
-
-                      <div className={`auth-portal__field-shell${form.senha && !senhaOk ? ' is-error' : ''}`}>
-                        <IconLock className="auth-portal__field-icon" />
-                        <input
-                          className="login-preview__input auth-portal__input-control"
-                          id="cadastro-senha"
-                          type={showPass ? 'text' : 'password'}
-                          placeholder="********"
-                          value={form.senha}
-                          onChange={(e) => updateField('senha', e.target.value)}
-                          autoComplete="new-password"
-                          required
-                        />
-                      </div>
-
+                    <div className={`auth-portal__field-shell${form.senha && !senhaOk ? ' is-error' : ''}`}>
+                      <IconLock className="auth-portal__field-icon" />
+                      <input
+                        className="login-preview__input auth-portal__input-control"
+                        id="cadastro-senha"
+                        type={showPass ? 'text' : 'password'}
+                        placeholder="********"
+                        value={form.senha}
+                        onChange={(e) => updateField('senha', e.target.value)}
+                        autoComplete="new-password"
+                        required
+                      />
                       <button
-
                         type="button"
-
                         className="login-preview__toggle"
-
                         onClick={() => setShowPass((v) => !v)}
-
                         aria-pressed={showPass}
-
+                        aria-label={showPass ? 'Ocultar senha' : 'Mostrar senha'}
+                        title={showPass ? 'Ocultar senha' : 'Mostrar senha'}
                       >
-
                         {showPass ? <IconEyeOff /> : <IconEye />}
-                        <span className="auth-portal__toggle-label">{showPass ? 'Ocultar' : 'Mostrar'}</span>
-
                       </button>
-
                     </div>
 
                     {form.senha ? (
@@ -916,39 +905,28 @@ export default function Cadastro() {
 
                     <label className="login-preview__label" htmlFor="cadastro-confirmar-senha">Confirmar senha</label>
 
-                    <div className="login-preview__pass-row">
-
-                      <div className={`auth-portal__field-shell${confirm && !matchOk ? ' is-error' : ''}`}>
-                        <IconLock className="auth-portal__field-icon" />
-                        <input
-                          className="login-preview__input auth-portal__input-control"
-                          id="cadastro-confirmar-senha"
-                          type={showConfirm ? 'text' : 'password'}
-                          placeholder="Repita a senha"
-                          value={confirm}
-                          onChange={(e) => setConfirm(e.target.value)}
-                          autoComplete="new-password"
-                          required
-                        />
-                      </div>
-
+                    <div className={`auth-portal__field-shell${confirm && !matchOk ? ' is-error' : ''}`}>
+                      <IconLock className="auth-portal__field-icon" />
+                      <input
+                        className="login-preview__input auth-portal__input-control"
+                        id="cadastro-confirmar-senha"
+                        type={showConfirm ? 'text' : 'password'}
+                        placeholder="Repita a senha"
+                        value={confirm}
+                        onChange={(e) => setConfirm(e.target.value)}
+                        autoComplete="new-password"
+                        required
+                      />
                       <button
-
                         type="button"
-
                         className="login-preview__toggle"
-
                         onClick={() => setShowConfirm((v) => !v)}
-
                         aria-pressed={showConfirm}
-
+                        aria-label={showConfirm ? 'Ocultar confirmação' : 'Mostrar confirmação'}
+                        title={showConfirm ? 'Ocultar confirmação' : 'Mostrar confirmação'}
                       >
-
                         {showConfirm ? <IconEyeOff /> : <IconEye />}
-                        <span className="auth-portal__toggle-label">{showConfirm ? 'Ocultar' : 'Mostrar'}</span>
-
                       </button>
-
                     </div>
 
                     {!!confirm && !matchOk ? (

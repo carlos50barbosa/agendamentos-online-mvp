@@ -327,40 +327,38 @@ export default function Login() {
 
                   <div className={`login-preview__field${senhaInvalid ? ' is-error' : ''}`}>
                     <label className="login-preview__label" htmlFor="login-pass">Senha</label>
-                    <div className="login-preview__pass-row">
-                      <div className={`auth-portal__field-shell${senhaInvalid ? ' is-error' : ''}`}>
-                        <IconLock className="auth-portal__field-icon" />
-                        <input
-                          id="login-pass"
-                          className={`login-preview__input auth-portal__input-control${senhaInvalid ? ' is-error' : ''}`}
-                          type={showPass ? 'text' : 'password'}
-                          autoComplete="current-password"
-                          placeholder="********"
-                          ref={passRef}
-                          value={senha}
-                          onChange={(event) => {
-                            setSenha(event.target.value);
-                            setErrorMsg('');
-                            setSuccessMsg('');
-                          }}
-                          onKeyUp={(event) => {
-                            if (typeof event.getModifierState === 'function') {
-                              setCapsLockOn(Boolean(event.getModifierState('CapsLock')));
-                            }
-                          }}
-                          onBlur={() => setCapsLockOn(false)}
-                          aria-invalid={senha ? senha.length < 6 : false}
-                        />
-                      </div>
-
+                    <div className={`auth-portal__field-shell${senhaInvalid ? ' is-error' : ''}`}>
+                      <IconLock className="auth-portal__field-icon" />
+                      <input
+                        id="login-pass"
+                        className={`login-preview__input auth-portal__input-control${senhaInvalid ? ' is-error' : ''}`}
+                        type={showPass ? 'text' : 'password'}
+                        autoComplete="current-password"
+                        placeholder="********"
+                        ref={passRef}
+                        value={senha}
+                        onChange={(event) => {
+                          setSenha(event.target.value);
+                          setErrorMsg('');
+                          setSuccessMsg('');
+                        }}
+                        onKeyUp={(event) => {
+                          if (typeof event.getModifierState === 'function') {
+                            setCapsLockOn(Boolean(event.getModifierState('CapsLock')));
+                          }
+                        }}
+                        onBlur={() => setCapsLockOn(false)}
+                        aria-invalid={senha ? senha.length < 6 : false}
+                      />
                       <button
                         type="button"
                         onClick={() => setShowPass((value) => !value)}
                         className="login-preview__toggle"
+                        aria-pressed={showPass}
                         aria-label={showPass ? 'Ocultar senha' : 'Mostrar senha'}
+                        title={showPass ? 'Ocultar senha' : 'Mostrar senha'}
                       >
                         {showPass ? <IconEyeOff /> : <IconEye />}
-                        <span className="auth-portal__toggle-label">{showPass ? 'Ocultar' : 'Mostrar'}</span>
                       </button>
                     </div>
 

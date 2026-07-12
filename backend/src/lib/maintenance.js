@@ -187,11 +187,39 @@ export async function reprocessPendingAsaasWebhookEvents(pool, { limit = 100, ol
   }
 }
 
+// Retenção da trilha de auditoria. Sem purga a tabela cresce para sempre; purgar rápido demais
+// destrói a prova. 12 meses é o padrão (ajustável por AUDIT_RETENTION_DAYS) e a exclusão é feita
+// em lotes para não travar a tabela num DELETE gigante.
+const AUDIT_RETENTION_DAYS = Math.max(1, Number(process.env.AUDIT_RETENTION_DAYS || 365))
+
+export async function purgeAuditLog(pool, { batchSize = 1000, maxBatches = 20 } = {}) {
+  let deleted = 0
+  try {
+    for (let i = 0; i < maxBatches; i += 1) {
+      const [r] = await pool.query(
+        'DELETE FROM audit_log WHERE criado_em < DATE_SUB(NOW(), INTERVAL ? DAY) LIMIT ?',
+        [AUDIT_RETENTION_DAYS, batchSize]
+      )
+      const rows = r?.affectedRows || 0
+      deleted += rows
+      if (rows < batchSize) break
+    }
+    return { deleted, retentionDays: AUDIT_RETENTION_DAYS }
+  } catch (e) {
+    console.error('[maintenance] purgeAuditLog error:', e?.message || e)
+    return { deleted, retentionDays: AUDIT_RETENTION_DAYS, error: e?.message || String(e) }
+  }
+}
+
 export function startMaintenance(pool, { intervalMs } = {}) {
   const every = Number(intervalMs || 6 * 60 * 60 * 1000)
   async function tick() {
     const r = await cleanupPasswordResets(pool)
     console.log('[maintenance] password_resets cleanup', r)
+    const a = await purgeAuditLog(pool)
+    if (a?.deleted || a?.error) {
+      console.log('[maintenance] audit_log purge', a)
+    }
   }
   setTimeout(tick, 10_000)
   return setInterval(tick, every)

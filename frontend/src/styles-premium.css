@@ -1392,7 +1392,8 @@ textarea.input:focus {
 .auth-portal__field-shell {
   min-height: 52px;
   display: grid;
-  grid-template-columns: auto 1fr;
+  /* 3ª coluna: o olho de mostrar/ocultar senha. Nos campos sem toggle ela fica vazia e colapsa. */
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 12px;
   padding: 0 14px;
@@ -1430,39 +1431,34 @@ textarea.input:focus {
   box-shadow: none;
 }
 
-.auth-portal .login-preview__pass-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 10px;
-  align-items: stretch;
-}
-
-.auth-portal .login-preview__toggle {
-  min-height: 52px;
-  padding: 0 14px;
-  border-radius: 8px;
-  border: 1px solid var(--auth-portal-field-border);
-  background: rgba(255, 255, 255, 0.84);
-  color: var(--auth-portal-text-strong);
+/* Botão só-ícone, dentro do próprio campo de senha */
+.auth-portal__field-shell .login-preview__toggle {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  font-size: 0.85rem;
-  font-weight: 700;
+  min-height: 0;
+  min-width: 0;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  margin-right: -4px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--auth-portal-muted);
+  cursor: pointer;
+  transition: color 0.18s ease, background 0.18s ease;
 }
 
-
+.auth-portal__field-shell .login-preview__toggle:hover {
+  color: var(--auth-portal-text-strong);
+  background: rgba(20, 34, 53, 0.06);
+}
 
 .auth-portal .login-preview__toggle svg,
 .auth-portal__support-link svg {
   width: 18px;
   height: 18px;
-}
-
-.auth-portal__toggle-label {
-  font-size: 0.82rem;
-  font-weight: 700;
 }
 
 .auth-portal .login-preview__hint {
@@ -1608,17 +1604,12 @@ textarea.input:focus {
   }
 
   .auth-portal__stats,
-  .auth-portal .login-preview__pass-row,
   .auth-portal .login-preview__field-row {
     grid-template-columns: 1fr;
   }
 
   .auth-portal .login-preview__field-row {
     display: grid;
-  }
-
-  .auth-portal .login-preview__toggle {
-    width: 100%;
   }
 
   .auth-portal .login-preview__actions {

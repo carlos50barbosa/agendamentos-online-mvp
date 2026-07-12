@@ -7,6 +7,7 @@ import {
 import { saveServiceImageFromDataUrl, removeServiceImageFile } from '../lib/service_images.js';
 import { ensureSubscriptionOperationalAccess } from '../middleware/billing.js';
 import { normalizeServiceSlotCapacity } from '../lib/service_capacity.js';
+import { setAudit, diffFields } from '../lib/audit.js';
 
 const router = Router();
 
@@ -232,6 +233,13 @@ router.post('/', auth, isEstabelecimento, ensureSubscriptionOperationalAccess({
     conn = null;
 
     const service = await fetchService(estId, serviceId);
+    setAudit(req, {
+      acao: 'servico.criar',
+      entidade: 'servico',
+      entidade_id: serviceId,
+      estabelecimento_id: estId,
+      dados_depois: { nome: service?.nome, preco_centavos: service?.preco_centavos, duracao_min: service?.duracao_min, ativo: service?.ativo },
+    });
     res.json(service);
   } catch (e) {
     if (conn) {
@@ -360,6 +368,15 @@ router.put('/:id', auth, isEstabelecimento, ensureSubscriptionOperationalAccess(
     conn = null;
 
     const service = await fetchService(estId, serviceId);
+    const diff = diffFields(current, updates, ['nome', 'descricao', 'duracao_min', 'preco_centavos', 'capacidade_por_horario', 'ativo']);
+    setAudit(req, {
+      acao: 'servico.atualizar',
+      entidade: 'servico',
+      entidade_id: serviceId,
+      estabelecimento_id: estId,
+      dados_antes: diff?.antes || null,
+      dados_depois: diff?.depois || null,
+    });
     res.json(service);
   } catch (e) {
     if (conn) {
@@ -404,8 +421,9 @@ router.delete('/:id', auth, isEstabelecimento, ensureSubscriptionOperationalAcce
       });
     }
 
+    // Snapshot completo antes do DELETE: depois da exclusão, esta é a única prova do que existia.
     const [[row]] = await pool.query(
-      'SELECT id, imagem_url FROM servicos WHERE id=? AND estabelecimento_id=?',
+      'SELECT id, nome, descricao, imagem_url, duracao_min, preco_centavos, capacidade_por_horario, ativo FROM servicos WHERE id=? AND estabelecimento_id=?',
       [serviceId, estId]
     );
 
@@ -421,6 +439,15 @@ router.delete('/:id', auth, isEstabelecimento, ensureSubscriptionOperationalAcce
       }
     }
 
+    setAudit(req, {
+      acao: 'servico.excluir',
+      entidade: 'servico',
+      entidade_id: serviceId,
+      estabelecimento_id: estId,
+      resultado: result.affectedRows ? 'sucesso' : 'falha',
+      motivo: result.affectedRows ? null : 'servico_inexistente',
+      dados_antes: row || null,
+    });
     res.json({ ok: true, affectedRows: result.affectedRows });
   } catch (e) {
     console.error('[servicos][delete]', e);

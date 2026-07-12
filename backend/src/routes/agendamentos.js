@@ -26,6 +26,7 @@ import { ensureSubscriptionOperationalAccess } from '../middleware/billing.js';
 import { applyClientLoyaltyBenefitsTx, previewClientLoyaltyBenefits } from '../lib/client_loyalty_credits.js'
 import { cancelPendingPaymentAppointmentTx, restoreAppointmentLoyaltyBenefitsTx } from '../lib/appointment_loyalty.js'
 import { checkAppointmentSlotCapacityTx, normalizeServiceSlotCapacity } from '../lib/service_capacity.js';
+import { setAudit } from '../lib/audit.js';
 
 const router = Router();
 
@@ -2124,6 +2125,14 @@ router.put('/:id/reschedule-estab', authRequired, isEstabelecimento, ensureSubsc
       await notifyEmail(cli.email, 'Agendamento reagendado', html);
     });
 
+    setAudit(req, {
+      acao: 'agendamento.remarcar',
+      entidade: 'agendamento',
+      entidade_id: id,
+      estabelecimento_id: estId,
+      dados_antes: { inicio: oldInicioIso },
+      dados_depois: { inicio: (updated?.inicio ? new Date(updated.inicio) : inicioDate).toISOString() },
+    });
     return res.json({ id: ag.id, inicio: updated?.inicio || inicioDate, fim: updated?.fim || fimDate });
   } catch (e) {
     try { if (txStarted && conn) await conn.rollback(); } catch {}
@@ -2175,6 +2184,15 @@ router.put('/:id/no-show', authRequired, isEstabelecimento, async (req, res) => 
       fireAndForget(() => refundAsaasDepositForCancellation(id, { db: pool, ignoreWindow: true }));
     }
 
+    setAudit(req, {
+      acao: 'agendamento.no_show',
+      entidade: 'agendamento',
+      entidade_id: id,
+      estabelecimento_id: estId,
+      dados_antes: { status: ag.status, no_show: 0 },
+      dados_depois: { status: 'concluido', no_show: 1 },
+      metadados: { sinal_retido: retain },
+    });
     return res.json({ ok: true, no_show: true, retained: retain });
   } catch (e) {
     console.error('[agendamentos/no-show]', e);
@@ -2321,6 +2339,14 @@ router.put('/:id/cancel', authRequired, isCliente, async (req, res) => {
 
     // WhatsApp: não notificar cliente quando ele mesmo cancela e não notificar estabelecimento (somente email configurado permanece).
 
+    setAudit(req, {
+      acao: 'agendamento.cancelar',
+      entidade: 'agendamento',
+      entidade_id: id,
+      estabelecimento_id: a?.estabelecimento_id || null,
+      dados_depois: { status: 'cancelado' },
+      metadados: { cancelado_por: 'cliente', inicio: a?.inicio || null },
+    });
     return res.json({ ok: true });
   } catch (e) {
     console.error('[agendamentos/cancel]', e);
@@ -2479,6 +2505,15 @@ router.put('/:id/cancel-estab', authRequired, isEstabelecimento, async (req, res
       }
     });
 
+    setAudit(req, {
+      acao: 'agendamento.cancelar',
+      entidade: 'agendamento',
+      entidade_id: id,
+      estabelecimento_id: estId,
+      dados_antes: { status: ag.status },
+      dados_depois: { status: 'cancelado' },
+      metadados: { cancelado_por: 'estabelecimento', cliente_id: ag?.cliente_id || null, inicio: ag?.inicio || null },
+    });
     return res.json({ ok: true });
   } catch (e) {
     console.error('[agendamentos/cancel-estab]', e);

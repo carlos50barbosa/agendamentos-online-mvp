@@ -38,6 +38,8 @@ import { startBillingMonitor } from './lib/billing_monitor.js';
 import { startAppointmentReminders } from './lib/appointment_reminders.js';
 import { startEstabReminders } from './lib/estab_reminders.js';
 import { classifySuspiciousRequest, getRequestAccessLogContext, logSecurityEvent, normalizeRequestId } from './lib/route_access.js';
+import { log } from './lib/logger.js';
+import { auditRequest } from './lib/audit.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -69,10 +71,25 @@ function parseBooleanEnv(value, fallback = false) {
   return fallback;
 }
 
+// O IP completo é dado pessoal: só sai por escolha explícita (LOG_FULL_IP=true) ou em ambiente
+// declaradamente não-produtivo. NODE_ENV ausente NÃO é motivo para vazar IP — antes, um servidor
+// que esquecesse de setar NODE_ENV escrevia o IP inteiro de cada visitante no disco.
 function shouldLogFullIpDiagnostics() {
   const nodeEnv = String(process.env.NODE_ENV || '').trim().toLowerCase();
   if (parseBooleanEnv(process.env.LOG_FULL_IP, false)) return true;
-  return !nodeEnv || ['development', 'dev', 'test', 'staging', 'stage'].includes(nodeEnv);
+  return ['development', 'dev', 'test'].includes(nodeEnv);
+}
+
+// Health-checks de monitor (UptimeRobot e afins) batem de minuto em minuto e afogam o log. Só
+// aparecem quando falham — ou com LOG_HEALTH=true.
+const HEALTH_PATHS = new Set(['/health', '/api/health', '/billing/status', '/api/billing/status']);
+const LOG_HEALTH = parseBooleanEnv(process.env.LOG_HEALTH, false);
+
+function isHealthNoise(req, statusCode) {
+  if (LOG_HEALTH) return false;
+  if (statusCode >= 400) return false;
+  const path = String(req?.originalUrl || req?.path || '').split('?')[0];
+  return HEALTH_PATHS.has(path);
 }
 
 // Se hoje o Nginx mantém /api até o Node, passe withApiPrefix=true (mas aceitamos ambos):
@@ -114,32 +131,49 @@ app.use((req, res, next) => {
     const context = getRequestAccessLogContext(req);
     const suspiciousSignals = res.statusCode === 404 ? classifySuspiciousRequest(req) : [];
     const logFullIp = shouldLogFullIpDiagnostics();
+    const ip = logFullIp ? context.ip : (context.ip_masked || context.ip || null);
+
+    // A trilha de auditoria persiste as mutações; roda mesmo quando o access log é silenciado.
+    auditRequest(req, res, { ip, user_agent: context.user_agent });
+
+    if (isHealthNoise(req, res.statusCode)) return;
+
     const payload = {
       request_id: req.requestId || context.request_id || null,
       method: context.method,
       path: context.path,
-      url: context.url,
+      // Rota-padrão do Express ('/servicos/:id'), que agrupa o que a URL concreta separa.
+      route: req.route?.path ? `${req.baseUrl || ''}${req.route.path}` : null,
+      query: context.url && context.url.includes('?') ? context.url.split('?').slice(1).join('?') : null,
       status: res.statusCode,
       duration_ms: Math.round(durationMs * 100) / 100,
-      ip: logFullIp ? context.ip : (context.ip_masked || context.ip || null),
+      bytes: Number(res.getHeader('content-length')) || 0,
+      // Quem fez: o que faltava para o log responder "quem".
+      user_id: req.user?.id || null,
+      user_tipo: req.user?.tipo || null,
+      ip,
       ip_source: context.ip_source || null,
-      ip_trusted_proxy: context.ip_trusted_proxy,
       user_agent: context.user_agent,
+      referer: context.referer || null,
+      host: context.host || null,
     };
     if (logFullIp) {
-      payload.client_ip = context.ip || null;
-      payload.req_ip = context.req_ip || null;
-      payload.req_ips = context.req_ips || [];
-      payload.x_forwarded_for = context.x_forwarded_for || null;
-      payload.x_real_ip = context.x_real_ip || null;
-      payload.cf_connecting_ip = context.cf_connecting_ip || null;
-      payload.socket_remote_address = context.socket_remote_address || null;
+      payload.ip_diagnostics = {
+        req_ip: context.req_ip || null,
+        x_forwarded_for: context.x_forwarded_for || null,
+        x_real_ip: context.x_real_ip || null,
+        cf_connecting_ip: context.cf_connecting_ip || null,
+        socket_remote_address: context.socket_remote_address || null,
+        trusted_proxy: context.ip_trusted_proxy,
+      };
     }
     if (suspiciousSignals.length) {
       payload.scan_signals = suspiciousSignals;
     }
-    const logger = res.statusCode >= 500 ? console.error : (suspiciousSignals.length ? console.warn : console.log);
-    logger('[http] completed', payload);
+
+    if (res.statusCode >= 500) log.error('http_request', payload);
+    else if (suspiciousSignals.length || res.statusCode >= 400) log.warn('http_request', payload);
+    else log.info('http_request', payload);
   });
   next();
 });
