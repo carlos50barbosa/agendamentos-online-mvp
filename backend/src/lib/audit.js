@@ -16,7 +16,7 @@
 // e todo erro é engolido (com um log de aviso) — perder uma linha de auditoria é ruim, devolver
 // 500 a um cliente porque o INSERT do log falhou é pior.
 import { pool } from './db.js';
-import { log, sanitizeForLog } from './logger.js';
+import { log, sanitizeForLog, sqlTimestamp } from './logger.js';
 
 const AUDIT_ENABLED = String(process.env.AUDIT_LOG_ENABLED ?? 'true').trim().toLowerCase() !== 'false';
 
@@ -134,13 +134,17 @@ export function recordAudit(entry = {}) {
     metadados: toJsonColumn(entry.metadados),
   };
 
+  // criado_em explícito, no mesmo fuso do access log (LOG_TZ) — e não o DEFAULT CURRENT_TIMESTAMP
+  // do MySQL, que segue o fuso do SO do banco (time_zone=SYSTEM), nem um Date convertido pelo
+  // mysql2, que seguiria o fuso do processo Node. Sem isto, um MySQL (ou um Node) em UTC deixaria
+  // a trilha 3h à frente do log, e correlacionar os dois viraria adivinhação.
   pool.query(
     `INSERT INTO audit_log
-      (request_id, ator_id, ator_tipo, ator_email, acao, entidade, entidade_id, estabelecimento_id,
+      (criado_em, request_id, ator_id, ator_tipo, ator_email, acao, entidade, entidade_id, estabelecimento_id,
        resultado, status_http, motivo, metodo, rota, ip, user_agent, dados_antes, dados_depois, metadados)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     [
-      row.request_id, row.ator_id, row.ator_tipo, row.ator_email, row.acao, row.entidade,
+      sqlTimestamp(), row.request_id, row.ator_id, row.ator_tipo, row.ator_email, row.acao, row.entidade,
       row.entidade_id, row.estabelecimento_id, row.resultado, row.status_http, row.motivo,
       row.metodo, row.rota, row.ip, row.user_agent, row.dados_antes, row.dados_depois, row.metadados,
     ]
