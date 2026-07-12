@@ -3,13 +3,16 @@
 // frontend/src/pages/Clientes.jsx
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ArrowDown, ArrowUp, ArrowUpDown } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Api } from '../utils/api';
 import { getUser } from '../utils/auth';
 import { IconSearch } from '../components/Icons.jsx';
 import Drawer from '../components/Drawer.jsx';
+import WhatsAppQueue from '../components/clientes/WhatsAppQueue.jsx';
 import useDebouncedValue from '../hooks/useDebouncedValue';
+import useMediaQuery from '../hooks/useMediaQuery';
 import { useClientesCrm } from '../hooks/useClientesCrm';
+import { buildDelta, buildRateDelta } from '../utils/metrics.js';
 
 const DATE_TIME = new Intl.DateTimeFormat('pt-BR', {
   day: '2-digit',
@@ -28,10 +31,12 @@ const TIME_ONLY = new Intl.DateTimeFormat('pt-BR', {
   minute: '2-digit',
   hour12: false,
 });
+// Com 0 casas, R$ 55,50 virava "R$ 56" — e não batia com /relatorios.
 const CURRENCY = new Intl.NumberFormat('pt-BR', {
   style: 'currency',
   currency: 'BRL',
-  maximumFractionDigits: 0,
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
 });
 
 const PERIOD_OPTIONS = [
@@ -49,15 +54,6 @@ const STATUS_OPTIONS = [
 
 const TAG_OPTIONS = ['VIP', 'Promoção', 'Atrasos'];
 
-const RELATIONSHIP_OPTIONS = [
-  { value: 'all', label: 'Relacionamento' },
-  { value: 'novo', label: 'Novo' },
-  { value: 'recorrente', label: 'Recorrente' },
-  { value: 'vip', label: 'VIP' },
-  { value: 'sumido', label: 'Sumido' },
-  { value: 'inativo', label: 'Inativo' },
-];
-
 const DORMANT_OPTIONS = [
   { value: 'all', label: 'Sem retorno' },
   { value: '15', label: '15+ dias' },
@@ -67,6 +63,9 @@ const DORMANT_OPTIONS = [
   { value: '90', label: '90+ dias' },
 ];
 
+// Estes chips SÃO o filtro de relacionamento. Antes havia três controles para a mesma
+// coisa — o chip "VIP", este segmento e um select "Relacionamento" —, cada um com um efeito
+// colateral diferente. Ficou um só, e ele mostra quantos há em cada segmento.
 const QUICK_SEGMENTS = [
   { value: 'all', label: 'Todos' },
   { value: 'novo', label: 'Novos' },
@@ -75,8 +74,46 @@ const QUICK_SEGMENTS = [
   { value: 'sumido', label: 'Sumidos' },
   { value: 'inativo', label: 'Inativos' },
 ];
+const SEGMENT_VALUES = QUICK_SEGMENTS.map((segment) => segment.value);
 
+const SORT_KEYS = ['name', 'last', 'booked', 'appointments', 'cancelled', 'revenue', 'ticket', 'dormant'];
+const PAGE_SIZES = [10, 25, 50];
+const DEFAULT_PERIOD = '30d';
 const DEFAULT_SORT = { key: 'last', dir: 'desc' };
+
+// Estado da tela lido da URL: dá para recarregar, voltar e mandar o link do recorte
+// ("os 87 sumidos") para outra pessoa sem perder nada.
+function readFilters(searchParams) {
+  const get = (key) => searchParams.get(key) || '';
+  const periodo = get('period');
+  const segmento = get('segmento');
+  const semRetorno = get('semRetorno');
+  const ordenar = get('ordenar');
+  const porPagina = Number(get('porPagina'));
+  const pagina = Number(get('pagina'));
+
+  return {
+    period: PERIOD_OPTIONS.some((opt) => opt.value === periodo) ? periodo : DEFAULT_PERIOD,
+    searchText: get('q'),
+    statusFilters: get('status')
+      .split(',')
+      .map((value) => value.trim())
+      .filter((value) => STATUS_OPTIONS.some((opt) => opt.value === value)),
+    riskOnly: get('risco') === '1',
+    birthdayOnly: get('aniversario') === '1',
+    relationshipFilter: SEGMENT_VALUES.includes(segmento) ? segmento : 'all',
+    serviceFilter: get('servico') || 'all',
+    professionalFilter: get('profissional') || 'all',
+    originFilter: get('origem') || 'all',
+    dormantDaysFilter: DORMANT_OPTIONS.some((opt) => opt.value === semRetorno) ? semRetorno : 'all',
+    sort: {
+      key: SORT_KEYS.includes(ordenar) ? ordenar : DEFAULT_SORT.key,
+      dir: get('dir') === 'asc' ? 'asc' : 'desc',
+    },
+    pageSize: PAGE_SIZES.includes(porPagina) ? porPagina : 10,
+    page: Number.isInteger(pagina) && pagina > 0 ? pagina : 1,
+  };
+}
 
 function formatDateTime(value) {
   if (!value) return '-';
@@ -159,11 +196,16 @@ const relationshipBadge = (status) => {
   return { text: 'Novo', className: 'crm-pill' };
 };
 
-const KpiCard = ({ label, value, helper, loading, placeholder }) => (
+const KpiCard = ({ label, value, helper, loading, placeholder, delta }) => (
   <div className="crm-kpi">
     <div className="crm-kpi__label">{label}</div>
     <div className="crm-kpi__value">
       {loading ? <div className="shimmer" style={{ width: '80%', height: 18 }} /> : (value ?? placeholder)}
+      {!loading && delta && (
+        <span className={`report-metric__delta is-${delta.tone}`} title={delta.title}>
+          {delta.text}
+        </span>
+      )}
     </div>
     {helper && <div className="crm-kpi__sub">{helper}</div>}
   </div>
@@ -187,22 +229,31 @@ export default function Clientes() {
   const navigate = useNavigate();
   const isEstab = user?.tipo === 'estabelecimento';
 
-  const [period, setPeriod] = useState('30d');
-  const [searchText, setSearchText] = useState('');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [initial] = useState(() => readFilters(searchParams));
+  const isCompact = useMediaQuery('(max-width: 840px)');
+
+  const [period, setPeriod] = useState(initial.period);
+  const [searchText, setSearchText] = useState(initial.searchText);
   const debouncedSearch = useDebouncedValue(searchText, 160);
-  const [statusFilters, setStatusFilters] = useState([]);
-  const [riskOnly, setRiskOnly] = useState(false);
-  const [vipOnly, setVipOnly] = useState(false);
-  const [relationshipFilter, setRelationshipFilter] = useState('all');
-  const [serviceFilter, setServiceFilter] = useState('all');
-  const [professionalFilter, setProfessionalFilter] = useState('all');
-  const [originFilter, setOriginFilter] = useState('all');
-  const [dormantDaysFilter, setDormantDaysFilter] = useState('all');
-  const [sort, setSort] = useState(DEFAULT_SORT);
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
+  const [statusFilters, setStatusFilters] = useState(initial.statusFilters);
+  const [riskOnly, setRiskOnly] = useState(initial.riskOnly);
+  const [relationshipFilter, setRelationshipFilter] = useState(initial.relationshipFilter);
+  const [serviceFilter, setServiceFilter] = useState(initial.serviceFilter);
+  const [professionalFilter, setProfessionalFilter] = useState(initial.professionalFilter);
+  const [originFilter, setOriginFilter] = useState(initial.originFilter);
+  const [dormantDaysFilter, setDormantDaysFilter] = useState(initial.dormantDaysFilter);
+  const [birthdayOnly, setBirthdayOnly] = useState(initial.birthdayOnly);
+  const [sort, setSort] = useState(initial.sort);
+  const [page, setPage] = useState(initial.page);
+  const [pageSize, setPageSize] = useState(initial.pageSize);
   const [serviceOptions, setServiceOptions] = useState([]);
   const [professionalOptions, setProfessionalOptions] = useState([]);
+
+  const [selectedIds, setSelectedIds] = useState(() => new Set());
+  const [exporting, setExporting] = useState(false);
+  const [actionError, setActionError] = useState('');
+  const [queue, setQueue] = useState({ open: false, loading: false, error: '', items: [], truncated: false, limit: 0 });
 
   const listParams = useMemo(() => ({
     page,
@@ -211,7 +262,7 @@ export default function Clientes() {
     period,
     status: statusFilters.length ? statusFilters.join(',') : undefined,
     risk: riskOnly ? 1 : undefined,
-    vip: vipOnly ? 1 : undefined,
+    birthday: birthdayOnly ? 'mes' : undefined,
     relationship: relationshipFilter !== 'all' ? relationshipFilter : undefined,
     serviceId: serviceFilter !== 'all' ? serviceFilter : undefined,
     profissionalId: professionalFilter !== 'all' ? professionalFilter : undefined,
@@ -226,7 +277,7 @@ export default function Clientes() {
     period,
     statusFilters,
     riskOnly,
-    vipOnly,
+    birthdayOnly,
     relationshipFilter,
     serviceFilter,
     professionalFilter,
@@ -235,11 +286,47 @@ export default function Clientes() {
     sort,
   ]);
 
+  // Espelha o recorte na URL (só o que sai do padrão) com replace: mexer num filtro não
+  // deve empilhar entrada no histórico do navegador.
+  useEffect(() => {
+    const next = new URLSearchParams();
+    if (period !== DEFAULT_PERIOD) next.set('period', period);
+    if (searchText) next.set('q', searchText);
+    if (statusFilters.length) next.set('status', statusFilters.join(','));
+    if (riskOnly) next.set('risco', '1');
+    if (birthdayOnly) next.set('aniversario', '1');
+    if (relationshipFilter !== 'all') next.set('segmento', relationshipFilter);
+    if (serviceFilter !== 'all') next.set('servico', serviceFilter);
+    if (professionalFilter !== 'all') next.set('profissional', professionalFilter);
+    if (originFilter !== 'all') next.set('origem', originFilter);
+    if (dormantDaysFilter !== 'all') next.set('semRetorno', dormantDaysFilter);
+    if (sort.key !== DEFAULT_SORT.key) next.set('ordenar', sort.key);
+    if (sort.dir !== DEFAULT_SORT.dir) next.set('dir', sort.dir);
+    if (pageSize !== 10) next.set('porPagina', String(pageSize));
+    if (page !== 1) next.set('pagina', String(page));
+
+    if (next.toString() !== searchParams.toString()) {
+      setSearchParams(next, { replace: true });
+    }
+  }, [
+    period, searchText, statusFilters, riskOnly, birthdayOnly, relationshipFilter,
+    serviceFilter, professionalFilter, originFilter, dormantDaysFilter,
+    sort, pageSize, page, searchParams, setSearchParams,
+  ]);
+
+  // Exportação e fila agem sobre o RECORTE (sem paginação). Havendo seleção manual, ela
+  // restringe dentro do filtro — nunca o contorna.
+  const actionParams = useMemo(() => {
+    const { page: _page, pageSize: _pageSize, ...rest } = listParams;
+    return selectedIds.size ? { ...rest, ids: [...selectedIds].join(',') } : rest;
+  }, [listParams, selectedIds]);
+
   const {
     items,
     total,
     hasNext,
     aggregations,
+    segments,
     meta,
     loading,
     error,
@@ -287,12 +374,14 @@ export default function Clientes() {
 
   useEffect(() => {
     setPage(1);
+    // Uma seleção feita sobre outro recorte não quer dizer nada — some junto com o filtro.
+    setSelectedIds(new Set());
   }, [
     debouncedSearch,
     period,
     statusFilters.join('|'),
     riskOnly,
-    vipOnly,
+    birthdayOnly,
     relationshipFilter,
     serviceFilter,
     professionalFilter,
@@ -353,17 +442,43 @@ export default function Clientes() {
        ? Number(aggregations?.cancel_rate)
       : fallbackCancelRate;
 
+    const previous = aggregations?.previous || null;
+
     return {
       clients,
+      // A lista agora é vitalícia; este é o recorte que antes era o único visível.
+      activeClients: Number(aggregations?.active_clients || 0),
       appointments,
       cancelled,
       cancelRate,
       revenue: aggregations?.revenue_centavos,
+      expectedRevenue: aggregations?.expected_revenue_centavos,
       ticket: aggregations?.ticket_medio_centavos,
-      vipClients: Number(aggregations?.vip_clients || 0),
       riskClients: Number(aggregations?.risk_clients || 0),
+      // Sem período anterior (period=all) não há delta — e nenhum card ganha selo.
+      deltas: previous ? {
+        activeClients: buildDelta(Number(aggregations?.active_clients || 0), previous.active_clients),
+        appointments: buildDelta(appointments, previous.appointments),
+        cancelRate: buildRateDelta((cancelRate || 0) / 100, (previous.cancel_rate || 0) / 100, { higherIsBetter: false }),
+        revenue: buildDelta(aggregations?.revenue_centavos, previous.revenue_centavos, { format: formatCurrency }),
+        ticket: buildDelta(aggregations?.ticket_medio_centavos, previous.ticket_medio_centavos, { format: formatCurrency }),
+      } : {},
     };
   }, [aggregations, items]);
+
+  // Uma derivação por cliente — a tabela e os cards liam os mesmos campos e recalculavam
+  // tudo em dois laços separados. A taxa de cancelamento vem pronta do backend (cancel_rate);
+  // recalculá-la aqui era a terceira implementação da mesma conta.
+  const rows = useMemo(() => items.map((item) => ({
+    item,
+    id: Number(item.id),
+    badge: statusBadge(item?.last_status),
+    relationship: relationshipBadge(item?.relationship_status),
+    totalAppointments: Number(item?.total_appointments || 0),
+    totalCancelled: Number(item?.total_cancelled || 0),
+    cancelPct: Number(item?.cancel_rate || 0),
+    waLink: buildWhatsappLink(item?.nome, item?.telefone),
+  })), [items]);
 
   const originOptions = useMemo(() => (
     Array.isArray(meta?.origins) ? meta.origins : []
@@ -385,17 +500,6 @@ export default function Clientes() {
     });
   }, []);
 
-  const handleQuickSegment = useCallback((value) => {
-    setRelationshipFilter(value);
-    if (value === 'vip') {
-      setVipOnly(true);
-      setRiskOnly(false);
-      return;
-    }
-    setVipOnly(false);
-    setRiskOnly(value === 'sumido' || value === 'inativo');
-  }, []);
-
   const handleOpenDetails = useCallback((item) => {
     setSelectedClient(item);
     setDrawerOpen(true);
@@ -413,16 +517,84 @@ export default function Clientes() {
     setSearchText('');
     setStatusFilters([]);
     setRiskOnly(false);
-    setVipOnly(false);
+    setBirthdayOnly(false);
     setRelationshipFilter('all');
     setServiceFilter('all');
     setProfessionalFilter('all');
     setOriginFilter('all');
     setDormantDaysFilter('all');
     setSort(DEFAULT_SORT);
-    setPeriod('30d');
+    setPeriod(DEFAULT_PERIOD);
     setPageSize(10);
   }, []);
+
+  const pageIds = useMemo(() => rows.map((row) => row.id), [rows]);
+  const allPageSelected = pageIds.length > 0 && pageIds.every((id) => selectedIds.has(id));
+  const somePageSelected = pageIds.some((id) => selectedIds.has(id));
+
+  const toggleAllOnPage = useCallback(() => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      const todosMarcados = pageIds.length > 0 && pageIds.every((id) => next.has(id));
+      pageIds.forEach((id) => (todosMarcados ? next.delete(id) : next.add(id)));
+      return next;
+    });
+  }, [pageIds]);
+
+  const toggleOne = useCallback((id) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const handleExportCsv = useCallback(async () => {
+    if (!user?.id) return;
+    setExporting(true);
+    setActionError('');
+    try {
+      const { blob, filename } = await Api.downloadClientesCsv(user.id, actionParams);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', filename);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setActionError(err?.message || 'Não foi possível exportar o CSV.');
+    } finally {
+      setExporting(false);
+    }
+  }, [actionParams, user?.id]);
+
+  const handleOpenQueue = useCallback(async () => {
+    if (!user?.id) return;
+    setQueue({ open: true, loading: true, error: '', items: [], truncated: false, limit: 0 });
+    try {
+      const resp = await Api.getEstablishmentClientContacts(user.id, actionParams);
+      setQueue({
+        open: true,
+        loading: false,
+        error: '',
+        items: Array.isArray(resp?.items) ? resp.items : [],
+        truncated: Boolean(resp?.truncated),
+        limit: Number(resp?.limit || 0),
+      });
+    } catch (err) {
+      setQueue({
+        open: true,
+        loading: false,
+        error: err?.message || 'Não foi possível carregar os contatos.',
+        items: [],
+        truncated: false,
+        limit: 0,
+      });
+    }
+  }, [actionParams, user?.id]);
 
   const handleSaveNotes = useCallback(async () => {
     if (!selectedClient || !user?.id) return;
@@ -522,6 +694,9 @@ export default function Clientes() {
   const from = total ? (page - 1) * pageSize + 1 : 0;
   const to = total ? Math.min(page * pageSize, total) : 0;
   const periodLabel = period === 'all' ? 'geral' : `últimos ${period.replace('d', ' dias')}`;
+  // Os números da linha são do período; a última visita e o gasto são vitalícios. O cabeçalho
+  // precisa dizer qual régua está usando — antes escrevia "(total)" sobre a contagem do período.
+  const periodShort = period === 'all' ? 'geral' : period;
 
 
   return (
@@ -547,25 +722,44 @@ export default function Clientes() {
       </div>
 
       <div className="crm-kpis">
-        <KpiCard label="Clientes" value={summary.clients} loading={loading} />
-        <KpiCard label="Agendamentos" value={summary.appointments} loading={loading} />
+        <KpiCard
+          label="Clientes"
+          value={summary.clients}
+          helper={`${summary.activeClients} com agendamento (${periodLabel})`}
+          delta={summary.deltas.activeClients}
+          loading={loading}
+        />
+        <KpiCard
+          label="Agendamentos"
+          value={summary.appointments}
+          helper={periodLabel}
+          delta={summary.deltas.appointments}
+          loading={loading}
+        />
         <KpiCard
           label="Cancelamentos"
           value={loading ? null : `${summary.cancelled} (${summary.cancelRate || 0}%)`}
+          helper={periodLabel}
+          delta={summary.deltas.cancelRate}
           loading={loading}
         />
-        {/* Opcional: exibe receita/ticket se houver valores no banco */}
         <KpiCard
-          label="Receita do período"
+          label="Receita realizada"
           value={summary.revenue != null ? formatCurrency(summary.revenue) : '—'}
-          helper="Opcional: valor em BRL"
+          helper={
+            summary.expectedRevenue != null
+              ? `Prevista: ${formatCurrency(summary.expectedRevenue)}`
+              : 'Atendimentos concluídos'
+          }
+          delta={summary.deltas.revenue}
           loading={loading}
           placeholder="—"
         />
         <KpiCard
           label="Ticket médio"
           value={summary.ticket != null ? formatCurrency(summary.ticket) : '—'}
-          helper="Opcional: média por cliente"
+          helper="Por atendimento concluído"
+          delta={summary.deltas.ticket}
           loading={loading}
           placeholder="—"
         />
@@ -617,45 +811,84 @@ export default function Clientes() {
                 {opt.label}
               </button>
             ))}
+            {/* "Em risco" (sumido OU cancelador crônico) não é um segmento: cruza com todos.
+                Por isso continua sendo um alternador próprio, e não um chip de segmento. */}
             <button
               type="button"
               className={`chip ${riskOnly ? 'chip--active' : ''}`}
               onClick={() => setRiskOnly((prev) => !prev)}
             >
-              Em risco
+              Em risco{summary.riskClients ? ` (${summary.riskClients})` : ''}
             </button>
             <button
               type="button"
-              className={`chip ${vipOnly ? 'chip--active' : ''}`}
-              onClick={() => setVipOnly((prev) => !prev)}
+              className={`chip ${birthdayOnly ? 'chip--active' : ''}`}
+              onClick={() => setBirthdayOnly((prev) => !prev)}
             >
-              VIP
+              Aniversariantes do mês
             </button>
           </div>
         </div>
+
+        <div className="crm-controls__row crm-bulk">
+          <span className="crm-bulk__count">
+            {selectedIds.size
+              ? <><strong>{selectedIds.size}</strong> selecionado{selectedIds.size > 1 ? 's' : ''}</>
+              : <>{total} cliente{total === 1 ? '' : 's'} no recorte</>}
+          </span>
+          {selectedIds.size > 0 && (
+            <button
+              type="button"
+              className="btn btn--ghost btn--sm"
+              onClick={() => setSelectedIds(new Set())}
+            >
+              Limpar seleção
+            </button>
+          )}
+          <div className="crm-actions">
+            <button
+              type="button"
+              className="btn btn--sm"
+              onClick={handleOpenQueue}
+              disabled={loading || !total}
+            >
+              Fila de WhatsApp ({selectedIds.size || total})
+            </button>
+            <button
+              type="button"
+              className="btn btn--outline btn--sm"
+              onClick={handleExportCsv}
+              disabled={exporting || loading || !total}
+            >
+              {exporting
+                ? 'Exportando...'
+                : selectedIds.size
+                  ? `Exportar ${selectedIds.size} selecionados`
+                  : 'Exportar CSV'}
+            </button>
+          </div>
+        </div>
+
+        {actionError && <div className="box error" style={{ marginTop: 8 }}>{actionError}</div>}
         <div className="crm-controls__row">
-          <div className="crm-filters">
+          <div className="crm-filters" role="group" aria-label="Segmento de relacionamento">
             {QUICK_SEGMENTS.map((segment) => (
               <button
                 key={segment.value}
                 type="button"
+                aria-pressed={relationshipFilter === segment.value}
                 className={`chip ${relationshipFilter === segment.value ? 'chip--active' : ''}`}
-                onClick={() => handleQuickSegment(segment.value)}
+                onClick={() => setRelationshipFilter(segment.value)}
               >
                 {segment.label}
+                {/* A contagem ignora o próprio filtro de segmento — senão, olhando "Sumidos",
+                    o chip "Novos" mostraria 0 e ninguém clicaria nele. */}
+                <span className="chip__count">{segments?.[segment.value] ?? 0}</span>
               </button>
             ))}
           </div>
         </div>
         <div className="crm-filter-grid">
-          <label className="label crm-filter-field">
-            <span>Relacionamento</span>
-            <select className="input" value={relationshipFilter} onChange={(event) => setRelationshipFilter(event.target.value)}>
-              {RELATIONSHIP_OPTIONS.map((opt) => (
-                <option key={opt.value} value={opt.value}>{opt.label}</option>
-              ))}
-            </select>
-          </label>
           <label className="label crm-filter-field">
             <span>Serviço</span>
             <select className="input" value={serviceFilter} onChange={(event) => setServiceFilter(event.target.value)}>
@@ -720,10 +953,83 @@ export default function Clientes() {
           </div>
         ) : (
           <>
+            {/* Uma lista por vez. Antes a tabela E os cards ficavam sempre no DOM, com o CSS
+                escondendo um — cada linha era construída em dobro, e cada correção também. */}
+            {isCompact ? (
+            <div className="crm-cards">
+              {rows.map(({ item, id, badge, relationship, totalAppointments, totalCancelled, cancelPct, waLink }) => (
+                <div key={id} className="crm-card" onClick={() => handleOpenDetails(item)}>
+                  <div className="crm-card__header">
+                    <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+                      <input
+                        type="checkbox"
+                        aria-label={`Selecionar ${item?.nome || 'cliente'}`}
+                        checked={selectedIds.has(id)}
+                        onClick={(event) => event.stopPropagation()}
+                        onChange={() => toggleOne(id)}
+                        style={{ marginTop: 4 }}
+                      />
+                      <div>
+                        <button
+                          type="button"
+                          className="crm-rowlink crm-card__name"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            handleOpenDetails(item);
+                          }}
+                        >
+                          {item?.nome || 'Cliente'}
+                        </button>
+                        <div className="crm-actions" style={{ marginTop: 6 }}>
+                          <span className={relationship.className}>{item?.relationship_label || relationship.text}</span>
+                          {item?.is_at_risk ? <span className="chip chip--active">Em risco</span> : null}
+                        </div>
+                      </div>
+                    </div>
+                    <span className={badge.className}>{badge.text}</span>
+                  </div>
+                  <div className="crm-card__meta">
+                    <span>
+                      Última visita: {item?.last_visit_at ? formatDateOnly(item.last_visit_at) : 'nunca'}
+                    </span>
+                    {item?.days_since_last_visit != null ? <span>{item.days_since_last_visit}d sem retorno</span> : null}
+                    <span>Agendamentos ({periodShort}): {totalAppointments}</span>
+                    <span>Cancel.: {`${totalCancelled} (${cancelPct}%)`}</span>
+                    <span>Gasto: {formatCurrency(item?.total_spent_centavos)}</span>
+                  </div>
+                  {waLink && (
+                    <div className="crm-card__actions">
+                      <a
+                        href={waLink}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="btn btn--sm"
+                        onClick={(event) => event.stopPropagation()}
+                      >
+                        WhatsApp
+                      </a>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+            ) : (
             <div className="crm-table-wrapper">
               <table className="crm-table">
                 <thead>
                   <tr>
+                    <th style={{ width: '36px' }}>
+                      <input
+                        type="checkbox"
+                        aria-label="Selecionar todos desta página"
+                        checked={allPageSelected}
+                        // indeterminado quando só parte da página está marcada
+                        ref={(node) => {
+                          if (node) node.indeterminate = !allPageSelected && somePageSelected;
+                        }}
+                        onChange={toggleAllOnPage}
+                      />
+                    </th>
                     <th style={{ width: '20%' }}>
                       <SortButton
                         label="Nome"
@@ -735,7 +1041,7 @@ export default function Clientes() {
                     <th style={{ width: '12%' }}>WhatsApp</th>
                     <th style={{ width: '16%' }}>
                       <SortButton
-                        label="Último agendamento"
+                        label="Última visita"
                         active={sort.key === 'last'}
                         direction={sort.dir}
                         onClick={() => handleSortChange('last')}
@@ -743,7 +1049,7 @@ export default function Clientes() {
                     </th>
                     <th style={{ width: '10%' }}>
                       <SortButton
-                        label="Agendamentos (total)"
+                        label={`Agendamentos (${periodShort})`}
                         active={sort.key === 'appointments'}
                         direction={sort.dir}
                         onClick={() => handleSortChange('appointments')}
@@ -751,7 +1057,7 @@ export default function Clientes() {
                     </th>
                     <th style={{ width: '12%' }}>
                       <SortButton
-                        label="Cancelamentos"
+                        label={`Cancelamentos (${periodShort})`}
                         active={sort.key === 'cancelled'}
                         direction={sort.dir}
                         onClick={() => handleSortChange('cancelled')}
@@ -759,36 +1065,40 @@ export default function Clientes() {
                     </th>
                     <th style={{ width: '15%' }}>Último serviço</th>
                     <th style={{ width: '10%' }}>Status</th>
-                    <th style={{ width: '15%' }}>Ações</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {items.map((item) => {
-                    const badge = statusBadge(item?.last_status);
-                    const relationship = relationshipBadge(item?.relationship_status);
-                    const totalAppointments = Number(item?.total_appointments || 0);
-                    const totalCancelled = Number(item?.total_cancelled || 0);
-                    const cancelPct = totalAppointments
-                       ? Math.round((totalCancelled / totalAppointments) * 100)
-                      : 0;
-                    const waLink = buildWhatsappLink(item?.nome, item?.telefone);
-                    return (
+                  {rows.map(({ item, id, badge, relationship, totalAppointments, totalCancelled, cancelPct, waLink }) => (
+                      // Sem role="button"/tabIndex: era um "botão" ARIA com <a> e <button>
+                      // dentro (aninhamento inválido) e só tratava Enter, não Espaço. O clique
+                      // na linha fica como atalho de mouse; o nome é o controle de verdade.
                       <tr
-                        key={item.id}
+                        key={id}
                         className="crm-row"
                         onClick={() => handleOpenDetails(item)}
-                        role="button"
-                        tabIndex={0}
-                        onKeyDown={(event) => {
-                          if (event.key === 'Enter') handleOpenDetails(item);
-                        }}
                       >
+                        <td onClick={(event) => event.stopPropagation()}>
+                          <input
+                            type="checkbox"
+                            aria-label={`Selecionar ${item?.nome || 'cliente'}`}
+                            checked={selectedIds.has(id)}
+                            onChange={() => toggleOne(id)}
+                          />
+                        </td>
                         <td>
                           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                            <strong>{item?.nome || 'Cliente'}</strong>
+                            <button
+                              type="button"
+                              className="crm-rowlink"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                handleOpenDetails(item);
+                              }}
+                            >
+                              {item?.nome || 'Cliente'}
+                            </button>
                             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                               <span className={relationship.className}>{item?.relationship_label || relationship.text}</span>
-                              {item?.is_vip ? <span className="chip">VIP</span> : null}
                               {item?.is_at_risk ? <span className="chip chip--active">Em risco</span> : null}
                               {item?.birthday?.is_birthday_month ? <span className="crm-pill crm-pill--soft">Aniversário</span> : null}
                             </div>
@@ -809,7 +1119,18 @@ export default function Clientes() {
                             <span className="muted">sem telefone</span>
                           )}
                         </td>
-                        <td>{formatDateTime(item?.last_appointment_at)}</td>
+                        <td>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                            <span>
+                              {item?.last_visit_at ? formatDateOnly(item.last_visit_at) : 'Nunca veio'}
+                            </span>
+                            <span className="muted">
+                              {item?.days_since_last_visit != null
+                                ? `${item.days_since_last_visit} dias sem retorno`
+                                : '—'}
+                            </span>
+                          </div>
+                        </td>
                         <td>{totalAppointments}</td>
                         <td>{`${totalCancelled} (${cancelPct}%)`}</td>
                         <td>
@@ -825,85 +1146,21 @@ export default function Clientes() {
                           </div>
                         </td>
                         <td>
-                          <span className={badge.className}>{badge.text}</span>
-                        </td>
-                        <td>
-                          <div className="crm-actions">
-                            <button
-                              type="button"
-                              className="btn btn--sm btn--outline"
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                handleOpenDetails(item);
-                              }}
-                            >
-                              Ver dados
-                            </button>
+                          {/* O status é do ÚLTIMO AGENDAMENTO, não da última visita: com a data
+                              ao lado, "cancelou ontem mas não vem há 60 dias" fica legível. */}
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                            <span className={badge.className}>{badge.text}</span>
+                            {item?.last_appointment_at && (
+                              <span className="muted">{formatDateOnly(item.last_appointment_at)}</span>
+                            )}
                           </div>
                         </td>
                       </tr>
-                    );
-                  })}
+                  ))}
                 </tbody>
               </table>
             </div>
-
-            <div className="crm-cards">
-              {items.map((item) => {
-                const badge = statusBadge(item?.last_status);
-                const relationship = relationshipBadge(item?.relationship_status);
-                const totalAppointments = Number(item?.total_appointments || 0);
-                const totalCancelled = Number(item?.total_cancelled || 0);
-                const cancelPct = totalAppointments
-                   ? Math.round((totalCancelled / totalAppointments) * 100)
-                  : 0;
-                const waLink = buildWhatsappLink(item?.nome, item?.telefone);
-                return (
-                  <div key={`card-${item.id}`} className="crm-card" onClick={() => handleOpenDetails(item)}>
-                    <div className="crm-card__header">
-                      <div>
-                        <div className="crm-card__name">{item?.nome || 'Cliente'}</div>
-                        <div className="crm-actions" style={{ marginTop: 6 }}>
-                          <span className={relationship.className}>{item?.relationship_label || relationship.text}</span>
-                          {item?.is_at_risk ? <span className="chip chip--active">Em risco</span> : null}
-                        </div>
-                      </div>
-                      <span className={badge.className}>{badge.text}</span>
-                    </div>
-                    <div className="crm-card__meta">
-                      <span>Último: {formatDateTime(item?.last_appointment_at)}</span>
-                      <span>Total: {totalAppointments}</span>
-                      <span>Cancel.: {`${totalCancelled} (${cancelPct}%)`}</span>
-                      <span>Gasto: {formatCurrency(item?.total_spent_centavos)}</span>
-                      {item?.days_since_last_visit != null ? <span>{item.days_since_last_visit}d sem retorno</span> : null}
-                    </div>
-                    <div className="crm-card__actions">
-                      <button
-                        type="button"
-                        className="btn btn--sm btn--outline"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          handleOpenDetails(item);
-                        }}
-                      >
-                        Ver dados
-                      </button>
-                      {waLink && (
-                        <a
-                          href={waLink}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="btn btn--sm"
-                          onClick={(event) => event.stopPropagation()}
-                        >
-                          WhatsApp
-                        </a>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+            )}
 
             <div className="crm-pagination">
               <div className="crm-pagination__meta">
@@ -1007,7 +1264,8 @@ export default function Clientes() {
                 <strong>{`Métricas (${periodLabel})`}</strong>
                 <div>Agendamentos: {detailData?.metrics?.total_appointments ?? 0}</div>
                 <div>Cancelamentos: {detailData?.metrics?.total_cancelled ?? 0}</div>
-                <div>Receita: {detailData?.metrics?.revenue_centavos != null ? formatCurrency(detailData.metrics.revenue_centavos) : '—'}</div>
+                <div>Receita realizada: {detailData?.metrics?.revenue_centavos != null ? formatCurrency(detailData.metrics.revenue_centavos) : '—'}</div>
+                <div>Receita prevista: {detailData?.metrics?.expected_revenue_centavos != null ? formatCurrency(detailData.metrics.expected_revenue_centavos) : '—'}</div>
                 <div>Ticket médio: {detailData?.metrics?.ticket_medio_centavos != null ? formatCurrency(detailData.metrics.ticket_medio_centavos) : '—'}</div>
               </div>
             </div>
@@ -1164,6 +1422,16 @@ export default function Clientes() {
           <span className="muted">Selecione um cliente para ver detalhes.</span>
         )}
       </Drawer>
+
+      <WhatsAppQueue
+        open={queue.open}
+        contacts={queue.items}
+        loading={queue.loading}
+        error={queue.error}
+        truncated={queue.truncated}
+        limit={queue.limit}
+        onClose={() => setQueue((prev) => ({ ...prev, open: false }))}
+      />
     </div>
   );
 }

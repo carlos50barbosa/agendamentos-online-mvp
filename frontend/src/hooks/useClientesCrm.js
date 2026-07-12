@@ -11,11 +11,14 @@ const EMPTY_AGGREGATIONS = {
   ticket_medio_centavos: null,
 };
 
+const EMPTY_SEGMENTS = { all: 0, novo: 0, recorrente: 0, vip: 0, sumido: 0, inativo: 0 };
+
 export function useClientesCrm({ establishmentId, params = {}, enabled = true }) {
   const [items, setItems] = useState([]);
   const [total, setTotal] = useState(0);
   const [hasNext, setHasNext] = useState(false);
   const [aggregations, setAggregations] = useState(EMPTY_AGGREGATIONS);
+  const [segments, setSegments] = useState(EMPTY_SEGMENTS);
   const [meta, setMeta] = useState({ origins: [], day_filters: [] });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -45,6 +48,7 @@ export function useClientesCrm({ establishmentId, params = {}, enabled = true })
         setTotal(Number(resp?.total || 0));
         setHasNext(Boolean(resp?.hasNext));
         setAggregations({ ...EMPTY_AGGREGATIONS, ...(resp?.aggregations || {}) });
+        setSegments({ ...EMPTY_SEGMENTS, ...(resp?.segments || {}) });
         setMeta(resp?.meta || { origins: [], day_filters: [] });
       })
       .catch((err) => {
@@ -54,6 +58,7 @@ export function useClientesCrm({ establishmentId, params = {}, enabled = true })
         setTotal(0);
         setHasNext(false);
         setAggregations(EMPTY_AGGREGATIONS);
+        setSegments(EMPTY_SEGMENTS);
         setMeta({ origins: [], day_filters: [] });
       })
       .finally(() => {
@@ -72,6 +77,7 @@ export function useClientesCrm({ establishmentId, params = {}, enabled = true })
     total,
     hasNext,
     aggregations,
+    segments,
     meta,
     loading,
     error,

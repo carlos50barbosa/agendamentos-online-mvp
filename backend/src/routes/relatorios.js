@@ -4,6 +4,13 @@ import { auth as authRequired, isEstabelecimento } from '../middleware/auth.js';
 import { getPlanContext, isDelinquentStatus } from '../lib/plans.js';
 import { EST_TZ_OFFSET_MIN, makeUtcFromLocalYMDHM } from '../lib/datetime_tz.js';
 import {
+  csvLine,
+  formatCsvBoolean,
+  formatCsvMoney,
+  sanitizeFilenameSegment,
+  startCsvResponse,
+} from '../lib/csv.js';
+import {
   parseLocalDate,
   formatLocalDate,
   shiftLocalDate,
@@ -196,10 +203,6 @@ function buildBaseFilters({
   };
 }
 
-// Excel pt-BR usa ';' como separador de lista e ',' como decimal. Com ',' o arquivo inteiro
-// cai na coluna A e o valor vira texto.
-const CSV_SEPARATOR = ';';
-
 const CSV_STATUS_LABELS = {
   confirmado: 'Confirmado',
   pendente: 'Pendente',
@@ -246,29 +249,10 @@ function buildCsvHeaders() {
 }
 
 function formatCsvCell(row, key) {
-  if (key === 'valor') {
-    return (Number(row.valor_centavos || 0) / 100).toFixed(2).replace('.', ',');
-  }
-  if (key === 'status') {
-    return CSV_STATUS_LABELS[row.status] || row.status;
-  }
-  if (key === 'no_show') {
-    return Number(row.no_show || 0) === 1 ? 'Sim' : 'Não';
-  }
+  if (key === 'valor') return formatCsvMoney(row.valor_centavos);
+  if (key === 'status') return CSV_STATUS_LABELS[row.status] || row.status;
+  if (key === 'no_show') return formatCsvBoolean(Number(row.no_show || 0) === 1);
   return row[key];
-}
-
-function escapeCsv(value) {
-  if (value === null || value === undefined) return '""';
-  const str = String(value).replace(/"/g, '""');
-  return `"${str}"`;
-}
-
-function sanitizeSegment(value) {
-  return String(value || '')
-    .replace(/\s+/g, '-')
-    .replace(/[^0-9A-Za-z_\-]/g, '')
-    .toLowerCase();
 }
 
 async function resolveReportContext(req, { requireAdvanced = false } = {}) {
@@ -802,16 +786,13 @@ router.get('/estabelecimento/export.csv', authRequired, isEstabelecimento, async
     // Ordem dos '?': SELECT (4x TZ), join de itens, WHERE.
     const exportParams = [...tzParams, ...itemJoin.params, ...baseFilters.params];
 
-    const filenameBase = sanitizeSegment(
+    const filenameBase = sanitizeFilenameSegment(
       `relatorio-${formatLocalDate(startLocal)}-a-${formatLocalDate(endLocal)}`
     );
     const filename = filenameBase ? `${filenameBase}.csv` : 'relatorio.csv';
 
-    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-
     const headers = buildCsvHeaders();
-    res.write('\ufeff' + headers.map((h) => escapeCsv(h.label)).join(CSV_SEPARATOR) + '\n');
+    startCsvResponse(res, filename, headers.map((h) => h.label));
 
     const conn = await pool.getConnection();
     try {
@@ -820,10 +801,8 @@ router.get('/estabelecimento/export.csv', authRequired, isEstabelecimento, async
 
       await new Promise((resolve, reject) => {
         stream.on('data', (row) => {
-          const linha = headers
-            .map((h) => escapeCsv(formatCsvCell(row, h.key)))
-            .join(CSV_SEPARATOR);
-          if (!res.write(linha + '\n')) {
+          const linha = csvLine(headers.map((h) => formatCsvCell(row, h.key)));
+          if (!res.write(linha)) {
             stream.pause();
             res.once('drain', () => stream.resume());
           }
