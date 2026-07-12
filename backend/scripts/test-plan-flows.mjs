@@ -83,12 +83,12 @@ function defaultReport() {
       receita_perdida: 2000
     },
     daily: [
-      { dia: '2025-01-01', confirmados: 1, cancelados: 0, receita_centavos: 8000 },
-      { dia: '2025-01-02', confirmados: 1, cancelados: 1, receita_centavos: 7000 }
+      { dia: '2025-01-01', confirmados: 1, cancelados: 0, receita_prevista: 8000, receita_concluida: 8000 },
+      { dia: '2025-01-02', confirmados: 1, cancelados: 1, receita_prevista: 7000, receita_concluida: 0 }
     ],
     services: [
-      { id: 10, nome: 'Consulta', total: 2, confirmados: 1, cancelados: 1, receita_centavos: 8000 },
-      { id: 11, nome: 'Exame', total: 1, confirmados: 1, cancelados: 0, receita_centavos: 7000 }
+      { servico_id: 10, nome: 'Consulta', total: 2, confirmados: 1, cancelados: 1, receita_prevista: 8000, receita_concluida: 8000 },
+      { servico_id: 11, nome: 'Exame', total: 1, confirmados: 1, cancelados: 0, receita_prevista: 7000, receita_concluida: 0 }
     ]
   }
 }
@@ -1524,8 +1524,8 @@ seedScenario({
       receita_futura: 10000,
       receita_perdida: 3000
     },
-    daily: [{ dia: '2025-02-01', confirmados: 2, cancelados: 0, receita_centavos: 15000 }],
-    services: [{ id: 10, nome: 'Consulta', total: 3, confirmados: 2, cancelados: 1, receita_centavos: 15000 }]
+    daily: [{ dia: '2025-02-01', confirmados: 2, cancelados: 0, receita_prevista: 15000, receita_concluida: 15000 }],
+    services: [{ servico_id: 10, nome: 'Consulta', total: 3, confirmados: 2, cancelados: 1, receita_prevista: 15000, receita_concluida: 15000 }]
   }
 })
 const res11 = await callHandler(relatorioHandler, {

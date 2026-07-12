@@ -1877,8 +1877,17 @@ a:hover { opacity: 1; text-decoration: underline; }
 .report-metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin-top:16px;}
 .report-metric{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:12px;display:flex;flex-direction:column;gap:6px;}
   .report-metric__label{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;}
+  .report-metric__value-row{display:flex;align-items:baseline;flex-wrap:wrap;gap:8px;}
   .report-metric__value{font-size:24px;font-weight:700;}
+  .report-metric__delta{font-size:12px;font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap;}
+  .report-metric__delta.is-good{color:var(--success-text);}
+  .report-metric__delta.is-bad{color:var(--danger-text);}
+  .report-metric__delta.is-flat{color:var(--muted);}
   .report-metric__hint{font-size:12px;color:var(--muted);}
+  .report-insights{display:grid;gap:8px;margin-top:16px;}
+  .report-insight{margin:0;padding:10px 12px;font-size:13px;line-height:1.45;color:var(--text);background:var(--surface);border:1px solid var(--border);border-left:3px solid var(--brand);border-radius:var(--radius-sm);}
+  .report-insight--positive{border-left-color:var(--success-text);background:var(--success-bg);}
+  .report-insight--negative{border-left-color:var(--danger-text);background:var(--danger-bg);}
   .report-metrics--mini{grid-template-columns:repeat(auto-fit,minmax(140px,1fr));margin-top:6px;}
   .report-metric--mini{padding:10px;}
   .report-metric--mini .report-metric__value{font-size:18px;}

@@ -595,8 +595,6 @@ export const Api = {
 
 
 
-  relatoriosEstabelecimento: (params = {}) => req(`/relatorios/estabelecimento/overview${toQuery(params)}`),
-
   relatoriosOverview: (params = {}) => req(`/relatorios/estabelecimento/overview${toQuery(params)}`),
 
   relatoriosProfissionais: (params = {}) => req(`/relatorios/estabelecimento/profissionais${toQuery(params)}`),
