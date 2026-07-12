@@ -36,6 +36,7 @@ import {
   countProfessionals,
   formatPlanLimitExceeded,
   getPlanPriceCents,
+  getPublicPlanCatalog,
 } from '../lib/plans.js'
 import { checkMonthlyAppointmentLimit } from '../lib/appointment_limits.js'
 import {
@@ -4258,6 +4259,17 @@ router.get('/implementation/status', async (req, res) => {
   } catch (error) {
     console.error('GET /billing/implementation/status', error?.message || error)
     return res.status(500).json({ error: 'implementation_status_failed' })
+  }
+})
+
+// Catálogo público — /planos é acessível sem login. Sai do plans.js para que preço e limite
+// na vitrine nunca divirjam do que o backend realmente aplica.
+router.get('/plans/public', (_req, res) => {
+  try {
+    return res.json(getPublicPlanCatalog())
+  } catch (err) {
+    console.error('GET /billing/plans/public', err)
+    return res.status(500).json({ error: 'plans_catalog_failed' })
   }
 })
 

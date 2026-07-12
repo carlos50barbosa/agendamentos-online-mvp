@@ -8,6 +8,7 @@ import { Api } from '../utils/api';
 import { getUser } from '../utils/auth';
 import { IconSearch } from '../components/Icons.jsx';
 import Drawer from '../components/Drawer.jsx';
+import Popover from '../components/Popover.jsx';
 import WhatsAppQueue from '../components/clientes/WhatsAppQueue.jsx';
 import useDebouncedValue from '../hooks/useDebouncedValue';
 import useMediaQuery from '../hooks/useMediaQuery';
@@ -187,6 +188,16 @@ const statusBadge = (status) => {
   return { text: status || '-', className: 'badge' };
 };
 
+// Há quanto tempo o cliente não aparece é O sinal da página. Os cortes são os mesmos que
+// classificam sumido (45 dias) e inativo (90) — a cor não inventa uma régua nova.
+const dormancyClass = (days) => {
+  const value = Number(days);
+  if (!Number.isFinite(value)) return 'crm-dormancy';
+  if (value >= 90) return 'crm-dormancy is-bad';
+  if (value >= 45) return 'crm-dormancy is-warn';
+  return 'crm-dormancy';
+};
+
 const relationshipBadge = (status) => {
   const norm = String(status || '').toLowerCase();
   if (norm === 'vip') return { text: 'VIP', className: 'crm-pill crm-pill--vip' };
@@ -202,7 +213,7 @@ const KpiCard = ({ label, value, helper, loading, placeholder, delta }) => (
     <div className="crm-kpi__value">
       {loading ? <div className="shimmer" style={{ width: '80%', height: 18 }} /> : (value ?? placeholder)}
       {!loading && delta && (
-        <span className={`report-metric__delta is-${delta.tone}`} title={delta.title}>
+        <span className={`metric-delta is-${delta.tone}`} title={delta.title}>
           {delta.text}
         </span>
       )}
@@ -528,6 +539,60 @@ export default function Clientes() {
     setPageSize(10);
   }, []);
 
+  const segmentLabel = useMemo(() => (
+    QUICK_SEGMENTS.find((segment) => segment.value === relationshipFilter)?.label || 'Todos'
+  ), [relationshipFilter]);
+
+  // Tudo o que está filtrado e não aparece em nenhum outro lugar da tela. O segmento vive no
+  // rótulo do próprio botão e a busca no campo de busca — por isso não se repetem aqui.
+  const activeFilters = useMemo(() => {
+    const out = [];
+
+    statusFilters.forEach((value) => {
+      const label = STATUS_OPTIONS.find((opt) => opt.value === value)?.label || value;
+      out.push({ key: `status-${value}`, label: `Status: ${label}`, clear: () => handleToggleStatus(value) });
+    });
+
+    if (riskOnly) {
+      out.push({ key: 'risco', label: 'Em risco', clear: () => setRiskOnly(false) });
+    }
+    if (birthdayOnly) {
+      out.push({ key: 'aniversario', label: 'Aniversariantes do mês', clear: () => setBirthdayOnly(false) });
+    }
+    if (serviceFilter !== 'all') {
+      const nome = serviceOptions.find((item) => String(item.id) === String(serviceFilter))?.nome || serviceFilter;
+      out.push({ key: 'servico', label: `Serviço: ${nome}`, clear: () => setServiceFilter('all') });
+    }
+    if (professionalFilter !== 'all') {
+      const nome = professionalOptions.find((item) => String(item.id) === String(professionalFilter))?.nome || professionalFilter;
+      out.push({ key: 'profissional', label: `Profissional: ${nome}`, clear: () => setProfessionalFilter('all') });
+    }
+    if (originFilter !== 'all') {
+      out.push({
+        key: 'origem',
+        label: `Origem: ${originFilter === 'desconhecido' ? 'Desconhecido' : originFilter}`,
+        clear: () => setOriginFilter('all'),
+      });
+    }
+    if (dormantDaysFilter !== 'all') {
+      const label = DORMANT_OPTIONS.find((opt) => opt.value === dormantDaysFilter)?.label || dormantDaysFilter;
+      out.push({ key: 'semRetorno', label: `Sem retorno: ${label}`, clear: () => setDormantDaysFilter('all') });
+    }
+
+    return out;
+  }, [
+    statusFilters,
+    riskOnly,
+    birthdayOnly,
+    serviceFilter,
+    professionalFilter,
+    originFilter,
+    dormantDaysFilter,
+    serviceOptions,
+    professionalOptions,
+    handleToggleStatus,
+  ]);
+
   const pageIds = useMemo(() => rows.map((row) => row.id), [rows]);
   const allPageSelected = pageIds.length > 0 && pageIds.every((id) => selectedIds.has(id));
   const somePageSelected = pageIds.some((id) => selectedIds.has(id));
@@ -703,9 +768,9 @@ export default function Clientes() {
     <div className="page clientes-crm">
       <div className="page__header">
         <div>
-          <p className="eyebrow">CRM leve</p>
+          <p className="eyebrow">Relacionamento</p>
           <h1 className="page__title">Clientes</h1>
-          <p className="page__subtitle">Veja quem já agendou com você e acompanhe o relacionamento.</p>
+          <p className="page__subtitle">Veja quem já agendou com você e quem está sumindo.</p>
         </div>
         <div className="segmented" role="tablist" aria-label="Período dos KPIs">
           {PERIOD_OPTIONS.map((opt) => (
@@ -776,59 +841,131 @@ export default function Clientes() {
               onChange={(event) => setSearchText(event.target.value)}
             />
           </div>
-          <button
-            type="button"
-            className="btn btn--outline btn--sm"
-            onClick={() => setSearchText('')}
-            disabled={!searchText}
-          >
-            Limpar
-          </button>
-          <div className="field" style={{ minWidth: 140 }}>
-            <label className="label">
-              <span>Itens por página</span>
-              <select
-                className="input"
-                value={pageSize}
-                onChange={(event) => setPageSize(Number(event.target.value))}
-              >
-                {[10, 25, 50].map((size) => (
-                  <option key={size} value={size}>{size}</option>
+
+          {/* Os 6 segmentos eram 6 chips na tela. Viraram um botão que já diz onde você
+              está ("Segmento: Sumidos") e abre a lista com as contagens. */}
+          <Popover label={`Segmento: ${segmentLabel}`} panelLabel="Segmento de relacionamento">
+            {({ close }) => (
+              <ul className="menu">
+                {QUICK_SEGMENTS.map((segment) => (
+                  <li key={segment.value}>
+                    <button
+                      type="button"
+                      aria-pressed={relationshipFilter === segment.value}
+                      className={`menu__item ${relationshipFilter === segment.value ? 'is-active' : ''}`}
+                      onClick={() => { setRelationshipFilter(segment.value); close(); }}
+                    >
+                      <span>{segment.label}</span>
+                      {/* A contagem ignora o próprio filtro de segmento — senão, olhando
+                          "Sumidos", "Novos" mostraria 0 e ninguém clicaria nele. */}
+                      <span className="menu__count">{segments?.[segment.value] ?? 0}</span>
+                    </button>
+                  </li>
                 ))}
-              </select>
-            </label>
-          </div>
+              </ul>
+            )}
+          </Popover>
+
+          <Popover label="Filtros" badge={activeFilters.length || null} panelLabel="Filtros">
+            {() => (
+              <div className="menu__panel">
+                <fieldset className="menu__group">
+                  <legend>Status do último agendamento</legend>
+                  {STATUS_OPTIONS.map((opt) => (
+                    <label key={opt.value} className="menu__check">
+                      <input
+                        type="checkbox"
+                        checked={statusFilters.includes(opt.value)}
+                        onChange={() => handleToggleStatus(opt.value)}
+                      />
+                      <span>{opt.label}</span>
+                    </label>
+                  ))}
+                </fieldset>
+
+                <div className="menu__group">
+                  {/* "Em risco" (sumido OU cancelador crônico) cruza os segmentos — não é um
+                      deles. Por isso vive aqui, e não na lista de segmentos. */}
+                  <label className="menu__check">
+                    <input type="checkbox" checked={riskOnly} onChange={() => setRiskOnly((prev) => !prev)} />
+                    <span>Em risco</span>
+                    {summary.riskClients ? <span className="menu__count">{summary.riskClients}</span> : null}
+                  </label>
+                  <label className="menu__check">
+                    <input type="checkbox" checked={birthdayOnly} onChange={() => setBirthdayOnly((prev) => !prev)} />
+                    <span>Aniversariantes do mês</span>
+                  </label>
+                </div>
+
+                <div className="menu__group">
+                  <label className="menu__field">
+                    <span>Serviço</span>
+                    <select className="input" value={serviceFilter} onChange={(event) => setServiceFilter(event.target.value)}>
+                      <option value="all">Todos</option>
+                      {serviceOptions.map((service) => (
+                        <option key={service.id} value={service.id}>{service.nome}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="menu__field">
+                    <span>Profissional</span>
+                    <select className="input" value={professionalFilter} onChange={(event) => setProfessionalFilter(event.target.value)}>
+                      <option value="all">Todos</option>
+                      {professionalOptions.map((professional) => (
+                        <option key={professional.id} value={professional.id}>{professional.nome}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="menu__field">
+                    <span>Origem</span>
+                    <select className="input" value={originFilter} onChange={(event) => setOriginFilter(event.target.value)}>
+                      <option value="all">Todas</option>
+                      {originOptions.map((origin) => (
+                        <option key={origin.origem} value={origin.origem}>
+                          {origin.origem === 'desconhecido' ? 'Desconhecido' : origin.origem}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="menu__field">
+                    <span>Sem retorno</span>
+                    <select className="input" value={dormantDaysFilter} onChange={(event) => setDormantDaysFilter(event.target.value)}>
+                      {DORMANT_OPTIONS.map((opt) => (
+                        <option key={opt.value} value={opt.value}>{opt.label}</option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+              </div>
+            )}
+          </Popover>
+
+          {(activeFilters.length > 0 || searchText || relationshipFilter !== 'all') && (
+            <button type="button" className="btn btn--ghost btn--sm" onClick={handleClearFilters}>
+              Limpar tudo
+            </button>
+          )}
         </div>
-        <div className="crm-controls__row">
-          <div className="crm-filters">
-            {STATUS_OPTIONS.map((opt) => (
+
+        {/* Colapsar filtro sem mostrar o que está ligado troca poluição por confusão: a
+            lista viria vazia e o motivo estaria escondido atrás de um botão. */}
+        {activeFilters.length > 0 && (
+          <div className="crm-active-filters" role="group" aria-label="Filtros ativos">
+            {activeFilters.map((filter) => (
               <button
-                key={opt.value}
+                key={filter.key}
                 type="button"
-                className={`chip ${statusFilters.includes(opt.value) ? 'chip--active' : ''}`}
-                onClick={() => handleToggleStatus(opt.value)}
+                className="crm-tag"
+                onClick={filter.clear}
+                title={`Remover filtro: ${filter.label}`}
               >
-                {opt.label}
+                {filter.label}
+                <span className="crm-tag__x" aria-hidden="true">×</span>
+                <span className="sr-only">Remover filtro</span>
               </button>
             ))}
-            {/* "Em risco" (sumido OU cancelador crônico) não é um segmento: cruza com todos.
-                Por isso continua sendo um alternador próprio, e não um chip de segmento. */}
-            <button
-              type="button"
-              className={`chip ${riskOnly ? 'chip--active' : ''}`}
-              onClick={() => setRiskOnly((prev) => !prev)}
-            >
-              Em risco{summary.riskClients ? ` (${summary.riskClients})` : ''}
-            </button>
-            <button
-              type="button"
-              className={`chip ${birthdayOnly ? 'chip--active' : ''}`}
-              onClick={() => setBirthdayOnly((prev) => !prev)}
-            >
-              Aniversariantes do mês
-            </button>
           </div>
-        </div>
+        )}
 
         <div className="crm-controls__row crm-bulk">
           <span className="crm-bulk__count">
@@ -870,63 +1007,6 @@ export default function Clientes() {
         </div>
 
         {actionError && <div className="box error" style={{ marginTop: 8 }}>{actionError}</div>}
-        <div className="crm-controls__row">
-          <div className="crm-filters" role="group" aria-label="Segmento de relacionamento">
-            {QUICK_SEGMENTS.map((segment) => (
-              <button
-                key={segment.value}
-                type="button"
-                aria-pressed={relationshipFilter === segment.value}
-                className={`chip ${relationshipFilter === segment.value ? 'chip--active' : ''}`}
-                onClick={() => setRelationshipFilter(segment.value)}
-              >
-                {segment.label}
-                {/* A contagem ignora o próprio filtro de segmento — senão, olhando "Sumidos",
-                    o chip "Novos" mostraria 0 e ninguém clicaria nele. */}
-                <span className="chip__count">{segments?.[segment.value] ?? 0}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-        <div className="crm-filter-grid">
-          <label className="label crm-filter-field">
-            <span>Serviço</span>
-            <select className="input" value={serviceFilter} onChange={(event) => setServiceFilter(event.target.value)}>
-              <option value="all">Todos</option>
-              {serviceOptions.map((service) => (
-                <option key={service.id} value={service.id}>{service.nome}</option>
-              ))}
-            </select>
-          </label>
-          <label className="label crm-filter-field">
-            <span>Profissional</span>
-            <select className="input" value={professionalFilter} onChange={(event) => setProfessionalFilter(event.target.value)}>
-              <option value="all">Todos</option>
-              {professionalOptions.map((professional) => (
-                <option key={professional.id} value={professional.id}>{professional.nome}</option>
-              ))}
-            </select>
-          </label>
-          <label className="label crm-filter-field">
-            <span>Origem</span>
-            <select className="input" value={originFilter} onChange={(event) => setOriginFilter(event.target.value)}>
-              <option value="all">Todas</option>
-              {originOptions.map((origin) => (
-                <option key={origin.origem} value={origin.origem}>
-                  {origin.origem === 'desconhecido' ? 'Desconhecido' : origin.origem}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="label crm-filter-field">
-            <span>Sem retorno</span>
-            <select className="input" value={dormantDaysFilter} onChange={(event) => setDormantDaysFilter(event.target.value)}>
-              {DORMANT_OPTIONS.map((opt) => (
-                <option key={opt.value} value={opt.value}>{opt.label}</option>
-              ))}
-            </select>
-          </label>
-        </div>
       </div>
 
       <div className="card">
@@ -982,7 +1062,7 @@ export default function Clientes() {
                         </button>
                         <div className="crm-actions" style={{ marginTop: 6 }}>
                           <span className={relationship.className}>{item?.relationship_label || relationship.text}</span>
-                          {item?.is_at_risk ? <span className="chip chip--active">Em risco</span> : null}
+                          {item?.is_at_risk ? <span className="crm-pill crm-pill--risk">Em risco</span> : null}
                         </div>
                       </div>
                     </div>
@@ -992,7 +1072,11 @@ export default function Clientes() {
                     <span>
                       Última visita: {item?.last_visit_at ? formatDateOnly(item.last_visit_at) : 'nunca'}
                     </span>
-                    {item?.days_since_last_visit != null ? <span>{item.days_since_last_visit}d sem retorno</span> : null}
+                    {item?.days_since_last_visit != null ? (
+                      <span className={dormancyClass(item.days_since_last_visit)}>
+                        {item.days_since_last_visit}d sem retorno
+                      </span>
+                    ) : null}
                     <span>Agendamentos ({periodShort}): {totalAppointments}</span>
                     <span>Cancel.: {`${totalCancelled} (${cancelPct}%)`}</span>
                     <span>Gasto: {formatCurrency(item?.total_spent_centavos)}</span>
@@ -1018,7 +1102,7 @@ export default function Clientes() {
               <table className="crm-table">
                 <thead>
                   <tr>
-                    <th style={{ width: '36px' }}>
+                    <th className="check">
                       <input
                         type="checkbox"
                         aria-label="Selecionar todos desta página"
@@ -1077,7 +1161,7 @@ export default function Clientes() {
                         className="crm-row"
                         onClick={() => handleOpenDetails(item)}
                       >
-                        <td onClick={(event) => event.stopPropagation()}>
+                        <td className="check" onClick={(event) => event.stopPropagation()}>
                           <input
                             type="checkbox"
                             aria-label={`Selecionar ${item?.nome || 'cliente'}`}
@@ -1099,7 +1183,7 @@ export default function Clientes() {
                             </button>
                             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                               <span className={relationship.className}>{item?.relationship_label || relationship.text}</span>
-                              {item?.is_at_risk ? <span className="chip chip--active">Em risco</span> : null}
+                              {item?.is_at_risk ? <span className="crm-pill crm-pill--risk">Em risco</span> : null}
                               {item?.birthday?.is_birthday_month ? <span className="crm-pill crm-pill--soft">Aniversário</span> : null}
                             </div>
                           </div>
@@ -1124,15 +1208,15 @@ export default function Clientes() {
                             <span>
                               {item?.last_visit_at ? formatDateOnly(item.last_visit_at) : 'Nunca veio'}
                             </span>
-                            <span className="muted">
+                            <span className={dormancyClass(item?.days_since_last_visit)}>
                               {item?.days_since_last_visit != null
                                 ? `${item.days_since_last_visit} dias sem retorno`
                                 : '—'}
                             </span>
                           </div>
                         </td>
-                        <td>{totalAppointments}</td>
-                        <td>{`${totalCancelled} (${cancelPct}%)`}</td>
+                        <td className="num">{totalAppointments}</td>
+                        <td className="num">{`${totalCancelled} (${cancelPct}%)`}</td>
                         <td>
                           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                             <span>{item?.last_service || '-'}</span>
@@ -1167,6 +1251,19 @@ export default function Clientes() {
                 {total ? `Mostrando ${from}–${to} de ${total}` : 'Sem resultados'}
               </div>
               <div className="crm-actions">
+                {/* Estava lá em cima, ao lado da busca: é controle de paginação e vive aqui. */}
+                <label className="crm-pagesize">
+                  <span className="muted">Por página</span>
+                  <select
+                    className="input"
+                    value={pageSize}
+                    onChange={(event) => setPageSize(Number(event.target.value))}
+                  >
+                    {PAGE_SIZES.map((size) => (
+                      <option key={size} value={size}>{size}</option>
+                    ))}
+                  </select>
+                </label>
                 <button
                   type="button"
                   className="btn btn--sm"

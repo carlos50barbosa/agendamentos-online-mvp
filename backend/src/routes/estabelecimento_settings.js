@@ -2,13 +2,12 @@
 import { Router } from 'express';
 import { pool } from '../lib/db.js';
 import { auth, isEstabelecimento } from '../middleware/auth.js';
-import { getPlanContext } from '../lib/plans.js';
+import { getPlanContext, planAllowsDeposit } from '../lib/plans.js';
 import { resolveDepositProvider } from '../lib/deposit_provider.js';
 import { config } from '../lib/config.js';
 
 const router = Router();
 const DEFAULT_DEPOSIT_HOLD_MINUTES = 15;
-const DEPOSIT_ALLOWED_PLANS = new Set(['pro', 'premium']);
 // Aceita UUID genérico (walletIds do Asaas podem não ser v4 estrito).
 const WALLET_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -89,7 +88,7 @@ router.get('/settings', auth, isEstabelecimento, async (req, res) => {
       return res.status(404).json({ error: 'estabelecimento_inexistente' });
     }
     const settings = await fetchDepositSettings(estId);
-    const allowed = DEPOSIT_ALLOWED_PLANS.has(String(planContext.plan || '').toLowerCase());
+    const allowed = planAllowsDeposit(planContext.plan);
     return res.json({
       deposit: serializeDeposit(settings, allowed),
       provider: resolveDepositProvider(),
@@ -108,7 +107,7 @@ router.put('/settings/deposit', auth, isEstabelecimento, async (req, res) => {
     if (!planContext) {
       return res.status(404).json({ error: 'estabelecimento_inexistente' });
     }
-    const allowed = DEPOSIT_ALLOWED_PLANS.has(String(planContext.plan || '').toLowerCase());
+    const allowed = planAllowsDeposit(planContext.plan);
     if (!allowed) {
       return res.status(403).json({
         error: 'plan_not_allowed',
@@ -244,7 +243,7 @@ router.get('/financeiro/sinais', auth, isEstabelecimento, async (req, res) => {
       return res.status(400).json({ error: 'missing_estabelecimento_id' });
     }
     const planContext = await getPlanContext(estId);
-    const allowed = planContext ? DEPOSIT_ALLOWED_PLANS.has(String(planContext.plan || '').toLowerCase()) : false;
+    const allowed = planContext ? planAllowsDeposit(planContext.plan) : false;
 
     const [rows] = await pool.query(
       `SELECT ap.id, ap.status, ap.amount_centavos,
