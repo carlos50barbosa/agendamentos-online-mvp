@@ -54,17 +54,37 @@ Por quê: o modelo atual do wrapper é checkout hospedado (`billingType: 'UNDEFI
 o Asaas **emite uma fatura por ciclo e o cliente vai lá pagar**. Para o consumidor final,
 isso mata o plano no segundo mês.
 
-### 2. Comissão da plataforma: **5%**
+### 2. Comissão da plataforma: **5% do líquido**
 
-Cobrada via `split`, sobre o valor do plano. A taxa do Asaas fica por conta do salão (mesmo
-modelo do sinal, `lib/signal_calculator.js:60`).
+Cobrada via `split` percentual (`percentualValue: 95` para o estabelecimento).
 
-Racional: take rate alto (10–20%) se justifica quando a plataforma **traz a demanda**. Aqui
-não traz — quem assina é o cliente que já é do salão. A plataforma fornece o trilho de
-pagamento e o motor de créditos. 5% é preço de infraestrutura, não de marketplace.
+Racional do número: take rate alto (10–20%) se justifica quando a plataforma **traz a
+demanda**. Aqui não traz — quem assina é o cliente que já é do salão. A plataforma fornece o
+trilho de pagamento e o motor de créditos. 5% é preço de infraestrutura, não de marketplace.
 
-Num plano de R$ 80: salão recebe ~R$ 73, paga ~R$ 2,89 ao Asaas e R$ 4,00 à plataforma
-(~8,6% de custo total sobre receita recorrente garantida).
+**"Do líquido" não é escolha nossa — é como o Asaas calcula.** Medido no sandbox em
+2026-07-13, com split real para a carteira de uma segunda conta:
+
+| bruto | taxa | líquido | 95% do líquido | Asaas repassou |
+|---|---|---|---|---|
+| R$ 10 | 0,99 | 9,01 | 8,5595 | **R$ 8,55** |
+| R$ 80 | 0,99 | 79,01 | 75,0595 | **R$ 75,05** |
+| R$ 100 | 0,99 | 99,01 | 94,0595 | **R$ 94,05** |
+
+Duas conclusões, ambas medidas e não deduzidas:
+
+1. O `percentualValue` incide sobre o **líquido** (bruto − taxa), não sobre o bruto. Se fosse
+   sobre o bruto, os R$ 100 teriam repassado R$ 95,00.
+2. O Asaas **trunca** para centavos (8,5595 → 8,55; se arredondasse, seria 8,56).
+
+**Consequência que muda o modelo de negócio:** a taxa do Asaas é **rateada na proporção do
+split**. Com 5%, o estabelecimento absorve 95% da taxa e a plataforma 5% — ninguém paga a
+taxa sozinho. Num plano de R$ 80 no cartão, a comissão efetiva sai ~R$ 0,14/mês menor do que
+5% do bruto.
+
+Cravar "5% do bruto" exigiria recalcular o percentual a cada mudança de taxa — e o split de
+uma **assinatura** é definido uma vez, na criação, e aplicado a todos os ciclos. Seria a
+fragilidade do `fixedValue` voltando pela porta dos fundos. **Fica como está.**
 
 Variante possível, se quiser usar a comissão como alavanca de upgrade do SaaS:
 **7% Starter · 5% Pro · 3% Premium**.
@@ -222,14 +242,40 @@ do sinal (`routes/agendamentos.js:816`).
 
 ---
 
+## Validação em sandbox (2026-07-13) — o que foi medido
+
+✅ **O split funciona na conta PF da plataforma.** Cobrança de R$ 100 com split percentual
+para a carteira de uma segunda conta: aceita, repasse calculado. (O `ASAAS_SPLIT_DISABLED=true`
+significa que o caminho nunca rodou em produção — mas ele funciona.)
+
+✅ **`percentualValue` incide sobre o líquido e trunca** (ver decisão 2). O código
+(`lib/loyalty_split.js`) reproduz a conta exata, e os testes usam os números medidos: se o
+Asaas mudar a regra, quebra ali, e não em produção com dinheiro de assinante no meio.
+
+❌ **Subconta (white-label) é impossível na conta atual.** O Asaas respondeu:
+
+> *"Contas de pessoa física (CPF) não podem criar subcontas. Apenas contas de pessoa
+> jurídica (CNPJ) podem acessar essa funcionalidade."*
+
+Ou seja: a plataforma **não consegue abrir a conta Asaas pelo salão**. Cada salão precisa
+abrir a própria conta e colar o **Wallet ID** nas Configurações (fluxo que já existe). Isso é
+atrito real de onboarding — parte dos salões vai empacar aí.
+
+Saídas, para decidir depois: (a) manter o `ASAAS_SPLIT_DISABLED` como fallback de conta única
+e repassar por fora; (b) tirar um CNPJ (MEI resolve) e abrir o white-label.
+
 ## Riscos e pendências
 
-**`ASAAS_SPLIT_DISABLED=true` hoje.** O split está **desligado** — o sinal cobra tudo na conta
-da plataforma, sem repasse. Isso significa que **o caminho de split pode nunca ter rodado com
-dinheiro real.** O plano depende inteiramente dele. Validar no sandbox antes de contar com ele.
+**O selo "carteira verificada" mentia — corrigido.** O `UPDATE` de `wallet_verified_at` rodava
+sempre que a cobrança era aceita, **inclusive com o split desligado**, quando o `walletId` nem
+chega ao Asaas. Uma carteira nunca exercitada aparecia como verificada no painel. Corrigido em
+`routes/agendamentos.js` (só carimba se o split foi de fato enviado). **Os dados já gravados
+não foram limpos** — conferir em produção se há `wallet_verified_at` mentiroso.
 
 **Não existe `LOYALTY_ENABLED`.** O motor roda incondicionalmente, sem flag. Para lançar de
 forma controlada (um salão piloto), criar a flag antes.
 
-**A taxa real de cartão do Asaas** não está no repositório — só a estimativa de PIX
-(`ASAAS_PIX_FEE_CENTS=199`). Conferir no painel da conta antes de fixar os 5%.
+**A taxa real de cartão** ainda não está confirmada (a medição foi com PIX, R$ 0,99 no
+sandbox). Conferir em *Asaas > Taxas* e preencher `ASAAS_CARD_FEE_PERCENT` /
+`ASAAS_CARD_FEE_FIXED_CENTS` — eles só alimentam o rateio exibido ao dono no painel, nunca o
+split enviado ao Asaas.

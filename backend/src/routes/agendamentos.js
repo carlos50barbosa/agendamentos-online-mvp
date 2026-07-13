@@ -1129,13 +1129,19 @@ router.post('/', authRequired, isCliente, ensureSubscriptionOperationalAccess({
             'UPDATE appointment_payments SET provider=?, provider_payment_id=?, provider_reference=?, split_centavos=?, platform_fee_centavos=?, raw_payload=? WHERE id=?',
             ['asaas', providerPaymentId, externalReference, splitCents, splitDisabled ? null : platformFeeCents, safeJson(payment), depositPaymentId]
           );
-          // Cobrança com split aceita -> o walletId está válido.
-          await pool
-            .query(
-              'UPDATE establishment_settings SET wallet_verified_at=NOW() WHERE estabelecimento_id=? AND wallet_verified_at IS NULL',
-              [estabelecimento_id],
-            )
-            .catch(() => {});
+          // Só carimba a verificação se o split REALMENTE foi enviado e aceito. Antes o UPDATE
+          // rodava sempre — inclusive com ASAAS_SPLIT_DISABLED=true, quando o walletId nem
+          // chega ao Asaas (walletId: null acima). Resultado: uma carteira nunca exercitada
+          // aparecia como "verificada" no painel, e o dono só descobriria que ela é inválida
+          // na primeira cobrança com split ligado — ou seja, com dinheiro real no caminho.
+          if (!splitDisabled && depositConfig.walletId) {
+            await pool
+              .query(
+                'UPDATE establishment_settings SET wallet_verified_at=NOW() WHERE estabelecimento_id=? AND wallet_verified_at IS NULL',
+                [estabelecimento_id],
+              )
+              .catch(() => {});
+          }
           return res.status(201).json({
             id: appointmentId,
             agendamentoId: appointmentId,

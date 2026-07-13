@@ -9,7 +9,7 @@ process.env.JWT_SECRET ??= 'test-secret'
 
 const {
   buildLoyaltySplit,
-  estimateLoyaltyCycleAmounts,
+  computeLoyaltySplitAmounts,
   resolveEstablishmentPercent,
   InvalidPlatformPercentError,
 } = await import('../src/lib/loyalty_split.js')
@@ -40,22 +40,57 @@ test('sem walletId nao ha split (o chamador decide se e erro)', () => {
   assert.equal(buildLoyaltySplit({ platformPercent: 5 }), null)
 })
 
-test('estimativa do ciclo: plano de R$ 80 com 5% de comissao e cartao 2,99% + R$ 0,49', () => {
-  const r = estimateLoyaltyCycleAmounts({
-    priceCents: 8000,
-    platformPercent: 5,
-    cardFeePercent: 2.99,
-    cardFeeFixedCents: 49,
-  })
-  assert.equal(r.priceCents, 8000)
-  assert.equal(r.platformFeeCents, 400) // 5% de 80,00
-  assert.equal(r.asaasFeeCents, 288) // 2,99% de 80,00 = 239 + 49
-  assert.equal(r.establishmentNetCents, 7312) // o salao recebe R$ 73,12
-  assert.equal(r.establishmentPercent, 95)
+// ---------------------------------------------------------------------------
+// Os quatro casos abaixo NAO sao suposicao: sao a resposta real do sandbox do Asaas,
+// medida em 2026-07-13 com split de verdade para a carteira de uma segunda conta.
+// Se algum dia o Asaas mudar a regra, e AQUI que a mudanca aparece — e nao em producao,
+// com dinheiro de assinante no meio.
+// ---------------------------------------------------------------------------
+
+test('MEDIDO: o percentual incide sobre o LIQUIDO, nao sobre o bruto', () => {
+  // bruto 100,00 | taxa 0,99 | liquido 99,01 | 95% => o Asaas repassou 94,05 (nao 95,00)
+  const r = computeLoyaltySplitAmounts({ grossCents: 10000, asaasFeeCents: 99, platformPercent: 5 })
+  assert.equal(r.netCents, 9901)
+  assert.equal(r.establishmentCents, 9405, 'o Asaas repassou R$ 94,05')
+  assert.notEqual(r.establishmentCents, 9500, 'se fosse sobre o bruto, seriam R$ 95,00')
+  assert.equal(r.platformCents, 496) // a plataforma fica com 5% do LIQUIDO, nao do bruto
 })
 
-test('sem taxa de cartao configurada, a estimativa nao inventa numero', () => {
-  const r = estimateLoyaltyCycleAmounts({ priceCents: 8000, platformPercent: 5 })
-  assert.equal(r.asaasFeeCents, 0)
-  assert.equal(r.establishmentNetCents, 7600)
+test('MEDIDO: o Asaas TRUNCA para centavos (nao arredonda)', () => {
+  // bruto 10,00 | liquido 9,01 | 95% = 8,5595 => repassou 8,55. Arredondando seria 8,56.
+  const r = computeLoyaltySplitAmounts({ grossCents: 1000, asaasFeeCents: 99, platformPercent: 5 })
+  assert.equal(r.establishmentCents, 855)
+  assert.notEqual(r.establishmentCents, 856, 'arredondar quebraria a paridade com o Asaas')
+})
+
+test('MEDIDO: plano de R$ 80 com 5% de comissao', () => {
+  // bruto 80,00 | taxa 0,99 | liquido 79,01 | 95% = 75,0595 => repassou 75,05
+  const r = computeLoyaltySplitAmounts({ grossCents: 8000, asaasFeeCents: 99, platformPercent: 5 })
+  assert.equal(r.establishmentCents, 7505)
+  assert.equal(r.platformCents, 396)
+  // A soma fecha: ninguem some com centavo no caminho.
+  assert.equal(r.establishmentCents + r.platformCents + r.asaasFeeCents, r.grossCents)
+})
+
+test('MEDIDO: comissao de 7,5% (o percentual decimal tambem confere)', () => {
+  // bruto 80,00 | liquido 79,01 | 92,5% = 73,0842 => repassou 73,08
+  const r = computeLoyaltySplitAmounts({ grossCents: 8000, asaasFeeCents: 99, platformPercent: 7.5 })
+  assert.equal(r.establishmentCents, 7308)
+})
+
+test('a taxa do Asaas e RATEADA na proporcao do split, nao paga por um lado so', () => {
+  const comTaxa = computeLoyaltySplitAmounts({ grossCents: 8000, asaasFeeCents: 288, platformPercent: 5 })
+  const semTaxa = computeLoyaltySplitAmounts({ grossCents: 8000, asaasFeeCents: 0, platformPercent: 5 })
+  // Sem taxa a plataforma ficaria com 400 (5% de 80,00). Com taxa de 2,88 ela fica com menos:
+  // absorve 5% da taxa, e o estabelecimento absorve os outros 95%.
+  assert.equal(semTaxa.platformCents, 400)
+  assert.equal(comTaxa.platformCents, 386)
+  assert.equal(semTaxa.establishmentCents - comTaxa.establishmentCents, 274) // 95% de 288
+})
+
+test('a taxa nunca deixa o liquido negativo', () => {
+  const r = computeLoyaltySplitAmounts({ grossCents: 100, asaasFeeCents: 999, platformPercent: 5 })
+  assert.equal(r.netCents, 0)
+  assert.equal(r.establishmentCents, 0)
+  assert.equal(r.platformCents, 0)
 })
