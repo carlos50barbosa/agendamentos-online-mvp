@@ -4,7 +4,7 @@ import { normalizeInboundMessage } from './normalize.js';
 import { handleReminderConfirmation, shouldTryConfirmation } from './reminderConfirmation.js';
 
 const INSTITUTIONAL_AUTO_REPLY_TEXT = [
-  'Ol\u00e1! Aqui \u00e9 o assist\u00eante do Agendamentos Online.',
+  'Ol\u00e1! Aqui \u00e9 o assistente do Agendamentos Online.',
   '',
   'Para marcar, reagendar ou cancelar, use nosso site.',
   '',

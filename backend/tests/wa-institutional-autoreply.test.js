@@ -175,7 +175,7 @@ test('handleInstitutionalInboundAutoReply nao usa fallback generico quando CONFI
   assert.equal(result.handled, true);
   assert.equal(result.reason, 'reminder_confirmation_not_found');
   assert.equal(sent.length, 1);
-  assert.equal(sent[0].message, 'Nao encontrei um agendamento pendente de confirmacao para esta conversa.');
+  assert.equal(sent[0].message, 'Não encontrei um agendamento pendente de confirmação para esta conversa.');
   assert.notEqual(sent[0].message, INSTITUTIONAL_AUTO_REPLY_TEXT);
   assert.equal(sent[0].context.rule, 'reminder_confirmation_not_found');
 });
