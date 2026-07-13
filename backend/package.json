@@ -7,7 +7,7 @@
     "start": "node src/index.js",
     "db:setup:smoke": "node scripts/setup-test-db.mjs",
     "test:smoke": "node scripts/setup-test-db.mjs && node --test tests/smoke-routes.test.js",
-    "test:all": "node --test \"tests/*.test.js\"",
+    "test:all": "node scripts/run-tests.mjs",
     "test:crm": "node --test tests/crm.test.js",
     "test:plan": "node scripts/test-plan-flows.mjs",
     "test:reports": "node --test tests/relatorios.test.js",
