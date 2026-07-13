@@ -95,10 +95,18 @@ export async function subscribeClientToPlan({
   platformPercent = config.loyalty.platformPercent,
 } = {}) {
   if (!clienteId) throw new ClientPlanError('cliente_required', 'Cliente não informado.');
-  if (!creditCardToken && !creditCard) {
-    throw new ClientPlanError('card_required', 'Informe os dados do cartão para assinar o plano.');
-  }
-  if (!remoteIp) {
+  // O cartão é OPCIONAL de propósito — e o caminho padrão é NÃO enviá-lo.
+  //
+  // Medido no sandbox (2026-07-13): uma assinatura criada com billingType CREDIT_CARD e SEM
+  // dados de cartão nasce ACTIVE e gera a 1ª cobrança com `invoiceUrl` (a página do Asaas).
+  // Quando o cliente paga o cartão LÁ, o Asaas guarda o cartão na assinatura
+  // (`creditCardToken`) e cobra os ciclos seguintes sozinho.
+  //
+  // Ou seja: dá para ter cartão recorrente sem o cartão passar pelo nosso servidor. A
+  // tokenização do Asaas é server-side (não existe SDK de navegador), então o caminho com
+  // `creditCard` nos jogaria no escopo PCI — e ainda exige aprovação prévia do Asaas para
+  // produção. O caminho com token fica disponível para quem já tiver essa aprovação.
+  if ((creditCard || creditCardToken) && !remoteIp) {
     throw new ClientPlanError('remote_ip_required', 'IP do cliente ausente (exigido pelo antifraude).');
   }
 
@@ -126,10 +134,35 @@ export async function subscribeClientToPlan({
     );
   }
 
-  // Ja assina? Nao cria a segunda: viraria cobranca dupla no cartao do cliente.
+  // Já assina? Não cria a segunda: viraria cobrança dupla no cartão do cliente.
   const existing = await getPreferredClientLoyaltySubscription(clienteId, estabelecimentoId, { db });
   if (existing && computeClientLoyaltySubscriptionState(existing).benefitsActive) {
     throw new ClientPlanError('already_subscribed', 'Você já tem um plano ativo neste estabelecimento.', { status: 409 });
+  }
+
+  // ...e o "pendente" também conta. Uma assinatura recém-criada e ainda não paga NÃO tem
+  // benefitsActive (não há ciclo aberto), então o guarda acima não a via: um duplo clique em
+  // "Assinar" criava DUAS assinaturas no Asaas e o cliente seria cobrado duas vezes no cartão.
+  // (Só apareceu ao exercitar o fluxo de verdade — com mock isso passa batido.)
+  //
+  // Em vez de recusar, devolvemos a assinatura pendente com o MESMO link de pagamento: quem
+  // clicou duas vezes quer pagar, não quer um erro.
+  if (existing && ['pending_payment', 'pending_pix'].includes(String(existing.status))) {
+    let checkoutUrl = null;
+    if (existing.gatewaySubscriptionId) {
+      try {
+        const charges = await payments.getSubscriptionPayments(existing.gatewaySubscriptionId);
+        const first = Array.isArray(charges) ? charges[0] : null;
+        checkoutUrl = first?.invoiceUrl || first?.bankSlipUrl || null;
+      } catch { /* sem link: o front avisa e o cliente tenta de novo */ }
+    }
+    return {
+      subscription: existing,
+      gatewaySubscriptionId: existing.gatewaySubscriptionId,
+      externalReference: existing.externalReference,
+      checkoutUrl,
+      reusedPending: true,
+    };
   }
 
   const payer = await loadPayer(clienteId, db);
@@ -182,8 +215,31 @@ export async function subscribeClientToPlan({
       { db },
     ).catch(() => {});
 
+    // O id da 1ª cobrança não volta na criação da assinatura — tem que ser buscado. É dela
+    // que sai o `invoiceUrl`: a página do Asaas onde o cliente digita o cartão. Sem cartão
+    // enviado, é PARA LÁ que o front manda o cliente.
+    let checkoutUrl = null;
+    let gatewayPaymentId = null;
+    if (!creditCardToken && !creditCard) {
+      try {
+        const charges = await payments.getSubscriptionPayments(gatewaySubscriptionId);
+        const first = Array.isArray(charges) ? charges[0] : null;
+        if (first) {
+          gatewayPaymentId = first.id ? String(first.id) : null;
+          checkoutUrl = first.invoiceUrl || first.bankSlipUrl || null;
+          if (gatewayPaymentId) {
+            await updateClientLoyaltySubscription(localSub.id, { gatewayPaymentId }, { db }).catch(() => {});
+          }
+        }
+      } catch (err) {
+        // A cobrança é gerada de forma assíncrona: se ainda não existe, o front consulta
+        // depois. Não é motivo para desfazer a assinatura.
+        console.error('[client-plan] não foi possível obter o link de pagamento', { error: err?.message });
+      }
+    }
+
     const subscription = await getClientLoyaltySubscriptionById(localSub.id, { db });
-    return { subscription, gatewaySubscriptionId, externalReference };
+    return { subscription, gatewaySubscriptionId, externalReference, checkoutUrl, gatewayPaymentId };
   } catch (err) {
     // A linha local nasceu antes da chamada. Se o Asaas recusou (cartao negado, split
     // invalido, carteira errada), ela nao pode ficar viva: o cliente veria um plano

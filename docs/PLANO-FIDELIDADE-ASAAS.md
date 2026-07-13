@@ -45,14 +45,29 @@ O que morreu foi a camada de pagamento e a superfície de API.
 
 ## Fase 0 — Decisões (fechadas)
 
-### 1. Cobrança: **cartão recorrente tokenizado**
+### 1. Cobrança: **cartão recorrente, pelo checkout do Asaas** ⚠️ *revisada na Fase 3*
 
-`billingType: 'CREDIT_CARD'` + `creditCardToken`. O Asaas tokeniza do lado dele — a
-plataforma não toca em dados de cartão (sem PCI).
+**A decisão de produto não mudou** (cartão com renovação automática), mas o COMO mudou — e
+para melhor. A premissa original era tokenizar o cartão. Ao investigar na Fase 3:
 
-Por quê: o modelo atual do wrapper é checkout hospedado (`billingType: 'UNDEFINED'`), em que
-o Asaas **emite uma fatura por ciclo e o cliente vai lá pagar**. Para o consumidor final,
-isso mata o plano no segundo mês.
+- A tokenização do Asaas é **server-side** (não existe SDK de navegador). O cartão passaria
+  pelo nosso servidor → **escopo PCI**. E a doc ainda avisa: *"a funcionalidade exige
+  aprovação prévia para produção"*.
+- **Medido no sandbox:** uma assinatura com `billingType: CREDIT_CARD` e **sem dados de
+  cartão** nasce ACTIVE e gera a 1ª cobrança com `invoiceUrl`. Quando o cliente paga o cartão
+  **na página do Asaas**, o Asaas **guarda o cartão na assinatura** (`creditCardToken`) e cobra
+  os ciclos seguintes sozinho.
+
+```
+antes do pagamento : assinatura tem cartao? NAO
+cliente paga       : CONFIRMED
+depois             : creditCardToken 9d2909e1-... | MASTERCARD | final 8829
+```
+
+**Resultado: cartão recorrente com ZERO PCI e sem depender de aprovação.** O fluxo é
+`assinar → checkout_url → o cliente digita o cartão no Asaas`. Não há formulário de cartão em
+lugar nenhum do nosso frontend. O caminho com `creditCardToken` segue aceito no backend, para
+quem um dia tiver a aprovação e quiser o formulário embutido.
 
 ### 2. Comissão da plataforma: **5% do líquido**
 
@@ -249,7 +264,36 @@ do sinal (`routes/agendamentos.js:816`).
 
 ---
 
-## Fase 3 — Frontend
+## Fase 3 — Frontend ✅ **CONCLUÍDA**
+
+| Entregue | Onde |
+|---|---|
+| Painel do dono: CRUD de planos, assinantes e **quanto você recebe de verdade** | `pages/Fidelidade.jsx` + rota `/fidelidade` + item "Planos" no menu |
+| Vitrine pública + "meu plano" (um componente só, na página onde a decisão acontece) | `components/booking/LoyaltyPlans.jsx`, dentro de `BookingPublic` |
+| `utils/api.js` alinhado (sai `pay/pix` e `pay/card`; entra `loyaltySplitPreview`) | — |
+
+**Sem formulário de cartão.** Assinar → o backend devolve `checkout_url` → o cliente digita o
+cartão no Asaas. A vitrine some sozinha quando o estabelecimento não vende plano.
+
+### Três bugs que só o teste de ponta a ponta pegou
+
+1. **Duplo clique em "Assinar" criava DUAS assinaturas** no Asaas → cobrança dupla no cartão
+   do cliente. O guarda de "já assina" olhava `benefitsActive`, e uma assinatura recém-criada
+   está em `pending_payment` — sem ciclo aberto, logo sem benefício ativo. Passava direto.
+   Agora o pendente é reaproveitado: devolve a MESMA assinatura e o MESMO link (quem clicou
+   duas vezes quer pagar, não quer um erro).
+2. **Erro de validação virava 502 "erro no gateway".** "Adicione ao menos um serviço ao plano"
+   chegava ao dono como "não foi possível concluir a operação". O `sendError` só respeitava
+   `ClientPlanError`; agora respeita qualquer erro com `status` 4xx.
+3. **O wrapper da Fase 1 exigia cartão** em `billingType: CREDIT_CARD` — uma suposição minha,
+   não uma regra do Asaas. Ela bloqueava justamente o fluxo sem PCI.
+
+Nenhum dos três apareceria com mock. Foram encontrados subindo o app contra o MariaDB e
+falando com o Asaas sandbox de verdade.
+
+---
+
+## Fase 3 — Plano original (referência)
 
 - **Painel do dono:** CRUD de planos + lista de assinantes. Do zero.
 - **Vitrine pública:** os planos na página do estabelecimento, ao lado dos serviços.

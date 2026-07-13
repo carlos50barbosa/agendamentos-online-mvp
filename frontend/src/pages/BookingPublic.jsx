@@ -7,6 +7,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import BookingWizard from '../components/booking/BookingWizard.jsx';
+import LoyaltyPlans from '../components/booking/LoyaltyPlans.jsx';
 import { Api } from '../utils/api.js';
 import { getUser } from '../utils/auth.js';
 import { isSameDay } from '../utils/agendaDates.js';
@@ -216,6 +217,9 @@ export default function BookingPublic() {
 
   return (
     <div style={{ ...(themeStyle || {}), background: 'var(--bg-lav, #F6F5FB)', minHeight: '100%' }}>
+      {/* Vitrine de planos + "meu plano". Some sozinha quando o estabelecimento nao vende
+          plano — a pagina de quem nao usa o recurso nao muda em nada. */}
+      <LoyaltyPlans establishmentId={establishmentId} idOrSlug={resolveKey} />
       <BookingWizard
         establishmentName={state.establishment?.nome || 'Agendamento'}
         establishment={state.establishment}

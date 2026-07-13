@@ -93,14 +93,15 @@ export function createAsaasPayments(client = getAsaasClient()) {
     requireField(value, 'value');
 
     const type = String(billingType || '').trim().toUpperCase();
-    if (type === 'CREDIT_CARD') {
-      // Falhar aqui, e não no Asaas: o erro do gateway para cartão é genérico e o
-      // diagnóstico sai caro (não dá para logar o cartão).
-      if (!creditCardToken && !creditCard) {
-        throw new AsaasError('Assinatura no cartão exige creditCardToken ou creditCard.', {
-          code: 'missing_credit_card',
-        });
-      }
+    // CREDIT_CARD SEM cartão é válido e é o caminho padrão: medido no sandbox, a assinatura
+    // nasce ACTIVE e o Asaas gera a 1ª cobrança com `invoiceUrl` — o cliente digita o cartão
+    // LÁ, e o Asaas o guarda para os ciclos seguintes. Assim o cartão nunca passa por aqui.
+    //
+    // (A Fase 1 exigia o cartão neste ponto. Era uma suposição minha, não uma regra do Asaas,
+    // e ela bloqueava justamente o fluxo sem PCI.)
+    if (creditCard || creditCardToken) {
+      // Com cartão, o antifraude do Asaas exige o IP do CLIENTE. Falhar aqui, e não no
+      // gateway: o erro dele para cartão é genérico e o diagnóstico sai caro.
       requireField(remoteIp, 'remoteIp');
     }
 

@@ -23,6 +23,7 @@ import LogoAO from './components/LogoAO.jsx';
 import Modal from './components/Modal.jsx';
 
 import { buildNavigation } from './utils/navigation.js';
+import Fidelidade from './pages/Fidelidade.jsx';
 
 import { Api } from './utils/api.js';
 
@@ -67,7 +68,7 @@ const NovoAgendamento = React.lazy(() => import('./pages/NovoAgendamento.jsx'));
 const Configuracoes = React.lazy(() => import('./pages/Configuracoes.jsx'));
 const ConfiguracaoInicial = React.lazy(() => import('./pages/ConfiguracaoInicial.jsx'));
 const Assinatura = React.lazy(() => import('./pages/Assinatura.jsx'));
-// Fidelidade desabilitada (feature 100% Mercado Pago) — imports/rotas removidos.
+// Fidelidade (planos cliente -> estabelecimento) reescrita sobre o Asaas — ver /fidelidade.
 const WhatsAppBusiness = React.lazy(() => import('./pages/WhatsAppBusiness.jsx'));
 const SinalAgendamentos = React.lazy(() => import('./pages/SinalAgendamentos.jsx'));
 
@@ -179,6 +180,7 @@ const APP_ROUTES = [
   { path: '/ajuda', element: <Ajuda /> },
 
   { path: '/relatorios', element: <Relatorios />, auth: true, role: 'estabelecimento' },
+  { path: '/fidelidade', element: <Fidelidade />, auth: true, role: 'estabelecimento' },
 
   { path: '/financeiro', element: <Financeiro />, auth: true, role: 'estabelecimento' },
 

@@ -105,12 +105,22 @@ test('assinar SEM carteira do salao falha ANTES de cobrar o cliente', async () =
   assert.equal(payments.calls.filter(([m]) => m === 'createSubscription').length, 0)
 })
 
-test('assinar sem cartao falha (a decisao de produto e cartao recorrente)', async () => {
+test('assinar SEM cartao e o caminho padrao: devolve o checkout do Asaas (zero PCI)', async () => {
+  // Medido em sandbox: assinatura CREDIT_CARD sem cartao nasce ACTIVE, gera a 1a cobranca com
+  // invoiceUrl, e quando o cliente paga o cartao LA, o Asaas guarda o cartao e cobra os ciclos
+  // seguintes sozinho. Cartao nenhum passa por este servidor.
   const db = fakeDb(baseHandlers())
-  await assert.rejects(
-    () => subscribeClientToPlan({ clienteId: 5, estabelecimentoId: 20, loyaltyPlanId: 7, remoteIp: '1.2.3.4', db, payments: stubPayments() }),
-    (err) => err.code === 'card_required',
-  )
+  const payments = stubPayments({
+    getSubscriptionPayments: async () => [{ id: 'pay_1', invoiceUrl: 'https://asaas.com/i/pay_1' }],
+  })
+  const r = await subscribeClientToPlan({
+    clienteId: 5, estabelecimentoId: 20, loyaltyPlanId: 7, remoteIp: '1.2.3.4', db, payments,
+  })
+  const [, body] = payments.calls.find(([m]) => m === 'createSubscription')
+  assert.equal(body.billingType, 'CREDIT_CARD')
+  assert.equal(body.creditCard, undefined, 'o cartao NAO pode ser enviado por aqui')
+  assert.equal(body.creditCardToken, undefined)
+  assert.equal(r.checkoutUrl, 'https://asaas.com/i/pay_1', 'sem o link, o cliente nao tem onde pagar')
 })
 
 test('assinar plano inativo e recusado', async () => {
@@ -200,4 +210,27 @@ test('cancelar assinatura de OUTRO cliente e 404', async () => {
     () => cancelClientPlanSubscription({ clienteId: 999, subscriptionId: 77, db, payments: stubPayments() }),
     (err) => err.code === 'subscription_not_found' && err.status === 404,
   )
+})
+
+test('duplo clique em Assinar NAO cria duas assinaturas (cobranca dupla no cartao)', async () => {
+  // Este bug so apareceu exercitando o fluxo de verdade: a assinatura recem-criada esta em
+  // pending_payment e NAO tem benefitsActive (nao ha ciclo aberto), entao o guarda de
+  // "ja assina" nao a via. Com mock, passa batido.
+  const db = fakeDb(baseHandlers({
+    assinaturaExistente: [{
+      id: 70, cliente_id: 5, estabelecimento_id: 20, loyalty_plan_id: 7,
+      status: 'pending_payment', gateway_subscription_id: 'sub_asaas_antiga',
+    }],
+  }))
+  const payments = stubPayments({
+    getSubscriptionPayments: async () => [{ id: 'pay_1', invoiceUrl: 'https://asaas.com/i/ja_existente' }],
+  })
+  const r = await subscribeClientToPlan({
+    clienteId: 5, estabelecimentoId: 20, loyaltyPlanId: 7, remoteIp: '1.2.3.4', db, payments,
+  })
+  assert.equal(payments.calls.filter(([m]) => m === 'createSubscription').length, 0,
+    'nao pode criar uma SEGUNDA assinatura no Asaas')
+  assert.equal(r.reusedPending, true)
+  // Quem clicou duas vezes quer pagar, nao quer um erro: devolve o MESMO link.
+  assert.equal(r.checkoutUrl, 'https://asaas.com/i/ja_existente')
 })
