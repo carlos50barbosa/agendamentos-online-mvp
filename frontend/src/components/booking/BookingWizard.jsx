@@ -8,7 +8,7 @@
 //   pollStatus(paymentId, token) -> vira o PIX para 'paid'/'expired' sozinho
 //   onConfirm({ services, professional, date, slot, guest }) -> cria o agendamento e devolve o PIX
 import React, { useEffect, useMemo, useState } from 'react';
-import { ChevronLeft, Scissors, Search, User, Check, ArrowRight, Loader2, Info, X } from 'lucide-react';
+import { ChevronLeft, Scissors, Search, User, Check, ArrowRight, Loader2, Info, X, Flame } from 'lucide-react';
 import LogoAO from '../LogoAO.jsx';
 import EstablishmentHeader from './EstablishmentHeader.jsx';
 import DayChips from '../agenda/DayChips.jsx';
@@ -577,8 +577,19 @@ function ServiceRow({ service, selected, onToggle, onDetails, disabled = false }
           )}
         </span>
         <span className="tw-min-w-0 tw-flex-1">
-          <span className="tw-block tw-truncate tw-text-sm tw-font-semibold" style={{ color: 'var(--ink, #1E1B4B)' }}>
-            {service.nome}
+          <span className="tw-flex tw-min-w-0 tw-items-center tw-gap-2">
+            <span className="tw-min-w-0 tw-truncate tw-text-sm tw-font-semibold" style={{ color: 'var(--ink, #1E1B4B)' }}>
+              {service.nome}
+            </span>
+            {service.popular && (
+              <span
+                className="tw-flex tw-shrink-0 tw-items-center tw-gap-1 tw-rounded-full tw-px-2 tw-py-0.5 tw-text-[10px] tw-font-bold tw-uppercase tw-tracking-wide"
+                style={{ background: 'var(--brand-100, #EEEDFC)', color: 'var(--brand)' }}
+              >
+                <Flame size={12} strokeWidth={2.4} aria-hidden="true" />
+                Mais agendado
+              </span>
+            )}
           </span>
           {subtitle && (
             <span className="tw-block tw-truncate tw-text-xs" style={{ color: 'var(--muted-ink, #6B7280)' }}>

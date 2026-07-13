@@ -86,6 +86,66 @@ async function attachProfessionals(services) {
   return services;
 }
 
+// Janela e tamanho do destaque "mais agendados" na vitrine pública.
+const POPULAR_WINDOW_DAYS = 90;
+const POPULAR_LIMIT = 3;
+
+/**
+ * Conta agendamentos por serviço nos últimos POPULAR_WINDOW_DAYS.
+ * O UNION ALL existe porque agendamentos antigos (pré agendamento_itens) só têm
+ * agendamentos.servico_id; a metade legada é restrita a agendamentos sem itens
+ * para o mesmo agendamento não ser contado duas vezes.
+ */
+async function fetchBookingCounts(establishmentId) {
+  const [rows] = await pool.query(
+    `SELECT servico_id, COUNT(*) AS total
+       FROM (
+         SELECT ai.servico_id AS servico_id
+           FROM agendamento_itens ai
+           JOIN agendamentos a ON a.id = ai.agendamento_id
+          WHERE a.estabelecimento_id=?
+            AND a.status IN ('confirmado','concluido')
+            AND COALESCE(a.no_show,0)=0
+            AND a.inicio >= (UTC_TIMESTAMP() - INTERVAL ? DAY)
+         UNION ALL
+         SELECT a.servico_id AS servico_id
+           FROM agendamentos a
+           LEFT JOIN agendamento_itens ai ON ai.agendamento_id = a.id
+          WHERE ai.id IS NULL
+            AND a.estabelecimento_id=?
+            AND a.status IN ('confirmado','concluido')
+            AND COALESCE(a.no_show,0)=0
+            AND a.inicio >= (UTC_TIMESTAMP() - INTERVAL ? DAY)
+       ) t
+      WHERE servico_id IS NOT NULL
+      GROUP BY servico_id`,
+    [establishmentId, POPULAR_WINDOW_DAYS, establishmentId, POPULAR_WINDOW_DAYS]
+  );
+  const counts = new Map();
+  rows.forEach((row) => counts.set(Number(row.servico_id), Number(row.total) || 0));
+  return counts;
+}
+
+/**
+ * Ordena a vitrine: os POPULAR_LIMIT mais agendados primeiro (marcados com `popular`),
+ * o restante em ordem alfabética. Sem histórico, a lista continua alfabética.
+ */
+function sortByPopularity(services, counts) {
+  services.forEach((svc) => {
+    svc.booking_count = counts.get(Number(svc.id)) || 0;
+    svc.popular = false;
+  });
+  const byName = (a, b) => String(a.nome || '').localeCompare(String(b.nome || ''), 'pt-BR');
+  const top = services
+    .filter((svc) => svc.booking_count > 0)
+    .sort((a, b) => b.booking_count - a.booking_count || byName(a, b))
+    .slice(0, POPULAR_LIMIT);
+  top.forEach((svc) => { svc.popular = true; });
+  const topIds = new Set(top.map((svc) => svc.id));
+  const rest = services.filter((svc) => !topIds.has(svc.id)).sort(byName);
+  return [...top, ...rest];
+}
+
 async function fetchService(establishmentId, serviceId) {
   const [[service]] = await pool.query(
     'SELECT * FROM servicos WHERE id=? AND estabelecimento_id=?',
@@ -121,7 +181,12 @@ router.get('/', async (req, res, next) => {
       [estabId]
     );
     await attachProfessionals(rows);
-    return res.json(rows || []);
+    // Popularidade é enfeite da vitrine: se a contagem falhar, a lista alfabética ainda vai.
+    const counts = await fetchBookingCounts(estabId).catch((e) => {
+      console.error('GET /servicos (public) booking counts', e);
+      return new Map();
+    });
+    return res.json(sortByPopularity(rows || [], counts));
   } catch (e) {
     console.error('GET /servicos (public)', e);
     return res.status(500).json({ error: 'list_services_failed' });

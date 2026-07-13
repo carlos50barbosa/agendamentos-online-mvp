@@ -115,6 +115,8 @@ export default function BookingPublic() {
       imagem_url: s.imagem_url,
       durationMin: s.duracao_min,
       price: (s.preco_centavos || 0) / 100,
+      // A API já devolve os mais agendados no topo; `popular` só marca quais são.
+      popular: !!s.popular,
       // Profissionais vinculados ao serviço (o passo só aparece quando há algum).
       professionals: (s.professionals || []).map((p) => ({
         id: p.id,
