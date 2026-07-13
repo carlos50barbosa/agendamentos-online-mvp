@@ -45,14 +45,29 @@ O que morreu foi a camada de pagamento e a superfície de API.
 
 ## Fase 0 — Decisões (fechadas)
 
-### 1. Cobrança: **cartão recorrente tokenizado**
+### 1. Cobrança: **cartão recorrente, pelo checkout do Asaas** ⚠️ *revisada na Fase 3*
 
-`billingType: 'CREDIT_CARD'` + `creditCardToken`. O Asaas tokeniza do lado dele — a
-plataforma não toca em dados de cartão (sem PCI).
+**A decisão de produto não mudou** (cartão com renovação automática), mas o COMO mudou — e
+para melhor. A premissa original era tokenizar o cartão. Ao investigar na Fase 3:
 
-Por quê: o modelo atual do wrapper é checkout hospedado (`billingType: 'UNDEFINED'`), em que
-o Asaas **emite uma fatura por ciclo e o cliente vai lá pagar**. Para o consumidor final,
-isso mata o plano no segundo mês.
+- A tokenização do Asaas é **server-side** (não existe SDK de navegador). O cartão passaria
+  pelo nosso servidor → **escopo PCI**. E a doc ainda avisa: *"a funcionalidade exige
+  aprovação prévia para produção"*.
+- **Medido no sandbox:** uma assinatura com `billingType: CREDIT_CARD` e **sem dados de
+  cartão** nasce ACTIVE e gera a 1ª cobrança com `invoiceUrl`. Quando o cliente paga o cartão
+  **na página do Asaas**, o Asaas **guarda o cartão na assinatura** (`creditCardToken`) e cobra
+  os ciclos seguintes sozinho.
+
+```
+antes do pagamento : assinatura tem cartao? NAO
+cliente paga       : CONFIRMED
+depois             : creditCardToken 9d2909e1-... | MASTERCARD | final 8829
+```
+
+**Resultado: cartão recorrente com ZERO PCI e sem depender de aprovação.** O fluxo é
+`assinar → checkout_url → o cliente digita o cartão no Asaas`. Não há formulário de cartão em
+lugar nenhum do nosso frontend. O caminho com `creditCardToken` segue aceito no backend, para
+quem um dia tiver a aprovação e quiser o formulário embutido.
 
 ### 2. Comissão da plataforma: **5% do líquido**
 
@@ -249,7 +264,36 @@ do sinal (`routes/agendamentos.js:816`).
 
 ---
 
-## Fase 3 — Frontend
+## Fase 3 — Frontend ✅ **CONCLUÍDA**
+
+| Entregue | Onde |
+|---|---|
+| Painel do dono: CRUD de planos, assinantes e **quanto você recebe de verdade** | `pages/Fidelidade.jsx` + rota `/fidelidade` + item "Planos" no menu |
+| Vitrine pública + "meu plano" (um componente só, na página onde a decisão acontece) | `components/booking/LoyaltyPlans.jsx`, dentro de `BookingPublic` |
+| `utils/api.js` alinhado (sai `pay/pix` e `pay/card`; entra `loyaltySplitPreview`) | — |
+
+**Sem formulário de cartão.** Assinar → o backend devolve `checkout_url` → o cliente digita o
+cartão no Asaas. A vitrine some sozinha quando o estabelecimento não vende plano.
+
+### Três bugs que só o teste de ponta a ponta pegou
+
+1. **Duplo clique em "Assinar" criava DUAS assinaturas** no Asaas → cobrança dupla no cartão
+   do cliente. O guarda de "já assina" olhava `benefitsActive`, e uma assinatura recém-criada
+   está em `pending_payment` — sem ciclo aberto, logo sem benefício ativo. Passava direto.
+   Agora o pendente é reaproveitado: devolve a MESMA assinatura e o MESMO link (quem clicou
+   duas vezes quer pagar, não quer um erro).
+2. **Erro de validação virava 502 "erro no gateway".** "Adicione ao menos um serviço ao plano"
+   chegava ao dono como "não foi possível concluir a operação". O `sendError` só respeitava
+   `ClientPlanError`; agora respeita qualquer erro com `status` 4xx.
+3. **O wrapper da Fase 1 exigia cartão** em `billingType: CREDIT_CARD` — uma suposição minha,
+   não uma regra do Asaas. Ela bloqueava justamente o fluxo sem PCI.
+
+Nenhum dos três apareceria com mock. Foram encontrados subindo o app contra o MariaDB e
+falando com o Asaas sandbox de verdade.
+
+---
+
+## Fase 3 — Plano original (referência)
 
 - **Painel do dono:** CRUD de planos + lista de assinantes. Do zero.
 - **Vitrine pública:** os planos na página do estabelecimento, ao lado dos serviços.
@@ -262,7 +306,55 @@ do sinal (`routes/agendamentos.js:816`).
 
 ---
 
-## Fase 4 — Operação
+## Fase 4 — Operação ✅ **CONCLUÍDA**
+
+### O preço na tela passou a ser o preço cobrado
+
+O `BookingWizard` mostrava o preço **cheio** enquanto o backend já aplicava o desconto do
+plano (`applyClientLoyaltyBenefitsTx` roda em toda criação). Um assinante veria **R$ 80** e
+seria cobrado **R$ 0** — o pior tipo de erro de interface, o que o cliente descobre no
+extrato. Agora o wizard consome `/cliente/loyalty/context` e mostra "Grátis pelo seu plano"
+(ou o preço com desconto), com o total refletindo o que será cobrado.
+
+### O ciclo completo, validado com dinheiro de verdade no sandbox
+
+```
+[1] plano ativo: "Plano Corte Mensal" (R$ 80,00/mês)
+    ok | assinatura criada (201) · checkout: sandbox.asaas.com/i/...
+    ok | status inicial = pending_payment (sem pagar, sem benefício)
+[2] ok | pagamento CONFIRMED · R$ 80
+    ok | o Asaas guardou o cartão (••••8829) -> os próximos ciclos são automáticos
+[3] ok | webhook aceito -> assinatura ACTIVE, ciclo até 13/08, 2/2 créditos materializados
+[4] ok | reenvio do MESMO evento -> o crédito NÃO dobrou (at least once é seguro)
+[5] ok | o app mostra 2 créditos restantes
+    ok | agendamento criado -> crédito aplicado -> total R$ 0,00 -> saldo caiu de 2 para 1
+```
+
+### 🐛 O bug que só o ciclo completo revelaria: fuso horário
+
+`toDatabaseDateTime()` serializa em **UTC** (`toISOString`), mas o MySQL deste projeto roda em
+horário **local** e o mysql2 lê `DATETIME` como local. Medido:
+
+```
+NOW() lido em JS      -> 18:48Z   (= agora, correto)
+UTC_TIMESTAMP() lido  -> 21:48Z   (3h à frente)
+```
+
+Gravar UTC numa coluna local faz o valor **voltar 3 horas no futuro**. O `current_period_start`
+nascia adiante, `withinCurrentPeriod` ficava `false`, `benefitsActive` ficava `false` — **o
+cliente pagava o plano e ficava 3 horas sem benefício nenhum**, exatamente quando iria agendar.
+
+Corrigido **com escopo** em `client_loyalty_subscriptions.js` (só a fidelidade usa, e ela não
+tem dados em produção), com teste de regressão.
+
+> ⚠️ **O mesmo defeito existe no `toDatabaseDateTime` global**, usado por `subscriptions.js`
+> (o billing do tenant — esse **com dados em produção**), `subscription_state.js` e
+> `subscription_credits.js`. Não toquei: o risco é outro e a decisão é sua. Vale investigar
+> se algum prazo de plano está 3h mais generoso do que deveria.
+
+---
+
+## Fase 4 — Plano original (referência)
 
 - Renovação e inadimplência: `past_due` → graça → suspende benefício (o
   `computeClientLoyaltySubscriptionState` já modela isso).

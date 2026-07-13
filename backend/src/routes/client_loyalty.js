@@ -47,13 +47,26 @@ function isCliente(req, res, next) {
   next();
 }
 
-/** ClientPlanError carrega o status; qualquer outro erro é 500 com log. */
+/**
+ * Erros de VALIDAÇÃO precisam chegar ao dono com o texto que explica o que fazer.
+ * O `lib/loyalty_plans.js` lança `Error` com `.status` e `.code` (ex.: 400
+ * `loyalty_plan_items_required` — "Adicione ao menos um serviço ao plano"), e o
+ * `ClientPlanError` faz o mesmo. Engolir isso num 502 genérico ("erro no gateway") seria
+ * transformar um problema de preenchimento numa mensagem que não ajuda ninguém.
+ * Só o que NÃO tem status vira 502 — aí sim é falha nossa ou do Asaas.
+ */
 function sendError(res, err, contexto) {
-  if (err instanceof ClientPlanError) {
-    return res.status(err.status).json({ error: err.code, message: err.message });
+  const status = Number(err?.status);
+  if (err instanceof ClientPlanError || (Number.isFinite(status) && status >= 400 && status < 500)) {
+    return res.status(status || 400).json({ error: err.code || 'invalid_request', message: err.message });
   }
   console.error(`[client-loyalty][${contexto}]`, err?.message || err);
   return res.status(502).json({ error: 'loyalty_gateway_error', message: 'Não foi possível concluir a operação agora.' });
+}
+
+/** A lib usa `items`; o front histórico manda `itens`. Aceita os dois. */
+function withItems(body = {}) {
+  return { ...body, items: body.items || body.itens || [] };
 }
 
 // ---------------------------------------------------------------------------
@@ -78,14 +91,14 @@ router.get('/loyalty/plans/:id', auth, isEstabelecimento, ensureLoyaltyEnabled, 
 
 router.post('/loyalty/plans', auth, isEstabelecimento, ensureLoyaltyEnabled, async (req, res) => {
   try {
-    const plan = await createLoyaltyPlan(req.user.id, req.body || {});
+    const plan = await createLoyaltyPlan(req.user.id, withItems(req.body));
     res.status(201).json(plan);
   } catch (err) { sendError(res, err, 'plan_create'); }
 });
 
 router.put('/loyalty/plans/:id', auth, isEstabelecimento, ensureLoyaltyEnabled, async (req, res) => {
   try {
-    const plan = await updateLoyaltyPlan(req.user.id, req.params.id, req.body || {});
+    const plan = await updateLoyaltyPlan(req.user.id, req.params.id, withItems(req.body));
     if (!plan) return res.status(404).json({ error: 'plan_not_found' });
     res.json(plan);
   } catch (err) { sendError(res, err, 'plan_update'); }
@@ -187,6 +200,15 @@ router.get('/cliente/loyalty/context', auth, isCliente, ensureLoyaltyEnabled, as
   } catch (err) { sendError(res, err, 'client_context'); }
 });
 
+/**
+ * Assina. O corpo NÃO precisa de cartão: a assinatura nasce sem ele e o cliente digita o
+ * cartão na página do Asaas (`checkout_url`). O Asaas guarda o cartão e cobra os ciclos
+ * seguintes sozinho — medido em sandbox. Assim o cartão nunca passa por este servidor, o
+ * que nos mantém fora do escopo PCI e dispensa a aprovação de tokenização do Asaas.
+ *
+ * O caminho com `credit_card_token` continua aceito, para quem já tenha essa aprovação e
+ * queira o formulário dentro do app.
+ */
 router.post('/cliente/loyalty/subscribe', auth, isCliente, ensureLoyaltyEnabled, async (req, res) => {
   try {
     const result = await subscribeClientToPlan({
@@ -199,7 +221,10 @@ router.post('/cliente/loyalty/subscribe', auth, isCliente, ensureLoyaltyEnabled,
       // O antifraude do Asaas exige o IP do CLIENTE, não o do servidor.
       remoteIp: req.ip,
     });
-    res.status(201).json({ subscription: serializeClientLoyaltySubscription(result.subscription) });
+    res.status(201).json({
+      subscription: serializeClientLoyaltySubscription(result.subscription),
+      checkout_url: result.checkoutUrl,
+    });
   } catch (err) { sendError(res, err, 'client_subscribe'); }
 });
 

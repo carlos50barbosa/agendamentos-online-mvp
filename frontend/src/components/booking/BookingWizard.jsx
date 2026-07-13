@@ -7,7 +7,7 @@
 //   buildSlots(date, { serviceIds, professionalId }) pode ser sync (mock) OU async (Promise, API real)
 //   pollStatus(paymentId, token) -> vira o PIX para 'paid'/'expired' sozinho
 //   onConfirm({ services, professional, date, slot, guest }) -> cria o agendamento e devolve o PIX
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ChevronLeft, Scissors, Search, User, Check, ArrowRight, Loader2, Info, X, Flame } from 'lucide-react';
 import LogoAO from '../LogoAO.jsx';
 import EstablishmentHeader from './EstablishmentHeader.jsx';
@@ -49,6 +49,10 @@ export default function BookingWizard({
   // preços) — só a AÇÃO de agendar é desligada. Esconder tudo puniria o cliente, que clicou
   // naquele link justamente para ver aquele estabelecimento.
   bookingDisabled = false,
+  // Contexto do plano do cliente (créditos restantes + desconto do plano). Sem isto o wizard
+  // mostraria o preço CHEIO enquanto o backend cobra o descontado — o assinante veria R$ 80 e
+  // seria cobrado R$ 0.
+  loyalty = null,
 }) {
   const [step, setStep] = useState(STEP.SERVICO);
   const [selectedServices, setSelectedServices] = useState([]);
@@ -78,7 +82,22 @@ export default function BookingWizard({
     );
   }, [services, serviceSearch]);
 
-  const totalPrice = useMemo(() => selectedServices.reduce((sum, s) => sum + (Number(s.price) || 0), 0), [selectedServices]);
+  // Espelha a regra do backend (client_loyalty_credits.buildBenefitPreview): crédito do ciclo
+  // zera o serviço; sem crédito, o desconto do plano vale para os "extras"; sem plano, cheio.
+  const benefitFor = useCallback((service) => {
+    const price = Number(service?.price) || 0;
+    if (!loyalty?.subscription) return { type: 'full', price };
+    const credito = loyalty?.credits_by_service?.[String(service.id)];
+    if (Number(credito?.quantidade_restante) > 0) return { type: 'credit', price: 0 };
+    const pct = Number(loyalty?.plan?.desconto_percentual_extras) || 0;
+    if (pct > 0) return { type: 'discount', price: Math.round(price * (100 - pct)) / 100, percent: pct };
+    return { type: 'full', price };
+  }, [loyalty]);
+
+  const totalPrice = useMemo(
+    () => selectedServices.reduce((sum, s) => sum + benefitFor(s).price, 0),
+    [selectedServices, benefitFor],
+  );
   const totalDuration = useMemo(() => selectedServices.reduce((sum, s) => sum + (Number(s.durationMin) || 0), 0), [selectedServices]);
   const depositTotal = useMemo(() => {
     if (!selectedServices.length || selectedServices.some((s) => s.depositValue == null)) return null;
@@ -271,6 +290,7 @@ export default function BookingWizard({
                   selected={!bookingDisabled && selectedServices.some((x) => x.id === s.id)}
                   onToggle={() => toggleService(s)}
                   onDetails={() => setDetailService(s)}
+                  benefit={benefitFor(s)}
                   // Vitrine: o serviço ainda abre os detalhes (o cliente quer saber o que tem e
                   // quanto custa), mas não pode ser selecionado — não há para onde avançar.
                   disabled={bookingDisabled}
@@ -546,10 +566,14 @@ function BookingDisabledNotice({ establishment }) {
   );
 }
 
-function ServiceRow({ service, selected, onToggle, onDetails, disabled = false }) {
-  const subtitle = [durationLabel({ minutes: service.durationMin }), service.priceLabel || formatBRL(service.price)]
-    .filter(Boolean)
-    .join(' · ');
+function ServiceRow({ service, selected, onToggle, onDetails, disabled = false, benefit = null }) {
+  // O preço exibido é o preço COBRADO. Mostrar o cheio e cobrar outro é o pior tipo de erro
+  // de interface: o cliente descobre no extrato.
+  const temBeneficio = benefit && benefit.type !== 'full';
+  const precoTexto = temBeneficio
+    ? (benefit.type === 'credit' ? 'Grátis pelo seu plano' : formatBRL(benefit.price))
+    : (service.priceLabel || formatBRL(service.price));
+  const subtitle = [durationLabel({ minutes: service.durationMin }), precoTexto].filter(Boolean).join(' · ');
   return (
     <div
       className="tw-flex tw-w-full tw-items-center tw-gap-1 tw-rounded-2xl tw-transition"
@@ -592,8 +616,14 @@ function ServiceRow({ service, selected, onToggle, onDetails, disabled = false }
             )}
           </span>
           {subtitle && (
-            <span className="tw-block tw-truncate tw-text-xs" style={{ color: 'var(--muted-ink, #6B7280)' }}>
+            <span className="tw-block tw-truncate tw-text-xs"
+              style={{ color: temBeneficio ? 'var(--brand)' : 'var(--muted-ink, #6B7280)', fontWeight: temBeneficio ? 650 : 400 }}>
               {subtitle}
+              {temBeneficio && (
+                <s className="tw-ml-1 tw-font-normal" style={{ color: 'var(--muted-ink, #6B7280)' }}>
+                  {formatBRL(service.price)}
+                </s>
+              )}
             </span>
           )}
         </span>

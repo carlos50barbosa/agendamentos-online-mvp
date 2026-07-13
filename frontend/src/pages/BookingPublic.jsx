@@ -7,6 +7,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import BookingWizard from '../components/booking/BookingWizard.jsx';
+import LoyaltyPlans from '../components/booking/LoyaltyPlans.jsx';
 import { Api } from '../utils/api.js';
 import { getUser } from '../utils/auth.js';
 import { isSameDay } from '../utils/agendaDates.js';
@@ -94,6 +95,20 @@ export default function BookingPublic() {
   }, [resolveKey]);
 
   const establishmentId = state.establishment?.id || null;
+
+  // Contexto do plano do cliente logado. Sem ele o wizard mostraria o preço CHEIO enquanto o
+  // backend cobra o descontado (applyClientLoyaltyBenefitsTx roda em toda criação): o
+  // assinante veria R$ 80 e seria cobrado R$ 0. O preço na tela tem de ser o preço cobrado.
+  const [loyalty, setLoyalty] = useState(null);
+  useEffect(() => {
+    const viewer = getUser();
+    if (viewer?.tipo !== 'cliente' || !establishmentId) { setLoyalty(null); return undefined; }
+    let alive = true;
+    Api.clientLoyaltyContext({ estabelecimento_id: establishmentId })
+      .then((ctx) => { if (alive) setLoyalty(ctx?.subscription ? ctx : null); })
+      .catch(() => { if (alive) setLoyalty(null); });
+    return () => { alive = false; };
+  }, [establishmentId]);
 
   // Cliente logado (fluxo /novo -> /agendar): pré-preenche os dados p/ não redigitar.
   const initialGuest = useMemo(() => {
@@ -216,6 +231,9 @@ export default function BookingPublic() {
 
   return (
     <div style={{ ...(themeStyle || {}), background: 'var(--bg-lav, #F6F5FB)', minHeight: '100%' }}>
+      {/* Vitrine de planos + "meu plano". Some sozinha quando o estabelecimento nao vende
+          plano — a pagina de quem nao usa o recurso nao muda em nada. */}
+      <LoyaltyPlans establishmentId={establishmentId} idOrSlug={resolveKey} />
       <BookingWizard
         establishmentName={state.establishment?.nome || 'Agendamento'}
         establishment={state.establishment}
@@ -226,6 +244,7 @@ export default function BookingPublic() {
         preselectedServiceIds={preselectedServiceIds}
         initialGuest={initialGuest}
         bookingDisabled={bookingDisabled}
+        loyalty={loyalty}
         collectGuest
       />
     </div>

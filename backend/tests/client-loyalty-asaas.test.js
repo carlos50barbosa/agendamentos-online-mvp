@@ -105,12 +105,22 @@ test('assinar SEM carteira do salao falha ANTES de cobrar o cliente', async () =
   assert.equal(payments.calls.filter(([m]) => m === 'createSubscription').length, 0)
 })
 
-test('assinar sem cartao falha (a decisao de produto e cartao recorrente)', async () => {
+test('assinar SEM cartao e o caminho padrao: devolve o checkout do Asaas (zero PCI)', async () => {
+  // Medido em sandbox: assinatura CREDIT_CARD sem cartao nasce ACTIVE, gera a 1a cobranca com
+  // invoiceUrl, e quando o cliente paga o cartao LA, o Asaas guarda o cartao e cobra os ciclos
+  // seguintes sozinho. Cartao nenhum passa por este servidor.
   const db = fakeDb(baseHandlers())
-  await assert.rejects(
-    () => subscribeClientToPlan({ clienteId: 5, estabelecimentoId: 20, loyaltyPlanId: 7, remoteIp: '1.2.3.4', db, payments: stubPayments() }),
-    (err) => err.code === 'card_required',
-  )
+  const payments = stubPayments({
+    getSubscriptionPayments: async () => [{ id: 'pay_1', invoiceUrl: 'https://asaas.com/i/pay_1' }],
+  })
+  const r = await subscribeClientToPlan({
+    clienteId: 5, estabelecimentoId: 20, loyaltyPlanId: 7, remoteIp: '1.2.3.4', db, payments,
+  })
+  const [, body] = payments.calls.find(([m]) => m === 'createSubscription')
+  assert.equal(body.billingType, 'CREDIT_CARD')
+  assert.equal(body.creditCard, undefined, 'o cartao NAO pode ser enviado por aqui')
+  assert.equal(body.creditCardToken, undefined)
+  assert.equal(r.checkoutUrl, 'https://asaas.com/i/pay_1', 'sem o link, o cliente nao tem onde pagar')
 })
 
 test('assinar plano inativo e recusado', async () => {
@@ -200,4 +210,44 @@ test('cancelar assinatura de OUTRO cliente e 404', async () => {
     () => cancelClientPlanSubscription({ clienteId: 999, subscriptionId: 77, db, payments: stubPayments() }),
     (err) => err.code === 'subscription_not_found' && err.status === 404,
   )
+})
+
+test('duplo clique em Assinar NAO cria duas assinaturas (cobranca dupla no cartao)', async () => {
+  // Este bug so apareceu exercitando o fluxo de verdade: a assinatura recem-criada esta em
+  // pending_payment e NAO tem benefitsActive (nao ha ciclo aberto), entao o guarda de
+  // "ja assina" nao a via. Com mock, passa batido.
+  const db = fakeDb(baseHandlers({
+    assinaturaExistente: [{
+      id: 70, cliente_id: 5, estabelecimento_id: 20, loyalty_plan_id: 7,
+      status: 'pending_payment', gateway_subscription_id: 'sub_asaas_antiga',
+    }],
+  }))
+  const payments = stubPayments({
+    getSubscriptionPayments: async () => [{ id: 'pay_1', invoiceUrl: 'https://asaas.com/i/ja_existente' }],
+  })
+  const r = await subscribeClientToPlan({
+    clienteId: 5, estabelecimentoId: 20, loyaltyPlanId: 7, remoteIp: '1.2.3.4', db, payments,
+  })
+  assert.equal(payments.calls.filter(([m]) => m === 'createSubscription').length, 0,
+    'nao pode criar uma SEGUNDA assinatura no Asaas')
+  assert.equal(r.reusedPending, true)
+  // Quem clicou duas vezes quer pagar, nao quer um erro: devolve o MESMO link.
+  assert.equal(r.checkoutUrl, 'https://asaas.com/i/ja_existente')
+})
+
+test('o ciclo e gravado no fuso LOCAL — senao o cliente paga e fica 3h sem beneficio', async () => {
+  // O MySQL deste projeto roda em horario LOCAL, e o mysql2 le DATETIME como local. Gravar
+  // toISOString() (UTC) fazia o periodo nascer 3h no FUTURO: withinCurrentPeriod=false,
+  // benefitsActive=false, e o cliente que acabou de pagar nao tinha beneficio nenhum.
+  // Medido: NOW() lido -> 18:48Z (certo) | UTC_TIMESTAMP() lido -> 21:48Z (3h a frente).
+  const db = fakeDb(baseHandlers())
+  await activateClientPlanCycle({ subscriptionId: 77, paymentId: 'pay_1', db })
+  const up = db.calls.find((c) => /^UPDATE client_loyalty_subscriptions/i.test(c.sql))
+  const periodo = up.params.find((p) => typeof p === 'string' && /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(p))
+  assert.ok(periodo, 'o periodo tem de ir como string YYYY-MM-DD HH:MM:SS')
+  const agora = new Date()
+  const gravado = new Date(periodo.replace(' ', 'T')) // interpretado como LOCAL, igual ao mysql2
+  const difMin = (gravado - agora) / 60000
+  assert.ok(Math.abs(difMin) < 2,
+    `o inicio do ciclo tem de ser AGORA no fuso local, nao ${difMin.toFixed(0)}min no futuro (UTC gravado como local)`)
 })

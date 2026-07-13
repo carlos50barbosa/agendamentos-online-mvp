@@ -141,14 +141,17 @@ test('assinatura no cartao envia token + remoteIp', async () => {
   assert.equal(body.remoteIp, '203.0.113.9')
 })
 
-test('cartao sem token e sem dados do cartao falha ANTES de chamar o Asaas', async () => {
-  const client = stubClient()
+test('MEDIDO: CREDIT_CARD SEM cartao e valido — e o caminho sem PCI', async () => {
+  // Medido no sandbox: a assinatura nasce ACTIVE e o Asaas gera a 1a cobranca com invoiceUrl.
+  // O cliente digita o cartao NA PAGINA DO ASAAS, que o guarda para os ciclos seguintes.
+  // A Fase 1 exigia o cartao aqui — era suposicao minha, e bloqueava justamente este fluxo.
+  const client = stubClient({ 'POST /v3/subscriptions': { id: 'sub_hosted' } })
   const pay = createAsaasPayments(client)
-  await assert.rejects(
-    () => pay.createSubscription({ customerId: 'cus_1', value: 80, billingType: 'CREDIT_CARD', remoteIp: '1.2.3.4' }),
-    (err) => err.code === 'missing_credit_card',
-  )
-  assert.equal(client.calls.length, 0, 'nao pode ter batido no Asaas')
+  await pay.createSubscription({ customerId: 'cus_1', value: 80, billingType: 'CREDIT_CARD' })
+  const body = client.calls[0].body
+  assert.equal(body.billingType, 'CREDIT_CARD')
+  assert.equal(body.creditCard, undefined)
+  assert.equal(body.creditCardToken, undefined)
 })
 
 test('cartao sem remoteIp falha ANTES de chamar o Asaas (o antifraude exige)', async () => {

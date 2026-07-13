@@ -16,7 +16,6 @@ import { createAsaasPayments } from '../services/asaas/payments.js';
 import { resolveAsaasCustomerId } from './deposit_provider.js';
 import { getLoyaltyPlanById } from './loyalty_plans.js';
 import { buildLoyaltySplit } from './loyalty_split.js';
-import { toDatabaseDateTime } from './database_datetime.js';
 import { ensureCreditsForCurrentCycle } from './client_loyalty_credits.js';
 import {
   appendClientLoyaltySubscriptionEvent,
@@ -95,10 +94,18 @@ export async function subscribeClientToPlan({
   platformPercent = config.loyalty.platformPercent,
 } = {}) {
   if (!clienteId) throw new ClientPlanError('cliente_required', 'Cliente não informado.');
-  if (!creditCardToken && !creditCard) {
-    throw new ClientPlanError('card_required', 'Informe os dados do cartão para assinar o plano.');
-  }
-  if (!remoteIp) {
+  // O cartão é OPCIONAL de propósito — e o caminho padrão é NÃO enviá-lo.
+  //
+  // Medido no sandbox (2026-07-13): uma assinatura criada com billingType CREDIT_CARD e SEM
+  // dados de cartão nasce ACTIVE e gera a 1ª cobrança com `invoiceUrl` (a página do Asaas).
+  // Quando o cliente paga o cartão LÁ, o Asaas guarda o cartão na assinatura
+  // (`creditCardToken`) e cobra os ciclos seguintes sozinho.
+  //
+  // Ou seja: dá para ter cartão recorrente sem o cartão passar pelo nosso servidor. A
+  // tokenização do Asaas é server-side (não existe SDK de navegador), então o caminho com
+  // `creditCard` nos jogaria no escopo PCI — e ainda exige aprovação prévia do Asaas para
+  // produção. O caminho com token fica disponível para quem já tiver essa aprovação.
+  if ((creditCard || creditCardToken) && !remoteIp) {
     throw new ClientPlanError('remote_ip_required', 'IP do cliente ausente (exigido pelo antifraude).');
   }
 
@@ -126,10 +133,35 @@ export async function subscribeClientToPlan({
     );
   }
 
-  // Ja assina? Nao cria a segunda: viraria cobranca dupla no cartao do cliente.
+  // Já assina? Não cria a segunda: viraria cobrança dupla no cartão do cliente.
   const existing = await getPreferredClientLoyaltySubscription(clienteId, estabelecimentoId, { db });
   if (existing && computeClientLoyaltySubscriptionState(existing).benefitsActive) {
     throw new ClientPlanError('already_subscribed', 'Você já tem um plano ativo neste estabelecimento.', { status: 409 });
+  }
+
+  // ...e o "pendente" também conta. Uma assinatura recém-criada e ainda não paga NÃO tem
+  // benefitsActive (não há ciclo aberto), então o guarda acima não a via: um duplo clique em
+  // "Assinar" criava DUAS assinaturas no Asaas e o cliente seria cobrado duas vezes no cartão.
+  // (Só apareceu ao exercitar o fluxo de verdade — com mock isso passa batido.)
+  //
+  // Em vez de recusar, devolvemos a assinatura pendente com o MESMO link de pagamento: quem
+  // clicou duas vezes quer pagar, não quer um erro.
+  if (existing && ['pending_payment', 'pending_pix'].includes(String(existing.status))) {
+    let checkoutUrl = null;
+    if (existing.gatewaySubscriptionId) {
+      try {
+        const charges = await payments.getSubscriptionPayments(existing.gatewaySubscriptionId);
+        const first = Array.isArray(charges) ? charges[0] : null;
+        checkoutUrl = first?.invoiceUrl || first?.bankSlipUrl || null;
+      } catch { /* sem link: o front avisa e o cliente tenta de novo */ }
+    }
+    return {
+      subscription: existing,
+      gatewaySubscriptionId: existing.gatewaySubscriptionId,
+      externalReference: existing.externalReference,
+      checkoutUrl,
+      reusedPending: true,
+    };
   }
 
   const payer = await loadPayer(clienteId, db);
@@ -182,15 +214,38 @@ export async function subscribeClientToPlan({
       { db },
     ).catch(() => {});
 
+    // O id da 1ª cobrança não volta na criação da assinatura — tem que ser buscado. É dela
+    // que sai o `invoiceUrl`: a página do Asaas onde o cliente digita o cartão. Sem cartão
+    // enviado, é PARA LÁ que o front manda o cliente.
+    let checkoutUrl = null;
+    let gatewayPaymentId = null;
+    if (!creditCardToken && !creditCard) {
+      try {
+        const charges = await payments.getSubscriptionPayments(gatewaySubscriptionId);
+        const first = Array.isArray(charges) ? charges[0] : null;
+        if (first) {
+          gatewayPaymentId = first.id ? String(first.id) : null;
+          checkoutUrl = first.invoiceUrl || first.bankSlipUrl || null;
+          if (gatewayPaymentId) {
+            await updateClientLoyaltySubscription(localSub.id, { gatewayPaymentId }, { db }).catch(() => {});
+          }
+        }
+      } catch (err) {
+        // A cobrança é gerada de forma assíncrona: se ainda não existe, o front consulta
+        // depois. Não é motivo para desfazer a assinatura.
+        console.error('[client-plan] não foi possível obter o link de pagamento', { error: err?.message });
+      }
+    }
+
     const subscription = await getClientLoyaltySubscriptionById(localSub.id, { db });
-    return { subscription, gatewaySubscriptionId, externalReference };
+    return { subscription, gatewaySubscriptionId, externalReference, checkoutUrl, gatewayPaymentId };
   } catch (err) {
     // A linha local nasceu antes da chamada. Se o Asaas recusou (cartao negado, split
     // invalido, carteira errada), ela nao pode ficar viva: o cliente veria um plano
     // "pendente" que nunca vai ser cobrado.
     await updateClientLoyaltySubscription(
       localSub.id,
-      { status: 'canceled', canceledAt: toDatabaseDateTime(new Date()) },
+      { status: 'canceled', canceledAt: new Date() },
       { db },
     ).catch(() => {});
     await appendClientLoyaltySubscriptionEvent(
@@ -229,7 +284,7 @@ export async function cancelClientPlanSubscription({
   // mantem benefitsActive enquanto estiver dentro do periodo. O cliente pagou o mes.
   await updateClientLoyaltySubscription(
     subscriptionId,
-    { status: 'canceled', canceledAt: toDatabaseDateTime(new Date()), autoRenew: 0 },
+    { status: 'canceled', canceledAt: new Date(), autoRenew: 0 },
     { db },
   );
   await appendClientLoyaltySubscriptionEvent(
@@ -259,11 +314,19 @@ export async function activateClientPlanCycle({ subscriptionId, paymentId, db = 
     {
       status: 'active',
       gatewayPaymentId: paymentId || sub.gatewayPaymentId || null,
-      startedAt: sub.startedAt || toDatabaseDateTime(now),
-      currentPeriodStart: toDatabaseDateTime(periodStart),
-      currentPeriodEnd: toDatabaseDateTime(periodEnd),
-      nextBillingAt: toDatabaseDateTime(periodEnd),
-      lastPaymentAt: toDatabaseDateTime(now),
+      // Objetos Date, NAO strings de toDatabaseDateTime(): aquele helper serializa em UTC
+      // (toISOString) e o MySQL deste projeto roda em horario LOCAL — provado medindo:
+      //   NOW() lido em JS        -> 18:48Z (certo)
+      //   UTC_TIMESTAMP() lido    -> 21:48Z (3h a frente)
+      // Gravando UTC numa coluna local, o periodo nascia 3h no FUTURO: `benefitsActive`
+      // ficava false e o cliente pagava sem receber beneficio nenhum por 3 horas — bem na
+      // hora em que ele iria agendar. Passando Date, o mysql2 converte no fuso da conexao,
+      // que e como o resto do app grava (agendamentos.inicio).
+      startedAt: sub.startedAt || now,
+      currentPeriodStart: periodStart,
+      currentPeriodEnd: periodEnd,
+      nextBillingAt: periodEnd,
+      lastPaymentAt: now,
       graceUntil: null,
     },
     { db },
@@ -295,7 +358,7 @@ export async function markClientPlanPastDue({ subscriptionId, db = pool } = {}) 
 
   await updateClientLoyaltySubscription(
     subscriptionId,
-    { status: 'past_due', graceUntil: toDatabaseDateTime(addDays(new Date(), GRACE_DAYS)) },
+    { status: 'past_due', graceUntil: addDays(new Date(), GRACE_DAYS) },
     { db },
   );
   await appendClientLoyaltySubscriptionEvent(
@@ -317,7 +380,7 @@ export async function revokeClientPlanForRefund({ subscriptionId, db = pool } = 
   const sub = await getClientLoyaltySubscriptionById(subscriptionId, { db });
   if (!sub) return { handled: false, reason: 'client_plan_subscription_not_found' };
 
-  const now = toDatabaseDateTime(new Date());
+  const now = new Date();
   await updateClientLoyaltySubscription(
     subscriptionId,
     { status: 'canceled', canceledAt: now, currentPeriodEnd: now, autoRenew: 0 },

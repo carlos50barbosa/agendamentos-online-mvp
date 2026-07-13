@@ -715,20 +715,19 @@ export const Api = {
 
   publicLoyaltyPlans: (idOrSlug) => req(`/public/estabelecimentos/${idOrSlug}/loyalty-plans`),
 
-  clientLoyaltyConfig: (params = {}) => req(`/cliente/loyalty/config${toQuery(params)}`),
+  // Quanto o dono recebe de fato: o split do Asaas incide sobre o LÍQUIDO e trunca, então
+  // "preço menos 5%" seria mentira. O backend devolve o número real.
+  loyaltySplitPreview: (priceCents) => req(`/loyalty/split-preview${toQuery({ price_cents: priceCents })}`),
 
   clientLoyaltySubscription: (params = {}) => req(`/cliente/loyalty/subscription${toQuery(params)}`),
 
   clientLoyaltyContext: (params = {}) => req(`/cliente/loyalty/context${toQuery(params)}`),
 
+  // Devolve { subscription, checkout_url }. O cartão NÃO passa por aqui: o cliente é levado
+  // ao checkout do Asaas, e é lá que ele digita o cartão. O Asaas guarda o cartão e cobra os
+  // ciclos seguintes sozinho (medido em sandbox). Zero PCI para a plataforma.
   clientLoyaltySubscribe: (payload) =>
     req('/cliente/loyalty/subscribe', { method: 'POST', body: JSON.stringify(payload || {}) }),
-
-  clientLoyaltyPayPix: (payload) =>
-    req('/cliente/loyalty/pay/pix', { method: 'POST', body: JSON.stringify(payload || {}) }),
-
-  clientLoyaltyPayCard: (payload) =>
-    req('/cliente/loyalty/pay/card', { method: 'POST', body: JSON.stringify(payload || {}) }),
 
   clientLoyaltyCancel: (payload) =>
     req('/cliente/loyalty/cancel', { method: 'POST', body: JSON.stringify(payload || {}) }),

@@ -53,6 +53,7 @@ export function buildNavigation(user) {
       { key: 'services', label: 'Serviços', to: '/servicos', icon: IconWrench, type: 'link' },
       { key: 'clients', label: 'Clientes', to: '/clientes', icon: IconUsers, type: 'link' },
       { key: 'reports', label: 'Relatórios', to: '/relatorios', icon: IconChart, type: 'link' },
+      { key: 'loyalty', label: 'Planos', to: '/fidelidade', icon: IconStar, type: 'link' },
       { key: 'finance', label: 'Financeiro', to: '/financeiro', icon: IconMoney, type: 'link' },
       { key: 'promotion', label: 'Meu QR Code', to: '/divulgacao', icon: IconQrCode, type: 'link' },
     )
