@@ -45,6 +45,10 @@ export default function BookingWizard({
   preselectedServiceIds = [],
   establishment = null,
   initialGuest = null,
+  // Assinatura vencida: a página do estabelecimento continua inteira (capa, perfil, serviços,
+  // preços) — só a AÇÃO de agendar é desligada. Esconder tudo puniria o cliente, que clicou
+  // naquele link justamente para ver aquele estabelecimento.
+  bookingDisabled = false,
 }) {
   const [step, setStep] = useState(STEP.SERVICO);
   const [selectedServices, setSelectedServices] = useState([]);
@@ -95,11 +99,14 @@ export default function BookingWizard({
   // sobrescrever uma escolha já feita pelo usuário (mantém o multi-serviço editável).
   const preselectKey = (preselectedServiceIds || []).map(String).join(',');
   useEffect(() => {
+    // ?servico=ID marca o serviço sozinho, sem passar por toggleService. Sem esta guarda, um link
+    // com pré-seleção deixaria serviços marcados numa página que não aceita agendamento.
+    if (bookingDisabled) return;
     if (!preselectKey || !services.length) return;
     const wanted = new Set(preselectKey.split(','));
     setSelectedServices((prev) => (prev.length ? prev : services.filter((s) => wanted.has(String(s.id)))));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [preselectKey, services]);
+  }, [preselectKey, services, bookingDisabled]);
 
   // Carrega os horários do dia (buildSlots sync [mock] OU async [Promise, API real]).
   useEffect(() => {
@@ -136,11 +143,15 @@ export default function BookingWizard({
   const back = () => go(Math.max(0, step - 1));
 
   const toggleService = (s) => {
+    // Ponto único de entrada da seleção: travando aqui, nenhum caminho (lista, modal de detalhes)
+    // consegue montar um agendamento enquanto a assinatura estiver vencida.
+    if (bookingDisabled) return;
     setSlot(null);
     setProfessional(null);
     setSelectedServices((prev) => (prev.some((x) => x.id === s.id) ? prev.filter((x) => x.id !== s.id) : [...prev, s]));
   };
   const goFromServices = () => {
+    if (bookingDisabled) return;
     if (!selectedServices.length) { setError('Selecione ao menos um serviço.'); return; }
     go(showProfessionalStep ? STEP.PROFISSIONAL : STEP.DIA);
   };
@@ -191,7 +202,11 @@ export default function BookingWizard({
       {establishment && step < STEP.PAGAMENTO && (
         <EstablishmentHeader establishment={establishment} onBack={back} showBack={step > STEP.SERVICO} />
       )}
-      {/* Marca (mock) / etapa + progresso */}
+
+      {bookingDisabled && <BookingDisabledNotice establishment={establishment} />}
+
+      {/* Marca (mock) / etapa + progresso. Sem agendamento não há etapas a percorrer. */}
+      {!bookingDisabled && (
       <header className="tw-flex tw-flex-col tw-gap-3">
         <div className="tw-flex tw-items-center tw-gap-2">
           {/* Chevron de voltar-etapa só no fluxo mock (sem cabeçalho do estabelecimento) */}
@@ -227,10 +242,11 @@ export default function BookingWizard({
         </div>
         <ProgressBar current={step} total={site.bookingSteps.length} />
       </header>
+      )}
 
       <main className="tw-flex-1">
         {step === STEP.SERVICO && (
-          <StepShell title="Escolha os serviços">
+          <StepShell title={bookingDisabled ? 'Serviços' : 'Escolha os serviços'}>
             <div
               className="tw-flex tw-items-center tw-gap-2 tw-rounded-xl tw-px-3"
               style={{ minHeight: 44, background: 'var(--surface, #fff)', border: '1px solid var(--brand-border, #E7E5F5)' }}
@@ -247,14 +263,17 @@ export default function BookingWizard({
               />
             </div>
 
-            <div className="tw-mt-3 tw-flex tw-flex-col tw-gap-2 tw-pb-24">
+            <div className={`tw-mt-3 tw-flex tw-flex-col tw-gap-2 ${bookingDisabled ? 'tw-pb-4' : 'tw-pb-24'}`}>
               {filteredServices.map((s) => (
                 <ServiceRow
                   key={s.id}
                   service={s}
-                  selected={selectedServices.some((x) => x.id === s.id)}
+                  selected={!bookingDisabled && selectedServices.some((x) => x.id === s.id)}
                   onToggle={() => toggleService(s)}
                   onDetails={() => setDetailService(s)}
+                  // Vitrine: o serviço ainda abre os detalhes (o cliente quer saber o que tem e
+                  // quanto custa), mas não pode ser selecionado — não há para onde avançar.
+                  disabled={bookingDisabled}
                 />
               ))}
               {!filteredServices.length && (
@@ -264,7 +283,8 @@ export default function BookingWizard({
               )}
             </div>
 
-            {/* Barra fixa: total + continuar */}
+            {/* Barra fixa: total + continuar. Sem agendamento, não há total nem para onde ir. */}
+            {!bookingDisabled && (
             <div
               className="tw-fixed tw-inset-x-0 tw-bottom-0 tw-mx-auto tw-flex tw-max-w-lg tw-items-center tw-justify-between tw-gap-3 tw-p-4"
               style={{ background: 'linear-gradient(to top, var(--bg-lav, #F6F5FB) 70%, transparent)' }}
@@ -287,6 +307,7 @@ export default function BookingWizard({
                 Continuar <ArrowRight size={20} strokeWidth={2.2} aria-hidden="true" />
               </button>
             </div>
+            )}
           </StepShell>
         )}
 
@@ -429,6 +450,7 @@ export default function BookingWizard({
           selected={selectedServices.some((x) => x.id === detailService.id)}
           onToggle={() => toggleService(detailService)}
           onClose={() => setDetailService(null)}
+          disabled={bookingDisabled}
         />
       )}
     </div>
@@ -480,7 +502,51 @@ function GuestInput({ label, value, onChange, type = 'text', placeholder, autoCo
 
 // Card do serviço com seleção (toggle) + botão de detalhes (abre o modal). Dois botões
 // irmãos num div (não aninhados) para HTML válido.
-function ServiceRow({ service, selected, onToggle, onDetails }) {
+// Faixa de indisponibilidade: fica logo abaixo da capa, antes dos serviços. Diz o que houve e dá
+// a única saída útil (falar com o estabelecimento) — a página continua navegável.
+function BookingDisabledNotice({ establishment }) {
+  const telefone = String(establishment?.telefone || '').replace(/\D/g, '');
+  const whatsappUrl = telefone.length >= 10
+    ? `https://wa.me/${telefone.length > 11 ? telefone : `55${telefone}`}`
+    : '';
+
+  return (
+    <div
+      role="status"
+      className="tw-flex tw-flex-col tw-gap-3 tw-rounded-2xl tw-p-4"
+      style={{ background: '#FFFBEB', border: '1px solid #FDE68A' }}
+    >
+      <div className="tw-flex tw-items-start tw-gap-3">
+        <span style={{ color: '#B45309', flexShrink: 0, marginTop: 2 }}>
+          <Info size={20} strokeWidth={2.2} aria-hidden="true" />
+        </span>
+        <div className="tw-min-w-0">
+          <p className="tw-m-0 tw-text-sm tw-font-bold" style={{ color: '#92400E' }}>
+            Agendamento online indisponível
+          </p>
+          <p className="tw-m-0 tw-mt-1 tw-text-sm" style={{ color: '#92400E' }}>
+            Este estabelecimento não está aceitando agendamentos pelo site no momento.
+            Você pode ver os serviços abaixo e falar direto com ele.
+          </p>
+        </div>
+      </div>
+
+      {whatsappUrl ? (
+        <a
+          href={whatsappUrl}
+          target="_blank"
+          rel="noreferrer"
+          className="tw-flex tw-w-full tw-items-center tw-justify-center tw-gap-2 tw-rounded-xl tw-font-semibold tw-no-underline"
+          style={{ minHeight: 44, background: 'var(--wa-green, #25D366)', color: '#fff' }}
+        >
+          Falar no WhatsApp
+        </a>
+      ) : null}
+    </div>
+  );
+}
+
+function ServiceRow({ service, selected, onToggle, onDetails, disabled = false }) {
   const subtitle = [durationLabel({ minutes: service.durationMin }), service.priceLabel || formatBRL(service.price)]
     .filter(Boolean)
     .join(' · ');
@@ -495,8 +561,8 @@ function ServiceRow({ service, selected, onToggle, onDetails }) {
     >
       <button
         type="button"
-        onClick={onToggle}
-        aria-pressed={selected}
+        onClick={disabled ? onDetails : onToggle}
+        aria-pressed={disabled ? undefined : selected}
         className="tw-flex tw-min-w-0 tw-flex-1 tw-items-center tw-gap-3 tw-border-0 tw-bg-transparent tw-p-3 tw-text-left"
         style={{ cursor: 'pointer' }}
       >
@@ -536,7 +602,7 @@ function ServiceRow({ service, selected, onToggle, onDetails }) {
   );
 }
 
-function ServiceDetailsModal({ service, selected, onToggle, onClose }) {
+function ServiceDetailsModal({ service, selected, onToggle, onClose, disabled = false }) {
   const subtitle = [durationLabel({ minutes: service.durationMin }), service.priceLabel || formatBRL(service.price)]
     .filter(Boolean)
     .join(' · ');
@@ -579,20 +645,24 @@ function ServiceDetailsModal({ service, selected, onToggle, onClose }) {
           <p className="tw-m-0 tw-text-sm" style={{ color: 'var(--ink, #1E1B4B)', whiteSpace: 'pre-wrap' }}>
             {service.descricao || 'Sem descrição para este serviço.'}
           </p>
-          <button
-            type="button"
-            onClick={() => { onToggle(); onClose(); }}
-            className="tw-mt-2 tw-flex tw-w-full tw-items-center tw-justify-center tw-gap-2 tw-rounded-xl tw-font-semibold"
-            style={{
-              minHeight: 48,
-              cursor: 'pointer',
-              background: selected ? 'var(--surface-soft, #F6F5FB)' : 'var(--brand)',
-              color: selected ? 'var(--brand-deep, #1E1B4B)' : '#fff',
-              border: selected ? '1px solid var(--brand-border, #E7E5F5)' : '1px solid transparent',
-            }}
-          >
-            {selected ? 'Remover do agendamento' : 'Adicionar ao agendamento'}
-          </button>
+          {/* Sem agendamento disponível, o modal é só a ficha do serviço — oferecer "Adicionar"
+              seria prometer algo que o passo seguinte não entrega. */}
+          {!disabled && (
+            <button
+              type="button"
+              onClick={() => { onToggle(); onClose(); }}
+              className="tw-mt-2 tw-flex tw-w-full tw-items-center tw-justify-center tw-gap-2 tw-rounded-xl tw-font-semibold"
+              style={{
+                minHeight: 48,
+                cursor: 'pointer',
+                background: selected ? 'var(--surface-soft, #F6F5FB)' : 'var(--brand)',
+                color: selected ? 'var(--brand-deep, #1E1B4B)' : '#fff',
+                border: selected ? '1px solid var(--brand-border, #E7E5F5)' : '1px solid transparent',
+              }}
+            >
+              {selected ? 'Remover do agendamento' : 'Adicionar ao agendamento'}
+            </button>
+          )}
         </div>
       </div>
     </div>

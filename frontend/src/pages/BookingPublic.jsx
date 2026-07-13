@@ -206,16 +206,11 @@ export default function BookingPublic() {
   if (state.notFound) return <NotFound />;
   if (state.error) return <CenterMsg>{state.error}</CenterMsg>;
 
-  // Assinatura vencida: avisa ANTES do wizard abrir. Deixar o cliente escolher serviço, profissional
-  // e horário para só então recusar no confirm é o pior desfecho possível — ele fez todo o esforço
-  // e ainda sai achando que o problema foi dele.
-  if (state.establishment?.booking_enabled === false) {
-    return (
-      <div style={{ ...(themeStyle || {}), background: 'var(--bg-lav, #F6F5FB)', minHeight: '100%' }}>
-        <BookingUnavailable establishment={state.establishment} />
-      </div>
-    );
-  }
+  // Assinatura vencida: a página do estabelecimento continua de pé (capa, perfil, serviços e
+  // preços) — só a ação de agendar é desligada, com o aviso logo abaixo da capa. O cliente veio
+  // por aquele link para ver aquele estabelecimento; sumir com tudo puniria ele por um problema
+  // que não é dele.
+  const bookingDisabled = state.establishment?.booking_enabled === false;
 
   return (
     <div style={{ ...(themeStyle || {}), background: 'var(--bg-lav, #F6F5FB)', minHeight: '100%' }}>
@@ -228,6 +223,7 @@ export default function BookingPublic() {
         pollStatus={pollStatus}
         preselectedServiceIds={preselectedServiceIds}
         initialGuest={initialGuest}
+        bookingDisabled={bookingDisabled}
         collectGuest
       />
     </div>
@@ -248,63 +244,6 @@ function CenterMsg({ children }) {
       }}
     >
       {children}
-    </div>
-  );
-}
-
-// Estabelecimento com assinatura vencida: em vez de deixar o cliente percorrer o wizard inteiro
-// para levar um "não" no fim, explica na entrada e oferece o contato — que é a única coisa útil
-// que ele pode fazer a seguir.
-function BookingUnavailable({ establishment }) {
-  const nome = establishment?.nome || 'Este estabelecimento';
-  const telefone = String(establishment?.telefone || '').replace(/\D/g, '');
-  const whatsappUrl = telefone.length >= 10
-    ? `https://wa.me/${telefone.length > 11 ? telefone : `55${telefone}`}`
-    : '';
-
-  return (
-    <div style={{ minHeight: '60vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
-      <div
-        style={{
-          maxWidth: 460,
-          width: '100%',
-          textAlign: 'center',
-          background: '#fff',
-          border: '1px solid var(--brand-border, #E7E5F5)',
-          borderRadius: 20,
-          padding: '32px 24px',
-          boxShadow: '0 18px 42px rgba(15,23,42,.06)',
-        }}
-      >
-        <div
-          aria-hidden
-          style={{
-            width: 56, height: 56, margin: '0 auto 16px',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            borderRadius: '50%', background: '#fffbeb', color: '#b45309',
-          }}
-        >
-          <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-            <circle cx="12" cy="12" r="9" />
-            <path d="M12 7v5" />
-            <path d="M12 16h.01" />
-          </svg>
-        </div>
-
-        <h1 style={{ margin: '0 0 8px', fontSize: '1.25rem', color: 'var(--ink, #1E1B4B)' }}>
-          Agendamento indisponível
-        </h1>
-        <p style={{ margin: '0 0 20px', fontSize: '.95rem', lineHeight: 1.6, color: 'var(--muted-ink, #6B7280)' }}>
-          <strong>{nome}</strong> não está aceitando agendamentos online no momento.
-          Entre em contato direto para verificar a disponibilidade.
-        </p>
-
-        {whatsappUrl ? (
-          <a className="btn btn--primary" href={whatsappUrl} target="_blank" rel="noreferrer">
-            Falar no WhatsApp
-          </a>
-        ) : null}
-      </div>
     </div>
   );
 }
