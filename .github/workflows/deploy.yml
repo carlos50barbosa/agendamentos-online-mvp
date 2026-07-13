@@ -20,22 +20,21 @@ jobs:
       run:
         working-directory: backend
 
-    # MySQL de verdade. Sem ele, o smoke não existe: os testes de rota mockam pool.query,
-    # e um mock nunca reclama de coluna inexistente — foi assim que o /clientes ficou 500
-    # em produção por três deploys ("Unknown column 'base.billable_appointments'").
+    # Banco de verdade — e MariaDB 10.11, a MESMA engine da VPS. Isso importa: quatro
+    # migrations usam `ADD COLUMN IF NOT EXISTS`, que é sintaxe MariaDB e o MySQL rejeita
+    # (erro 1064). Um CI em MySQL testaria contra uma engine que produção não usa.
+    #
+    # Sem banco não há smoke: os testes de rota mockam pool.query, e um mock nunca reclama
+    # de coluna inexistente — foi assim que o /clientes ficou 500 em produção por três
+    # deploys ("Unknown column 'base.billable_appointments'").
     services:
-      mysql:
-        image: mysql:8.0
+      mariadb:
+        image: mariadb:10.11
         env:
-          MYSQL_ROOT_PASSWORD: ci-root
-          MYSQL_DATABASE: agendamentos_smoke
+          MARIADB_ROOT_PASSWORD: ci-root
+          MARIADB_DATABASE: agendamentos_smoke
         ports:
           - 3306:3306
-        options: >-
-          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -pci-root"
-          --health-interval=5s
-          --health-timeout=5s
-          --health-retries=20
 
     env:
       MYSQL_HOST: 127.0.0.1
@@ -56,6 +55,19 @@ jobs:
           cache: npm
           cache-dependency-path: backend/package-lock.json
       - run: npm ci
+
+      # A espera é feita pelo mesmo driver que a aplicação usa (mysql2), e não por um
+      # binário de dentro do container: o nome do cliente muda entre MySQL e MariaDB, e
+      # um health-cmd errado derruba o job antes de qualquer teste rodar.
+      - name: Aguardar o MariaDB
+        run: |
+          for i in $(seq 1 60); do
+            if node -e "require('mysql2/promise').createConnection({host:'127.0.0.1',port:3306,user:'root',password:'ci-root'}).then(c=>c.query('SELECT VERSION() v').then(([r])=>{console.log('MariaDB pronto:',r[0].v);return c.end()})).then(()=>process.exit(0)).catch(()=>process.exit(1))"; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "MariaDB nao respondeu em 120s"; exit 1
 
       # schema.sql + todas as migrations, do zero. Se uma migration quebrar o schema,
       # o CI para aqui — antes era só no VPS, na unha.

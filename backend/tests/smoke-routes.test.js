@@ -81,6 +81,14 @@ async function seed() {
     connectionLimit: 4,
   });
 
+  // Idempotente: da para rodar `node --test tests/smoke-routes.test.js` varias vezes
+  // contra o mesmo banco de smoke sem recriar tudo. Na ordem das FKs.
+  await pool.query('DELETE FROM agendamentos WHERE estabelecimento_id = ?', [ESTAB_ID]);
+  await pool.query('DELETE FROM servico_profissionais WHERE servico_id = ?', [SERVICO_ID]);
+  await pool.query('DELETE FROM servicos WHERE id = ?', [SERVICO_ID]);
+  await pool.query('DELETE FROM profissionais WHERE id = ?', [PROF_ID]);
+  await pool.query('DELETE FROM usuarios WHERE id IN (?, ?)', [ESTAB_ID, CLIENTE_ID]);
+
   await pool.query(
     `INSERT INTO usuarios (id, nome, email, senha_hash, tipo, telefone, plan, plan_status, slug)
      VALUES (?, 'Salao Smoke', 'estab.smoke@test.local', 'x', 'estabelecimento', '11999990000', 'pro', 'active', 'salao-smoke'),
