@@ -481,6 +481,11 @@ body{
   .toast{
     bottom: calc(var(--mobile-nav-h, 64px) + 12px + env(safe-area-inset-bottom, 0px));
   }
+  /* /estab tem um FAB fixo no canto inferior direito (CockpitOverview) e o :root
+     zera --mobile-nav-h no mobile — sem isto o toast nasceria embaixo do FAB.
+     A var é herdada pelo .toast (descendente do painel); o .app-main é ANCESTRAL
+     e continua com o valor do :root, então nenhum padding de layout muda. */
+  .dashboard-estab-pro{ --mobile-nav-h: 72px; }
 }
 /* =======================
    Modal

@@ -1,7 +1,10 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { Api, resolveAssetUrl } from '../../utils/api'
 import { normalizeStatus } from '../../config/theme'
+import { publicLinkFor } from '../settings/helpers.js'
+import useMediaQuery from '../../hooks/useMediaQuery'
 import Modal from '../Modal.jsx'
+import StatusPill from '../StatusPill.jsx'
 import styles from './CockpitOverview.module.css'
 
 /* -----------------------------------------------------------------------------
@@ -64,12 +67,6 @@ const formatBRL = (centavos, { compact = false } = {}) => {
 
 const capitalize = (text) => (text ? text.charAt(0).toUpperCase() + text.slice(1) : text)
 
-const greetingFor = (hour) => {
-  if (hour < 12) return 'Bom dia'
-  if (hour < 18) return 'Boa tarde'
-  return 'Boa noite'
-}
-
 const getResourceId = (item) =>
   item?.profissional_id ??
   item?.professional_id ??
@@ -115,6 +112,16 @@ const apptVariant = (norm, hasWa) => {
   return styles.apptBrand
 }
 
+// Por que este agendamento ainda não está resolvido (null = nada a cobrar).
+// É o que transforma "2 sem resposta" (número) em "João, 16:00, não confirmou" (trabalho).
+const pendenciaDe = (ev) => {
+  if (!ev || ev.norm === 'cancelado' || ev.norm === 'concluido') return null
+  if (ev.norm === 'aguardando_sinal') return 'sinal não pago'
+  if (ev.norm === 'pendente') return 'a confirmar'
+  if (!ev.confirmedAt) return 'não confirmou'
+  return null
+}
+
 // Rótulo curto de status exibido dentro do card da linha do tempo.
 const statusShort = (norm, confirmedAt) => {
   if (norm === 'cancelado') return 'Cancelado'
@@ -126,16 +133,7 @@ const statusShort = (norm, confirmedAt) => {
 }
 
 const ICONS = {
-  money: (
-    <>
-      <rect x="2" y="6" width="20" height="12" rx="2" />
-      <circle cx="12" cy="12" r="2.5" />
-      <path d="M5.5 9.5h.01M18.5 14.5h.01" />
-    </>
-  ),
   wa: <path d="M21 11.5a8.5 8.5 0 0 1-12.7 7.4L3 20l1.2-5.1A8.5 8.5 0 1 1 21 11.5Z" />,
-  card: <><rect x="2" y="6" width="20" height="13" rx="2" /><path d="M2 10h20M6 15h4" /></>,
-  calendar: <><rect x="3" y="4" width="18" height="17" rx="2" /><path d="M3 9h18M8 2v4M16 2v4" /></>,
   plus: <path d="M12 5v14M5 12h14" />,
   check: <path d="M20 6 9 17l-5-5" />,
 }
@@ -226,6 +224,9 @@ export default function CockpitOverview({ establishmentId, currentUser, professi
   const [itens, setItens] = useState([])
   const [loading, setLoading] = useState(true)
   const [now, setNow] = useState(() => new Date())
+  // A régua da timeline é dimensionada em JS (minWidth inline), então o mobile não
+  // dá para resolver só com @media — precisa do mesmo corte de 780px em JS.
+  const isMobile = useMediaQuery('(max-width: 780px)')
   // Linha do tempo: visão (dia/semana/mês) e data-âncora (null = hoje).
   const [view, setView] = useState('dia')
   const [anchor, setAnchor] = useState(null)
@@ -235,6 +236,8 @@ export default function CockpitOverview({ establishmentId, currentUser, professi
   const centeredViewRef = useRef(null)
   // Modal de detalhes do agendamento (ao clicar num card da linha do tempo).
   const [selectedEvent, setSelectedEvent] = useState(null)
+  // Feedback do "Copiar link" do card de dia vazio.
+  const [linkCopied, setLinkCopied] = useState(false)
   // Gestão dentro do modal: alterar data/hora + cancelar.
   const [rescheduleOpen, setRescheduleOpen] = useState(false)
   const [rescheduleDate, setRescheduleDate] = useState('')
@@ -471,39 +474,6 @@ export default function CockpitOverview({ establishmentId, currentUser, professi
     scroller.scrollTo({ left: target })
   }, [view, timeline])
 
-  // Sparkline: faturamento de HOJE acumulado por hora (independente da visão da timeline).
-  const sparkPoints = useMemo(() => {
-    const active = todayItems.filter((ev) => ev.norm !== 'cancelado')
-    if (!active.length) return ''
-    let lo = 8 * 60
-    let hi = 20 * 60
-    active.forEach((ev) => {
-      const s = minutesOfDay(ev.start)
-      lo = Math.min(lo, s)
-      hi = Math.max(hi, s + 30)
-    })
-    lo = Math.floor(lo / 60) * 60
-    hi = Math.ceil(hi / 60) * 60
-    const hours = []
-    for (let h = lo / 60; h <= hi / 60; h += 1) hours.push(h)
-    let maxCum = 0
-    const cums = hours.map((h) => {
-      const cum = active
-        .filter((ev) => minutesOfDay(ev.start) < (h + 1) * 60)
-        .reduce((sum, ev) => sum + ev.valueCent, 0)
-      maxCum = Math.max(maxCum, cum)
-      return cum
-    })
-    const n = hours.length
-    return cums
-      .map((cum, i) => {
-        const x = n > 1 ? (i / (n - 1)) * 200 : 0
-        const y = maxCum > 0 ? 32 - (cum / maxCum) * 27 : 32
-        return `${x.toFixed(1)},${y.toFixed(1)}`
-      })
-      .join(' ')
-  }, [todayItems])
-
   const agora = useMemo(() => {
     const t = now.getTime()
     return todayItems
@@ -517,6 +487,7 @@ export default function CockpitOverview({ establishmentId, currentUser, professi
       .filter((ev) => ev.norm !== 'cancelado' && ev.start.getTime() > t)
       .slice(0, 4)
   }, [todayItems, now])
+
 
   const team = useMemo(() => {
     const counts = new Map()
@@ -537,12 +508,40 @@ export default function CockpitOverview({ establishmentId, currentUser, professi
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [todayItems, memberMeta])
 
-  const establishmentName = currentUser?.nome || currentUser?.name || 'seu negócio'
-  const greeting = greetingFor(now.getHours())
   const dateLabel = capitalize(
     now.toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' })
   )
-  const timeLabel = `${pad2(now.getHours())}:${pad2(now.getMinutes())}`
+  // O h1 carrega o dado do dia — não uma saudação. Dia vazio é caso de primeira classe:
+  // esconde os indicadores zerados e a fila vazia, e oferece a única ação que resolve
+  // uma agenda livre (divulgar o link público).
+  const vazio = metrics.total === 0
+  const headline = vazio
+    ? 'Nenhum atendimento hoje'
+    : `${metrics.total} ${metrics.total === 1 ? 'atendimento' : 'atendimentos'} hoje`
+  const publicLink = publicLinkFor({ slug: currentUser?.slug, id: establishmentId })
+
+  // O card do topo nunca anuncia ausência: entre um atendimento e outro — a maior parte
+  // do dia — ele mostra o PRÓXIMO, em vez de gastar a área mais nobre com "nenhum em
+  // andamento". Só vira "dia encerrado" quando realmente não há mais nada.
+  const emCurso = Boolean(agora)
+  const destaque = agora || proximos[0] || null
+  const fila = emCurso ? proximos : proximos.slice(1)
+  const minutosAte = destaque && !emCurso ? Math.max(0, Math.round((destaque.start - now) / 60000)) : 0
+  const kicker = emCurso
+    ? 'Acontecendo agora'
+    : minutosAte < 60
+      ? `Próximo · em ${minutosAte} min`
+      : `Próximo · às ${pad2(destaque?.start.getHours())}:${pad2(destaque?.start.getMinutes())}`
+
+  const copyPublicLink = async () => {
+    if (!publicLink) return
+    try {
+      if (typeof navigator === 'undefined' || !navigator.clipboard?.writeText) return
+      await navigator.clipboard.writeText(publicLink)
+      setLinkCopied(true)
+      window.setTimeout(() => setLinkCopied(false), 2000)
+    } catch { /* clipboard exige HTTPS/localhost — falha silenciosa */ }
+  }
 
   // Navegação da linha do tempo (◀ ▶ / Hoje) e rótulo do período.
   const shiftAnchor = (dir) => {
@@ -563,27 +562,18 @@ export default function CockpitOverview({ establishmentId, currentUser, professi
         ? `${fmtShortDay(startOfWeekMon(refDate))} – ${fmtShortDay(addDaysD(startOfWeekMon(refDate), 6))}`
         : capitalize(refDate.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' }))
 
-  const waPct = metrics.waTotal > 0 ? Math.round((metrics.waConfirmed / metrics.waTotal) * 100) : 0
-  const sinalPct = metrics.activeCount > 0 ? Math.round((metrics.sinaisCount / metrics.activeCount) * 100) : 0
-
   if (loading) {
+    // O esqueleto promete o layout real (título + faixa + painel), não uma torre de blocos.
     return (
       <div className={styles.wrap} aria-busy="true">
         <div className={styles.topbar}>
           <div className={styles.topbarInfo}>
-            <div className={styles.eyebrow}>Painel operacional</div>
-            <div className={styles.skeleton} style={{ width: 'min(320px, 100%)', height: 30, marginTop: 8 }} />
+            <div className={styles.skeleton} style={{ width: 'min(260px, 70%)', height: 22 }} />
+            <div className={styles.skeleton} style={{ width: 'min(180px, 50%)', height: 13, marginTop: 8 }} />
           </div>
         </div>
-        <div className={styles.tiles}>
-          {[0, 1, 2, 3].map((i) => (
-            <div key={i} className={styles.skeleton} style={{ height: 128 }} />
-          ))}
-        </div>
-        <div className={styles.board}>
-          <div className={styles.skeleton} style={{ height: 260 }} />
-          <div className={styles.skeleton} style={{ height: 260 }} />
-        </div>
+        <div className={styles.skeleton} style={{ height: 66, marginBottom: 16 }} />
+        <div className={styles.skeleton} style={{ height: 220 }} />
       </div>
     )
   }
@@ -593,19 +583,17 @@ export default function CockpitOverview({ establishmentId, currentUser, professi
       {/* TOPBAR */}
       <header className={styles.topbar}>
         <div className={styles.topbarInfo}>
-          <div className={styles.eyebrow}>Painel operacional · {establishmentName}</div>
-          <h1 className={styles.hello}>{greeting}, <small>{establishmentName}</small></h1>
+          <h1 className={styles.hello}>{headline}</h1>
           <p className={styles.subhello}>
-            <span className={styles.liveDot} />
-            {dateLabel} · <b>{timeLabel}</b> ·{' '}
-            <b>{metrics.total}</b>&nbsp;{metrics.total === 1 ? 'atendimento hoje' : 'atendimentos hoje'}
-            {metrics.waPending > 0 && <>, <b>{metrics.waPending}</b>&nbsp;aguardando confirmação</>}
+            {dateLabel}
+            {metrics.waPending > 0 && <> · <b className={styles.warn}>{metrics.waPending} a confirmar</b></>}
+            {metrics.cancelados > 0 && <> · {metrics.cancelados} {metrics.cancelados === 1 ? 'cancelado' : 'cancelados'}</>}
           </p>
         </div>
         <div className={styles.topActions}>
           <button
             type="button"
-            className={styles.btnCta}
+            className={styles.btnGhostTop}
             onClick={() => { if (onNewAppointment) onNewAppointment() }}
           >
             <Icon path={ICONS.plus} width={17} strokeWidth={2.2} />
@@ -614,91 +602,75 @@ export default function CockpitOverview({ establishmentId, currentUser, professi
         </div>
       </header>
 
-      {/* MÉTRICAS */}
-      <section className={styles.tiles} aria-label="Indicadores do dia">
-        {/* Faturamento */}
-        <div className={styles.tile}>
-          <div className={styles.tileTop}>
-            <span className={styles.tileLabel}>Faturamento hoje</span>
-            <span className={styles.tileIc}><Icon path={ICONS.money} /></span>
-          </div>
-          <div className={styles.tileVal}>{formatBRL(metrics.faturamento, { compact: true })}</div>
-          {metrics.faturamento > 0 && sparkPoints ? (
-            <svg className={styles.spark} viewBox="0 0 200 34" preserveAspectRatio="none">
-              <defs>
-                <linearGradient id="cockpitSpark" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0" stopColor="#16A34A" stopOpacity="0.28" />
-                  <stop offset="1" stopColor="#16A34A" stopOpacity="0" />
-                </linearGradient>
-              </defs>
-              <polygon fill="url(#cockpitSpark)" points={`0,34 ${sparkPoints} 200,34`} />
-              <polyline fill="none" stroke="#16A34A" strokeWidth="2" strokeLinecap="round"
-                strokeLinejoin="round" points={sparkPoints} />
-            </svg>
-          ) : (
-            <div className={styles.tileFoot}>Sem faturamento registrado ainda</div>
-          )}
-        </div>
+      {/* Mesmo handler do CTA acima. O CSS garante que só UM dos dois existe em cada
+          largura (o corte é único, em 781px): este é o único ponto de entrada de
+          "novo agendamento" do /estab — não há fallback em nav nenhuma. */}
+      <button
+        type="button"
+        className={styles.fab}
+        aria-label="Novo agendamento"
+        title="Novo agendamento"
+        onClick={() => { if (onNewAppointment) onNewAppointment() }}
+      >
+        <Icon path={ICONS.plus} width={24} strokeWidth={2.4} />
+      </button>
 
-        {/* Confirmação WhatsApp */}
-        <div className={styles.tile}>
-          <div className={styles.tileTop}>
-            <span className={styles.tileLabel}>Confirmação WhatsApp</span>
-            <span className={`${styles.tileIc} ${styles.tileIcWa}`}><Icon path={ICONS.wa} /></span>
+      {/* INDICADORES — uma faixa, três números. O total do dia mora no h1. */}
+      {!vazio && (
+        <section className={styles.strip} aria-label="Indicadores do dia">
+          <div className={styles.stripItem}>
+            <span className={styles.stripLabel}>Faturamento</span>
+            <span className={styles.stripVal}>{formatBRL(metrics.faturamento, { compact: true })}</span>
           </div>
-          <div className={styles.tileVal}>
-            {metrics.waConfirmed}<em>/{metrics.waTotal}</em>
-          </div>
-          <div className={styles.meter}>
-            <i style={{ width: `${waPct}%`, background: 'linear-gradient(90deg,#1AA34D,#25D366)' }} />
-          </div>
-          <div className={styles.tileFoot}>
-            {metrics.waPending > 0
-              ? `${metrics.waPending} ${metrics.waPending === 1 ? 'cliente ainda não confirmou' : 'clientes ainda não confirmaram'}`
-              : 'Todos os clientes confirmaram'}
-          </div>
-        </div>
 
-        {/* Sinais Asaas */}
-        <div className={styles.tile}>
-          <div className={styles.tileTop}>
-            <span className={styles.tileLabel}>Sinais · Asaas</span>
-            <span className={styles.tileIc}><Icon path={ICONS.card} /></span>
-          </div>
-          <div className={styles.tileVal}>
-            {formatBRL(metrics.sinaisCent, { compact: true })}
-            {metrics.sinaisCount > 0 && (
-              <em>{metrics.sinaisCount} {metrics.sinaisCount === 1 ? 'sinal' : 'sinais'}</em>
+          <div className={styles.stripItem}>
+            <span className={styles.stripLabel}>Confirmados</span>
+            {/* waTotal=0 (todos cancelados) não é "todos confirmaram" — é nada a confirmar. */}
+            <span className={styles.stripVal}>
+              {metrics.waTotal === 0 ? '—' : `${metrics.waConfirmed}/${metrics.waTotal}`}
+            </span>
+            {metrics.waTotal > 0 && (
+              <span className={styles.stripFoot}>
+                {metrics.waPending > 0
+                  ? `${metrics.waPending} sem resposta`
+                  : 'todos confirmaram'}
+              </span>
             )}
           </div>
-          <div className={styles.meter}>
-            <i style={{ width: `${sinalPct}%`, background: 'linear-gradient(90deg,#5049E5,#7669ED)' }} />
-          </div>
-          <div className={styles.tileFoot}>
-            {metrics.sinaisCount > 0
-              ? `${metrics.sinaisCount} de ${metrics.activeCount} agendamentos com sinal pago`
-              : 'Nenhum sinal recebido hoje'}
-          </div>
-        </div>
 
-        {/* Agenda de hoje */}
-        <div className={styles.tile}>
-          <div className={styles.tileTop}>
-            <span className={styles.tileLabel}>Agenda de hoje</span>
-            <span className={styles.tileIc}><Icon path={ICONS.calendar} /></span>
+          <div className={styles.stripItem}>
+            <span className={styles.stripLabel}>Sinais</span>
+            <span className={styles.stripVal}>{formatBRL(metrics.sinaisCent, { compact: true })}</span>
+            {metrics.activeCount > 0 && (
+              <span className={styles.stripFoot}>
+                {metrics.sinaisCount > 0 ? `${metrics.sinaisCount} de ${metrics.activeCount} pagos` : 'nenhum pago'}
+              </span>
+            )}
           </div>
-          <div className={styles.tileVal}>{metrics.total}</div>
-          <div className={styles.tileFoot}>
-            <span className={styles.dot} style={{ background: '#16A34A' }} /> {metrics.confirmados} confirm.
-            <span className={styles.dot} style={{ background: '#D97706', marginLeft: 6 }} /> {metrics.pendentes} pend.
-            <span className={styles.dot} style={{ background: '#64748B', marginLeft: 6 }} /> {metrics.concluidos} concl.
-            <span className={styles.dot} style={{ background: '#DC2626', marginLeft: 6 }} /> {metrics.cancelados} canc.
+        </section>
+      )}
+
+      {/* DIA VAZIO — em vez de sete blocos zerados, a ação que resolve uma agenda livre. */}
+      {vazio && (
+        <section className={styles.emptyCard}>
+          <b>Sua agenda está livre</b>
+          <p>Divulgue seu link público para receber agendamentos.</p>
+          {publicLink && <span className={styles.emptyLink}>{publicLink}</span>}
+          <div className={styles.emptyActions}>
+            <button type="button" className={styles.btnGhostTop} onClick={copyPublicLink} disabled={!publicLink}>
+              {linkCopied ? 'Link copiado!' : 'Copiar link'}
+            </button>
+            {publicLink && (
+              <a className={styles.btnGhostTop} href={publicLink} target="_blank" rel="noreferrer">
+                Abrir página
+              </a>
+            )}
           </div>
-        </div>
-      </section>
+        </section>
+      )}
 
       {/* BOARD */}
-      <section className={styles.board}>
+      <section className={`${styles.board} ${vazio ? styles.boardSolo : ''}`}>
         {/* LINHA DO TEMPO */}
         <div className={styles.panel}>
           <div className={styles.panelHd}>
@@ -763,9 +735,14 @@ export default function CockpitOverview({ establishmentId, currentUser, professi
             </div>
           ) : (
             <div className={styles.tlScroll} ref={tlScrollRef}>
-              <div className={styles.tl} style={{ minWidth: Math.max(760, timeline.hours.length * 140) }}>
+              {/* A régua é dimensionada aqui (não dá para encolher por @media): no celular,
+                  96px/hora em vez de 140px — com 132px fixos de rótulo, o dono via ~27% da
+                  régua por vez. */}
+              <div className={styles.tl} style={{ minWidth: Math.max(isMobile ? 520 : 760, timeline.hours.length * (isMobile ? 96 : 140)) }}>
                 <div className={styles.tlHours}>
-                  <span className={styles.tlHoursLabel}>{view === 'semana' ? 'Dia' : 'Profissional'}</span>
+                  <span className={styles.tlHoursLabel}>
+                    {view === 'semana' ? 'Dia' : (isMobile ? 'Prof.' : 'Profissional')}
+                  </span>
                   <div className={styles.tlHoursTrack}>
                     {timeline.hours.map((h, i) => {
                       const left = timeline.hours.length > 1 ? (i / (timeline.hours.length - 1)) * 100 : 0
@@ -790,7 +767,9 @@ export default function CockpitOverview({ establishmentId, currentUser, professi
                               <span className={styles.laneAv} style={{ background: palette.g }}>
                                 {isGeneric ? '•' : initials(lane.name)}
                               </span>
-                              <span className={styles.laneName}>{isGeneric ? 'Atendimentos' : lane.name}</span>
+                              <span className={styles.laneName}>
+                                {isGeneric ? 'Atendimentos' : (isMobile ? firstName(lane.name) : lane.name)}
+                              </span>
                             </>
                           )}
                         </div>
@@ -851,38 +830,43 @@ export default function CockpitOverview({ establishmentId, currentUser, professi
           )}
         </div>
 
-        {/* COLUNA DIREITA */}
+        {/* COLUNA DIREITA — no dia vazio ela não existe: só repetiria "não há nada". */}
+        {!vazio && (
         <div>
-          {agora ? (
+          {destaque ? (
             <div className={styles.nowCard}>
-              <div className={styles.nowKicker}><span className={styles.liveDot} />Acontecendo agora</div>
+              <div className={styles.nowKicker}>{emCurso && <span className={styles.liveDot} />}{kicker}</div>
               <div className={styles.nowBody}>
-                <span className={styles.nowAv}>{initials(agora.client)}</span>
+                <span className={styles.nowAv}>{initials(destaque.client)}</span>
                 <div className={styles.nowMain}>
-                  <div className={styles.nowTitle}>{agora.client}</div>
-                  <div className={styles.nowSub}>{agora.service} · com {agora.resourceName}</div>
+                  <div className={styles.nowTitle}>{destaque.client}</div>
+                  <div className={styles.nowSub}>{destaque.service} · com {destaque.resourceName}</div>
                 </div>
                 <div className={styles.nowTime}>
-                  <b>{pad2(agora.start.getHours())}:{pad2(agora.start.getMinutes())}</b>
-                  <small>até {pad2(agora.end.getHours())}:{pad2(agora.end.getMinutes())}</small>
+                  <b>{pad2(destaque.start.getHours())}:{pad2(destaque.start.getMinutes())}</b>
+                  <small>até {pad2(destaque.end.getHours())}:{pad2(destaque.end.getMinutes())}</small>
                 </div>
               </div>
               <div className={styles.nowMeta}>
-                {agora.confirmedAt && (
+                {destaque.confirmedAt && (
                   <span className={styles.chip}><Icon path={ICONS.wa} width={13} strokeWidth={2} />Confirmado no WhatsApp</span>
                 )}
-                {agora.depositPaidAt && agora.depositCent > 0 && (
-                  <span className={styles.chip}>Sinal {formatBRL(agora.depositCent)} pago</span>
+                {destaque.depositPaidAt && destaque.depositCent > 0 && (
+                  <span className={styles.chip}>Sinal {formatBRL(destaque.depositCent)} pago</span>
+                )}
+                {/* A ausência do chip verde não é sinal suficiente: se há pendência, ela é dita. */}
+                {pendenciaDe(destaque) && (
+                  <span className={`${styles.chip} ${styles.chipWarn}`}>{pendenciaDe(destaque)}</span>
                 )}
               </div>
               <div className={styles.nowBtns}>
-                <button type="button" className={`${styles.btnLine} ${styles.btnSolid}`} onClick={() => setSelectedEvent(agora)}>
+                <button type="button" className={`${styles.btnLine} ${styles.btnSolid}`} onClick={() => setSelectedEvent(destaque)}>
                   <Icon path={ICONS.check} width={15} strokeWidth={2.2} />Detalhes
                 </button>
-                {agora.clientPhone && (
+                {destaque.clientPhone && (
                   <a
                     className={`${styles.btnLine} ${styles.btnGhost}`}
-                    href={`https://wa.me/${String(agora.clientPhone).replace(/\D/g, '')}`}
+                    href={`https://wa.me/${String(destaque.clientPhone).replace(/\D/g, '')}`}
                     target="_blank"
                     rel="noreferrer"
                   >
@@ -893,37 +877,62 @@ export default function CockpitOverview({ establishmentId, currentUser, professi
             </div>
           ) : (
             <div className={styles.nowEmpty}>
-              <b>Nenhum atendimento em andamento</b>
-              {proximos.length > 0 ? 'O próximo começa em breve — veja a fila abaixo.' : 'Aproveite para organizar a agenda.'}
+              <b>Dia encerrado</b>
+              {metrics.concluidos > 0
+                ? `${metrics.concluidos} ${metrics.concluidos === 1 ? 'atendimento concluído' : 'atendimentos concluídos'} hoje.`
+                : 'Nada mais na agenda de hoje.'}
             </div>
           )}
 
+          {/* A FILA É A LISTA DE PENDÊNCIAS. Um bloco "Pendências" separado repetiria,
+              a 100px de distância, os mesmos nomes que já estão aqui. Então a pendência
+              vira o motivo em âmbar + o [Cobrar] no lugar do selo, na própria linha. */}
           <div className={styles.upnext}>
             <h3>Próximos na fila</h3>
-            {proximos.length === 0 ? (
+            {fila.length === 0 ? (
               <div className={styles.qEmpty}>Sem próximos atendimentos hoje.</div>
             ) : (
-              proximos.map((ev, i) => {
+              fila.map((ev, i) => {
                 const palette = paletteFor(ev.resourceId, i)
-                const done = ev.norm === 'concluido'
-                const confirmed = ev.norm === 'confirmado'
-                const statusClass = done ? styles.qStatusDone : confirmed ? styles.qStatusOk : styles.qStatusWarn
-                const statusLabel = done ? 'Concl.' : confirmed ? 'Confirm.' : 'Aguard.'
+                const motivo = pendenciaDe(ev)
+                const waDigits = String(ev.clientPhone || '').replace(/\D/g, '')
                 return (
                   <div className={styles.qrow} key={ev.id}>
-                    <span className={styles.qtime}>{pad2(ev.start.getHours())}:{pad2(ev.start.getMinutes())}</span>
-                    <span className={styles.qav} style={{ background: palette.g }}>{initials(ev.client)}</span>
-                    <div className={styles.qmain}>
-                      <b>{ev.client}</b>
-                      <span>{ev.service} · {ev.resourceName}</span>
-                    </div>
-                    <span className={`${styles.qstatus} ${statusClass}`}>{statusLabel}</span>
+                    {/* Clicável: abre o MESMO modal (detalhe/remarcar/cancelar) do card da
+                        linha do tempo. Antes, cancelar um agendamento no celular exigia
+                        rolar a régua na horizontal e acertar um bloco. */}
+                    <button type="button" className={styles.qmainBtn} onClick={() => setSelectedEvent(ev)}>
+                      <span className={styles.qtime}>{pad2(ev.start.getHours())}:{pad2(ev.start.getMinutes())}</span>
+                      <span className={styles.qav} style={{ background: palette.g }}>{initials(ev.client)}</span>
+                      <span className={styles.qmain}>
+                        <b>{ev.client}</b>
+                        {/* Motivo primeiro: se a linha for cortada, some o menos importante. */}
+                        <span>
+                          {motivo && <em className={styles.qWhy}>{motivo} · </em>}
+                          {ev.service} · {ev.resourceName}
+                        </span>
+                      </span>
+                    </button>
+                    {motivo && waDigits ? (
+                      <a
+                        className={styles.btnCobrar}
+                        href={`https://wa.me/${waDigits}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        aria-label={`Cobrar ${ev.client} no WhatsApp`}
+                      >
+                        <Icon path={ICONS.wa} width={13} strokeWidth={2} />Cobrar
+                      </a>
+                    ) : (
+                      <StatusPill status={ev.norm} size="sm" showIcon={false} className={styles.qpill} />
+                    )}
                   </div>
                 )
               })
             )}
           </div>
         </div>
+        )}
       </section>
 
       {/* EQUIPE */}

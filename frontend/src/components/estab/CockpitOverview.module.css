@@ -34,6 +34,9 @@
   min-width: 0;
   color: var(--c-ink);
   font-variant-numeric: tabular-nums;
+  /* Espaço para o FAB não cobrir o último bloco. Zerado no desktop (>=781px),
+     onde o FAB não existe. */
+  padding-bottom: calc(72px + env(safe-area-inset-bottom, 0px));
 }
 
 /* ---------- Topbar ---------- */
@@ -49,59 +52,60 @@
    overflow-wrap:anywhere (herdado) quebra nome de estabelecimento sem espaços,
    evitando que empurre a página na horizontal. */
 .topbarInfo { min-width: 0; overflow-wrap: anywhere; }
-.eyebrow {
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  color: var(--c-brand);
-}
+/* O h1 carrega o dado do dia ("8 atendimentos hoje"), não uma saudação. */
 .hello {
-  font-size: 22px;
+  font-size: 18px;
   font-weight: 750;
   letter-spacing: -0.02em;
-  margin: 5px 0 3px;
+  margin: 0 0 3px;
   text-wrap: balance;
-}
-.hello small {
-  color: var(--c-muted);
-  font-weight: 500;
-  font-size: 22px;
 }
 .subhello {
   color: var(--c-muted);
-  font-size: 13.5px;
+  font-size: 13px;
   margin: 0;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
 }
 .subhello b {
   color: var(--c-ink);
   font-weight: 650;
 }
+/* Specificity: precisa de 2 classes para vencer o `.subhello b` acima. */
+.subhello .warn { color: var(--c-warn); }
+/* Sem animação: a bolinha sobrevive só como marcador do card "Acontecendo agora". */
 .liveDot {
   width: 7px;
   height: 7px;
   border-radius: 50%;
   background: #16a34a;
-  box-shadow: 0 0 0 0 rgba(22, 163, 74, 0.6);
-  animation: pulse 2.4s infinite;
   flex: none;
 }
-@keyframes pulse {
-  0% { box-shadow: 0 0 0 0 rgba(22, 163, 74, 0.5); }
-  70% { box-shadow: 0 0 0 8px rgba(22, 163, 74, 0); }
-  100% { box-shadow: 0 0 0 0 rgba(22, 163, 74, 0); }
-}
 
-.topActions { display: flex; gap: 10px; align-items: center; }
-.btnCta {
-  height: 42px;
-  padding: 0 18px;
-  border-radius: 12px;
+/* Mobile-first: o CTA do topo NÃO existe; quem age é o FAB. Um único @media
+   (min-width: 781px) inverte os dois de uma vez — com um corte para cada, uma
+   faixa de largura ficaria com dois botões (ou, pior, com nenhum). */
+.topActions { display: none; gap: 10px; align-items: center; }
+.fab {
+  position: fixed;
+  right: 16px;
+  bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+  z-index: 60; /* abaixo do toast (90), do menu (9000) e do modal (10000) */
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
   border: 0;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  background: var(--c-brand);
+  box-shadow: 0 10px 24px -8px rgba(30, 27, 75, 0.5);
+}
+.fab:focus-visible { outline: 2px solid var(--c-brand); outline-offset: 3px; }
+.btnGhostTop {
+  height: 42px;
+  padding: 0 16px;
+  border-radius: var(--radius, 12px);
   cursor: pointer;
   display: inline-flex;
   align-items: center;
@@ -109,115 +113,72 @@
   font-family: inherit;
   font-weight: 650;
   font-size: 13.5px;
-  color: #fff;
-  text-decoration: none;
-  background: linear-gradient(150deg, var(--c-brand-light), var(--c-brand));
-  box-shadow: 0 12px 26px -10px rgba(80, 73, 229, 0.75), inset 0 1px 0 rgba(255, 255, 255, 0.3);
-  transition: transform 0.18s ease, filter 0.18s ease;
-}
-.btnCta:hover { transform: translateY(-1px); filter: brightness(1.05); }
-.btnCta svg { width: 17px; height: 17px; }
-.btnGhostTop {
-  height: 42px;
-  padding: 0 16px;
-  border-radius: 12px;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  font-weight: 600;
-  font-size: 13.5px;
   color: var(--c-brand);
   text-decoration: none;
   background: var(--c-surface);
   border: 1px solid var(--c-line);
-  box-shadow: var(--c-shadow);
+  transition: background 0.15s ease;
 }
 .btnGhostTop:hover { background: var(--c-brand-tint); }
+.btnGhostTop:focus-visible { outline: 2px solid var(--c-brand); outline-offset: 2px; }
+.btnGhostTop:disabled { opacity: 0.55; cursor: default; }
+.btnGhostTop svg { width: 17px; height: 17px; }
 
-/* ---------- Tiles ---------- */
-.tiles {
+/* ---------- Indicadores: uma faixa, três números ---------- */
+/* Escala copiada do .crm-kpi global (label 11px/.08em, valor 22px/700, sub 12px)
+   para não criar mais um dialeto de KPI. */
+.strip {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 16px;
-  margin-bottom: 16px;
-}
-.tile {
-  position: relative;
-  overflow: hidden;
+  grid-template-columns: repeat(3, 1fr);
   background: var(--c-surface);
-  border: 1px solid #efeef8;
-  border-radius: 18px;
-  padding: 15px 16px 14px;
-  box-shadow: var(--c-shadow);
-  min-width: 0;
+  border: 1px solid var(--c-line);
+  border-radius: var(--radius, 12px);
+  margin-bottom: 16px;
+  overflow: hidden;
 }
-.tile::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  background: radial-gradient(120% 80% at 100% 0, rgba(80, 73, 229, 0.06), transparent 55%);
-  pointer-events: none;
-}
-.tileTop {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 12px;
-}
-.tileLabel {
+.stripItem { padding: 12px 14px; min-width: 0; }
+.stripItem + .stripItem { border-left: 1px solid var(--c-line); }
+.stripLabel {
+  display: block;
   font-size: 11px;
   font-weight: 650;
-  letter-spacing: 0.11em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--c-muted);
 }
-.tileIc {
-  width: 30px;
-  height: 30px;
-  border-radius: 9px;
-  display: grid;
-  place-items: center;
-  background: var(--c-brand-tint);
-  color: var(--c-brand);
-  flex: none;
-}
-.tileIc svg { width: 16px; height: 16px; }
-.tileIcWa { background: var(--c-ok-soft); color: var(--c-wa); }
-.tileIcBad { background: var(--c-bad-soft); color: var(--c-bad); }
-
-.tileVal {
-  font-size: 25px;
-  font-weight: 750;
-  letter-spacing: -0.03em;
-  line-height: 1;
+.stripVal {
+  display: block;
+  margin-top: 4px;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
   color: var(--c-ink);
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
   white-space: nowrap;
-}
-.tileVal em { font-size: 14px; font-weight: 600; color: var(--c-muted); font-style: normal; }
-.tileFoot {
-  margin-top: 12px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--c-muted);
-  font-size: 12px;
-  flex-wrap: wrap;
-}
-.dot { width: 8px; height: 8px; border-radius: 50%; flex: none; display: inline-block; }
-
-.spark { width: 100%; height: 34px; margin-top: 10px; display: block; }
-.meter {
-  height: 7px;
-  border-radius: 99px;
-  background: var(--c-brand-tint);
   overflow: hidden;
-  margin-top: 12px;
+  text-overflow: ellipsis;
 }
-.meter > i { display: block; height: 100%; border-radius: 99px; }
+.stripFoot { display: block; margin-top: 2px; font-size: 12px; color: var(--c-muted); }
+
+/* ---------- Dia vazio: a ação que resolve uma agenda livre ---------- */
+.emptyCard {
+  background: var(--c-surface);
+  border: 1px solid var(--c-line);
+  border-radius: var(--radius, 12px);
+  padding: 16px;
+  margin-bottom: 16px;
+}
+.emptyCard b { display: block; font-size: 15px; font-weight: 750; color: var(--c-ink); }
+.emptyCard p { margin: 3px 0 0; font-size: 13px; color: var(--c-muted); }
+.emptyLink {
+  display: block;
+  margin-top: 10px;
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--c-brand);
+  overflow-wrap: anywhere;
+}
+.emptyActions { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
 
 /* ---------- Board ---------- */
 .board {
@@ -231,12 +192,13 @@
    no .tlScroll — sem isso a linha do tempo (width:max-content) infla o grid e
    faz a página inteira rolar na horizontal. */
 .board > * { min-width: 0; }
+/* Dia vazio: sem a coluna direita, a linha do tempo ocupa a largura toda. */
+.boardSolo { grid-template-columns: 1fr; }
 .panel {
   background: var(--c-surface);
-  border: 1px solid #efeef8;
-  border-radius: 18px;
+  border: 1px solid var(--c-line);
+  border-radius: var(--radius, 12px);
   padding: 15px 16px 6px;
-  box-shadow: var(--c-shadow);
   min-width: 0;
 }
 .panelHd {
@@ -480,7 +442,7 @@
   position: relative;
   min-height: 62px;
   border-radius: 10px;
-  border: 1px solid #efeef8;
+  border: 1px solid var(--c-line);
   background: var(--c-surface);
   padding: 6px 8px;
   cursor: pointer;
@@ -501,19 +463,19 @@
 .monthDots { display: flex; gap: 3px; }
 .monthDots i { width: 6px; height: 6px; border-radius: 50%; display: block; }
 
-@media (max-width: 560px) {
+@media (max-width: 640px) {
   .monthCell { min-height: 52px; padding: 5px 6px; }
   .monthCount { font-size: 15px; }
 }
 
 /* ---------- Coluna direita ---------- */
+/* Único bloco preenchido da tela: é o ponto focal, então não precisa de brilho. */
 .nowCard {
-  background: linear-gradient(155deg, #5b54e8, var(--c-brand-light));
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: 18px;
+  background: var(--c-brand);
+  border: 1px solid var(--c-brand);
+  border-radius: var(--radius, 12px);
   padding: 18px;
   margin-bottom: 16px;
-  box-shadow: 0 20px 44px -18px rgba(80, 73, 229, 0.7);
 }
 .nowKicker {
   display: flex;
@@ -526,7 +488,7 @@
   color: rgba(255, 255, 255, 0.92);
   margin-bottom: 12px;
 }
-.nowKicker .liveDot { background: #5eeaa0; box-shadow: none; animation: none; }
+.nowKicker .liveDot { background: #5eeaa0; }
 .nowBody { display: flex; gap: 13px; align-items: center; }
 .nowAv {
   width: 48px;
@@ -561,6 +523,8 @@
   background: rgba(255, 255, 255, 0.15);
 }
 .chip svg { width: 13px; height: 13px; }
+/* Âmbar legível sobre o índigo do card. */
+.chipWarn { background: rgba(253, 224, 71, 0.22); border-color: rgba(253, 224, 71, 0.55); color: #FDE68A; }
 .nowBtns { display: flex; gap: 9px; margin-top: 15px; }
 .btnLine {
   flex: 1;
@@ -584,8 +548,8 @@
 .nowEmpty {
   background: var(--c-surface);
   border: 1px dashed var(--c-line-strong);
-  border-radius: 18px;
-  padding: 22px 18px;
+  border-radius: var(--radius, 12px);
+  padding: 18px;
   margin-bottom: 16px;
   text-align: center;
   color: var(--c-muted);
@@ -595,20 +559,41 @@
 
 .upnext {
   background: var(--c-surface);
-  border: 1px solid #efeef8;
-  border-radius: 18px;
+  border: 1px solid var(--c-line);
+  border-radius: var(--radius, 12px);
   padding: 16px 16px 8px;
-  box-shadow: var(--c-shadow);
 }
 .upnext h3 { margin: 0 0 4px; font-size: 14px; font-weight: 750; padding: 0 2px; }
+/* A linha tem DOIS alvos: o corpo (abre o modal) e o [Cobrar] (abre o WhatsApp).
+   Por isso a linha é um container e o corpo é que é o botão — <a> dentro de
+   <button> seria markup inválido. */
 .qrow {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 11px 4px;
-  border-bottom: 1px solid #f0eff7;
+  gap: 8px;
+  border-bottom: 1px solid var(--c-line);
 }
 .qrow:last-child { border-bottom: 0; }
+.qmainBtn {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+  min-width: 0;
+  padding: 11px 4px;
+  border: 0;
+  background: transparent;
+  font-family: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 8px;
+  transition: background 0.15s ease;
+}
+.qmainBtn:hover { background: var(--c-surface-2); }
+.qmainBtn:focus-visible { outline: 2px solid var(--c-brand); outline-offset: -2px; }
+.qpill { flex: none; }
+.qWhy { font-style: normal; font-weight: 700; color: var(--c-warn); }
 .qtime { font-size: 12.5px; font-weight: 700; color: var(--c-brand); width: 44px; flex: none; }
 .qav {
   width: 30px;
@@ -623,29 +608,35 @@
 }
 .qmain { min-width: 0; flex: 1; }
 .qmain b { font-size: 13px; font-weight: 650; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.qmain span { font-size: 11.5px; color: var(--c-muted); }
-.qstatus {
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  padding: 3px 8px;
-  border-radius: 7px;
-  flex: none;
-}
-.qStatusOk { color: var(--c-ok); background: var(--c-ok-soft); }
-.qStatusWarn { color: var(--c-warn); background: var(--c-warn-soft); }
-.qStatusDone { color: var(--c-done); background: var(--c-done-soft); }
+.qmain span { display: block; font-size: 11.5px; color: var(--c-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .qEmpty { padding: 16px 4px; color: var(--c-muted); font-size: 12.5px; }
+
+/* Cobrar: a única ação de saída do painel (abre a conversa no WhatsApp). */
+.btnCobrar {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 99px;
+  border: 1px solid var(--c-line);
+  background: var(--c-surface);
+  color: var(--c-wa);
+  font-size: 12px;
+  font-weight: 700;
+  text-decoration: none;
+}
+.btnCobrar:hover { background: var(--c-ok-soft); }
+.btnCobrar:focus-visible { outline: 2px solid var(--c-wa); outline-offset: 2px; }
 
 /* ---------- Equipe ---------- */
 .team {
   margin-top: 16px;
   background: var(--c-surface);
-  border: 1px solid #efeef8;
-  border-radius: 18px;
+  border: 1px solid var(--c-line);
+  border-radius: var(--radius, 12px);
   padding: 18px;
-  box-shadow: var(--c-shadow);
 }
 .teamHd { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
 .teamHd h3 { margin: 0; font-size: 15px; font-weight: 750; }
@@ -656,9 +647,9 @@
   align-items: center;
   gap: 12px;
   padding: 12px;
-  border-radius: 14px;
+  border-radius: var(--radius, 12px);
   background: var(--c-surface-2);
-  border: 1px solid #efeef8;
+  border: 1px solid var(--c-line);
 }
 .memberAv {
   width: 38px;
@@ -765,27 +756,50 @@
 .modalManageBtns { display: flex; gap: 9px; justify-content: flex-end; flex-wrap: wrap; }
 
 .skeleton {
-  border-radius: 18px;
+  border-radius: var(--radius, 12px);
   background: linear-gradient(100deg, #efeef8 30%, #f7f6fc 50%, #efeef8 70%);
   background-size: 200% 100%;
   animation: shimmer 1.3s infinite;
 }
 @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
 
-@media (max-width: 1080px) {
-  .tiles { grid-template-columns: repeat(2, 1fr); }
+/* Breakpoints do app (1024/640), não os inventados aqui (1080/560/430). */
+@media (max-width: 1024px) {
   .board { grid-template-columns: 1fr; }
+  /* Empilhado, a coluna de ação ("acontecendo agora" + fila) vem ANTES da linha
+     do tempo — sem isso, o que o dono precisa ver fica atrás da régua horizontal.
+     `order` em vez de inverter o DOM: no desktop nada muda de lugar. */
+  .board > *:nth-child(2) { order: -1; }
   .teamGrid { grid-template-columns: repeat(2, 1fr); }
 }
 @media (max-width: 640px) {
   .teamGrid { grid-template-columns: 1fr; }
+  /* A faixa de 3 números cabe nos ~342px úteis do celular; o que encolhe é o valor. */
+  .stripItem { padding: 10px; }
+  .stripVal { font-size: 18px; }
+  .stripLabel { font-size: 10px; letter-spacing: 0.06em; }
 }
-/* Só vira 1 coluna em celulares estreitos — entre 431 e 640px 2-up cabe bem e
-   não fica "grande demais". (O breakpoint 640 anterior dos tiles era no-op.) */
-@media (max-width: 430px) {
-  .tiles { grid-template-columns: 1fr; }
+/* Linha do tempo no celular: 132px fixos de rótulo em ~342px úteis deixavam o dono
+   vendo pouco mais de um quarto da régua por vez. O avatar (mesma paleta da fila e
+   do card) continua identificando o profissional; o rótulo vira só o 1º nome (JSX). */
+@media (max-width: 780px) {
+  .tlHours, .lane { grid-template-columns: 84px 1fr; }
+  .nowOverlay { left: 84px; }
+  .laneWho { gap: 6px; padding-right: 8px; }
+  .laneAv { width: 26px; height: 26px; font-size: 10px; }
+  .laneName { font-size: 11.5px; }
+  .tlHoursLabel { font-size: 10px; }
+}
+@media (min-width: 641px) {
+  .hello { font-size: 22px; }
+}
+/* O ÚNICO corte que troca o CTA pelo FAB: os dois viram do avesso na mesma linha. */
+@media (min-width: 781px) {
+  .topActions { display: flex; }
+  .fab { display: none; }
+  .wrap { padding-bottom: 0; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .liveDot, .skeleton { animation: none; }
-  .appt, .btnCta { transition: none; }
+  .skeleton { animation: none; }
+  .appt { transition: none; }
 }
