@@ -291,7 +291,9 @@ test('vencimento do plano do cliente vira past_due (nao libera sinal)', () => {
   assert.equal(desc.action, 'past_due')
 })
 
-test('evento de plano do cliente e registrado mas NAO processado (Fase 2)', async () => {
+test('plano do cliente inexistente: recusa sem tocar na tabela do TENANT', async () => {
+  // Fase 2: o evento agora e processado. O que nao pode mudar NUNCA e o desvio: uma
+  // cobranca de plano do cliente jamais pode ser tratada como assinatura SaaS do salao.
   const db = fakeDb([])
   const desc = mapAsaasEvent({
     id: 'evt_5',
@@ -300,6 +302,33 @@ test('evento de plano do cliente e registrado mas NAO processado (Fase 2)', asyn
   })
   const res = await applyAsaasWebhookAction(desc, { db, rawPayload: '{}' })
   assert.equal(res.handled, false)
-  assert.equal(res.reason, 'client_plan_not_implemented')
-  assert.equal(db.calls.length, 0, 'nao pode ter tocado no banco do tenant')
+  assert.equal(res.reason, 'client_plan_subscription_not_found')
+  // A unica leitura permitida e na tabela do plano do cliente. Se encostar em
+  // `subscriptions` (a do tenant) ou em `usuarios.plan`, o desvio voltou.
+  const tocouTenant = db.calls.some((c) => /FROM subscriptions|UPDATE subscriptions|UPDATE usuarios/i.test(c.sql))
+  assert.equal(tocouTenant, false, 'jamais pode mexer na assinatura SaaS do estabelecimento')
+})
+
+test('plano do cliente pago: ativa o ciclo do CLIENTE, e nao o plano SaaS do salao', async () => {
+  const db = fakeDb([
+    { match: /FROM client_loyalty_subscriptions WHERE id=/i, result: [[{
+      id: 77, cliente_id: 5, estabelecimento_id: 20, loyalty_plan_id: 7, status: 'pending_payment',
+      current_period_start: new Date(), current_period_end: new Date(Date.now() + 30 * 86400000),
+    }]] },
+    { match: /^UPDATE client_loyalty_subscriptions/i, result: [{ affectedRows: 1 }] },
+    { match: /FROM loyalty_plan_items/i, result: [[{ servico_id: 9, quantidade_por_ciclo: 2 }]] },
+    { match: /INSERT INTO client_loyalty_subscription_credits/i, result: [{ insertId: 1 }] },
+    { match: /FROM client_loyalty_subscription_credits/i, result: [[]] },
+    { match: /INSERT INTO client_loyalty_subscription_events/i, result: [{ insertId: 1 }] },
+  ])
+  const desc = mapAsaasEvent({
+    id: 'evt_6',
+    event: 'PAYMENT_RECEIVED',
+    payment: { id: 'pay_6', subscription: 'sub_1', externalReference: 'clientplan:77', value: 80 },
+  })
+  const res = await applyAsaasWebhookAction(desc, { db, rawPayload: '{}' })
+  assert.equal(res.handled, true)
+  assert.equal(res.reason, 'client_plan_activated')
+  const tocouTenant = db.calls.some((c) => /FROM subscriptions|UPDATE subscriptions|UPDATE usuarios/i.test(c.sql))
+  assert.equal(tocouTenant, false, 'jamais pode mexer na assinatura SaaS do estabelecimento')
 })

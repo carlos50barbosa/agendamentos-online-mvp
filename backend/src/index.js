@@ -16,6 +16,7 @@ import notificationsRouter from './routes/notifications.js'; // opcional
 import notifyRouter from './routes/notify.js'; // rota de teste de notificações
 import adminRouter from './routes/admin.js';
 import relatoriosRouter from './routes/relatorios.js';
+import clientLoyaltyRouter from './routes/client_loyalty.js';
 import billingRouter from './routes/billing.js';
 import paymentsRouter from './routes/payments.js';
 import whatsappWebhookRouter from './routes/whatsapp_webhook.js';
@@ -306,6 +307,10 @@ app.use('/public/otp', otpPublicRouter);
 app.use('/public/agendamentos', publicAgendamentosRouter);
 app.use('/admin', adminRouter);
 app.use('/relatorios', relatoriosRouter);
+// Planos de fidelidade (cliente -> estabelecimento). O router ja traz os prefixos completos
+// (/loyalty, /cliente/loyalty, /public/estabelecimentos/:id/loyalty-plans) e vive atras da
+// flag LOYALTY_ENABLED. Ver docs/PLANO-FIDELIDADE-ASAAS.md.
+app.use(clientLoyaltyRouter);
 if (BILLING_ROUTES_ENABLED) {
   app.use('/billing', billingRouter);
 }
@@ -335,6 +340,7 @@ app.use('/api/public/otp', otpPublicRouter);
 app.use('/api/public/agendamentos', publicAgendamentosRouter);
 app.use('/api/admin', adminRouter);
 app.use('/api/relatorios', relatoriosRouter);
+app.use('/api', clientLoyaltyRouter);
 if (BILLING_ROUTES_ENABLED) {
   app.use('/api/billing', billingRouter);
 }
