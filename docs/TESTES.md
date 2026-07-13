@@ -30,8 +30,19 @@ Os três problemas têm a mesma raiz: **nada exercitava o código de verdade**.
 | `npm run test:plan` | Fluxos de plano/billing (script, não é arquivo de teste). |
 | `test:asaas`, `test:wa`, `test:crm`, `test:reports` | Recortes da suíte, para rodar rápido no dia a dia. |
 
-O CI (`.github/workflows/deploy.yml`) sobe um **MySQL 8 de verdade**, aplica o schema e
-roda `test:all` + `test:plan`. Sem isso, nenhum deploy sai.
+O CI (`.github/workflows/deploy.yml`) sobe um **MariaDB 10.11** — a mesma engine da VPS —,
+aplica o schema e roda `test:all` + `test:plan`. Sem isso, nenhum deploy sai.
+
+## Atenção: produção é MariaDB, o ambiente local pode ser MySQL
+
+São engines diferentes, e isso já mordeu. Quatro migrations usam
+`ADD COLUMN IF NOT EXISTS`, que é **sintaxe MariaDB** — o MySQL responde erro 1064. Por
+isso `scripts/setup-test-db.mjs` **emula** a cláusula (consulta o `information_schema` e
+adiciona só as colunas ausentes), e assim o mesmo comando funciona nas duas engines.
+
+O script também ignora os `USE agendamentos;` que abrem 30 dos 58 arquivos `.sql` — sem
+isso, o primeiro `USE` trocaria de banco no meio do setup e despejaria as migrations no
+banco de desenvolvimento.
 
 ## O smoke das rotas (`tests/smoke-routes.test.js`)
 
