@@ -8,12 +8,28 @@
 // Por quê: o sinal é avulso e sempre PIX, então a taxa do Asaas é previsível e dá para
 // descontá-la em centavos. O plano é recorrente e o cliente pode trocar o meio de pagamento
 // entre ciclos — a taxa muda, e uma estimativa fixa passaria a errar silenciosamente, mês a
-// mês, sem ninguém perceber. Com percentual, a divisão é estável independente da taxa.
+// mês. Com percentual, a divisão é estável independente da taxa.
 //
-// ⚠️ PENDÊNCIA DE SANDBOX: falta confirmar se o `percentualValue` do Asaas incide sobre o
-// valor BRUTO ou LÍQUIDO da cobrança. Isso decide quem absorve a taxa do cartão. As funções
-// de ESTIMATIVA abaixo assumem o modelo do sinal (a taxa sai do bolso do estabelecimento) e
-// existem só para EXIBIR o líquido ao dono — nunca para compor o split enviado ao Asaas.
+// ─────────────────────────────────────────────────────────────────────────────────────
+// COMO O ASAAS REALMENTE CALCULA — MEDIDO NO SANDBOX EM 2026-07-13, não deduzido:
+//
+//   bruto R$  10 → taxa 0,99 → líquido  9,01 → 95% = 8,5595  → repassou R$  8,55
+//   bruto R$  80 → taxa 0,99 → líquido 79,01 → 95% = 75,0595 → repassou R$ 75,05
+//   bruto R$ 100 → taxa 0,99 → líquido 99,01 → 95% = 94,0595 → repassou R$ 94,05
+//   bruto R$  80 → taxa 0,99 → líquido 79,01 → 92,5% = 73,0842 → repassou R$ 73,08
+//
+//   1) O percentual incide sobre o LÍQUIDO (bruto − taxa do Asaas), NÃO sobre o bruto.
+//   2) O Asaas TRUNCA para centavos (se arredondasse, 8,5595 viraria 8,56).
+//
+// Consequência que muda o modelo de negócio: a taxa do Asaas é RATEADA na proporção do
+// split. Com 5% de comissão, o estabelecimento absorve 95% da taxa e a plataforma 5% —
+// ninguém "paga a taxa" sozinho. Ou seja: a comissão da plataforma é 5% do LÍQUIDO, e não
+// 5% do bruto. Num plano de R$ 80 no cartão, a diferença é de ~R$ 0,14/mês por assinante.
+//
+// Tentar cravar 5% do BRUTO exigiria recalcular o percentual a cada mudança de taxa — e o
+// split de uma ASSINATURA é definido uma vez, na criação, e aplicado a todos os ciclos.
+// Seria a mesma fragilidade do fixedValue, de volta pela porta dos fundos.
+// ─────────────────────────────────────────────────────────────────────────────────────
 
 export class InvalidPlatformPercentError extends Error {
   constructor(message = 'percentual da plataforma inválido') {
@@ -55,31 +71,31 @@ export function buildLoyaltySplit({ walletId, platformPercent } = {}) {
 }
 
 /**
- * Estimativa do rateio de UM ciclo, em centavos — para o painel do dono ("de R$ 80 você
- * recebe R$ 73,11"). NÃO é o que vai no split: o Asaas desconta a taxa real por conta dele.
- * @returns {{priceCents, platformFeeCents, asaasFeeCents, establishmentNetCents, establishmentPercent}}
+ * Reproduz a conta do Asaas (medida, ver cabeçalho): o percentual incide sobre o líquido e
+ * o resultado é TRUNCADO para centavos.
+ *
+ * `asaasFeeCents` é a taxa do meio de pagamento. Ela NÃO é enviada ao Asaas — ele desconta a
+ * dele por conta própria. Serve para exibir o rateio ao dono no painel ("de R$ 80 você recebe
+ * R$ 75,05"). Com a taxa em 0, o resultado é o teto teórico, não a realidade.
+ *
+ * @returns {{grossCents, asaasFeeCents, netCents, establishmentCents, platformCents, establishmentPercent}}
  */
-export function estimateLoyaltyCycleAmounts({
-  priceCents,
-  platformPercent,
-  cardFeePercent = 0,
-  cardFeeFixedCents = 0,
-} = {}) {
-  const price = Math.max(0, toIntCents(priceCents));
+export function computeLoyaltySplitAmounts({ grossCents, asaasFeeCents = 0, platformPercent } = {}) {
+  const gross = Math.max(0, toIntCents(grossCents));
+  const fee = Math.min(gross, Math.max(0, toIntCents(asaasFeeCents)));
   const establishmentPercent = resolveEstablishmentPercent(platformPercent);
 
-  const platformFeeCents = Math.round((price * (100 - establishmentPercent)) / 100);
-  const asaasFeeCents = Math.max(
-    0,
-    Math.round((price * Math.max(0, Number(cardFeePercent) || 0)) / 100) + Math.max(0, toIntCents(cardFeeFixedCents)),
-  );
-  const establishmentNetCents = price - platformFeeCents - asaasFeeCents;
+  const netCents = gross - fee;
+  // Trunca, como o Asaas: Math.floor, não Math.round.
+  const establishmentCents = Math.floor((netCents * establishmentPercent) / 100);
+  const platformCents = netCents - establishmentCents;
 
   return {
-    priceCents: price,
-    platformFeeCents,
-    asaasFeeCents,
-    establishmentNetCents,
+    grossCents: gross,
+    asaasFeeCents: fee,
+    netCents,
+    establishmentCents,
+    platformCents,
     establishmentPercent,
   };
 }
