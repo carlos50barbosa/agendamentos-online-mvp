@@ -19,6 +19,35 @@ jobs:
     defaults:
       run:
         working-directory: backend
+
+    # MySQL de verdade. Sem ele, o smoke não existe: os testes de rota mockam pool.query,
+    # e um mock nunca reclama de coluna inexistente — foi assim que o /clientes ficou 500
+    # em produção por três deploys ("Unknown column 'base.billable_appointments'").
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: ci-root
+          MYSQL_DATABASE: agendamentos_smoke
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -pci-root"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+
+    env:
+      MYSQL_HOST: 127.0.0.1
+      MYSQL_PORT: 3306
+      MYSQL_USER: root
+      MYSQL_PASSWORD: ci-root
+      MYSQL_DATABASE: agendamentos_smoke
+      JWT_SECRET: ci-smoke-secret
+      # O smoke FALHA (em vez de pular) se o banco não estiver de pé. Um smoke que pula
+      # sozinho quando o ambiente está torto é um verde falso — pior que teste nenhum.
+      SMOKE_REQUIRE_DB: '1'
+
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -27,9 +56,18 @@ jobs:
           cache: npm
           cache-dependency-path: backend/package-lock.json
       - run: npm ci
-      # Gate do deploy: suíte Asaas (migração de pagamentos) + fluxos de plano/billing.
-      - name: Asaas suite (client + payments + webhook + deposit + subscription)
-        run: npm run test:asaas
+
+      # schema.sql + todas as migrations, do zero. Se uma migration quebrar o schema,
+      # o CI para aqui — antes era só no VPS, na unha.
+      - name: Banco de teste (schema + migrations)
+        run: npm run db:setup:smoke
+
+      # Roda TUDO em tests/ — inclusive o smoke, que sobe o app contra o MySQL acima e
+      # chama as rotas por HTTP. Antes o gate era só test:asaas + test:plan, então
+      # test:wa, test:crm e test:reports nunca rodavam no CI.
+      - name: Suíte completa (inclui o smoke das rotas contra o MySQL)
+        run: npm run test:all
+
       - name: Plan/billing flows
         run: npm run test:plan
 

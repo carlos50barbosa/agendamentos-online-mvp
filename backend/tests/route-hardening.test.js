@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import { createHmac } from 'node:crypto';
-import test from 'node:test';
+import test, { after } from 'node:test';
 import express from 'express';
 import jwt from 'jsonwebtoken';
 
@@ -1057,4 +1057,14 @@ test('resolveRouteTokenAccess still accepts configured custom tokens from explic
 
   assert.equal(result.ok, true);
   assert.equal(result.source, 'header:x-notify-token');
+});
+
+// Sem isto o processo NUNCA encerra: initializeRateLimitStore() acima abre conexoes no
+// pool do MySQL (e agenda a manutencao), e handles abertos seguram o event loop. O teste
+// passava e o runner matava o arquivo por timeout — motivo real de `node --test tests/`
+// nunca ter rodado de ponta a ponta, e de a suite completa nunca ter virado gate de CI.
+after(async () => {
+  stopRateLimitStoreMaintenance();
+  resetRateLimitStore();
+  await pool.end();
 });
