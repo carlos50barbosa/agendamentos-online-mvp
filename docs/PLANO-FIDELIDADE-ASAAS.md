@@ -151,7 +151,38 @@ pré-requisito para fixar os 5%.
 
 ---
 
-## Fase 2 — Backend do plano
+## Fase 2 — Backend do plano ✅ **CONCLUÍDA**
+
+| # | Entregue | Onde |
+|---|---|---|
+| 2.1 ✅ | **Nada a generalizar.** O `COLUMN_MAP` de `client_loyalty_subscriptions.js` já era agnóstico (`gateway`, `gateway_subscription_id`, ciclos). Os 3 "acoplamentos MP" são *lookups* que o caminho Asaas não usa. | — |
+| 2.2 ✅ | Camada de cobrança nova (assinar / cancelar / ativar ciclo / vencer / estornar) | `lib/client_loyalty_asaas.js` |
+| 2.3 ✅ | Ramo `client_plan` do webhook ligado: pago → abre ciclo + materializa créditos; vencido → graça; estornado → **encerra o período** | `routes/webhooks_asaas.js` |
+| 2.4 ✅ | 13 rotas (dono, vitrine pública, cliente) — contra o contrato que já existia em `utils/api.js` | `routes/client_loyalty.js` |
+| 2.5 ✅ | Gate: sem `asaas_wallet_id` do salão, ninguém assina | `client_loyalty_asaas.js` |
+| — ✅ | Flag `LOYALTY_ENABLED` (default **false**) | `lib/config.js` |
+
+Testes: `tests/client-loyalty-asaas.test.js` (11 casos) + o ramo do webhook + **as 5 rotas no
+smoke contra o MariaDB**. Suíte: 313/313.
+
+### Decisões tomadas na implementação
+
+**Não existe rota de pagar por PIX.** A decisão de produto é cartão recorrente (Fase 0). Uma
+fatura por ciclo, que o cliente precisa abrir e pagar todo mês, mata o plano no segundo mês.
+O contrato antigo do frontend previa `/cliente/loyalty/pay/pix` — ficou de fora de propósito.
+
+**No estorno, encerra-se o PERÍODO, não só o status.** `computeClientLoyaltySubscriptionState`
+mantém `benefitsActive` para assinatura **cancelada** que ainda está dentro do período pago —
+e isso está certo: o cliente pagou o mês. Mas num estorno ele recebeu o dinheiro de volta, e o
+benefício tem de cair **agora**. Por isso `current_period_end = NOW()`.
+
+**Se o Asaas recusar, a linha local é cancelada.** Ela nasce antes da chamada (o
+`externalReference` precisa do id dela). Sem esse cancelamento, um cartão recusado deixaria o
+cliente vendo um plano "pendente" que nunca seria cobrado.
+
+---
+
+## Fase 2 — Plano original (referência)
 
 ### 2.1 Generalizar `client_loyalty_subscriptions.js`
 

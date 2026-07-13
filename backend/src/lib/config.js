@@ -210,6 +210,10 @@ export const config = {
   // é PERCENTUAL, porque a taxa do Asaas varia com o meio de pagamento e uma estimativa
   // fixa erraria a cada troca de cartão para PIX. Ver docs/PLANO-FIDELIDADE-ASAAS.md.
   loyalty: {
+    // Interruptor do recurso. Desligado por padrão: o motor de créditos roda em toda criação
+    // de agendamento (sem flag, desde sempre), mas VENDER plano é o que fica atrás daqui —
+    // dá para ligar num salão piloto sem expor o recurso a todo mundo.
+    enabled: parseBool(getAny('LOYALTY_ENABLED'), false),
     // Comissão da plataforma sobre o valor do plano (%). O restante vai ao estabelecimento.
     platformPercent: Number(getAny('LOYALTY_PLATFORM_PERCENT') || 5) || 5,
     // Taxas do cartão no Asaas — SÓ para estimar o líquido exibido ao dono no painel.

@@ -141,7 +141,9 @@ async function startServer() {
 
   server = spawn(process.execPath, ['src/index.js'], {
     cwd: BACKEND_DIR,
-    env: { ...process.env, PORT: String(port), HOST: '127.0.0.1' },
+    // Sem isto as rotas de fidelidade devolvem 503 (loyalty_disabled) e o smoke passaria
+    // 'verde' sem exercitar uma linha do modulo — o oposto do que ele existe para fazer.
+    env: { ...process.env, PORT: String(port), HOST: '127.0.0.1', LOYALTY_ENABLED: '1' },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   // Guardamos a saida do servidor: quando uma rota devolve 500, o erro de SQL esta AQUI,
@@ -217,6 +219,11 @@ const ROTAS_AUTENTICADAS = [
   '/billing/plans',
   '/billing/whatsapp/packs',
   '/billing/whatsapp/wallet',
+  // Planos de fidelidade (cliente -> estabelecimento). Rotas novas: entram no smoke desde o
+  // primeiro dia, e nao depois de quebrarem em producao.
+  '/loyalty/plans',
+  '/loyalty/subscribers',
+  '/loyalty/split-preview?price_cents=8000',
 ];
 
 const ROTAS_PUBLICAS = [
@@ -227,6 +234,8 @@ const ROTAS_PUBLICAS = [
   // exercitada com um banco real — o mock nunca reclamaria da coluna.
   `/servicos?establishmentId=${ESTAB_ID}`,
   '/billing/plans/public',
+  `/public/estabelecimentos/${ESTAB_ID}/loyalty-plans`,
+  '/public/estabelecimentos/salao-smoke/loyalty-plans',
 ];
 
 for (const rota of ROTAS_AUTENTICADAS) {

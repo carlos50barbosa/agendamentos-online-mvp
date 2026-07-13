@@ -18,6 +18,11 @@ import { cancelPendingPaymentAppointmentTx } from '../lib/appointment_loyalty.js
 import { notifyAppointmentConfirmed } from '../lib/appointment_confirmation.js';
 import { confirmAsaasTopupByChargeId, expireAsaasTopupByChargeId } from '../lib/billing.js';
 import { toDatabaseDateTime } from '../lib/database_datetime.js';
+import {
+  activateClientPlanCycle,
+  markClientPlanPastDue,
+  revokeClientPlanForRefund,
+} from '../lib/client_loyalty_asaas.js';
 
 const DEPOSIT_REF_PREFIX = 'deposit:';
 const SUBSCRIPTION_REF_PREFIX = 'subscription:';
@@ -133,16 +138,20 @@ export async function applyAsaasWebhookAction(descriptor, { db = pool, rawPayloa
   }
 
   if (kind === 'client_plan') {
-    // Fase 2 implementa: ativar ciclo + materializar créditos (PAYMENT_RECEIVED), suspender
-    // benefícios (PAYMENT_OVERDUE), estornar (PAYMENT_REFUNDED).
-    // O ramo existe DESDE JÁ para que a cobrança do plano do cliente jamais escorregue para
-    // o ramo da assinatura do tenant — que a trataria como assinatura de plano SaaS e poderia
-    // mexer no `usuarios.plan` do estabelecimento errado. Nenhum evento desse tipo pode chegar
-    // hoje (nada cria a assinatura ainda); se chegar, o evento fica registrado e não processado.
-    console.warn('[wa/asaas] evento de plano do cliente recebido, mas o processamento é da Fase 2', {
-      event, eventId, paymentId, internalId,
-    });
-    return { handled: false, reason: 'client_plan_not_implemented' };
+    // Plano recorrente do cliente no estabelecimento. O id vem do externalReference
+    // (`clientplan:<client_loyalty_subscriptions.id>`), e NÃO do payment.subscription — ver
+    // o comentário do roteamento em mapAsaasEvent.
+    if (internalId == null) return { handled: false, reason: 'missing_internal_id' };
+    if (action === 'confirm') {
+      return activateClientPlanCycle({ subscriptionId: internalId, paymentId, db, rawPayload });
+    }
+    if (action === 'past_due') {
+      return markClientPlanPastDue({ subscriptionId: internalId, db });
+    }
+    if (action === 'refunded') {
+      return revokeClientPlanForRefund({ subscriptionId: internalId, db });
+    }
+    return { handled: false, reason: 'noop_client_plan' };
   }
 
   if (kind === 'topup') {
