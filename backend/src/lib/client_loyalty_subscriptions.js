@@ -330,12 +330,39 @@ export function normalizeClientLoyaltyPaymentMethod(value, fallback = 'pix') {
   return CLIENT_LOYALTY_PAYMENT_METHODS.has(normalized) ? normalized : fallback
 }
 
+/**
+ * Serializa a data no fuso LOCAL, e não em UTC.
+ *
+ * O MySQL deste projeto roda em horário local — medido, não suposto:
+ *   NOW() lido em JS        -> 18:48Z  (= agora, correto)
+ *   UTC_TIMESTAMP() lido    -> 21:48Z  (3h à frente)
+ * E o mysql2 lê DATETIME interpretando no fuso local do processo (a conexão não define
+ * `timezone`). Ou seja: gravar `toISOString()` (UTC) enfia um relógio UTC numa coluna local,
+ * e o valor volta 3 HORAS NO FUTURO.
+ *
+ * O estrago concreto: `current_period_start` nascia 3h adiante, `withinCurrentPeriod` ficava
+ * false, `benefitsActive` ficava false — **o cliente pagava o plano e ficava 3 horas sem
+ * benefício nenhum**, justamente quando ele iria agendar. Só apareceu ao rodar o ciclo
+ * completo contra o Asaas de verdade.
+ *
+ * Este arquivo só é usado pelo módulo de fidelidade (sem dados em produção). O
+ * `toDatabaseDateTime` global tem o mesmo defeito e é usado por `subscriptions.js` (o billing
+ * do tenant, esse SIM com dados em produção) — corrigir lá é outra conversa, com outro risco.
+ */
+function toLocalDatabaseDateTime(value) {
+  if (value == null || value === '') return null
+  const d = value instanceof Date ? value : new Date(value)
+  if (!Number.isFinite(d.getTime())) return null
+  const p = (n) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
+}
+
 function normalizePersistenceValue(key, value, fields = {}) {
   if (key === 'ownerType') return normalizeClientLoyaltyOwnerType(value, fields.ownerType || 'establishment')
   if (key === 'status') return normalizeClientLoyaltyStatus(value, fields.status || 'pending_pix')
   if (key === 'paymentMethod') return normalizeClientLoyaltyPaymentMethod(value, fields.paymentMethod || 'pix')
   if (key === 'autoRenew') return value ? 1 : 0
-  if (DATETIME_FIELDS.has(key)) return toDatabaseDateTime(value)
+  if (DATETIME_FIELDS.has(key)) return toLocalDatabaseDateTime(value)
   return value
 }
 

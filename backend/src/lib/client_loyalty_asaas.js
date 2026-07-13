@@ -16,7 +16,6 @@ import { createAsaasPayments } from '../services/asaas/payments.js';
 import { resolveAsaasCustomerId } from './deposit_provider.js';
 import { getLoyaltyPlanById } from './loyalty_plans.js';
 import { buildLoyaltySplit } from './loyalty_split.js';
-import { toDatabaseDateTime } from './database_datetime.js';
 import { ensureCreditsForCurrentCycle } from './client_loyalty_credits.js';
 import {
   appendClientLoyaltySubscriptionEvent,
@@ -246,7 +245,7 @@ export async function subscribeClientToPlan({
     // "pendente" que nunca vai ser cobrado.
     await updateClientLoyaltySubscription(
       localSub.id,
-      { status: 'canceled', canceledAt: toDatabaseDateTime(new Date()) },
+      { status: 'canceled', canceledAt: new Date() },
       { db },
     ).catch(() => {});
     await appendClientLoyaltySubscriptionEvent(
@@ -285,7 +284,7 @@ export async function cancelClientPlanSubscription({
   // mantem benefitsActive enquanto estiver dentro do periodo. O cliente pagou o mes.
   await updateClientLoyaltySubscription(
     subscriptionId,
-    { status: 'canceled', canceledAt: toDatabaseDateTime(new Date()), autoRenew: 0 },
+    { status: 'canceled', canceledAt: new Date(), autoRenew: 0 },
     { db },
   );
   await appendClientLoyaltySubscriptionEvent(
@@ -315,11 +314,19 @@ export async function activateClientPlanCycle({ subscriptionId, paymentId, db = 
     {
       status: 'active',
       gatewayPaymentId: paymentId || sub.gatewayPaymentId || null,
-      startedAt: sub.startedAt || toDatabaseDateTime(now),
-      currentPeriodStart: toDatabaseDateTime(periodStart),
-      currentPeriodEnd: toDatabaseDateTime(periodEnd),
-      nextBillingAt: toDatabaseDateTime(periodEnd),
-      lastPaymentAt: toDatabaseDateTime(now),
+      // Objetos Date, NAO strings de toDatabaseDateTime(): aquele helper serializa em UTC
+      // (toISOString) e o MySQL deste projeto roda em horario LOCAL — provado medindo:
+      //   NOW() lido em JS        -> 18:48Z (certo)
+      //   UTC_TIMESTAMP() lido    -> 21:48Z (3h a frente)
+      // Gravando UTC numa coluna local, o periodo nascia 3h no FUTURO: `benefitsActive`
+      // ficava false e o cliente pagava sem receber beneficio nenhum por 3 horas — bem na
+      // hora em que ele iria agendar. Passando Date, o mysql2 converte no fuso da conexao,
+      // que e como o resto do app grava (agendamentos.inicio).
+      startedAt: sub.startedAt || now,
+      currentPeriodStart: periodStart,
+      currentPeriodEnd: periodEnd,
+      nextBillingAt: periodEnd,
+      lastPaymentAt: now,
       graceUntil: null,
     },
     { db },
@@ -351,7 +358,7 @@ export async function markClientPlanPastDue({ subscriptionId, db = pool } = {}) 
 
   await updateClientLoyaltySubscription(
     subscriptionId,
-    { status: 'past_due', graceUntil: toDatabaseDateTime(addDays(new Date(), GRACE_DAYS)) },
+    { status: 'past_due', graceUntil: addDays(new Date(), GRACE_DAYS) },
     { db },
   );
   await appendClientLoyaltySubscriptionEvent(
@@ -373,7 +380,7 @@ export async function revokeClientPlanForRefund({ subscriptionId, db = pool } = 
   const sub = await getClientLoyaltySubscriptionById(subscriptionId, { db });
   if (!sub) return { handled: false, reason: 'client_plan_subscription_not_found' };
 
-  const now = toDatabaseDateTime(new Date());
+  const now = new Date();
   await updateClientLoyaltySubscription(
     subscriptionId,
     { status: 'canceled', canceledAt: now, currentPeriodEnd: now, autoRenew: 0 },

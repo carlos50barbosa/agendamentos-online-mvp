@@ -96,6 +96,20 @@ export default function BookingPublic() {
 
   const establishmentId = state.establishment?.id || null;
 
+  // Contexto do plano do cliente logado. Sem ele o wizard mostraria o preço CHEIO enquanto o
+  // backend cobra o descontado (applyClientLoyaltyBenefitsTx roda em toda criação): o
+  // assinante veria R$ 80 e seria cobrado R$ 0. O preço na tela tem de ser o preço cobrado.
+  const [loyalty, setLoyalty] = useState(null);
+  useEffect(() => {
+    const viewer = getUser();
+    if (viewer?.tipo !== 'cliente' || !establishmentId) { setLoyalty(null); return undefined; }
+    let alive = true;
+    Api.clientLoyaltyContext({ estabelecimento_id: establishmentId })
+      .then((ctx) => { if (alive) setLoyalty(ctx?.subscription ? ctx : null); })
+      .catch(() => { if (alive) setLoyalty(null); });
+    return () => { alive = false; };
+  }, [establishmentId]);
+
   // Cliente logado (fluxo /novo -> /agendar): pré-preenche os dados p/ não redigitar.
   const initialGuest = useMemo(() => {
     const viewer = getUser();
@@ -230,6 +244,7 @@ export default function BookingPublic() {
         preselectedServiceIds={preselectedServiceIds}
         initialGuest={initialGuest}
         bookingDisabled={bookingDisabled}
+        loyalty={loyalty}
         collectGuest
       />
     </div>

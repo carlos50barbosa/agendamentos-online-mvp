@@ -234,3 +234,20 @@ test('duplo clique em Assinar NAO cria duas assinaturas (cobranca dupla no carta
   // Quem clicou duas vezes quer pagar, nao quer um erro: devolve o MESMO link.
   assert.equal(r.checkoutUrl, 'https://asaas.com/i/ja_existente')
 })
+
+test('o ciclo e gravado no fuso LOCAL — senao o cliente paga e fica 3h sem beneficio', async () => {
+  // O MySQL deste projeto roda em horario LOCAL, e o mysql2 le DATETIME como local. Gravar
+  // toISOString() (UTC) fazia o periodo nascer 3h no FUTURO: withinCurrentPeriod=false,
+  // benefitsActive=false, e o cliente que acabou de pagar nao tinha beneficio nenhum.
+  // Medido: NOW() lido -> 18:48Z (certo) | UTC_TIMESTAMP() lido -> 21:48Z (3h a frente).
+  const db = fakeDb(baseHandlers())
+  await activateClientPlanCycle({ subscriptionId: 77, paymentId: 'pay_1', db })
+  const up = db.calls.find((c) => /^UPDATE client_loyalty_subscriptions/i.test(c.sql))
+  const periodo = up.params.find((p) => typeof p === 'string' && /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(p))
+  assert.ok(periodo, 'o periodo tem de ir como string YYYY-MM-DD HH:MM:SS')
+  const agora = new Date()
+  const gravado = new Date(periodo.replace(' ', 'T')) // interpretado como LOCAL, igual ao mysql2
+  const difMin = (gravado - agora) / 60000
+  assert.ok(Math.abs(difMin) < 2,
+    `o inicio do ciclo tem de ser AGORA no fuso local, nao ${difMin.toFixed(0)}min no futuro (UTC gravado como local)`)
+})

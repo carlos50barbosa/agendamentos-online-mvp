@@ -306,7 +306,55 @@ falando com o Asaas sandbox de verdade.
 
 ---
 
-## Fase 4 — Operação
+## Fase 4 — Operação ✅ **CONCLUÍDA**
+
+### O preço na tela passou a ser o preço cobrado
+
+O `BookingWizard` mostrava o preço **cheio** enquanto o backend já aplicava o desconto do
+plano (`applyClientLoyaltyBenefitsTx` roda em toda criação). Um assinante veria **R$ 80** e
+seria cobrado **R$ 0** — o pior tipo de erro de interface, o que o cliente descobre no
+extrato. Agora o wizard consome `/cliente/loyalty/context` e mostra "Grátis pelo seu plano"
+(ou o preço com desconto), com o total refletindo o que será cobrado.
+
+### O ciclo completo, validado com dinheiro de verdade no sandbox
+
+```
+[1] plano ativo: "Plano Corte Mensal" (R$ 80,00/mês)
+    ok | assinatura criada (201) · checkout: sandbox.asaas.com/i/...
+    ok | status inicial = pending_payment (sem pagar, sem benefício)
+[2] ok | pagamento CONFIRMED · R$ 80
+    ok | o Asaas guardou o cartão (••••8829) -> os próximos ciclos são automáticos
+[3] ok | webhook aceito -> assinatura ACTIVE, ciclo até 13/08, 2/2 créditos materializados
+[4] ok | reenvio do MESMO evento -> o crédito NÃO dobrou (at least once é seguro)
+[5] ok | o app mostra 2 créditos restantes
+    ok | agendamento criado -> crédito aplicado -> total R$ 0,00 -> saldo caiu de 2 para 1
+```
+
+### 🐛 O bug que só o ciclo completo revelaria: fuso horário
+
+`toDatabaseDateTime()` serializa em **UTC** (`toISOString`), mas o MySQL deste projeto roda em
+horário **local** e o mysql2 lê `DATETIME` como local. Medido:
+
+```
+NOW() lido em JS      -> 18:48Z   (= agora, correto)
+UTC_TIMESTAMP() lido  -> 21:48Z   (3h à frente)
+```
+
+Gravar UTC numa coluna local faz o valor **voltar 3 horas no futuro**. O `current_period_start`
+nascia adiante, `withinCurrentPeriod` ficava `false`, `benefitsActive` ficava `false` — **o
+cliente pagava o plano e ficava 3 horas sem benefício nenhum**, exatamente quando iria agendar.
+
+Corrigido **com escopo** em `client_loyalty_subscriptions.js` (só a fidelidade usa, e ela não
+tem dados em produção), com teste de regressão.
+
+> ⚠️ **O mesmo defeito existe no `toDatabaseDateTime` global**, usado por `subscriptions.js`
+> (o billing do tenant — esse **com dados em produção**), `subscription_state.js` e
+> `subscription_credits.js`. Não toquei: o risco é outro e a decisão é sua. Vale investigar
+> se algum prazo de plano está 3h mais generoso do que deveria.
+
+---
+
+## Fase 4 — Plano original (referência)
 
 - Renovação e inadimplência: `past_due` → graça → suspende benefício (o
   `computeClientLoyaltySubscriptionState` já modela isso).
