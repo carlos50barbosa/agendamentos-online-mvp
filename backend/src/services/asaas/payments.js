@@ -61,7 +61,19 @@ export function createAsaasPayments(client = getAsaasClient()) {
     });
   }
 
-  /** Cria uma assinatura recorrente (plano do tenant). */
+  /**
+   * Cria uma assinatura recorrente. Dois usos:
+   *
+   *  - Plano do TENANT (salão paga a plataforma): billingType UNDEFINED = checkout
+   *    hospedado, sem split. O cliente paga a fatura de cada ciclo.
+   *  - Plano do CLIENTE (cliente paga o salão): billingType CREDIT_CARD + creditCardToken
+   *    (débito automático a cada ciclo, sem atrito) + `split` para a carteira do salão.
+   *    O Asaas replica o split em TODA cobrança gerada pela assinatura.
+   *
+   * `split`: [{ walletId, percentualValue }] ou [{ walletId, fixedValue }].
+   * `remoteIp` é EXIGIDO pelo Asaas em cobrança de cartão (antifraude) — é o IP do cliente
+   * final, não o do servidor: precisa vir da requisição.
+   */
   async function createSubscription({
     customerId,
     value,
@@ -71,13 +83,31 @@ export function createAsaasPayments(client = getAsaasClient()) {
     description,
     externalReference,
     callback,
+    split,
+    creditCardToken,
+    creditCard,
+    creditCardHolderInfo,
+    remoteIp,
   } = {}) {
     requireField(customerId, 'customerId');
     requireField(value, 'value');
+
+    const type = String(billingType || '').trim().toUpperCase();
+    if (type === 'CREDIT_CARD') {
+      // Falhar aqui, e não no Asaas: o erro do gateway para cartão é genérico e o
+      // diagnóstico sai caro (não dá para logar o cartão).
+      if (!creditCardToken && !creditCard) {
+        throw new AsaasError('Assinatura no cartão exige creditCardToken ou creditCard.', {
+          code: 'missing_credit_card',
+        });
+      }
+      requireField(remoteIp, 'remoteIp');
+    }
+
     return client.post('/v3/subscriptions', {
       body: {
         customer: customerId,
-        billingType,
+        billingType: type || 'UNDEFINED',
         value: Number(value),
         cycle,
         nextDueDate: toDateOnly(nextDueDate) || toDateOnly(new Date()),
@@ -85,8 +115,85 @@ export function createAsaasPayments(client = getAsaasClient()) {
         externalReference: externalReference || undefined,
         // Redireciona o cliente de volta ao app após pagar (autoRedirect).
         callback: callback || undefined,
+        split: Array.isArray(split) && split.length ? split : undefined,
+        creditCardToken: creditCardToken || undefined,
+        creditCard: creditCard || undefined,
+        creditCardHolderInfo: creditCardHolderInfo || undefined,
+        remoteIp: remoteIp || undefined,
       },
     });
+  }
+
+  /**
+   * Tokeniza um cartão. O token substitui os dados do cartão nas cobranças seguintes —
+   * é o que permite renovar o plano do cliente todo mês sem pedir o cartão de novo, e sem
+   * a plataforma armazenar nada sensível (o cartão nunca é persistido aqui).
+   * @returns { creditCardNumber (4 últimos), creditCardBrand, creditCardToken }
+   */
+  async function tokenizeCreditCard({ customerId, creditCard, creditCardHolderInfo, remoteIp } = {}) {
+    requireField(customerId, 'customerId');
+    requireField(creditCard, 'creditCard');
+    requireField(creditCardHolderInfo, 'creditCardHolderInfo');
+    requireField(remoteIp, 'remoteIp');
+    const res = await client.post('/v3/creditCard/tokenize', {
+      body: {
+        customer: customerId,
+        creditCard,
+        creditCardHolderInfo,
+        remoteIp,
+      },
+    });
+    return {
+      creditCardNumber: res?.creditCardNumber || null,
+      creditCardBrand: res?.creditCardBrand || null,
+      creditCardToken: res?.creditCardToken || null,
+    };
+  }
+
+  /** Consulta uma assinatura (status, valor, próximo vencimento). */
+  async function getSubscription(subscriptionId) {
+    requireField(subscriptionId, 'subscriptionId');
+    return client.get(`/v3/subscriptions/${encodeURIComponent(subscriptionId)}`);
+  }
+
+  /**
+   * Atualiza uma assinatura (valor, ciclo, vencimento, split...). `updatePendingPayments`
+   * propaga a mudança para as cobranças já geradas e ainda não pagas — sem isso, um upgrade
+   * de plano só valeria a partir do ciclo seguinte.
+   */
+  async function updateSubscription(subscriptionId, {
+    value,
+    cycle,
+    nextDueDate,
+    billingType,
+    description,
+    split,
+    status,
+    updatePendingPayments,
+  } = {}) {
+    requireField(subscriptionId, 'subscriptionId');
+    return client.post(`/v3/subscriptions/${encodeURIComponent(subscriptionId)}`, {
+      body: {
+        value: value != null ? Number(value) : undefined,
+        cycle: cycle || undefined,
+        nextDueDate: toDateOnly(nextDueDate) || undefined,
+        billingType: billingType || undefined,
+        description: description || undefined,
+        split: Array.isArray(split) ? split : undefined,
+        status: status || undefined,
+        updatePendingPayments: updatePendingPayments != null ? Boolean(updatePendingPayments) : undefined,
+      },
+    });
+  }
+
+  /**
+   * Remove a assinatura de vez. Diferente de setSubscriptionStatus('INACTIVE'), que só
+   * pausa a geração de cobranças: aqui a assinatura deixa de existir no Asaas. Use no
+   * cancelamento pedido pelo cliente.
+   */
+  async function deleteSubscription(subscriptionId) {
+    requireField(subscriptionId, 'subscriptionId');
+    return client.delete(`/v3/subscriptions/${encodeURIComponent(subscriptionId)}`);
   }
 
   /**
@@ -189,8 +296,12 @@ export function createAsaasPayments(client = getAsaasClient()) {
     updateCustomer,
     getCustomerByCpfCnpj,
     createSubscription,
+    getSubscription,
+    updateSubscription,
+    deleteSubscription,
     getSubscriptionPayments,
     setSubscriptionStatus,
+    tokenizeCreditCard,
     createPixCharge,
     getPixQrCode,
     getPayment,
@@ -206,8 +317,12 @@ export const {
   updateCustomer,
   getCustomerByCpfCnpj,
   createSubscription,
+  getSubscription,
+  updateSubscription,
+  deleteSubscription,
   getSubscriptionPayments,
   setSubscriptionStatus,
+  tokenizeCreditCard,
   createPixCharge,
   getPixQrCode,
   getPayment,

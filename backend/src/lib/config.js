@@ -205,6 +205,19 @@ export const config = {
     // exigir walletId). Útil quando o estabelecimento ainda não configurou a wallet.
     splitDisabled: parseBool(getAny('ASAAS_SPLIT_DISABLED'), false),
   },
+  // Plano recorrente que o ESTABELECIMENTO vende ao SEU cliente (fidelidade), cobrado no
+  // cartão e repassado por split. Diferente do `signal` (avulso, fixedValue): aqui o split
+  // é PERCENTUAL, porque a taxa do Asaas varia com o meio de pagamento e uma estimativa
+  // fixa erraria a cada troca de cartão para PIX. Ver docs/PLANO-FIDELIDADE-ASAAS.md.
+  loyalty: {
+    // Comissão da plataforma sobre o valor do plano (%). O restante vai ao estabelecimento.
+    platformPercent: Number(getAny('LOYALTY_PLATFORM_PERCENT') || 5) || 5,
+    // Taxas do cartão no Asaas — SÓ para estimar o líquido exibido ao dono no painel.
+    // Não entram no split (o Asaas desconta a taxa real por conta dele). Confirmar os
+    // valores no painel da conta antes de exibir número para o usuário.
+    cardFeePercent: Number(getAny('ASAAS_CARD_FEE_PERCENT') || 0) || 0,
+    cardFeeFixedCents: Number(getAny('ASAAS_CARD_FEE_FIXED_CENTS') || 0) || 0,
+  },
 }
 
 export function getOperationalHardeningWarnings(env = process.env, cfg = config) {
