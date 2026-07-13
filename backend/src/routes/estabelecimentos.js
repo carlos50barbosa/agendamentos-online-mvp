@@ -1756,6 +1756,10 @@ function buildCrmBaseQuery(estabelecimentoId, filters) {
       stats.prev_total_appointments,
       stats.prev_total_cancelled,
       stats.prev_revenue_centavos,
+      -- Precisa SAIR do subquery: a agregação lá fora faz SUM(base.billable_appointments)
+      -- para contar os atendimentos realizados no período. Sem esta linha, o /clientes
+      -- inteiro morre com "Unknown column 'base.billable_appointments'".
+      stats.billable_appointments,
       stats.prev_billable_appointments,
       -- Ticket médio por ATENDIMENTO realizado (a legenda dizia "por cliente", e dividia
       -- por agendamentos — errava a conta e o nome).
