@@ -236,3 +236,70 @@ test('apply: topup sem subscription correspondente é no-op seguro', async () =>
   assert.equal(res.handled, false)
   assert.equal(res.reason, 'topup_subscription_not_found')
 })
+
+// ---------------------------------------------------------------------------
+// REGRESSAO CRITICA (Fase 1, docs/PLANO-FIDELIDADE-ASAAS.md):
+// Toda cobranca gerada por uma assinatura Asaas traz `payment.subscription` preenchido —
+// inclusive a do plano do CLIENTE. Se o parser testasse subscriptionId antes do prefixo,
+// ela cairia no ramo da assinatura do TENANT, procuraria em `subscriptions` e morreria em
+// subscription_not_found: dinheiro cobrado, credito nao liberado, e o pior — mexendo no
+// plano SaaS do estabelecimento errado.
+// ---------------------------------------------------------------------------
+
+test('cobranca do plano do cliente NAO e confundida com a assinatura do tenant', () => {
+  const desc = mapAsaasEvent({
+    id: 'evt_1',
+    event: 'PAYMENT_RECEIVED',
+    payment: {
+      id: 'pay_1',
+      subscription: 'sub_asaas_1', // presente: e uma cobranca de assinatura
+      externalReference: 'clientplan:77',
+      value: 80,
+    },
+  })
+  assert.equal(desc.kind, 'client_plan')
+  assert.equal(desc.internalId, 77)
+  assert.equal(desc.action, 'confirm')
+})
+
+test('a assinatura do tenant continua sendo reconhecida', () => {
+  const desc = mapAsaasEvent({
+    id: 'evt_2',
+    event: 'PAYMENT_RECEIVED',
+    payment: { id: 'pay_2', subscription: 'sub_asaas_2', externalReference: 'subscription:estab:5' },
+  })
+  assert.equal(desc.kind, 'subscription')
+})
+
+test('o sinal continua sendo reconhecido (nao tem subscription)', () => {
+  const desc = mapAsaasEvent({
+    id: 'evt_3',
+    event: 'PAYMENT_RECEIVED',
+    payment: { id: 'pay_3', externalReference: 'deposit:42' },
+  })
+  assert.equal(desc.kind, 'deposit')
+  assert.equal(desc.internalId, 42)
+})
+
+test('vencimento do plano do cliente vira past_due (nao libera sinal)', () => {
+  const desc = mapAsaasEvent({
+    id: 'evt_4',
+    event: 'PAYMENT_OVERDUE',
+    payment: { id: 'pay_4', subscription: 'sub_1', externalReference: 'clientplan:77' },
+  })
+  assert.equal(desc.kind, 'client_plan')
+  assert.equal(desc.action, 'past_due')
+})
+
+test('evento de plano do cliente e registrado mas NAO processado (Fase 2)', async () => {
+  const db = fakeDb([])
+  const desc = mapAsaasEvent({
+    id: 'evt_5',
+    event: 'PAYMENT_RECEIVED',
+    payment: { id: 'pay_5', subscription: 'sub_1', externalReference: 'clientplan:77' },
+  })
+  const res = await applyAsaasWebhookAction(desc, { db, rawPayload: '{}' })
+  assert.equal(res.handled, false)
+  assert.equal(res.reason, 'client_plan_not_implemented')
+  assert.equal(db.calls.length, 0, 'nao pode ter tocado no banco do tenant')
+})

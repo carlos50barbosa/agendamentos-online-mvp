@@ -105,3 +105,117 @@ test('getPixQrCode mapeia encodedImage/payload/expirationDate', async () => {
   const qr = await pay.getPixQrCode('pay_9')
   assert.deepEqual(qr, { encodedImage: 'BASE64==', payload: '000201...', expirationDate: '2026-07-03 23:59:59' })
 })
+
+// ---------------------------------------------------------------------------
+// Fase 1 do plano recorrente cliente -> estabelecimento (docs/PLANO-FIDELIDADE-ASAAS.md):
+// split na assinatura + cartao tokenizado (debito automatico a cada ciclo).
+// ---------------------------------------------------------------------------
+
+test('createSubscription aceita split percentual (o Asaas replica em toda cobranca do ciclo)', async () => {
+  const client = stubClient({ 'POST /v3/subscriptions': { id: 'sub_1' } })
+  const pay = createAsaasPayments(client)
+  await pay.createSubscription({
+    customerId: 'cus_1',
+    value: 80,
+    externalReference: 'clientplan:77',
+    split: [{ walletId: 'wal_abc', percentualValue: 95 }],
+  })
+  const body = client.calls[0].body
+  assert.deepEqual(body.split, [{ walletId: 'wal_abc', percentualValue: 95 }])
+  assert.equal(body.externalReference, 'clientplan:77')
+})
+
+test('assinatura no cartao envia token + remoteIp', async () => {
+  const client = stubClient({ 'POST /v3/subscriptions': { id: 'sub_2' } })
+  const pay = createAsaasPayments(client)
+  await pay.createSubscription({
+    customerId: 'cus_1',
+    value: 80,
+    billingType: 'credit_card', // minusculo de proposito: precisa normalizar
+    creditCardToken: 'tok_123',
+    remoteIp: '203.0.113.9',
+  })
+  const body = client.calls[0].body
+  assert.equal(body.billingType, 'CREDIT_CARD')
+  assert.equal(body.creditCardToken, 'tok_123')
+  assert.equal(body.remoteIp, '203.0.113.9')
+})
+
+test('cartao sem token e sem dados do cartao falha ANTES de chamar o Asaas', async () => {
+  const client = stubClient()
+  const pay = createAsaasPayments(client)
+  await assert.rejects(
+    () => pay.createSubscription({ customerId: 'cus_1', value: 80, billingType: 'CREDIT_CARD', remoteIp: '1.2.3.4' }),
+    (err) => err.code === 'missing_credit_card',
+  )
+  assert.equal(client.calls.length, 0, 'nao pode ter batido no Asaas')
+})
+
+test('cartao sem remoteIp falha ANTES de chamar o Asaas (o antifraude exige)', async () => {
+  const client = stubClient()
+  const pay = createAsaasPayments(client)
+  await assert.rejects(
+    () => pay.createSubscription({ customerId: 'cus_1', value: 80, billingType: 'CREDIT_CARD', creditCardToken: 'tok_1' }),
+    (err) => err.code === 'missing_field',
+  )
+  assert.equal(client.calls.length, 0)
+})
+
+test('a assinatura do tenant segue sem split e em checkout hospedado', async () => {
+  const client = stubClient({ 'POST /v3/subscriptions': { id: 'sub_3' } })
+  const pay = createAsaasPayments(client)
+  await pay.createSubscription({ customerId: 'cus_1', value: 29.9, externalReference: 'subscription:estab:5' })
+  const body = client.calls[0].body
+  assert.equal(body.billingType, 'UNDEFINED')
+  assert.equal(body.split, undefined)
+  assert.equal(body.creditCardToken, undefined)
+})
+
+test('tokenizeCreditCard devolve token + bandeira + 4 ultimos, e nao guarda o cartao', async () => {
+  const client = stubClient({
+    'POST /v3/creditCard/tokenize': { creditCardNumber: '1234', creditCardBrand: 'VISA', creditCardToken: 'tok_xyz' },
+  })
+  const pay = createAsaasPayments(client)
+  const res = await pay.tokenizeCreditCard({
+    customerId: 'cus_1',
+    creditCard: { holderName: 'Jose C Barbosa', number: '4111111111111111', expiryMonth: '12', expiryYear: '2030', ccv: '123' },
+    creditCardHolderInfo: { name: 'Jose C Barbosa', email: 'j@x.com', cpfCnpj: '12345678909', postalCode: '01001000', addressNumber: '10', phone: '11999990000' },
+    remoteIp: '203.0.113.9',
+  })
+  assert.deepEqual(res, { creditCardNumber: '1234', creditCardBrand: 'VISA', creditCardToken: 'tok_xyz' })
+})
+
+test('tokenizeCreditCard exige remoteIp', async () => {
+  const client = stubClient()
+  const pay = createAsaasPayments(client)
+  await assert.rejects(
+    () => pay.tokenizeCreditCard({ customerId: 'cus_1', creditCard: {}, creditCardHolderInfo: {} }),
+    (err) => err.code === 'missing_field',
+  )
+  assert.equal(client.calls.length, 0)
+})
+
+test('updateSubscription propaga a mudanca para as cobrancas ja geradas (upgrade no meio do ciclo)', async () => {
+  const client = stubClient({ 'POST /v3/subscriptions/sub_9': { id: 'sub_9' } })
+  const pay = createAsaasPayments(client)
+  await pay.updateSubscription('sub_9', { value: 120, updatePendingPayments: true })
+  const call = client.calls[0]
+  assert.equal(call.path, '/v3/subscriptions/sub_9')
+  assert.equal(call.body.value, 120)
+  assert.equal(call.body.updatePendingPayments, true)
+})
+
+test('deleteSubscription remove de vez (cancelamento pelo cliente), diferente de INACTIVE', async () => {
+  const client = stubClient({ 'DELETE /v3/subscriptions/sub_9': { deleted: true } })
+  const pay = createAsaasPayments(client)
+  await pay.deleteSubscription('sub_9')
+  assert.equal(client.calls[0].method, 'DELETE')
+  assert.equal(client.calls[0].path, '/v3/subscriptions/sub_9')
+})
+
+test('getSubscription consulta a assinatura', async () => {
+  const client = stubClient({ 'GET /v3/subscriptions/sub_9': { id: 'sub_9', status: 'ACTIVE' } })
+  const pay = createAsaasPayments(client)
+  const sub = await pay.getSubscription('sub_9')
+  assert.equal(sub.status, 'ACTIVE')
+})

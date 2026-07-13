@@ -22,6 +22,8 @@ import { toDatabaseDateTime } from '../lib/database_datetime.js';
 const DEPOSIT_REF_PREFIX = 'deposit:';
 const SUBSCRIPTION_REF_PREFIX = 'subscription:';
 const TOPUP_REF_PREFIX = 'topup:';
+// Plano recorrente do CLIENTE no estabelecimento (fidelidade). Ver docs/PLANO-FIDELIDADE-ASAAS.md.
+const CLIENT_PLAN_REF_PREFIX = 'clientplan:';
 
 /** Avança a data em 1 ciclo (mensal por padrão; anual quando billing_cycle='anual'). */
 function addCycle(base, billingCycle) {
@@ -78,7 +80,16 @@ export function mapAsaasEvent(body = {}) {
 
   let kind = 'unknown';
   let internalId = null;
-  if (subscriptionId || externalReference?.startsWith(SUBSCRIPTION_REF_PREFIX)) {
+  // O plano do CLIENTE é testado PRIMEIRO, e isso não é estilo — é correção.
+  // Toda cobrança gerada por uma assinatura Asaas traz `payment.subscription` preenchido,
+  // inclusive a do plano do cliente. Se o teste de `subscriptionId` viesse antes, ela cairia
+  // no ramo da assinatura do TENANT, iria procurar em `subscriptions WHERE gateway='asaas'`
+  // e morreria em subscription_not_found — com dinheiro real no meio e sem crédito liberado.
+  if (externalReference?.startsWith(CLIENT_PLAN_REF_PREFIX)) {
+    kind = 'client_plan';
+    const parsed = Number(externalReference.slice(CLIENT_PLAN_REF_PREFIX.length));
+    internalId = Number.isFinite(parsed) ? parsed : null;
+  } else if (subscriptionId || externalReference?.startsWith(SUBSCRIPTION_REF_PREFIX)) {
     kind = 'subscription';
   } else if (externalReference?.startsWith(DEPOSIT_REF_PREFIX)) {
     kind = 'deposit';
@@ -119,6 +130,19 @@ export async function applyAsaasWebhookAction(descriptor, { db = pool, rawPayloa
   const { kind, action, internalId, subscriptionId, paymentId, event, eventId } = descriptor;
   if (action === 'ignore' || kind === 'unknown') {
     return { handled: false, reason: 'ignored' };
+  }
+
+  if (kind === 'client_plan') {
+    // Fase 2 implementa: ativar ciclo + materializar créditos (PAYMENT_RECEIVED), suspender
+    // benefícios (PAYMENT_OVERDUE), estornar (PAYMENT_REFUNDED).
+    // O ramo existe DESDE JÁ para que a cobrança do plano do cliente jamais escorregue para
+    // o ramo da assinatura do tenant — que a trataria como assinatura de plano SaaS e poderia
+    // mexer no `usuarios.plan` do estabelecimento errado. Nenhum evento desse tipo pode chegar
+    // hoje (nada cria a assinatura ainda); se chegar, o evento fica registrado e não processado.
+    console.warn('[wa/asaas] evento de plano do cliente recebido, mas o processamento é da Fase 2', {
+      event, eventId, paymentId, internalId,
+    });
+    return { handled: false, reason: 'client_plan_not_implemented' };
   }
 
   if (kind === 'topup') {
