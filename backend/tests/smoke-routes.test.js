@@ -412,9 +412,26 @@ test('dono LEGADO (notificacao ligada, sem aceite) -> o banner DEVE aparecer', {
   assert.equal(r.precisa_reaceitar, true, 'sem esta flag o dono legado nunca ve o banner');
 });
 
-test('depois de aceitar, a pendencia acaba -> o banner some (e e assim que deve ser)', { skip }, async () => {
-  const { status } = await post('/auth/me/whatsapp-optin', {}, { token: estabToken });
-  assert.equal(status, 200);
+// Este teste AFIRMAVA o buraco. Ele dizia: "chamou POST -> optin=true", ou seja, um clique bastava
+// para gravar consentimento. Era verdade, e era o defeito — foi por essa porta que alguem cadastrou
+// o telefone de uma pessoa aleatoria, clicou, e a vitima passou a receber template.
+//
+// O CI pegou a contradicao no merge (a rota parou de gravar; o teste ainda esperava que gravasse),
+// que e exatamente o que ele existe para fazer.
+//
+// Agora o aceite nasce do WEBHOOK, quando "AUTORIZO" chega DAQUELE numero. Aqui ele e simulado
+// direto na tabela — o caminho do webhook tem teste proprio — e o que se verifica e o que este
+// teste sempre quis verificar: havendo aceite, a pendencia acaba e o banner some.
+test('havendo aceite, a pendencia acaba -> o banner some (e e assim que deve ser)', { skip }, async () => {
+  const e164 = '5511999990000';
+  await pool.query('DELETE FROM whatsapp_optins WHERE telefone_e164=?', [e164]);
+  await pool.query(
+    `INSERT INTO whatsapp_optins (telefone_e164, evento, usuario_id, origem, texto_versao, texto, metadados)
+     VALUES (?, 'granted', ?, 'whatsapp_autorizo', 'v1',
+             'Quero receber no WhatsApp os avisos da minha agenda.',
+             '{"prova":"inbound_autorizo","wamid":"wamid.TESTE"}')`,
+    [e164, ESTAB_ID]
+  );
 
   const r = await optinStatus();
   assert.equal(r.optin, true);
