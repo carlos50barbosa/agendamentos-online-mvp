@@ -281,11 +281,11 @@ test('um apagão da plataforma NÃO polui a trilha da carteira do estabeleciment
 });
 
 test('número IMPOSSÍVEL não sai — nem com aceite registrado', { skip }, async () => {
-  // Caso real: o usuário 170 ("Sergio") cadastrou 5519876646464 — DDD 19, celular começando com 8.
-  // Nenhum celular brasileiro começa com 8. Ele escapou porque não marcou a caixa; o próximo
-  // cadastro falso marca. Aceite não faz um número inexistente existir — e uma taxa alta de
-  // destinatário inexistente é a assinatura de lista raspada, que é o que a Meta caça.
-  const impossivel = '5519876646464';
+  // Caso real de produção: um cadastro trouxe um número de 13 dígitos com 8 na posição do nono
+  // dígito. Nenhum celular brasileiro começa com 8 — não existe. Escapou porque não marcaram a
+  // caixa; o próximo cadastro falso marca. Aceite não faz um número inexistente existir — e uma
+  // taxa alta de destinatário inexistente é a assinatura de lista raspada, que é o que a Meta caça.
+  const impossivel = '5519812345678';
   await consent.grantWhatsAppConsent({
     phone: impossivel,
     estabelecimentoId: ESTAB_ID,
@@ -307,10 +307,10 @@ test('número IMPOSSÍVEL não sai — nem com aceite registrado', { skip }, asy
 });
 
 test('o celular SEM o nono dígito continua saindo — quebrar isso derrubaria cliente real', { skip }, async () => {
-  // Caso real: o estabelecimento 168 ("Vana beauty") usa 551199873664 (12 dígitos, celular anterior
-  // à migração). A Meta normaliza, e o envio para ele FUNCIONOU em produção — saiu com wamid. Uma
-  // regra ingênua ("tem de ter 13 dígitos") teria matado um envio que está de pé.
-  const semNonoDigito = '551199873664';
+  // Caso real de produção: há cadastros com 12 dígitos (celular anterior à migração do nono
+  // dígito). A Meta normaliza, e esses envios FUNCIONAM — voltam com wamid. Uma regra ingênua
+  // ("tem de ter 13 dígitos") teria matado um envio que está de pé.
+  const semNonoDigito = '551198765432';
   await consent.grantWhatsAppConsent({
     phone: semNonoDigito,
     usuarioId: ESTAB_ID,

@@ -70,8 +70,8 @@ const DDD_VALIDOS = new Set([
  *
  *   13 dígitos + nono dígito 9 ....... celular atual. Aceita.
  *   12 dígitos + primeiro 6..9 ....... celular anterior à migração do nono dígito. Aceita — a Meta
- *                                      normaliza, e é um envio que está FUNCIONANDO em produção
- *                                      (551199873664). Barrar isso quebraria cliente de verdade.
+ *                                      normaliza, e há envios nesse formato FUNCIONANDO em produção
+ *                                      (voltam com wamid). Barrar quebraria cliente de verdade.
  *   12 dígitos + primeiro 2..5 ....... telefone FIXO. Rejeita: não recebe WhatsApp.
  *   13 dígitos + nono dígito != 9 .... não existe. Nenhum celular brasileiro começa com 8.
  *   DDD fora da lista ................ não existe.
