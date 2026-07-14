@@ -14,12 +14,14 @@ import assert from 'node:assert/strict';
 import {
   CONSENT_VERSION as BACKEND_VERSION,
   WA_SENDER_NAME as BACKEND_SENDER,
+  CONSENT_AUDIENCE,
   buildConsentText as backendText,
 } from '../src/lib/whatsapp_consent_text.js';
 
 import {
   CONSENT_VERSION as FRONTEND_VERSION,
   WA_SENDER_NAME as FRONTEND_SENDER,
+  CONSENT_AUDIENCE as FRONTEND_AUDIENCE,
   buildConsentText as frontendText,
 } from '../../frontend/src/utils/whatsappConsent.js';
 
@@ -31,13 +33,18 @@ import { isOptOutText } from '../src/whatsapp/inbound/optOut.js';
 // o que a pessoa lê. Se divergirem, o registro deixa de provar o que foi mostrado — e uma prova
 // que não bate com a realidade é pior do que nenhuma prova.
 
-test('o texto do aceite é IDÊNTICO no frontend e no backend', () => {
+test('o texto do aceite é IDÊNTICO no frontend e no backend, nas DUAS audiências', () => {
   const casos = [
     { establishmentName: 'Studio Dihcampos' },
     { establishmentName: 'Salão da Ana & Cia.' },
     { establishmentName: '' },        // sem nome: a frase ainda tem de fechar
     {},                                // sem argumento nenhum
     undefined,                         // chamada sem objeto
+    { audience: CONSENT_AUDIENCE.CLIENT, establishmentName: 'Studio Dihcampos' },
+    { audience: CONSENT_AUDIENCE.ESTABLISHMENT },
+    // O dono não tem "em nome de": mesmo passando o nome, o texto dele ignora — e o espelho
+    // precisa ignorar do mesmo jeito.
+    { audience: CONSENT_AUDIENCE.ESTABLISHMENT, establishmentName: 'Studio Dihcampos' },
   ];
   for (const caso of casos) {
     assert.equal(
@@ -48,18 +55,31 @@ test('o texto do aceite é IDÊNTICO no frontend e no backend', () => {
   }
 });
 
-test('frontend e backend concordam na versão e no nome do remetente', () => {
+test('frontend e backend concordam na versão, no remetente e nas audiências', () => {
   assert.equal(FRONTEND_VERSION, BACKEND_VERSION);
   assert.equal(FRONTEND_SENDER, BACKEND_SENDER);
+  assert.deepEqual(FRONTEND_AUDIENCE, CONSENT_AUDIENCE);
 });
 
-test('o texto diz tudo que a Meta exige: canal, remetente, salão, escopo e como sair', () => {
+test('o texto do CLIENTE diz tudo que a Meta exige: canal, remetente, salão, escopo e como sair', () => {
   const texto = backendText({ establishmentName: 'Studio Dihcampos' });
   assert.match(texto, /WhatsApp/, 'precisa nomear o canal');
   assert.match(texto, new RegExp(BACKEND_SENDER), 'precisa nomear QUEM envia (o que a pessoa verá)');
   assert.match(texto, /Studio Dihcampos/, 'precisa nomear o salão');
   assert.match(texto, /confirmação e os lembretes/i, 'precisa delimitar o escopo (transacional)');
   assert.match(texto, /PARAR/, 'precisa dizer como sair');
+});
+
+test('o texto do DONO descreve o que ELE recebe — não "seu agendamento foi confirmado"', () => {
+  // O dono recebe "novo cliente agendou". Se o aceite dele falasse em "confirmação do meu
+  // agendamento", ele estaria autorizando uma coisa e recebendo outra — e o registro deixaria de
+  // provar o que interessa.
+  const texto = backendText({ audience: CONSENT_AUDIENCE.ESTABLISHMENT });
+  assert.match(texto, /WhatsApp/);
+  assert.match(texto, new RegExp(BACKEND_SENDER));
+  assert.match(texto, /avisos da minha agenda/);
+  assert.match(texto, /PARAR/);
+  assert.doesNotMatch(texto, /em nome de/, 'o dono não recebe mensagem "em nome de" ninguém');
 });
 
 test('sem o nome do salão a frase continua íntegra (não sobra "em nome de .")', () => {

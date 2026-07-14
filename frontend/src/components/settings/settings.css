@@ -164,6 +164,16 @@
 .set-switch { display: flex; gap: 10px; align-items: center; padding: 10px 12px; border: 1px solid var(--brand-border, #e7e5f5); border-radius: 10px; font-size: 14px; color: var(--ink, #1e1b4b); cursor: pointer; }
 .set-switch input { width: 18px; height: 18px; flex: 0 0 auto; }
 
+/* A caixa do WhatsApp não é um switch qualquer: ela carrega o TEXTO DO ACEITE, que é o que o
+   backend grava como prova. Prova de algo que a pessoa não leu não é prova — por isso o texto fica
+   à vista, e não atrás de um "saiba mais".
+   O alinhamento vai para o TOPO porque o rótulo tem duas alturas; centralizar deixaria o
+   quadradinho boiando no meio do parágrafo. */
+.set-switch--consent { align-items: flex-start; }
+.set-switch--consent input { margin-top: 2px; }
+.set-switch--consent > span { display: flex; flex-direction: column; gap: 4px; }
+.set-switch__consent-text { display: block; font-size: 12px; line-height: 1.45; color: var(--muted, #6b7280); }
+
 /* linha inline (código de e-mail) */
 .set-inline { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 

@@ -185,7 +185,40 @@ test('COM consentimento, o envio passa do portão (não é mais bloqueado por op
   assert.notEqual(r.reason, 'no_optin', 'com aceite registrado, o opt-in não pode mais barrar');
 });
 
-test('o envio ao ESTABELECIMENTO não é barrado por opt-in (é o titular da conta)', { skip }, async () => {
+test('o envio ao ESTABELECIMENTO também é bloqueado sem aceite — ser o dono não isenta', { skip }, async () => {
+  // Por um tempo o dono era isento, com o argumento de que é o titular da conta e o número é dele.
+  // O argumento é verdadeiro e não importa: a regra da Meta não abre exceção para o titular. Uma
+  // isenção era a frincha que a gente teria de explicar num recurso — e "esse a gente não pediu
+  // autorização, mas é o dono" não é resposta.
+  await db.query('DELETE FROM whatsapp_optins WHERE telefone_e164=?', [TEL_ESTAB]);
+
+  const r = await outbox.sendAppointmentWhatsApp({
+    estabelecimentoId: ESTAB_ID,
+    to: TEL_ESTAB,
+    kind: 'confirm_est',
+    audience: outbox.WA_AUDIENCE_ESTABLISHMENT,
+    message: 'aviso ao dono',
+  });
+  assert.equal(r.blocked, true);
+  assert.equal(r.reason, 'no_optin');
+});
+
+test('com aceite, o envio ao ESTABELECIMENTO passa — e a prova descreve o que ELE recebe', { skip }, async () => {
+  await consent.grantWhatsAppConsent({
+    phone: TEL_ESTAB,
+    usuarioId: ESTAB_ID,
+    origem: consent.OPTIN_SOURCES.ESTAB_SETTINGS,
+    audience: consent.CONSENT_AUDIENCE.ESTABLISHMENT,
+  });
+
+  const row = await consent.getWhatsAppConsent(TEL_ESTAB);
+  // O texto do dono fala da AGENDA DELE, não de "seu agendamento foi confirmado". Um texto só para
+  // os dois descreveria errado o que metade das pessoas de fato recebe — e o aceite passaria a
+  // cobrir outra coisa.
+  assert.match(row.texto, /avisos da minha agenda/);
+  assert.match(row.texto, /novos agendamentos, cancelamentos e lembretes/);
+  assert.doesNotMatch(row.texto, /em nome de/, 'o dono não recebe "em nome de" ninguém');
+
   const r = await outbox.sendAppointmentWhatsApp({
     estabelecimentoId: ESTAB_ID,
     to: TEL_ESTAB,

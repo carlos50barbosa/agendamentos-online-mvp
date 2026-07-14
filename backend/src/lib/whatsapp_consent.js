@@ -23,17 +23,18 @@
 import { pool } from './db.js';
 import { normalizePhoneBR } from './phone_br.js';
 import { log } from './logger.js';
-import { CONSENT_VERSION, buildConsentText } from './whatsapp_consent_text.js';
+import { CONSENT_VERSION, CONSENT_AUDIENCE, buildConsentText } from './whatsapp_consent_text.js';
 
 // O texto vive num módulo puro porque é espelhado no frontend e comparado por teste — ver o
 // cabeçalho de whatsapp_consent_text.js.
-export { CONSENT_VERSION, buildConsentText };
+export { CONSENT_VERSION, CONSENT_AUDIENCE, buildConsentText };
 
 export const OPTIN_SOURCES = Object.freeze({
   PUBLIC_BOOKING: 'agendamento_publico',
   CLIENT_BOOKING: 'agendamento_cliente',
   SIGNUP: 'cadastro',
   CLIENT_PANEL: 'painel_cliente',
+  ESTAB_SETTINGS: 'configuracoes_estab',
   WHATSAPP_STOP: 'whatsapp_parar',
 });
 
@@ -155,6 +156,9 @@ export async function grantWhatsAppConsent({
   estabelecimentoId = null,
   establishmentName = null,
   origem,
+  // Muda a frase, não a exigência: o dono do salão precisa de aceite igual ao cliente — só que o
+  // que ele recebe é outra coisa, e o texto tem de descrever o que ele de fato vai receber.
+  audience = CONSENT_AUDIENCE.CLIENT,
   req = null,
 }) {
   const e164 = normalizePhoneBR(phone);
@@ -165,7 +169,12 @@ export async function grantWhatsAppConsent({
     return { ok: true, phone: e164, evento: EVENT_GRANTED, unchanged: true };
   }
 
-  const nome = establishmentName ?? (await resolveEstablishmentName(estabelecimentoId));
+  // O nome do salão só entra no texto do CLIENTE ("em nome de X"). Buscá-lo para o dono seria uma
+  // consulta jogada fora.
+  const nome = audience === CONSENT_AUDIENCE.ESTABLISHMENT
+    ? null
+    : (establishmentName ?? (await resolveEstablishmentName(estabelecimentoId)));
+
   const { ip, userAgent } = requestFingerprint(req);
   return insertEvent({
     evento: EVENT_GRANTED,
@@ -173,7 +182,7 @@ export async function grantWhatsAppConsent({
     usuarioId,
     estabelecimentoId,
     origem,
-    texto: buildConsentText({ establishmentName: nome }),
+    texto: buildConsentText({ establishmentName: nome, audience }),
     textoVersao: CONSENT_VERSION,
     ip,
     userAgent,

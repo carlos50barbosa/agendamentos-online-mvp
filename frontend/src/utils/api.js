@@ -284,6 +284,13 @@ export const Api = {
 
   updateProfile: (payload) => req('/auth/me', { method: 'PUT', body: JSON.stringify(payload) }),
 
+  // Opt-in do WhatsApp do usuário logado. Sem consentimento registrado o backend NÃO envia nada —
+  // nem ao cliente, nem ao dono do salão. `precisa_reaceitar` marca o dono que tem a notificação
+  // ligada de antes do opt-in existir e nunca deu aceite.
+  whatsappOptinStatus: () => req('/auth/me/whatsapp-optin'),
+  whatsappOptin: () => req('/auth/me/whatsapp-optin', { method: 'POST' }),
+  whatsappOptout: () => req('/auth/me/whatsapp-optin', { method: 'DELETE' }),
+
   confirmEmailChange: (payload) => req('/auth/me/email-confirm', { method: 'POST', body: JSON.stringify(payload) }),
 
   requestPasswordReset: (email) => req('/auth/forgot', { method: 'POST', body: JSON.stringify({ email }) }),

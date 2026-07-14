@@ -11,17 +11,17 @@ import {
 } from './whatsapp_wallet.js';
 
 /**
- * Quem recebe a mensagem — e, por consequência, se ela exige opt-in.
+ * Quem recebe a mensagem. NÃO é mais um portão — é rótulo.
  *
- * CLIENT: o consumidor. Mensagem iniciada pelo negócio para um número que não nos procurou.
- *   É a que a Meta exige opt-in, é a que gera denúncia de spam, e é a que derrubou a WABA.
- *   Sem consentimento registrado, não sai. Ponto.
+ * Por um tempo o envio ao ESTABLISHMENT era isento do opt-in, com o argumento de que o dono é o
+ * titular da conta e o número é dele. O argumento é verdadeiro e não importa: a regra da Meta não
+ * abre exceção para o titular. Continua sendo mensagem iniciada pelo negócio para um número, e
+ * continua exigindo aceite comprovável. Uma isenção era exatamente a frincha que a gente teria de
+ * explicar num recurso — e "esse a gente não pediu autorização, mas é o dono" não é resposta.
  *
- * ESTABLISHMENT: o dono do salão — titular da conta, sobre os agendamentos dele, num número que
- *   ele mesmo cadastrou e cuja notificação ele liga/desliga em Configurações
- *   (`usuarios.notify_whatsapp_estab`). Não é solicitação fria.
- *   ⚠️ Isso NÃO é uma isenção da regra da Meta — é uma dívida conhecida: o aceite dele ainda não
- *   tem texto, data e IP registrados. Fechar essa lacuna é o próximo passo.
+ * Hoje TODO destinatário precisa de consentimento registrado. A audiência sobrevive só para dizer,
+ * na trilha de bloqueios, para quem a mensagem barrada era — o que muda quem você vai cutucar
+ * (o cliente ou o dono), não se a mensagem sai.
  */
 export const WA_AUDIENCE_CLIENT = 'client';
 export const WA_AUDIENCE_ESTABLISHMENT = 'establishment';
@@ -160,10 +160,8 @@ export async function sendAppointmentWhatsApp({
   message,
   template,
   metadata,
-  // Padrão fail-closed: quem não declarar a audiência é tratado como CLIENTE e precisa de opt-in.
-  // Se alguém criar um envio novo e esquecer deste parâmetro, a mensagem é bloqueada — não vaza.
-  // O contrário (default 'establishment') faria um esquecimento virar mensagem não autorizada,
-  // que é precisamente o erro que custou a conta.
+  // Só rótulo, para a trilha de bloqueios saber de quem era a mensagem barrada. Não isenta
+  // ninguém do opt-in — nem o dono do salão.
   audience = WA_AUDIENCE_CLIENT,
 }) {
   const estabId = toInt(estabelecimentoId, 0);
@@ -172,20 +170,18 @@ export async function sendAppointmentWhatsApp({
     return { ok: false, error: 'invalid_payload' };
   }
 
-  // Opt-in antes de tudo: sem autorização não se consulta saldo, não se debita, não se envia.
-  // Vem primeiro de propósito — é a pergunta mais barata e a única que, respondida errado, tira a
-  // plataforma do ar inteira.
-  if (audience !== WA_AUDIENCE_ESTABLISHMENT) {
-    const consented = await hasWhatsAppConsent(to);
-    if (!consented) {
-      await recordWhatsAppBlocked({
-        estabelecimentoId: estabId,
-        agendamentoId: agId,
-        reason: 'no_optin',
-        metadata: { kind, audience },
-      }).catch(() => {});
-      return { ok: true, sent: false, blocked: true, reason: 'no_optin' };
-    }
+  // Opt-in antes de tudo, para TODO destinatário: sem autorização não se consulta saldo, não se
+  // debita, não se envia. Vem primeiro de propósito — é a pergunta mais barata e a única que,
+  // respondida errado, tira a plataforma inteira do ar.
+  const consented = await hasWhatsAppConsent(to);
+  if (!consented) {
+    await recordWhatsAppBlocked({
+      estabelecimentoId: estabId,
+      agendamentoId: agId,
+      reason: 'no_optin',
+      metadata: { kind, audience },
+    }).catch(() => {});
+    return { ok: true, sent: false, blocked: true, reason: 'no_optin' };
   }
 
   const wallet = await getWhatsAppWalletSnapshot(estabId).catch(() => null);
