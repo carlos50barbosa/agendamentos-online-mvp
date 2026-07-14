@@ -15,17 +15,17 @@ import assert from 'node:assert/strict';
 
 import { isValidMobileBR, isValidPhoneBR, normalizePhoneBR } from '../src/lib/phone_br.js';
 
-test('os cadastros reais de 14/07: o impossível é barrado, o que funciona continua passando', () => {
-  // Sergio (usuario 170): 55 + DDD 19 + 876646464. Nenhum celular brasileiro começa com 8 —
-  // depois da migração do nono dígito, todos começam com 9. Este número NÃO EXISTE.
-  assert.equal(isValidMobileBR('5519876646464'), false);
+test('os dois formatos que apareceram em produção: o impossível barra, o que funciona passa', () => {
+  // Um cadastro trouxe um número de 13 dígitos com 8 na posição do nono dígito. Nenhum celular
+  // brasileiro começa com 8 — depois da migração do nono dígito, todos começam com 9. NÃO EXISTE.
+  assert.equal(isValidMobileBR('5519812345678'), false);
 
-  // Vana beauty (usuario 168): 55 + DDD 11 + 99873664. São 8 dígitos — celular ANTERIOR à migração
-  // do nono dígito. A Meta normaliza, e este envio ESTÁ FUNCIONANDO em produção (saiu com wamid).
-  // Uma regra ingênua ("13 dígitos ou nada") teria quebrado um cliente de verdade.
-  assert.equal(isValidMobileBR('551199873664'), true);
+  // Outro trouxe 12 dígitos: celular ANTERIOR à migração do nono dígito. A Meta normaliza, e envios
+  // nesse formato ESTÃO FUNCIONANDO em produção (voltam com wamid). Uma regra ingênua ("13 dígitos
+  // ou nada") teria quebrado um cliente de verdade — este é o caso que guarda contra isso.
+  assert.equal(isValidMobileBR('551198765432'), true);
 
-  // Meli (usuario 169): celular atual, bem formado.
+  // Celular atual, bem formado.
   assert.equal(isValidMobileBR('5511987373737'), true);
 });
 
@@ -57,7 +57,7 @@ test('Santa Maria (DDD 55) sobrevive — de novo', () => {
 test('a regra nova é MAIS ESTRITA que a antiga — e é esse o ponto', () => {
   // isValidPhoneBR só conta dígitos: serve para "cadastrei um telefone", não para decidir um ENVIO.
   // Se as duas concordassem, esta mudança não teria feito nada.
-  const impossiveis = ['5519876646464', '551133334444', '5500999999999'];
+  const impossiveis = ['5519812345678', '551133334444', '5500999999999'];
   for (const n of impossiveis) {
     assert.equal(isValidPhoneBR(n), true, `${n}: a regra ANTIGA aceitava (era o problema)`);
     assert.equal(isValidMobileBR(n), false, `${n}: a regra NOVA tem de barrar`);
