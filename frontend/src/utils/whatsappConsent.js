@@ -12,7 +12,7 @@
 export const CONSENT_VERSION = 'v1';
 
 /** ⚠️ Idêntico ao "display name" verificado da conta na Meta — é o nome que aparece na conversa. */
-export const WA_SENDER_NAME = 'Agenda0';
+export const WA_SENDER_NAME = 'Agendamentos Online';
 
 export function buildConsentText({ establishmentName } = {}) {
   const estab = String(establishmentName || '').trim();

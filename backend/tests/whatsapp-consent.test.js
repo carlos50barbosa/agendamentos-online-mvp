@@ -65,7 +65,9 @@ test('o texto diz tudo que a Meta exige: canal, remetente, salão, escopo e como
 test('sem o nome do salão a frase continua íntegra (não sobra "em nome de .")', () => {
   const texto = backendText({ establishmentName: '' });
   assert.doesNotMatch(texto, /em nome de\s*[.,]/);
-  assert.match(texto, /enviados por Agenda0\./);
+  // Deriva do próprio remetente em vez de cravar o nome: numa troca de marca, o que TEM de
+  // quebrar é o espelho frontend↔backend, não esta asserção de gramática.
+  assert.ok(texto.includes(`enviados por ${BACKEND_SENDER}.`));
 });
 
 // --- 2. O "PARAR" -------------------------------------------------------------------------------
