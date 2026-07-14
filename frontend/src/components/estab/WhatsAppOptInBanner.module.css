@@ -1,0 +1,96 @@
+/*
+ * WhatsAppOptInBanner — o aviso que cutuca o dono a autorizar as mensagens no WhatsApp.
+ *
+ * Tom ÂMBAR, não vermelho: isto é uma pendência, não um incêndio. Vermelho no topo do painel
+ * assusta, e o dono aprende a ignorar — justamente o banner que um dia vai importar de verdade.
+ *
+ * Ele mora acima do cockpit e é a ÚNICA coisa que pode aparecer ali, porque é acionável e some
+ * sozinho quando resolvida. O topo do /estab foi desentupido de propósito (commit a713972); tudo
+ * que voltar a ocupar esse espaço precisa pagar a passagem.
+ */
+.banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 16px;
+  margin-bottom: 16px;
+  border-radius: 16px;
+  background: var(--warning-bg, #FEF3C7);
+  border: 1px solid var(--warning-border, #FDE68A);
+  color: var(--warning-text, #92400E);
+}
+
+.icon {
+  flex: 0 0 auto;
+  margin-top: 2px;
+}
+
+.body {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.lead {
+  margin: 4px 0 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+/* O texto do aceite: o que a pessoa LÊ e o que o servidor GRAVA como prova. Fica visualmente
+   recuado para se distinguir do aviso — mas visível, nunca escondido atrás de um "saiba mais". */
+.consent {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.55);
+  font-size: 12px;
+  line-height: 1.45;
+  font-style: italic;
+}
+
+.error {
+  margin: 8px 0 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--danger-text, #991B1B);
+}
+
+.cta {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 40px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--brand, #5049E5);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.cta:disabled {
+  opacity: 0.7;
+  cursor: default;
+}
+
+/* No mobile o botão desce e ocupa a largura: um alvo de toque espremido ao lado de três linhas de
+   texto é um alvo que ninguém acerta — e este é o único clique que resolve a pendência. */
+@media (max-width: 640px) {
+  .banner {
+    flex-wrap: wrap;
+  }
+  .cta {
+    width: 100%;
+    margin-top: 4px;
+  }
+}

@@ -19,6 +19,7 @@ import PixCheckout from '../agenda/PixCheckout.jsx';
 import { buildDayRange, fullDateLabel, hourLabel, durationLabel } from '../../utils/agendaDates.js';
 import { formatBRPhone, formatCpfCnpj } from '../../utils/masks.js';
 import { WA_SENDER_NAME } from '../../utils/whatsappConsent.js';
+import { useWhatsAppAvailable } from '../../hooks/useWhatsAppStatus.js';
 import { site } from '../../config/site.js';
 import { iconSizes } from '../../config/theme.js';
 
@@ -78,6 +79,7 @@ export default function BookingWizard({
   // consentimento ativo — para a Meta e para a LGPD é como se não houvesse aceite nenhum, e é a
   // primeira coisa que derruba um recurso. Marcar sozinho custaria a conta de novo.
   const [waOptIn, setWaOptIn] = useState(false);
+  const waAvailable = useWhatsAppAvailable();
 
   const days = useMemo(() => daysProp || buildDayRange(new Date(), 14), [daysProp]);
 
@@ -415,6 +417,7 @@ export default function BookingWizard({
               checked={waOptIn}
               onChange={setWaOptIn}
               establishmentName={establishment?.nome || establishmentName}
+              unavailable={!waAvailable}
             />
 
             {error && (
@@ -519,30 +522,50 @@ function ProgressBar({ current, total }) {
  *    reconhecer o remetente quando a mensagem chegar. A frase é a mesma que o servidor grava como
  *    prova — ver utils/whatsappConsent.js.
  */
-function WhatsAppOptIn({ checked, onChange, establishmentName }) {
+function WhatsAppOptIn({ checked, onChange, establishmentName, unavailable = false }) {
   const nome = String(establishmentName || '').trim();
   return (
-    <label
-      className="tw-mt-3 tw-flex tw-cursor-pointer tw-items-start tw-gap-3 tw-rounded-2xl tw-p-3"
-      style={{ background: 'var(--surface-soft, #F6F5FB)', border: '1px solid var(--brand-border, #E7E5F5)' }}
-    >
-      <input
-        type="checkbox"
-        checked={checked}
-        onChange={(e) => onChange(e.target.checked)}
-        className="tw-mt-0.5 tw-h-5 tw-w-5 tw-shrink-0 tw-cursor-pointer tw-rounded"
-        style={{ accentColor: 'var(--brand)' }}
-      />
-      <span className="tw-flex tw-flex-col tw-gap-0.5">
-        <span className="tw-text-sm tw-font-semibold" style={{ color: 'var(--brand-deep, #1E1B4B)' }}>
-          Quero receber a confirmação e os lembretes no WhatsApp
+    <div className="tw-mt-3 tw-flex tw-flex-col">
+      <label
+        className="tw-flex tw-cursor-pointer tw-items-start tw-gap-3 tw-rounded-2xl tw-p-3"
+        style={{ background: 'var(--surface-soft, #F6F5FB)', border: '1px solid var(--brand-border, #E7E5F5)' }}
+      >
+        <input
+          type="checkbox"
+          checked={checked}
+          onChange={(e) => onChange(e.target.checked)}
+          className="tw-mt-0.5 tw-h-5 tw-w-5 tw-shrink-0 tw-cursor-pointer tw-rounded"
+          style={{ accentColor: 'var(--brand)' }}
+        />
+        <span className="tw-flex tw-flex-col tw-gap-0.5">
+          <span className="tw-text-sm tw-font-semibold" style={{ color: 'var(--brand-deep, #1E1B4B)' }}>
+            Quero receber a confirmação e os lembretes no WhatsApp
+          </span>
+          <span className="tw-text-xs" style={{ color: 'var(--text-muted, #6B7280)' }}>
+            Enviado por {WA_SENDER_NAME}{nome ? ` em nome de ${nome}` : ''}. Sem promoções — só sobre o seu
+            horário. Para sair, responda <b>PARAR</b>. Se preferir, deixe desmarcado: avisamos por e-mail.
+          </span>
         </span>
-        <span className="tw-text-xs" style={{ color: 'var(--text-muted, #6B7280)' }}>
-          Enviado por {WA_SENDER_NAME}{nome ? ` em nome de ${nome}` : ''}. Sem promoções — só sobre o seu
-          horário. Para sair, responda <b>PARAR</b>. Se preferir, deixe desmarcado: avisamos por e-mail.
-        </span>
-      </span>
-    </label>
+      </label>
+
+      {/* Aviso de STATUS, deliberadamente FORA do rótulo da caixa.
+          O texto lá em cima é a prova: é ele que o servidor grava, palavra por palavra, e um teste
+          impede que a tela e o banco divirjam. Enfiar "está fora do ar hoje" lá dentro contaminaria
+          a prova com uma circunstância passageira — e daqui a um mês o registro diria que a pessoa
+          aceitou um aviso de apagão.
+          A caixa continua funcionando: um canal fora do ar é motivo para não PROMETER, não para
+          deixar de PERGUNTAR. O aceite fica guardado e vale quando o WhatsApp voltar. */}
+      {unavailable && checked && (
+        <p
+          className="tw-mt-2 tw-rounded-xl tw-px-3 tw-py-2 tw-text-xs"
+          style={{ background: 'var(--warning-bg, #FEF3C7)', color: 'var(--warning-text, #92400E)' }}
+        >
+          <b>Só um aviso:</b> nossas mensagens no WhatsApp estão temporariamente suspensas. Por
+          enquanto a confirmação e o lembrete vão para o seu <b>e-mail</b> — e seu aceite fica
+          guardado para quando o WhatsApp voltar.
+        </p>
+      )}
+    </div>
   );
 }
 

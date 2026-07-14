@@ -229,6 +229,57 @@ test('com aceite, o envio ao ESTABELECIMENTO passa — e a prova descreve o que 
   assert.notEqual(r.reason, 'no_optin');
 });
 
+// --- Canal fora do ar (conta suspensa pela Meta) ------------------------------------------------
+
+test('com o canal FORA DO AR, nem quem TEM aceite é enviado', { skip }, async () => {
+  // O curto-circuito vem ANTES do opt-in de propósito. Sem ele, cada confirmação e cada tick do
+  // cron de lembrete bateria numa conta desabilitada, falharia e encheria o log — e o volume
+  // cresceria junto com o número de pessoas que marcam a caixa. Autorizar um canal morto não faz
+  // a mensagem chegar.
+  const antes = process.env.WHATSAPP_UNAVAILABLE;
+  process.env.WHATSAPP_UNAVAILABLE = 'true';
+  try {
+    const r = await outbox.sendAppointmentWhatsApp({
+      estabelecimentoId: ESTAB_ID,
+      to: TEL_CLIENTE,           // ESTE tem aceite registrado (teste acima)
+      kind: 'confirm_cli',
+      message: 'não deveria nem tentar',
+    });
+
+    assert.equal(r.blocked, true);
+    assert.equal(r.reason, 'wa_unavailable', 'aceite não vence um canal fora do ar');
+    assert.equal(r.sent, false);
+  } finally {
+    if (antes === undefined) delete process.env.WHATSAPP_UNAVAILABLE;
+    else process.env.WHATSAPP_UNAVAILABLE = antes;
+  }
+});
+
+test('religar a flag volta a enviar — sem restart, sem deploy', { skip }, async () => {
+  // A flag é lida a cada chamada. É o que permite ao dono tirar WHATSAPP_UNAVAILABLE do .env da VPS
+  // e o canal voltar sozinho, em vez de precisar de um build do frontend para os avisos sumirem.
+  delete process.env.WHATSAPP_UNAVAILABLE;
+  const r = await outbox.sendAppointmentWhatsApp({
+    estabelecimentoId: ESTAB_ID,
+    to: TEL_CLIENTE,
+    kind: 'confirm_cli',
+    message: 'agora pode',
+  });
+  assert.notEqual(r.reason, 'wa_unavailable');
+});
+
+test('um apagão da plataforma NÃO polui a trilha da carteira do estabelecimento', { skip }, async () => {
+  // Bloqueio por falta de opt-in é um fato sobre AQUELE número e vira linha na carteira. Apagão da
+  // plataforma não é evento do estabelecimento — registrar um "blocked" por envio transformaria a
+  // trilha dele em lixo justamente quando ele fosse investigar outra coisa.
+  const [rows] = await db.query(
+    `SELECT COUNT(*) AS n FROM whatsapp_wallet_transactions
+      WHERE estabelecimento_id=? AND reason='wa_unavailable'`,
+    [ESTAB_ID]
+  );
+  assert.equal(rows[0].n, 0);
+});
+
 test('todo bloqueio por falta de opt-in fica REGISTRADO (não some em silêncio)', { skip }, async () => {
   const [rows] = await db.query(
     `SELECT reason FROM whatsapp_wallet_transactions
