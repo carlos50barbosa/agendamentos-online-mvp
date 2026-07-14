@@ -21,7 +21,7 @@ export const CONSENT_VERSION = 'v1';
  * "Agenda0" e chega mensagem de outro nome, o consentimento não cobre aquele remetente — e, na
  * prática, é justamente aí que ela não reconhece quem escreveu e denuncia como spam.
  */
-export const WA_SENDER_NAME = 'Agenda0';
+export const WA_SENDER_NAME = 'Agendamentos Online';
 
 /**
  * A frase que a pessoa lê e aceita. Num fôlego ela precisa dizer:
