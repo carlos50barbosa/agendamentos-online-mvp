@@ -4,6 +4,7 @@ import { sendWhatsAppSmart } from './notifications.js';
 import { buildConfirmacaoAgendamentoV2Components, isConfirmacaoAgendamentoV2 } from './whatsapp_templates.js';
 import { hasWhatsAppConsent } from './whatsapp_consent.js';
 import { whatsappUnavailable } from './whatsapp_availability.js';
+import { isValidMobileBR } from './phone_br.js';
 import {
   debitWhatsAppMessage,
   getWhatsAppWalletSnapshot,
@@ -182,6 +183,26 @@ export async function sendAppointmentWhatsApp({
   // QUALQUER bloqueio, justamente para um motivo novo como este não sumir em silêncio.
   if (whatsappUnavailable()) {
     return { ok: true, sent: false, blocked: true, reason: 'wa_unavailable' };
+  }
+
+  // Número que não pode existir (DDD inexistente, telefone fixo, celular começando com 8): não sai.
+  //
+  // Vem antes do opt-in porque não merece nem um SELECT. E vem, sobretudo, porque uma taxa alta de
+  // destinatário inexistente é a assinatura de lista raspada — o padrão que a Meta procura. De
+  // quebra, cada tentativa dessas debitaria a carteira do estabelecimento por uma mensagem que
+  // nunca chegaria a lugar nenhum.
+  //
+  // O cliente NÃO fica sem aviso: `blocked` faz o lembrete cair em e-mail sozinho, porque o
+  // fallback trata qualquer bloqueio. Quem digitou o telefone errado já não recebia WhatsApp —
+  // a diferença é que agora não queima crédito nem reputação tentando.
+  if (!isValidMobileBR(to)) {
+    await recordWhatsAppBlocked({
+      estabelecimentoId: estabId,
+      agendamentoId: agId,
+      reason: 'invalid_phone',
+      metadata: { kind, audience },
+    }).catch(() => {});
+    return { ok: true, sent: false, blocked: true, reason: 'invalid_phone' };
   }
 
   // Opt-in, para TODO destinatário: sem autorização não se consulta saldo, não se debita, não se

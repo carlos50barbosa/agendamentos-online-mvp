@@ -280,6 +280,54 @@ test('um apagão da plataforma NÃO polui a trilha da carteira do estabeleciment
   assert.equal(rows[0].n, 0);
 });
 
+test('número IMPOSSÍVEL não sai — nem com aceite registrado', { skip }, async () => {
+  // Caso real: o usuário 170 ("Sergio") cadastrou 5519876646464 — DDD 19, celular começando com 8.
+  // Nenhum celular brasileiro começa com 8. Ele escapou porque não marcou a caixa; o próximo
+  // cadastro falso marca. Aceite não faz um número inexistente existir — e uma taxa alta de
+  // destinatário inexistente é a assinatura de lista raspada, que é o que a Meta caça.
+  const impossivel = '5519876646464';
+  await consent.grantWhatsAppConsent({
+    phone: impossivel,
+    estabelecimentoId: ESTAB_ID,
+    origem: consent.OPTIN_SOURCES.PUBLIC_BOOKING,
+  });
+  assert.equal(await consent.hasWhatsAppConsent(impossivel), true, 'o aceite existe...');
+
+  const r = await outbox.sendAppointmentWhatsApp({
+    estabelecimentoId: ESTAB_ID,
+    to: impossivel,
+    kind: 'confirm_cli',
+    message: 'nao deveria nem tentar',
+  });
+
+  // ...e mesmo assim não sai.
+  assert.equal(r.blocked, true);
+  assert.equal(r.reason, 'invalid_phone');
+  assert.equal(r.sent, false);
+});
+
+test('o celular SEM o nono dígito continua saindo — quebrar isso derrubaria cliente real', { skip }, async () => {
+  // Caso real: o estabelecimento 168 ("Vana beauty") usa 551199873664 (12 dígitos, celular anterior
+  // à migração). A Meta normaliza, e o envio para ele FUNCIONOU em produção — saiu com wamid. Uma
+  // regra ingênua ("tem de ter 13 dígitos") teria matado um envio que está de pé.
+  const semNonoDigito = '551199873664';
+  await consent.grantWhatsAppConsent({
+    phone: semNonoDigito,
+    usuarioId: ESTAB_ID,
+    origem: consent.OPTIN_SOURCES.ESTAB_SETTINGS,
+    audience: consent.CONSENT_AUDIENCE.ESTABLISHMENT,
+  });
+
+  const r = await outbox.sendAppointmentWhatsApp({
+    estabelecimentoId: ESTAB_ID,
+    to: semNonoDigito,
+    kind: 'estab_reminder_5h',
+    audience: outbox.WA_AUDIENCE_ESTABLISHMENT,
+    message: 'pode sair',
+  });
+  assert.notEqual(r.reason, 'invalid_phone', 'este número funciona em produção; não pode ser barrado');
+});
+
 test('todo bloqueio por falta de opt-in fica REGISTRADO (não some em silêncio)', { skip }, async () => {
   const [rows] = await db.query(
     `SELECT reason FROM whatsapp_wallet_transactions
