@@ -36,6 +36,7 @@ export const OPTIN_SOURCES = Object.freeze({
   CLIENT_PANEL: 'painel_cliente',
   ESTAB_SETTINGS: 'configuracoes_estab',
   WHATSAPP_STOP: 'whatsapp_parar',
+  WHATSAPP_AUTORIZO: 'whatsapp_autorizo',
 });
 
 const EVENT_GRANTED = 'granted';
@@ -107,15 +108,21 @@ async function insertEvent({
   textoVersao = null,
   ip = null,
   userAgent = null,
+  metadados = null,
 }) {
   const e164 = normalizePhoneBR(phone);
   if (!e164) return { ok: false, error: 'telefone_invalido' };
   if (!origem) return { ok: false, error: 'origem_obrigatoria' };
 
+  let metaJson = null;
+  if (metadados) {
+    try { metaJson = JSON.stringify(metadados); } catch { metaJson = null; }
+  }
+
   await pool.query(
     `INSERT INTO whatsapp_optins
-       (telefone_e164, evento, usuario_id, estabelecimento_id, origem, texto_versao, texto, ip, user_agent)
-     VALUES (?,?,?,?,?,?,?,?,?)`,
+       (telefone_e164, evento, usuario_id, estabelecimento_id, origem, texto_versao, texto, ip, user_agent, metadados)
+     VALUES (?,?,?,?,?,?,?,?,?,?)`,
     [
       e164,
       evento,
@@ -126,6 +133,7 @@ async function insertEvent({
       texto,
       truncate(ip, 64),
       truncate(userAgent, 256),
+      metaJson,
     ]
   );
   return { ok: true, phone: e164, evento };
@@ -159,6 +167,10 @@ export async function grantWhatsAppConsent({
   // Muda a frase, não a exigência: o dono do salão precisa de aceite igual ao cliente — só que o
   // que ele recebe é outra coisa, e o texto tem de descrever o que ele de fato vai receber.
   audience = CONSENT_AUDIENCE.CLIENT,
+  // Prova de que quem autorizou é DONO do número. Hoje: o wamid da mensagem "AUTORIZO" que ele
+  // mandou do próprio WhatsApp — só o titular consegue enviar de lá. É o que separa consentimento
+  // de declaração.
+  metadados = null,
   req = null,
 }) {
   const e164 = normalizePhoneBR(phone);
@@ -186,6 +198,7 @@ export async function grantWhatsAppConsent({
     textoVersao: CONSENT_VERSION,
     ip,
     userAgent,
+    metadados,
   });
 }
 

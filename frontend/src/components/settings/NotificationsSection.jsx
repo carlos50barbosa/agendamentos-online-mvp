@@ -60,7 +60,24 @@ export default function NotificationsSection() {
       if (resp?.user) saveUser(resp.user);
 
       if (form.whatsapp !== consented) {
-        const estado = form.whatsapp ? await Api.whatsappOptin() : await Api.whatsappOptout();
+        if (form.whatsapp) {
+          // MARCAR não grava mais consentimento — abre o WhatsApp para o dono ENVIAR "AUTORIZO".
+          //
+          // Marcar aqui gravava direto, e era o buraco: em 14/07/2026 alguém cadastrou o telefone
+          // de uma pessoa aleatória, marcou esta caixa, e a vítima passou a receber template. Um
+          // clique prova que alguém clicou. Uma mensagem enviada DAQUELE número prova quem é dono
+          // dele — e ninguém manda mensagem do WhatsApp de um estranho.
+          const r = await Api.whatsappOptin();
+          if (r?.wa_link) window.open(r.wa_link, '_blank', 'noopener');
+          setForm((f) => ({ ...f, whatsapp: false }));  // só marca de verdade quando o aceite chegar
+          setFeedback({
+            type: 'warn',
+            message: 'Abrimos o WhatsApp com a mensagem pronta — é só enviar. A confirmação precisa sair do seu WhatsApp: é assim que sabemos que o número é seu.',
+          });
+          return;
+        }
+        // DESMARCAR revoga na hora: sair tem de ser sempre mais fácil que entrar.
+        const estado = await Api.whatsappOptout();
         setConsented(Boolean(estado?.optin));
         setPrecisaReaceitar(false);
       }

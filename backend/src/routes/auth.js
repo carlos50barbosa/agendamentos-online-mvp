@@ -17,6 +17,7 @@ import {
   describeWhatsAppConsent,
   OPTIN_SOURCES,
   CONSENT_AUDIENCE,
+  buildConsentText,
 } from '../lib/whatsapp_consent.js';
 import { buildRateLimitClientKey, consumeRateLimit, setRateLimitHeaders } from '../lib/request_rate_limit.js';
 import { logSecurityEvent } from '../lib/route_access.js';
@@ -291,17 +292,29 @@ router.post('/register', async (req, res) => {
     // um cadastro não é, por si, autorização para receber mensagem.
     const optInRaw = req.body?.whatsapp_optin ?? req.body?.whatsappOptin;
     const whatsappOptIn = optInRaw === true || optInRaw === 'true' || optInRaw === 1 || optInRaw === '1';
-    if (whatsappOptIn && telefoneTrim) {
+    // Marcar a caixa no cadastro NÃO grava consentimento para ESTABELECIMENTO — e é deliberado.
+    //
+    // Foi por aqui e pela rota de Configurações que o ataque de 14/07/2026 passou: alguém cadastrou
+    // o telefone de uma pessoa aleatória, marcou a caixa, e a vítima passou a receber template. O
+    // aceite ficava gravado com texto, data e IP — prova impecável de algo que não valia nada,
+    // porque o número não era de quem clicou.
+    //
+    // Para o dono, o consentimento agora só nasce quando a mensagem "AUTORIZO" chega DAQUELE número
+    // (whatsapp/inbound/optInConfirm.js). Ninguém envia do WhatsApp de um estranho. A caixa aqui
+    // vira só a intenção: liga `notify_whatsapp_estab`, e o banner do painel pede a confirmação.
+    //
+    // ⚠️ Para CLIENTE a caixa ainda grava direto — dívida conhecida, não descuido. O dano é
+    // limitado (ele recebe 2 mensagens do próprio agendamento, não um fluxo perpétuo) e a rede de
+    // segurança existe: quem diz "erraram a pessoa" sai na hora. Exigir AUTORIZO de todo cliente
+    // antes do primeiro agendamento poria fricção no funil que paga a conta. Fechar isso é o
+    // próximo passo, e precisa de um desenho que não mate a conversão.
+    if (whatsappOptIn && telefoneTrim && tipo === 'cliente') {
       try {
         await grantWhatsAppConsent({
           phone: telefoneTrim,
           usuarioId: r.insertId,
           origem: OPTIN_SOURCES.SIGNUP,
-          // O dono do salão recebe "novo agendamento", não "seu agendamento foi confirmado".
-          // O texto tem de descrever o que a pessoa VAI receber, senão o aceite cobre outra coisa.
-          audience: tipo === 'estabelecimento'
-            ? CONSENT_AUDIENCE.ESTABLISHMENT
-            : CONSENT_AUDIENCE.CLIENT,
+          audience: CONSENT_AUDIENCE.CLIENT,
           req,
         });
       } catch (err) {
@@ -866,6 +879,22 @@ router.get('/me/whatsapp-optin', auth, async (req, res) => {
   }
 });
 
+/**
+ * Começa a autorização — e NÃO grava mais consentimento nenhum.
+ *
+ * Esta rota gravava direto: clicou, autorizou. Foi o buraco. Em 14/07/2026 alguém criou um
+ * estabelecimento falso com o telefone de uma pessoa aleatória, chamou esta rota, e a vítima passou
+ * a receber template de lembrete. O aceite ficou gravado com texto, data e IP — prova impecável de
+ * um consentimento que não valia nada, porque NUNCA VERIFICAMOS QUE QUEM CLICA É DONO DO NÚMERO.
+ *
+ * Agora ela só devolve o link. Quem grava o consentimento é o WEBHOOK, quando a mensagem "AUTORIZO"
+ * chega DAQUELE número (whatsapp/inbound/optInConfirm.js). Ninguém manda mensagem do WhatsApp de um
+ * estranho — é a única prova de posse que não dá para forjar.
+ *
+ * (Um código enviado por nós provaria quem tem acesso ao APARELHO. Uma mensagem enviada de lá prova
+ * quem é DONO do número. E, de quebra, não depende de um template de autenticação aprovado na Meta,
+ * que não existe.)
+ */
 router.post('/me/whatsapp-optin', auth, async (req, res) => {
   try {
     const [[row]] = await pool.query('SELECT telefone FROM usuarios WHERE id=? LIMIT 1', [req.user.id]);
@@ -875,16 +904,30 @@ router.post('/me/whatsapp-optin', auth, async (req, res) => {
         message: 'Cadastre um telefone antes de ativar as mensagens no WhatsApp.',
       });
     }
-    await grantWhatsAppConsent({
-      phone: row.telefone,
-      usuarioId: req.user.id,
-      origem: isEstab(req) ? OPTIN_SOURCES.ESTAB_SETTINGS : OPTIN_SOURCES.CLIENT_PANEL,
-      audience: isEstab(req) ? CONSENT_AUDIENCE.ESTABLISHMENT : CONSENT_AUDIENCE.CLIENT,
-      req,
+
+    const numero = String(process.env.WA_PUBLIC_NUMBER || '').replace(/\D/g, '');
+    if (!numero) {
+      // Sem o número da plataforma não há para onde mandar o AUTORIZO. Falhar alto é melhor do que
+      // devolver um link quebrado que o dono clica e não entende por que não funciona.
+      console.error('[auth/whatsapp-optin] WA_PUBLIC_NUMBER ausente — a confirmação por WhatsApp não funciona');
+      return res.status(503).json({
+        error: 'wa_nao_configurado',
+        message: 'A confirmação por WhatsApp está indisponível. Tente mais tarde.',
+      });
+    }
+
+    setAudit(req, { acao: 'whatsapp.optin_iniciado', entidade: 'usuario', entidade_id: String(req.user.id) });
+
+    return res.json({
+      // O consentimento NÃO foi gravado. Só será, quando a mensagem chegar daquele número.
+      optin: false,
+      aguardando_confirmacao: true,
+      wa_link: `https://wa.me/${numero}?text=${encodeURIComponent('AUTORIZO')}`,
+      palavra: 'AUTORIZO',
+      texto: buildConsentText({
+        audience: isEstab(req) ? CONSENT_AUDIENCE.ESTABLISHMENT : CONSENT_AUDIENCE.CLIENT,
+      }),
     });
-    await syncEstabWhatsAppPreference(req, true);
-    setAudit(req, { acao: 'whatsapp.optin', entidade: 'usuario', entidade_id: String(req.user.id) });
-    return res.json(await describeWhatsAppConsent(row.telefone));
   } catch (e) {
     console.error('[auth/whatsapp-optin][post]', e);
     return res.status(500).json({ error: 'server_error' });

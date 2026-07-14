@@ -143,7 +143,7 @@ async function startServer() {
     cwd: BACKEND_DIR,
     // Sem isto as rotas de fidelidade devolvem 503 (loyalty_disabled) e o smoke passaria
     // 'verde' sem exercitar uma linha do modulo — o oposto do que ele existe para fazer.
-    env: { ...process.env, PORT: String(port), HOST: '127.0.0.1', LOYALTY_ENABLED: '1' },
+    env: { ...process.env, PORT: String(port), HOST: '127.0.0.1', LOYALTY_ENABLED: '1', WA_PUBLIC_NUMBER: '5511911451733' },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   // Guardamos a saida do servidor: quando uma rota devolve 500, o erro de SQL esta AQUI,
@@ -322,6 +322,42 @@ function amanhaAs10h() {
   return d.toISOString();
 }
 
+// --- O BURACO DE 14/07/2026, e o teste que o fecha ------------------------------------------------
+//
+// Alguem criou um estabelecimento falso com o telefone de uma pessoa ALEATORIA, chamou
+// POST /auth/me/whatsapp-optin, e a vitima passou a receber template de lembrete. O aceite ficava
+// gravado com texto, data e IP — prova impecavel de algo que nao valia NADA, porque nunca
+// verificamos que quem clica e dono do numero.
+//
+// Um clique prova que alguem clicou. Uma mensagem ENVIADA daquele numero prova quem e DONO dele.
+// Agora a rota so devolve o link; quem grava o consentimento e o WEBHOOK, quando "AUTORIZO" chega
+// daquele numero.
+
+test('POST /whatsapp-optin NAO grava consentimento — so devolve o link do AUTORIZO', { skip }, async () => {
+  const e164 = '5511999990000';   // telefone do Salao Smoke
+  await pool.query('DELETE FROM whatsapp_optins WHERE telefone_e164=?', [e164]);
+
+  const res = await fetch(`${baseUrl}/auth/me/whatsapp-optin`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${estabToken}` },
+    body: '{}',
+  });
+  const body = await res.text();
+  assert.equal(res.status, 200, `status ${res.status}: ${body.slice(0, 200)}`);
+  const r = JSON.parse(body);
+
+  assert.equal(r.optin, false, 'a rota NAO pode dizer que autorizou');
+  assert.equal(r.aguardando_confirmacao, true);
+  assert.match(r.wa_link, /^https:\/\/wa\.me\/\d+\?text=AUTORIZO$/);
+
+  // A PROVA: nenhuma linha foi gravada. Era exatamente esta linha que o atacante conseguia criar.
+  const [rows] = await pool.query('SELECT id FROM whatsapp_optins WHERE telefone_e164=?', [e164]);
+  assert.equal(
+    rows.length, 0,
+    'um clique NAO pode virar consentimento — o numero pode nao ser de quem clicou'
+  );
+});
+
 test('agendamento publico COM a caixa marcada grava o consentimento (com a prova)', { skip }, async () => {
   const telefone = '12987650001';
   const e164 = `55${telefone}`;
@@ -376,9 +412,26 @@ test('dono LEGADO (notificacao ligada, sem aceite) -> o banner DEVE aparecer', {
   assert.equal(r.precisa_reaceitar, true, 'sem esta flag o dono legado nunca ve o banner');
 });
 
-test('depois de aceitar, a pendencia acaba -> o banner some (e e assim que deve ser)', { skip }, async () => {
-  const { status } = await post('/auth/me/whatsapp-optin', {}, { token: estabToken });
-  assert.equal(status, 200);
+// Este teste AFIRMAVA o buraco. Ele dizia: "chamou POST -> optin=true", ou seja, um clique bastava
+// para gravar consentimento. Era verdade, e era o defeito — foi por essa porta que alguem cadastrou
+// o telefone de uma pessoa aleatoria, clicou, e a vitima passou a receber template.
+//
+// O CI pegou a contradicao no merge (a rota parou de gravar; o teste ainda esperava que gravasse),
+// que e exatamente o que ele existe para fazer.
+//
+// Agora o aceite nasce do WEBHOOK, quando "AUTORIZO" chega DAQUELE numero. Aqui ele e simulado
+// direto na tabela — o caminho do webhook tem teste proprio — e o que se verifica e o que este
+// teste sempre quis verificar: havendo aceite, a pendencia acaba e o banner some.
+test('havendo aceite, a pendencia acaba -> o banner some (e e assim que deve ser)', { skip }, async () => {
+  const e164 = '5511999990000';
+  await pool.query('DELETE FROM whatsapp_optins WHERE telefone_e164=?', [e164]);
+  await pool.query(
+    `INSERT INTO whatsapp_optins (telefone_e164, evento, usuario_id, origem, texto_versao, texto, metadados)
+     VALUES (?, 'granted', ?, 'whatsapp_autorizo', 'v1',
+             'Quero receber no WhatsApp os avisos da minha agenda.',
+             '{"prova":"inbound_autorizo","wamid":"wamid.TESTE"}')`,
+    [e164, ESTAB_ID]
+  );
 
   const r = await optinStatus();
   assert.equal(r.optin, true);
