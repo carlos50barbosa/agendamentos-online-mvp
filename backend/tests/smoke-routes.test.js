@@ -302,6 +302,18 @@ async function postJson(pathname, payload) {
   return { status: res.status, body: await res.text() };
 }
 
+async function post(pathname, payload, { token } = {}) {
+  const res = await fetch(`${baseUrl}${pathname}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify(payload || {}),
+  });
+  return { status: res.status, body: await res.text() };
+}
+
 // Amanha as 10:00 local: dentro do expediente padrao (07:00-22:00) e longe do lead minimo.
 function amanhaAs10h() {
   const d = new Date();
@@ -339,6 +351,50 @@ test('agendamento publico COM a caixa marcada grava o consentimento (com a prova
   // O texto e renderizado pelo SERVIDOR e nomeia o salao — e isso que vale como prova.
   assert.match(rows[0].texto, /Salao Smoke/);
   assert.match(rows[0].texto, /PARAR/);
+});
+
+// --- O que decide se o BANNER do dono aparece ----------------------------------------------------
+//
+// `precisa_reaceitar` e a unica coisa que o front consulta para mostrar (ou nao) o banner que cutuca
+// o dono a autorizar o WhatsApp. Se essa flag vier errada, o banner some — e o dono nunca descobre
+// que os avisos dele estao bloqueados. Nao ha erro, nao ha log: so silencio. Por isso vai por HTTP,
+// com JWT de verdade, contra o banco de verdade.
+
+async function optinStatus() {
+  const { status, body } = await get('/auth/me/whatsapp-optin', { token: estabToken });
+  assert.equal(status, 200, `status ${status}: ${body.slice(0, 200)}`);
+  return JSON.parse(body);
+}
+
+test('dono LEGADO (notificacao ligada, sem aceite) -> o banner DEVE aparecer', { skip }, async () => {
+  const e164 = '5511999990000'; // telefone do Salao Smoke, em E.164
+  await pool.query('DELETE FROM whatsapp_optins WHERE telefone_e164=?', [e164]);
+  await pool.query('UPDATE usuarios SET notify_whatsapp_estab=1 WHERE id=?', [ESTAB_ID]);
+
+  const r = await optinStatus();
+  assert.equal(r.optin, false);
+  assert.equal(r.precisa_reaceitar, true, 'sem esta flag o dono legado nunca ve o banner');
+});
+
+test('depois de aceitar, a pendencia acaba -> o banner some (e e assim que deve ser)', { skip }, async () => {
+  const { status } = await post('/auth/me/whatsapp-optin', {}, { token: estabToken });
+  assert.equal(status, 200);
+
+  const r = await optinStatus();
+  assert.equal(r.optin, true);
+  assert.equal(r.precisa_reaceitar, false, 'quem ja autorizou nao tem o que reaceitar');
+  assert.match(r.texto, /avisos da minha agenda/, 'a prova gravada e a do DONO, nao a do cliente');
+});
+
+test('dono com a notificacao DESLIGADA nao ve banner — ele optou por nao receber', { skip }, async () => {
+  const e164 = '5511999990000';
+  await pool.query('DELETE FROM whatsapp_optins WHERE telefone_e164=?', [e164]);
+  await pool.query('UPDATE usuarios SET notify_whatsapp_estab=0 WHERE id=?', [ESTAB_ID]);
+
+  const r = await optinStatus();
+  assert.equal(r.precisa_reaceitar, false, 'cobrar aceite de quem desligou o aviso seria ruido');
+
+  await pool.query('UPDATE usuarios SET notify_whatsapp_estab=1 WHERE id=?', [ESTAB_ID]);
 });
 
 test('agendamento publico SEM a caixa marcada NAO grava consentimento (e o agendamento vale)', { skip }, async () => {
