@@ -53,10 +53,16 @@ export function useWhatsAppConsent() {
         optin: Boolean(r?.optin),
         precisaReaceitar: Boolean(r?.precisa_reaceitar),
       });
-    } catch {
-      // Falhou a consulta: não inventa pendência. Um banner cobrando aceite de quem já aceitou é
+    } catch (err) {
+      // Falhou a consulta: NÃO inventa pendência. Um banner cobrando aceite de quem já aceitou é
       // ruído — e ruído que o dono aprende a ignorar, justamente no banner que um dia vai importar.
-      setState({ loading: false, optin: false, precisaReaceitar: false });
+      //
+      // Mas o erro NÃO some mais em silêncio. A primeira versão fazia `catch {}`: um 401, uma queda
+      // de rede e um "sem pendência" produziam exatamente o mesmo resultado visual (nada), e
+      // investigar "o banner não aparece" virou adivinhação — inclusive para mim. Esconder o banner
+      // é a decisão de produto certa; esconder o MOTIVO nunca é.
+      console.error('[whatsapp-optin] não foi possível consultar o consentimento', err);
+      setState({ loading: false, optin: false, precisaReaceitar: false, erro: true });
     }
   };
 
