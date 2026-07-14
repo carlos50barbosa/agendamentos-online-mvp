@@ -1,6 +1,6 @@
 // backend/src/lib/estab_reminders.js
 import { notifyEmail } from './notifications.js';
-import { sendAppointmentWhatsApp } from './whatsapp_outbox.js';
+import { sendAppointmentWhatsApp, WA_AUDIENCE_ESTABLISHMENT } from './whatsapp_outbox.js';
 import { estabNotificationsDisabled } from './estab_notifications.js';
 
 const TZ = 'America/Sao_Paulo';
@@ -127,6 +127,7 @@ async function sendEstabReminder(pool, row) {
         agendamentoId: row.id,
         to: telEst,
         kind: 'estab_reminder_5h',
+        audience: WA_AUDIENCE_ESTABLISHMENT,
         template: { name: tplName, lang: tplLang, bodyParams: params },
       });
 
@@ -149,6 +150,7 @@ async function sendEstabReminder(pool, row) {
             agendamentoId: row.id,
             to: telEst,
             kind: 'estab_reminder_5h',
+            audience: WA_AUDIENCE_ESTABLISHMENT,
             message: msgText,
           });
           waMessageId = waMessageId || a2?.provider_message_id || null;

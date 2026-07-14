@@ -2,12 +2,29 @@
 import { pool } from './db.js';
 import { sendWhatsAppSmart } from './notifications.js';
 import { buildConfirmacaoAgendamentoV2Components, isConfirmacaoAgendamentoV2 } from './whatsapp_templates.js';
+import { hasWhatsAppConsent } from './whatsapp_consent.js';
 import {
   debitWhatsAppMessage,
   getWhatsAppWalletSnapshot,
   recordWhatsAppBlocked,
   WHATSAPP_MAX_MESSAGES_PER_APPOINTMENT,
 } from './whatsapp_wallet.js';
+
+/**
+ * Quem recebe a mensagem — e, por consequência, se ela exige opt-in.
+ *
+ * CLIENT: o consumidor. Mensagem iniciada pelo negócio para um número que não nos procurou.
+ *   É a que a Meta exige opt-in, é a que gera denúncia de spam, e é a que derrubou a WABA.
+ *   Sem consentimento registrado, não sai. Ponto.
+ *
+ * ESTABLISHMENT: o dono do salão — titular da conta, sobre os agendamentos dele, num número que
+ *   ele mesmo cadastrou e cuja notificação ele liga/desliga em Configurações
+ *   (`usuarios.notify_whatsapp_estab`). Não é solicitação fria.
+ *   ⚠️ Isso NÃO é uma isenção da regra da Meta — é uma dívida conhecida: o aceite dele ainda não
+ *   tem texto, data e IP registrados. Fechar essa lacuna é o próximo passo.
+ */
+export const WA_AUDIENCE_CLIENT = 'client';
+export const WA_AUDIENCE_ESTABLISHMENT = 'establishment';
 
 const toInt = (value, fallback = 0) => {
   const n = Number(value);
@@ -143,11 +160,32 @@ export async function sendAppointmentWhatsApp({
   message,
   template,
   metadata,
+  // Padrão fail-closed: quem não declarar a audiência é tratado como CLIENTE e precisa de opt-in.
+  // Se alguém criar um envio novo e esquecer deste parâmetro, a mensagem é bloqueada — não vaza.
+  // O contrário (default 'establishment') faria um esquecimento virar mensagem não autorizada,
+  // que é precisamente o erro que custou a conta.
+  audience = WA_AUDIENCE_CLIENT,
 }) {
   const estabId = toInt(estabelecimentoId, 0);
   const agId = agendamentoId != null ? toInt(agendamentoId, 0) : null;
   if (!estabId || !to) {
     return { ok: false, error: 'invalid_payload' };
+  }
+
+  // Opt-in antes de tudo: sem autorização não se consulta saldo, não se debita, não se envia.
+  // Vem primeiro de propósito — é a pergunta mais barata e a única que, respondida errado, tira a
+  // plataforma do ar inteira.
+  if (audience !== WA_AUDIENCE_ESTABLISHMENT) {
+    const consented = await hasWhatsAppConsent(to);
+    if (!consented) {
+      await recordWhatsAppBlocked({
+        estabelecimentoId: estabId,
+        agendamentoId: agId,
+        reason: 'no_optin',
+        metadata: { kind, audience },
+      }).catch(() => {});
+      return { ok: true, sent: false, blocked: true, reason: 'no_optin' };
+    }
   }
 
   const wallet = await getWhatsAppWalletSnapshot(estabId).catch(() => null);

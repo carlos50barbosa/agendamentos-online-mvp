@@ -1270,6 +1270,27 @@ a:hover { opacity: 1; text-decoration: underline; }
 }
 .login-preview__hint.is-error{color:var(--login-error);}
 .login-preview__hint.is-warn{color:#b45309;}
+
+/* Opt-in do WhatsApp no cadastro. A caixa fica ALINHADA AO TOPO (align-items:flex-start) porque o
+   texto tem duas linhas — centralizar deixaria o quadradinho flutuando no meio do parágrafo. */
+.cadastro-optin{
+  display:flex;
+  align-items:flex-start;
+  gap:8px;
+  margin-top:10px;
+  cursor:pointer;
+  font-size:12px;
+  line-height:1.45;
+  color:var(--login-muted);
+}
+.cadastro-optin input[type="checkbox"]{
+  flex:0 0 auto;
+  width:16px;
+  height:16px;
+  margin-top:2px;
+  cursor:pointer;
+  accent-color:var(--brand, #5049E5);
+}
 .login-preview__chooser-note{
   margin-top:8px;
   font-size:12px;

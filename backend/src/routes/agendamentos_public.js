@@ -6,7 +6,7 @@ import { assertDentroExpediente, formatExpedienteMessage, getExpediente, getLoca
 import { getPlanContext, isDelinquentStatus, formatPlanLimitExceeded, planAllowsDeposit } from '../lib/plans.js';
 import bcrypt from 'bcryptjs';
 import { notifyEmail } from '../lib/notifications.js';
-import { sendAppointmentWhatsApp } from '../lib/whatsapp_outbox.js';
+import { sendAppointmentWhatsApp, WA_AUDIENCE_ESTABLISHMENT } from '../lib/whatsapp_outbox.js';
 import { buildConfirmacaoAgendamentoV2Components, isConfirmacaoAgendamentoV2 } from '../lib/whatsapp_templates.js';
 import { createMercadoPagoPixPayment } from '../lib/billing.js';
 import { resolveMpAccessToken } from '../services/mpAccounts.js';
@@ -16,6 +16,7 @@ import { computeSignalTotalCents, computeSplitCents, SignalTooLowError } from '.
 import { ensureSubscriptionOperationalAccess } from '../middleware/billing.js';
 import { estabNotificationsDisabled } from '../lib/estab_notifications.js';
 import { clientWhatsappDisabled, whatsappImmediateDisabled, whatsappConfirmationDisabled } from '../lib/client_notifications.js';
+import { grantWhatsAppConsent, OPTIN_SOURCES } from '../lib/whatsapp_consent.js';
 import { checkMonthlyAppointmentLimit, notifyAppointmentLimitReached } from '../lib/appointment_limits.js';
 import {
   extractPixPayloadFromRaw,
@@ -515,6 +516,7 @@ async function notifyPublicConfirmedAppointment(appointmentId) {
           agendamentoId: ag.id,
           to: telEst,
           kind: 'confirm_est',
+          audience: WA_AUDIENCE_ESTABLISHMENT,
           message: waMsgEst,
           template: { name: tplName, lang: tplLang, bodyParams: fallbackBodyParams },
         });
@@ -553,7 +555,14 @@ router.post('/', ensureSubscriptionOperationalAccess({
       dataNascimento,
       cpf,
       cpf_cnpj,
+      whatsapp_optin,
+      whatsappOptin,
     } = req.body || {};
+
+    // Só `true` (ou o "true"/"1" que um form manda) autoriza. Qualquer outra coisa — ausente,
+    // null, string vazia — é "não autorizou". Consentimento não se infere.
+    const optInRaw = whatsapp_optin ?? whatsappOptin;
+    const whatsappOptIn = optInRaw === true || optInRaw === 'true' || optInRaw === 1 || optInRaw === '1';
 
     const professionalCandidate = profissionalIdRaw != null ? profissionalIdRaw : profissionalId;
     const profissional_id = professionalCandidate == null ? null : Number(professionalCandidate);
@@ -911,6 +920,29 @@ router.post('/', ensureSubscriptionOperationalAccess({
           await pool.query(`UPDATE usuarios SET ${updates.join(', ')} WHERE id=?`, [...params, userId]);
         }
       } catch {}
+    }
+
+    // Opt-in do WhatsApp — registrado AQUI, de forma síncrona, e não em fire-and-forget: a
+    // confirmação é disparada poucas linhas abaixo e consulta o consentimento. Se a gravação
+    // corresse em paralelo, a própria confirmação que o cliente acabou de autorizar sairia
+    // bloqueada por uma corrida.
+    //
+    // NÃO marcar a caixa não revoga um aceite anterior. A caixa nasce desmarcada, então tratar
+    // "desmarcada" como "quero sair" faria todo cliente que já autorizou perder a autorização ao
+    // reagendar. Para sair existem caminhos explícitos: responder PARAR ou a tela do cliente.
+    if (telNorm && whatsappOptIn) {
+      try {
+        await grantWhatsAppConsent({
+          phone: telNorm,
+          usuarioId: userId,
+          estabelecimentoId: estabelecimento_id,
+          origem: OPTIN_SOURCES.PUBLIC_BOOKING,
+          req,
+        });
+      } catch (err) {
+        // Não derruba o agendamento: sem o aceite gravado o cliente perde o WhatsApp, não a vaga.
+        console.warn('[optin][public] falha ao registrar consentimento', err?.message || err);
+      }
     }
 
     const loyaltyPreview = await previewClientLoyaltyBenefits({

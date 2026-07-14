@@ -156,7 +156,7 @@ export default function BookingPublic() {
       .map((s) => ({ datetime: s.datetime, available: s.status === 'free' }));
   }, [establishmentId]);
 
-  const onConfirm = useCallback(async ({ services, professional, date, slot, guest }) => {
+  const onConfirm = useCallback(async ({ services, professional, date, slot, guest, whatsappOptIn }) => {
     const cpfDigits = (guest?.cpf || '').replace(/\D/g, '');
     const inicio = typeof slot?.datetime === 'string' ? slot.datetime : new Date(slot.datetime).toISOString();
     const payload = {
@@ -166,6 +166,8 @@ export default function BookingPublic() {
       nome: (guest?.nome || '').trim(),
       email: (guest?.email || '').trim(),
       telefone: (guest?.telefone || '').replace(/\D/g, ''),
+      // Sem isto o backend não manda WhatsApp nenhum — nem confirmação, nem lembrete.
+      whatsapp_optin: whatsappOptIn === true,
     };
     if (cpfDigits) payload.cpf = cpfDigits;
     if (professional?.id) payload.profissional_id = professional.id;

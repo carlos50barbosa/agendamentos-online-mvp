@@ -5,7 +5,8 @@ import { assertDentroExpediente, formatExpedienteMessage, getExpediente, getLoca
 import { getPlanContext, isDelinquentStatus, formatPlanLimitExceeded, planAllowsDeposit } from '../lib/plans.js';
 import { auth as authRequired, isCliente, isEstabelecimento } from '../middleware/auth.js';
 import { notifyEmail } from '../lib/notifications.js';
-import { sendAppointmentWhatsApp } from '../lib/whatsapp_outbox.js';
+import { sendAppointmentWhatsApp, WA_AUDIENCE_ESTABLISHMENT } from '../lib/whatsapp_outbox.js';
+import { grantWhatsAppConsent, OPTIN_SOURCES } from '../lib/whatsapp_consent.js';
 import { buildConfirmacaoAgendamentoV2Components, isConfirmacaoAgendamentoV2 } from '../lib/whatsapp_templates.js';
 import { createMercadoPagoPixPayment } from '../lib/billing.js';
 import { resolveMpAccessToken } from '../services/mpAccounts.js';
@@ -661,10 +662,21 @@ router.post('/', authRequired, isCliente, ensureSubscriptionOperationalAccess({
   let conn;
   let txStarted = false;
   try {
-    const { estabelecimento_id, inicio, profissional_id: profissionalIdRaw, profissionalId } = req.body || {};
+    const {
+      estabelecimento_id,
+      inicio,
+      profissional_id: profissionalIdRaw,
+      profissionalId,
+      whatsapp_optin,
+      whatsappOptin,
+    } = req.body || {};
     const serviceIds = extractServiceIds(req.body || {});
     const professionalCandidate = profissionalIdRaw != null ? profissionalIdRaw : profissionalId;
     const profissional_id = professionalCandidate == null ? null : Number(professionalCandidate);
+
+    // Consentimento não se infere: só um `true` explícito autoriza.
+    const optInRaw = whatsapp_optin ?? whatsappOptin;
+    const whatsappOptIn = optInRaw === true || optInRaw === 'true' || optInRaw === 1 || optInRaw === '1';
 
     if (profissional_id !== null && !Number.isFinite(profissional_id)) {
       return res.status(400).json({ error: 'profissional_invalido', message: 'Profissional inválido.' });
@@ -1250,6 +1262,24 @@ router.post('/', authRequired, isCliente, ensureSubscriptionOperationalAccess({
       }
     }
 
+    // 5.1) Opt-in do WhatsApp. Antes do bloco de notificação, e com await: a confirmação abaixo
+    // consulta o consentimento, e um registro em fire-and-forget chegaria tarde demais — o cliente
+    // marcaria a caixa e mesmo assim não receberia a confirmação que acabou de autorizar.
+    if (whatsappOptIn && cli?.telefone) {
+      try {
+        await grantWhatsAppConsent({
+          phone: cli.telefone,
+          usuarioId: req.user.id,
+          estabelecimentoId: estabelecimento_id,
+          establishmentName: est?.nome || null,
+          origem: OPTIN_SOURCES.CLIENT_BOOKING,
+          req,
+        });
+      } catch (err) {
+        console.warn('[optin][cliente] falha ao registrar consentimento', err?.message || err);
+      }
+    }
+
     // 6) notificacao "best-effort" (NUNCA bloqueia a resposta)
     const inicioISO = new Date(novo.inicio).toISOString();
     const inicioBR  = brDateTime(inicioISO);
@@ -1333,6 +1363,7 @@ router.post('/', authRequired, isCliente, ensureSubscriptionOperationalAccess({
             agendamentoId: novo.id,
             to: telEst,
             kind: 'confirm_est',
+            audience: WA_AUDIENCE_ESTABLISHMENT,
             template: { name: tplName, lang: tplLang, bodyParams: tplParams },
           });
         } else {
@@ -1341,6 +1372,7 @@ router.post('/', authRequired, isCliente, ensureSubscriptionOperationalAccess({
             agendamentoId: novo.id,
             to: telEst,
             kind: 'confirm_est',
+            audience: WA_AUDIENCE_ESTABLISHMENT,
             message: waMsg,
             template: { name: tplName, lang: tplLang, bodyParams: fallbackBodyParams },
           });
@@ -1873,6 +1905,7 @@ router.post('/estabelecimento', authRequired, isEstabelecimento, ensureSubscript
             agendamentoId: novo.id,
             to: telEst,
             kind: 'confirm_est',
+            audience: WA_AUDIENCE_ESTABLISHMENT,
             template: { name: tplName, lang: tplLang, bodyParams: tplParams },
           });
         } else {
@@ -1881,6 +1914,7 @@ router.post('/estabelecimento', authRequired, isEstabelecimento, ensureSubscript
             agendamentoId: novo.id,
             to: telEst,
             kind: 'confirm_est',
+            audience: WA_AUDIENCE_ESTABLISHMENT,
             message: waMsg,
             template: { name: tplName, lang: tplLang, bodyParams: fallbackBodyParams },
           });
@@ -2320,6 +2354,7 @@ router.put('/:id/cancel', authRequired, isCliente, async (req, res) => {
           agendamentoId: id,
           to: telEst,
           kind: 'cancel_est',
+          audience: WA_AUDIENCE_ESTABLISHMENT,
           template: { name: tplName, lang: tplLang, bodyParams: tplParams },
         });
         if (waResult && waResult.ok === false) {
@@ -2329,6 +2364,7 @@ router.put('/:id/cancel', authRequired, isCliente, async (req, res) => {
             agendamentoId: id,
             to: telEst,
             kind: 'cancel_est',
+          audience: WA_AUDIENCE_ESTABLISHMENT,
             message: cancelText,
           });
         }
