@@ -143,7 +143,7 @@ async function startServer() {
     cwd: BACKEND_DIR,
     // Sem isto as rotas de fidelidade devolvem 503 (loyalty_disabled) e o smoke passaria
     // 'verde' sem exercitar uma linha do modulo — o oposto do que ele existe para fazer.
-    env: { ...process.env, PORT: String(port), HOST: '127.0.0.1', LOYALTY_ENABLED: '1' },
+    env: { ...process.env, PORT: String(port), HOST: '127.0.0.1', LOYALTY_ENABLED: '1', WA_PUBLIC_NUMBER: '5511911451733' },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   // Guardamos a saida do servidor: quando uma rota devolve 500, o erro de SQL esta AQUI,
@@ -309,6 +309,42 @@ function amanhaAs10h() {
   d.setHours(10, 0, 0, 0);
   return d.toISOString();
 }
+
+// --- O BURACO DE 14/07/2026, e o teste que o fecha ------------------------------------------------
+//
+// Alguem criou um estabelecimento falso com o telefone de uma pessoa ALEATORIA, chamou
+// POST /auth/me/whatsapp-optin, e a vitima passou a receber template de lembrete. O aceite ficava
+// gravado com texto, data e IP — prova impecavel de algo que nao valia NADA, porque nunca
+// verificamos que quem clica e dono do numero.
+//
+// Um clique prova que alguem clicou. Uma mensagem ENVIADA daquele numero prova quem e DONO dele.
+// Agora a rota so devolve o link; quem grava o consentimento e o WEBHOOK, quando "AUTORIZO" chega
+// daquele numero.
+
+test('POST /whatsapp-optin NAO grava consentimento — so devolve o link do AUTORIZO', { skip }, async () => {
+  const e164 = '5511999990000';   // telefone do Salao Smoke
+  await pool.query('DELETE FROM whatsapp_optins WHERE telefone_e164=?', [e164]);
+
+  const res = await fetch(`${baseUrl}/auth/me/whatsapp-optin`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${estabToken}` },
+    body: '{}',
+  });
+  const body = await res.text();
+  assert.equal(res.status, 200, `status ${res.status}: ${body.slice(0, 200)}`);
+  const r = JSON.parse(body);
+
+  assert.equal(r.optin, false, 'a rota NAO pode dizer que autorizou');
+  assert.equal(r.aguardando_confirmacao, true);
+  assert.match(r.wa_link, /^https:\/\/wa\.me\/\d+\?text=AUTORIZO$/);
+
+  // A PROVA: nenhuma linha foi gravada. Era exatamente esta linha que o atacante conseguia criar.
+  const [rows] = await pool.query('SELECT id FROM whatsapp_optins WHERE telefone_e164=?', [e164]);
+  assert.equal(
+    rows.length, 0,
+    'um clique NAO pode virar consentimento — o numero pode nao ser de quem clicou'
+  );
+});
 
 test('agendamento publico COM a caixa marcada grava o consentimento (com a prova)', { skip }, async () => {
   const telefone = '12987650001';
