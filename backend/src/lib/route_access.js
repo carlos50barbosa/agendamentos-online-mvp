@@ -84,10 +84,24 @@ function parseBooleanEnv(value, fallback = false) {
   return fallback;
 }
 
+/**
+ * O IP inteiro só aparece onde foi PEDIDO explicitamente: um ambiente declaradamente não-produtivo,
+ * ou LOG_FULL_IP=true.
+ *
+ * O `!nodeEnv ||` que existia aqui dizia o contrário: "NODE_ENV ausente → pode expor". E ausente é
+ * exatamente o estado da produção (os logs saem com `"env":"unknown"`), então a redação estava
+ * DESLIGADA justamente onde ela existe para atuar. O log de segurança — login falho, rate limit,
+ * requisição suspeita — vinha gravando o IP completo de cada visitante no disco, enquanto o log de
+ * acesso comum, ao lado, anonimizava certinho.
+ *
+ * O gêmeo desta função (index.js#shouldLogFullIpDiagnostics) já tinha sido corrigido, e o comentário
+ * de lá explica o porquê. Este ficou para trás. Setar NODE_ENV=production resolve o sintoma; falhar
+ * fechado resolve a classe — o próximo servidor que esquecer da variável não vaza nada.
+ */
 function shouldExposeFullIpDiagnostics() {
   const nodeEnv = String(process.env.NODE_ENV || '').trim().toLowerCase();
   if (parseBooleanEnv(process.env.LOG_FULL_IP, false)) return true;
-  return !nodeEnv || ['development', 'dev', 'test', 'staging', 'stage'].includes(nodeEnv);
+  return ['development', 'dev', 'test', 'staging', 'stage'].includes(nodeEnv);
 }
 
 function redactIpDiagnostics(context) {

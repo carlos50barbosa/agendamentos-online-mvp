@@ -124,3 +124,77 @@ test('security logs omit full IP diagnostics in production unless explicitly ena
   assert.equal('req_ip' in payload, false);
   assert.equal('x_forwarded_for' in payload, false);
 });
+
+// --- IP no log de segurança: NODE_ENV ausente NÃO pode expor -------------------------------------
+//
+// Regressão de um bug que estava VIVO em produção. A VPS não seta NODE_ENV (os logs saem com
+// `"env":"unknown"`), e `shouldExposeFullIpDiagnostics` tinha um `!nodeEnv ||`: "ambiente
+// desconhecido -> pode expor". Ou seja, a redação estava desligada exatamente onde ela existe para
+// atuar. O log de segurança (login falho, rate limit, requisição suspeita) gravava o IP COMPLETO de
+// cada visitante no disco — enquanto o log de acesso comum, ao lado, anonimizava certinho.
+//
+// O que enganava: o campo `ip` SEMPRE veio mascarado (191.52.219.0). Quem vazava eram os campos de
+// diagnóstico — req_ip, x_real_ip, x_forwarded_for, socket_remote_address —, e ninguém olha para
+// eles.
+//
+// A mesma função em index.js (#shouldLogFullIpDiagnostics) já tinha sido corrigida, com comentário
+// explicando o porquê. O gêmeo daqui ficou para trás. É o tipo de bug que volta: por isso o teste.
+
+const IP_REAL = '191.52.219.77';
+
+function reqDeVisitante() {
+  return {
+    method: 'POST',
+    originalUrl: '/api/auth/login',
+    path: '/api/auth/login',
+    headers: {
+      'x-real-ip': IP_REAL,
+      'x-forwarded-for': IP_REAL,
+      'user-agent': 'curl/8',
+    },
+    ip: IP_REAL,
+    ips: [IP_REAL],
+    socket: { remoteAddress: IP_REAL },
+  };
+}
+
+/** Roda logSecurityEvent com um NODE_ENV específico e devolve o que foi para o log, em texto. */
+async function logComEnv(nodeEnv) {
+  const anterior = process.env.NODE_ENV;
+  const anteriorFull = process.env.LOG_FULL_IP;
+  delete process.env.LOG_FULL_IP;
+  if (nodeEnv === undefined) delete process.env.NODE_ENV;
+  else process.env.NODE_ENV = nodeEnv;
+
+  const { logSecurityEvent } = await import('../src/lib/route_access.js');
+  let capturado = '';
+  const originais = { warn: console.warn, error: console.error };
+  console.warn = (_msg, obj) => { capturado = JSON.stringify(obj ?? {}); };
+  console.error = console.warn;
+  try {
+    resetSecurityEventCounters();
+    logSecurityEvent('auth:login_failed', reqDeVisitante());
+  } finally {
+    console.warn = originais.warn;
+    console.error = originais.error;
+    if (anterior === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = anterior;
+    if (anteriorFull === undefined) delete process.env.LOG_FULL_IP; else process.env.LOG_FULL_IP = anteriorFull;
+  }
+  return capturado;
+}
+
+test('NODE_ENV ausente (o caso da produção): o log de segurança NÃO leva o IP completo', async () => {
+  const log = await logComEnv(undefined);
+  assert.ok(!log.includes(IP_REAL), `o IP completo vazou para o log de segurança: ${log}`);
+  assert.ok(log.includes(maskIpForLog(IP_REAL)), 'o IP mascarado deveria continuar lá — sem ele não dá para investigar nada');
+});
+
+test('NODE_ENV=production: idem', async () => {
+  const log = await logComEnv('production');
+  assert.ok(!log.includes(IP_REAL), `o IP completo vazou para o log de segurança: ${log}`);
+});
+
+test('em desenvolvimento o IP completo aparece — quem depura precisa dele', async () => {
+  const log = await logComEnv('development');
+  assert.ok(log.includes(IP_REAL), 'em dev a exposição é deliberada; sem ela não se investiga um bloqueio local');
+});
