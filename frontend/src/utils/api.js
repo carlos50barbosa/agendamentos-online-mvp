@@ -284,6 +284,10 @@ export const Api = {
 
   updateProfile: (payload) => req('/auth/me', { method: 'PUT', body: JSON.stringify(payload) }),
 
+  // Config pública (sem auth): o que a TELA precisa saber para não mentir. Hoje, só se o canal do
+  // WhatsApp está no ar — a flag vive no .env da VPS, então religar não exige rebuild do bundle.
+  publicConfig: () => req('/public/config'),
+
   // Opt-in do WhatsApp do usuário logado. Sem consentimento registrado o backend NÃO envia nada —
   // nem ao cliente, nem ao dono do salão. `precisa_reaceitar` marca o dono que tem a notificação
   // ligada de antes do opt-in existir e nunca deu aceite.

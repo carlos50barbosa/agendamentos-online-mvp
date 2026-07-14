@@ -3,6 +3,7 @@ import { pool } from './db.js';
 import { sendWhatsAppSmart } from './notifications.js';
 import { buildConfirmacaoAgendamentoV2Components, isConfirmacaoAgendamentoV2 } from './whatsapp_templates.js';
 import { hasWhatsAppConsent } from './whatsapp_consent.js';
+import { whatsappUnavailable } from './whatsapp_availability.js';
 import {
   debitWhatsAppMessage,
   getWhatsAppWalletSnapshot,
@@ -170,9 +171,21 @@ export async function sendAppointmentWhatsApp({
     return { ok: false, error: 'invalid_payload' };
   }
 
-  // Opt-in antes de tudo, para TODO destinatário: sem autorização não se consulta saldo, não se
-  // debita, não se envia. Vem primeiro de propósito — é a pergunta mais barata e a única que,
-  // respondida errado, tira a plataforma inteira do ar.
+  // Canal fora do ar (conta suspensa): nem tenta. Sem isto, cada confirmação e cada tick do cron
+  // de lembrete bate numa conta desabilitada, falha e enche o log — e o volume cresce junto com o
+  // número de pessoas que marcam a caixa de opt-in.
+  //
+  // Não gera linha na carteira: um apagão da plataforma não é um evento do estabelecimento, e
+  // registrar um "bloqueado" por envio transformaria a trilha dele em lixo.
+  //
+  // Devolve `blocked`, e é isso que faz o lembrete cair em e-mail sozinho — o fallback já trata
+  // QUALQUER bloqueio, justamente para um motivo novo como este não sumir em silêncio.
+  if (whatsappUnavailable()) {
+    return { ok: true, sent: false, blocked: true, reason: 'wa_unavailable' };
+  }
+
+  // Opt-in, para TODO destinatário: sem autorização não se consulta saldo, não se debita, não se
+  // envia. É a pergunta mais barata e a única que, respondida errado, tira a plataforma do ar.
   const consented = await hasWhatsAppConsent(to);
   if (!consented) {
     await recordWhatsAppBlocked({

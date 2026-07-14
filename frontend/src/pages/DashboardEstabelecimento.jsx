@@ -3,6 +3,7 @@ import { Api, resolveAssetUrl } from '../utils/api'
 import { getUser, USER_EVENT } from '../utils/auth'
 import Modal from '../components/Modal.jsx'
 import CockpitOverview from '../components/estab/CockpitOverview.jsx'
+import WhatsAppOptInBanner from '../components/estab/WhatsAppOptInBanner.jsx'
 import { useLocation, useSearchParams } from 'react-router-dom'
 
 
@@ -1324,6 +1325,12 @@ export default function DashboardEstabelecimento() {
     <div className="dashboard-narrow dashboard-pro dashboard-estab-pro">
 
       {dashboardNotice ? <div className="dashboard-success-banner">{dashboardNotice}</div> : null}
+
+      {/* Só aparece para o dono que ainda não autorizou o WhatsApp — e some sozinho no clique.
+          É a única coisa que ganhou o direito de voltar ao topo do painel (que foi desentupido em
+          a713972): é acionável, resolve-se de uma vez, e sem ela o dono não descobre que os avisos
+          dele estão bloqueados. */}
+      <WhatsAppOptInBanner />
 
       <CockpitOverview
         establishmentId={establishmentId}
