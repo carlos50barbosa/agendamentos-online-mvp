@@ -16,6 +16,7 @@ import {
   revokeWhatsAppConsent,
   describeWhatsAppConsent,
   OPTIN_SOURCES,
+  CONSENT_AUDIENCE,
 } from '../lib/whatsapp_consent.js';
 import { buildRateLimitClientKey, consumeRateLimit, setRateLimitHeaders } from '../lib/request_rate_limit.js';
 import { logSecurityEvent } from '../lib/route_access.js';
@@ -296,6 +297,11 @@ router.post('/register', async (req, res) => {
           phone: telefoneTrim,
           usuarioId: r.insertId,
           origem: OPTIN_SOURCES.SIGNUP,
+          // O dono do salão recebe "novo agendamento", não "seu agendamento foi confirmado".
+          // O texto tem de descrever o que a pessoa VAI receber, senão o aceite cobre outra coisa.
+          audience: tipo === 'estabelecimento'
+            ? CONSENT_AUDIENCE.ESTABLISHMENT
+            : CONSENT_AUDIENCE.CLIENT,
           req,
         });
       } catch (err) {
@@ -825,12 +831,35 @@ router.post('/me/email-confirm', auth, async (req, res) => {
 // O opt-out precisa ser tão fácil quanto o opt-in — a Meta cobra isso, e é o mínimo decente.
 // Por isso são três rotas simples e não um formulário escondido em Configurações.
 
+const isEstab = (req) => req.user?.tipo === 'estabelecimento';
+
+/**
+ * Para o dono do salão, aceite e preferência (`notify_whatsapp_estab`) andam juntos: são a mesma
+ * intenção ("me avise no WhatsApp"), e mantê-los como dois botões independentes só criaria o
+ * estado idiota de quem autorizou mas não recebe — ou pior, de quem desligou o aviso e continua
+ * com autorização registrada. O envio exige os dois; então quem muda um, muda o outro.
+ */
+async function syncEstabWhatsAppPreference(req, enabled) {
+  if (!isEstab(req)) return;
+  await pool.query('UPDATE usuarios SET notify_whatsapp_estab=? WHERE id=?', [enabled ? 1 : 0, req.user.id]);
+}
+
 /** Estado atual do consentimento do usuário logado (alimenta a tela e serve de prova a ele). */
 router.get('/me/whatsapp-optin', auth, async (req, res) => {
   try {
-    const [[row]] = await pool.query('SELECT telefone FROM usuarios WHERE id=? LIMIT 1', [req.user.id]);
+    const [[row]] = await pool.query(
+      'SELECT telefone, notify_whatsapp_estab FROM usuarios WHERE id=? LIMIT 1',
+      [req.user.id]
+    );
     if (!row?.telefone) return res.json({ optin: false, aceito_em: null, texto: null, sem_telefone: true });
-    return res.json(await describeWhatsAppConsent(row.telefone));
+    const estado = await describeWhatsAppConsent(row.telefone);
+    // `precisa_reaceitar`: o dono tem a notificação LIGADA de antes, mas nunca houve aceite
+    // registrado. É a base legada — é ela que a tela precisa cutucar, e é a única resposta
+    // honesta para "todos os destinatários têm opt-in?".
+    return res.json({
+      ...estado,
+      precisa_reaceitar: isEstab(req) && !estado.optin && Boolean(row.notify_whatsapp_estab),
+    });
   } catch (e) {
     console.error('[auth/whatsapp-optin][get]', e);
     return res.status(500).json({ error: 'server_error' });
@@ -849,9 +878,11 @@ router.post('/me/whatsapp-optin', auth, async (req, res) => {
     await grantWhatsAppConsent({
       phone: row.telefone,
       usuarioId: req.user.id,
-      origem: OPTIN_SOURCES.CLIENT_PANEL,
+      origem: isEstab(req) ? OPTIN_SOURCES.ESTAB_SETTINGS : OPTIN_SOURCES.CLIENT_PANEL,
+      audience: isEstab(req) ? CONSENT_AUDIENCE.ESTABLISHMENT : CONSENT_AUDIENCE.CLIENT,
       req,
     });
+    await syncEstabWhatsAppPreference(req, true);
     setAudit(req, { acao: 'whatsapp.optin', entidade: 'usuario', entidade_id: String(req.user.id) });
     return res.json(await describeWhatsAppConsent(row.telefone));
   } catch (e) {
@@ -863,12 +894,15 @@ router.post('/me/whatsapp-optin', auth, async (req, res) => {
 router.delete('/me/whatsapp-optin', auth, async (req, res) => {
   try {
     const [[row]] = await pool.query('SELECT telefone FROM usuarios WHERE id=? LIMIT 1', [req.user.id]);
-    // Sem telefone não há o que revogar — e devolver erro aqui só atrapalharia quem quer sair.
+    // Desliga a preferência ANTES de conferir o telefone: quem quer sair tem de sair, mesmo que o
+    // cadastro esteja pela metade. Devolver erro a quem pede para sair é o oposto do que a Meta
+    // cobra — e é o clique que vem antes de "denunciar spam".
+    await syncEstabWhatsAppPreference(req, false);
     if (!row?.telefone) return res.json({ optin: false, aceito_em: null, texto: null });
     await revokeWhatsAppConsent({
       phone: row.telefone,
       usuarioId: req.user.id,
-      origem: OPTIN_SOURCES.CLIENT_PANEL,
+      origem: isEstab(req) ? OPTIN_SOURCES.ESTAB_SETTINGS : OPTIN_SOURCES.CLIENT_PANEL,
       req,
     });
     setAudit(req, { acao: 'whatsapp.optout', entidade: 'usuario', entidade_id: String(req.user.id) });

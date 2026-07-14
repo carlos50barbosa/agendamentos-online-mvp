@@ -865,8 +865,21 @@ export default function Cadastro() {
                         onChange={(e) => updateField('whatsappOptin', e.target.checked)}
                       />
                       <span>
-                        Quero receber a confirmação e os lembretes dos meus agendamentos no WhatsApp,
-                        enviados por {WA_SENDER_NAME}. Sem promoções. Para sair, respondo <b>PARAR</b>.
+                        {/* O dono do salão recebe "novo agendamento"; o cliente, "seu agendamento
+                            foi confirmado". Um texto só descreveria errado a metade das pessoas —
+                            e o aceite passaria a cobrir algo diferente do que de fato chega. */}
+                        {form.tipo === 'estabelecimento' ? (
+                          <>
+                            Quero receber no WhatsApp os avisos da minha agenda (novos agendamentos,
+                            cancelamentos e lembretes), enviados por {WA_SENDER_NAME}. Sem promoções.
+                            Para sair, respondo <b>PARAR</b>.
+                          </>
+                        ) : (
+                          <>
+                            Quero receber a confirmação e os lembretes dos meus agendamentos no WhatsApp,
+                            enviados por {WA_SENDER_NAME}. Sem promoções. Para sair, respondo <b>PARAR</b>.
+                          </>
+                        )}
                       </span>
                     </label>
 
