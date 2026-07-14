@@ -1,15 +1,30 @@
 // src/components/settings/helpers.js
 // Helpers compartilhados pelas seções granulares de Configurações.
 
+import { formatBRPhone } from '../../utils/masks.js';
+
 export const onlyDigits = (s) => String(s || '').replace(/\D/g, '');
 
-export function formatPhoneBR(s) {
-  const d = onlyDigits(s).slice(0, 11);
-  if (d.length <= 2) return d;
-  if (d.length <= 6) return `(${d.slice(0, 2)}) ${d.slice(2)}`;
-  if (d.length <= 10) return `(${d.slice(0, 2)}) ${d.slice(2, 6)}-${d.slice(6)}`;
-  return `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}`;
-}
+/**
+ * Máscara do telefone. Delega para utils/masks.js — que é a fonte única e trata o código do
+ * país corretamente.
+ *
+ * A versão que vivia aqui fazia `onlyDigits(s).slice(0, 11)`: cortava em 11 dígitos SEM
+ * remover o "55" do país. Com o telefone gravado em E.164 (5512981686284), a tela passava a
+ * exibir "(55) 12981-6862" — DDD errado — e, ao salvar, o backend via 11 dígitos, entendia
+ * como número local e prefixava outro 55:
+ *
+ *   banco 5512981686284  ->  tela 55129816862  ->  banco 5555129816862
+ *
+ * Ou seja: bastava o dono abrir Configurações e salvar QUALQUER coisa para o WhatsApp dele
+ * ser destruído — e ele parava de receber as notificações de agendamento, sem nenhum aviso.
+ * E piorava a cada save (5555555512981...). A corrupção ainda PERDE os 2 últimos dígitos, o
+ * que a torna irreversível: não dá para recuperar o número original a partir do corrompido.
+ *
+ * O masks.js já fazia certo, e explica o motivo de não se poder cortar o "55" cegamente:
+ * 55 também é DDD (Santa Maria/RS).
+ */
+export const formatPhoneBR = formatBRPhone;
 
 export function formatCep(s) {
   const d = onlyDigits(s).slice(0, 8);
