@@ -1,7 +1,7 @@
 // backend/src/lib/appointment_confirmation.js
 import { pool } from './db.js';
 import { notifyEmail } from './notifications.js';
-import { sendAppointmentWhatsApp } from './whatsapp_outbox.js';
+import { sendAppointmentWhatsApp, WA_AUDIENCE_ESTABLISHMENT } from './whatsapp_outbox.js';
 import { buildConfirmacaoAgendamentoV2Components, isConfirmacaoAgendamentoV2 } from './whatsapp_templates.js';
 import { estabNotificationsDisabled } from './estab_notifications.js';
 import { clientWhatsappDisabled, whatsappImmediateDisabled, whatsappConfirmationDisabled } from './client_notifications.js';
@@ -135,10 +135,10 @@ estabelecimentoId: ag.estabelecimento_id, agendamentoId: ag.id, to: telCli, kind
 if (!blockEstabNotifications && canWhatsappEst && telEst && telEst !== telCli) {
 if (/^triple|3$/.test(paramMode)) {
 await sendAppointmentWhatsApp({
-estabelecimentoId: ag.estabelecimento_id, agendamentoId: ag.id, to: telEst, kind: 'confirm_est', template: { name: tplName, lang: tplLang, bodyParams: tplParams }, });
+estabelecimentoId: ag.estabelecimento_id, agendamentoId: ag.id, to: telEst, kind: 'confirm_est', audience: WA_AUDIENCE_ESTABLISHMENT, template: { name: tplName, lang: tplLang, bodyParams: tplParams }, });
 } else {
 await sendAppointmentWhatsApp({
-estabelecimentoId: ag.estabelecimento_id, agendamentoId: ag.id, to: telEst, kind: 'confirm_est', message: waMsg, template: { name: tplName, lang: tplLang, bodyParams: fallbackBodyParams }, });
+estabelecimentoId: ag.estabelecimento_id, agendamentoId: ag.id, to: telEst, kind: 'confirm_est', audience: WA_AUDIENCE_ESTABLISHMENT, message: waMsg, template: { name: tplName, lang: tplLang, bodyParams: fallbackBodyParams }, });
 }
         }
 }

@@ -21,6 +21,8 @@ import { saveToken, saveUser } from '../utils/auth';
 
 import { LEGAL_METADATA } from '../utils/legal.js';
 
+import { WA_SENDER_NAME } from '../utils/whatsappConsent.js';
+
 const normalizeUiText = (value = '') =>
   String(value || '')
     .normalize('NFD')
@@ -120,6 +122,9 @@ export default function Cadastro() {
     tipo: 'estabelecimento',
 
     telefone: '',
+
+    // Desmarcado por padrão — caixa pré-marcada não vale como consentimento.
+    whatsappOptin: false,
 
     data_nascimento: '',
 
@@ -536,6 +541,9 @@ export default function Cadastro() {
 
         telefone: telefoneNorm,
 
+        // Sem isto o backend não envia WhatsApp nenhum a este número.
+        whatsapp_optin: form.whatsappOptin === true,
+
         data_nascimento: form.data_nascimento || undefined,
 
         cpf_cnpj: cpfCnpjValue,
@@ -845,9 +853,26 @@ export default function Cadastro() {
 
                     </div>
 
+                    {/* Opt-in do WhatsApp. Antes, a única menção ao canal era a dica acima — e uma
+                        dica não é consentimento: a pessoa dava o telefone e passava a receber
+                        mensagem de um remetente que nunca autorizou. Foi assim que a conta caiu.
+                        A caixa nasce desmarcada e não trava o cadastro: quem não marcar recebe por
+                        e-mail. */}
+                    <label className="cadastro-optin">
+                      <input
+                        type="checkbox"
+                        checked={form.whatsappOptin === true}
+                        onChange={(e) => updateField('whatsappOptin', e.target.checked)}
+                      />
+                      <span>
+                        Quero receber a confirmação e os lembretes dos meus agendamentos no WhatsApp,
+                        enviados por {WA_SENDER_NAME}. Sem promoções. Para sair, respondo <b>PARAR</b>.
+                      </span>
+                    </label>
+
                   </div>
 
-  
+
 
                   <div className="login-preview__field">
 

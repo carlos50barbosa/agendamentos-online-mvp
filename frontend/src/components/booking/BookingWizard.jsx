@@ -6,7 +6,9 @@
 //   collectGuest=true  -> mostra os campos nome/e-mail/telefone/CPF na confirmação
 //   buildSlots(date, { serviceIds, professionalId }) pode ser sync (mock) OU async (Promise, API real)
 //   pollStatus(paymentId, token) -> vira o PIX para 'paid'/'expired' sozinho
-//   onConfirm({ services, professional, date, slot, guest }) -> cria o agendamento e devolve o PIX
+//   onConfirm({ services, professional, date, slot, guest, whatsappOptIn }) -> cria o agendamento e devolve o PIX
+//     whatsappOptIn: a pessoa marcou a caixa autorizando mensagens no WhatsApp. Sem isso, o backend
+//     NÃO envia (nem confirmação, nem lembrete) — cai para e-mail. Ver lib/whatsapp_consent.js.
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ChevronLeft, Scissors, Search, User, Check, ArrowRight, Loader2, Info, X, Flame } from 'lucide-react';
 import LogoAO from '../LogoAO.jsx';
@@ -16,6 +18,7 @@ import SlotPicker from '../agenda/SlotPicker.jsx';
 import PixCheckout from '../agenda/PixCheckout.jsx';
 import { buildDayRange, fullDateLabel, hourLabel, durationLabel } from '../../utils/agendaDates.js';
 import { formatBRPhone, formatCpfCnpj } from '../../utils/masks.js';
+import { WA_SENDER_NAME } from '../../utils/whatsappConsent.js';
 import { site } from '../../config/site.js';
 import { iconSizes } from '../../config/theme.js';
 
@@ -71,6 +74,10 @@ export default function BookingWizard({
   }));
   const [slotsState, setSlotsState] = useState({ loading: false, list: [] });
   const [detailService, setDetailService] = useState(null);
+  // Opt-in do WhatsApp. Nasce DESMARCADO e assim tem de ficar: caixa pré-marcada não é
+  // consentimento ativo — para a Meta e para a LGPD é como se não houvesse aceite nenhum, e é a
+  // primeira coisa que derruba um recurso. Marcar sozinho custaria a conta de novo.
+  const [waOptIn, setWaOptIn] = useState(false);
 
   const days = useMemo(() => daysProp || buildDayRange(new Date(), 14), [daysProp]);
 
@@ -204,7 +211,7 @@ export default function BookingWizard({
     setSubmitting(true);
     setError(null);
     try {
-      const result = await onConfirm({ services: selectedServices, professional, date, slot, guest });
+      const result = await onConfirm({ services: selectedServices, professional, date, slot, guest, whatsappOptIn: waOptIn });
       setPix(result);
       go(STEP.PAGAMENTO);
     } catch (e) {
@@ -404,6 +411,12 @@ export default function BookingWizard({
               </div>
             )}
 
+            <WhatsAppOptIn
+              checked={waOptIn}
+              onChange={setWaOptIn}
+              establishmentName={establishment?.nome || establishmentName}
+            />
+
             {error && (
               <p className="tw-mt-3 tw-text-sm" style={{ color: 'var(--status-cancelado-fg)' }}>
                 {error}
@@ -488,6 +501,48 @@ function ProgressBar({ current, total }) {
         />
       ))}
     </div>
+  );
+}
+
+/**
+ * A caixa de opt-in do WhatsApp.
+ *
+ * Três decisões que parecem detalhe e não são:
+ *
+ * 1. NASCE DESMARCADA. Caixa pré-marcada não é consentimento ativo — nem para a Meta, nem para a
+ *    LGPD. Custa taxa de adesão, sim. Custa menos que a conta banida.
+ *
+ * 2. NÃO BLOQUEIA O AGENDAMENTO. Condicionar o serviço ao aceite é consentimento forçado, que não
+ *    vale (e ainda derruba a conversão). Quem não marcar agenda igual e recebe por e-mail.
+ *
+ * 3. O TEXTO NOMEIA QUEM ENVIA. É o que a Meta exige e o que evita a denúncia: a pessoa precisa
+ *    reconhecer o remetente quando a mensagem chegar. A frase é a mesma que o servidor grava como
+ *    prova — ver utils/whatsappConsent.js.
+ */
+function WhatsAppOptIn({ checked, onChange, establishmentName }) {
+  const nome = String(establishmentName || '').trim();
+  return (
+    <label
+      className="tw-mt-3 tw-flex tw-cursor-pointer tw-items-start tw-gap-3 tw-rounded-2xl tw-p-3"
+      style={{ background: 'var(--surface-soft, #F6F5FB)', border: '1px solid var(--brand-border, #E7E5F5)' }}
+    >
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+        className="tw-mt-0.5 tw-h-5 tw-w-5 tw-shrink-0 tw-cursor-pointer tw-rounded"
+        style={{ accentColor: 'var(--brand)' }}
+      />
+      <span className="tw-flex tw-flex-col tw-gap-0.5">
+        <span className="tw-text-sm tw-font-semibold" style={{ color: 'var(--brand-deep, #1E1B4B)' }}>
+          Quero receber a confirmação e os lembretes no WhatsApp
+        </span>
+        <span className="tw-text-xs" style={{ color: 'var(--text-muted, #6B7280)' }}>
+          Enviado por {WA_SENDER_NAME}{nome ? ` em nome de ${nome}` : ''}. Sem promoções — só sobre o seu
+          horário. Para sair, responda <b>PARAR</b>. Se preferir, deixe desmarcado: avisamos por e-mail.
+        </span>
+      </span>
+    </label>
   );
 }
 

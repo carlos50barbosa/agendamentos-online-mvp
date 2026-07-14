@@ -11,6 +11,12 @@ import { consumeLinkToken } from '../lib/wa_store.js';
 import { saveAvatarFromDataUrl, removeAvatarFile } from '../lib/avatar.js';
 import { MAX_TRIAL_DAYS } from '../lib/plans.js';
 import { config } from '../lib/config.js';
+import {
+  grantWhatsAppConsent,
+  revokeWhatsAppConsent,
+  describeWhatsAppConsent,
+  OPTIN_SOURCES,
+} from '../lib/whatsapp_consent.js';
 import { buildRateLimitClientKey, consumeRateLimit, setRateLimitHeaders } from '../lib/request_rate_limit.js';
 import { logSecurityEvent } from '../lib/route_access.js';
 import { setAudit } from '../lib/audit.js';
@@ -279,6 +285,23 @@ router.post('/register', async (req, res) => {
       onboarding_concluido: false,
       onboarding_etapa: 'profissionais',
     };
+
+    // Opt-in do WhatsApp, se a pessoa marcou a caixa no cadastro. Só um `true` explícito autoriza —
+    // um cadastro não é, por si, autorização para receber mensagem.
+    const optInRaw = req.body?.whatsapp_optin ?? req.body?.whatsappOptin;
+    const whatsappOptIn = optInRaw === true || optInRaw === 'true' || optInRaw === 1 || optInRaw === '1';
+    if (whatsappOptIn && telefoneTrim) {
+      try {
+        await grantWhatsAppConsent({
+          phone: telefoneTrim,
+          usuarioId: r.insertId,
+          origem: OPTIN_SOURCES.SIGNUP,
+          req,
+        });
+      } catch (err) {
+        console.warn('[optin][cadastro] falha ao registrar consentimento', err?.message || err);
+      }
+    }
 
     const maskPhoneForDisplay = (value) => {
       if (!value) return '-';
@@ -792,6 +815,66 @@ router.post('/me/email-confirm', auth, async (req, res) => {
     return res.json({ ok: true, user: normalized });
   } catch (e) {
     console.error('[auth/email-confirm]', e);
+    return res.status(500).json({ error: 'server_error' });
+  }
+});
+
+
+// --- Opt-in do WhatsApp (autogestão pelo titular do número) ---------------------------------
+//
+// O opt-out precisa ser tão fácil quanto o opt-in — a Meta cobra isso, e é o mínimo decente.
+// Por isso são três rotas simples e não um formulário escondido em Configurações.
+
+/** Estado atual do consentimento do usuário logado (alimenta a tela e serve de prova a ele). */
+router.get('/me/whatsapp-optin', auth, async (req, res) => {
+  try {
+    const [[row]] = await pool.query('SELECT telefone FROM usuarios WHERE id=? LIMIT 1', [req.user.id]);
+    if (!row?.telefone) return res.json({ optin: false, aceito_em: null, texto: null, sem_telefone: true });
+    return res.json(await describeWhatsAppConsent(row.telefone));
+  } catch (e) {
+    console.error('[auth/whatsapp-optin][get]', e);
+    return res.status(500).json({ error: 'server_error' });
+  }
+});
+
+router.post('/me/whatsapp-optin', auth, async (req, res) => {
+  try {
+    const [[row]] = await pool.query('SELECT telefone FROM usuarios WHERE id=? LIMIT 1', [req.user.id]);
+    if (!row?.telefone) {
+      return res.status(400).json({
+        error: 'sem_telefone',
+        message: 'Cadastre um telefone antes de ativar as mensagens no WhatsApp.',
+      });
+    }
+    await grantWhatsAppConsent({
+      phone: row.telefone,
+      usuarioId: req.user.id,
+      origem: OPTIN_SOURCES.CLIENT_PANEL,
+      req,
+    });
+    setAudit(req, { acao: 'whatsapp.optin', entidade: 'usuario', entidade_id: String(req.user.id) });
+    return res.json(await describeWhatsAppConsent(row.telefone));
+  } catch (e) {
+    console.error('[auth/whatsapp-optin][post]', e);
+    return res.status(500).json({ error: 'server_error' });
+  }
+});
+
+router.delete('/me/whatsapp-optin', auth, async (req, res) => {
+  try {
+    const [[row]] = await pool.query('SELECT telefone FROM usuarios WHERE id=? LIMIT 1', [req.user.id]);
+    // Sem telefone não há o que revogar — e devolver erro aqui só atrapalharia quem quer sair.
+    if (!row?.telefone) return res.json({ optin: false, aceito_em: null, texto: null });
+    await revokeWhatsAppConsent({
+      phone: row.telefone,
+      usuarioId: req.user.id,
+      origem: OPTIN_SOURCES.CLIENT_PANEL,
+      req,
+    });
+    setAudit(req, { acao: 'whatsapp.optout', entidade: 'usuario', entidade_id: String(req.user.id) });
+    return res.json(await describeWhatsAppConsent(row.telefone));
+  } catch (e) {
+    console.error('[auth/whatsapp-optin][delete]', e);
     return res.status(500).json({ error: 'server_error' });
   }
 });

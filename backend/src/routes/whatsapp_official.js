@@ -9,6 +9,7 @@ import { resolveReplyMode } from '../bot/engine/replyPolicy.js';
 import { detectIntent, normalizeIntentText } from '../bot/engine/intents.js';
 import { normalizeInboundMessage, parseWebhookPayload } from '../whatsapp/inbound/normalize.js';
 import { handleInstitutionalInboundAutoReply } from '../whatsapp/inbound/institutionalAutoReply.js';
+import { handleInboundOptOut } from '../whatsapp/inbound/optOut.js';
 import { handleReminderConfirmation } from '../whatsapp/inbound/reminderConfirmation.js';
 import { TEMPLATE_KEYS } from '../bot/templates/templateRegistry.js';
 import { dispatchBotReply } from '../bot/runtime/replyDispatcher.js';
@@ -735,6 +736,9 @@ async function processWebhookPayload(payload) {
     if (!isConnectedAccount(account)) {
       const messages = Array.isArray(block.messages) ? block.messages : [];
       for (const message of messages) {
+        // "PARAR" vem primeiro: quem pediu para sair não recebe menu nem saudação em seguida.
+        const optOut = await handleInboundOptOut({ phoneNumberId, value: block.value, message });
+        if (optOut.handled) continue;
         try {
           await handleInstitutionalInboundAutoReply({
             phoneNumberId,
@@ -759,6 +763,9 @@ async function processWebhookPayload(payload) {
 
     const messages = Array.isArray(block.messages) ? block.messages : [];
     for (const message of messages) {
+      // Idem no caminho do bot do tenant: o pedido de saída tem precedência sobre a conversa.
+      const optOut = await handleInboundOptOut({ phoneNumberId, value: block.value, message });
+      if (optOut.handled) continue;
       await processInboundMessage({
         account,
         phoneNumberId,

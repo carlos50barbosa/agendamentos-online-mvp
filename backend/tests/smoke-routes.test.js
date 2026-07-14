@@ -284,3 +284,87 @@ test('a vitrine publica marca o servico mais agendado', { skip }, async () => {
   assert.equal(servicos[0].booking_count, 2, 'os 2 agendamentos semeados deveriam ser contados');
   assert.equal(servicos[0].popular, true);
 });
+
+// --- Opt-in do WhatsApp: o fio entre a TELA e o BANCO --------------------------------------------
+//
+// Os testes de unidade provam que a lib grava e que o envio bloqueia. Nenhum deles prova que a
+// ROTA leva a caixa marcada ate a lib. Se o nome do campo no corpo estiver errado (whatsapp_optin
+// vs whatsappOptin vs optin), tudo continua "passando": ninguem nunca opta, nada e gravado, e o
+// WhatsApp simplesmente emudece — sem erro, sem log, sem ninguem perceber. Este teste faz um
+// agendamento publico DE VERDADE, por HTTP, e vai olhar a linha no banco.
+
+async function postJson(pathname, payload) {
+  const res = await fetch(`${baseUrl}${pathname}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  return { status: res.status, body: await res.text() };
+}
+
+// Amanha as 10:00 local: dentro do expediente padrao (07:00-22:00) e longe do lead minimo.
+function amanhaAs10h() {
+  const d = new Date();
+  d.setDate(d.getDate() + 1);
+  d.setHours(10, 0, 0, 0);
+  return d.toISOString();
+}
+
+test('agendamento publico COM a caixa marcada grava o consentimento (com a prova)', { skip }, async () => {
+  const telefone = '12987650001';
+  const e164 = `55${telefone}`;
+  await pool.query('DELETE FROM whatsapp_optins WHERE telefone_e164=?', [e164]);
+  await pool.query('DELETE FROM usuarios WHERE email=?', ['optin.sim@test.local']);
+
+  const { status, body } = await postJson('/public/agendamentos', {
+    estabelecimento_id: ESTAB_ID,
+    servico_ids: [SERVICO_ID],
+    profissional_id: PROF_ID,
+    inicio: amanhaAs10h(),
+    nome: 'Cliente Optou',
+    email: 'optin.sim@test.local',
+    telefone,
+    whatsapp_optin: true,
+  });
+  assert.equal(status, 201, `status ${status}: ${body.slice(0, 300)}`);
+
+  const [rows] = await pool.query(
+    'SELECT evento, origem, texto, texto_versao FROM whatsapp_optins WHERE telefone_e164=?',
+    [e164]
+  );
+  assert.equal(rows.length, 1, 'a caixa marcada tinha de virar exatamente uma linha de consentimento');
+  assert.equal(rows[0].evento, 'granted');
+  assert.equal(rows[0].origem, 'agendamento_publico');
+  assert.equal(rows[0].texto_versao, 'v1');
+  // O texto e renderizado pelo SERVIDOR e nomeia o salao — e isso que vale como prova.
+  assert.match(rows[0].texto, /Salao Smoke/);
+  assert.match(rows[0].texto, /PARAR/);
+});
+
+test('agendamento publico SEM a caixa marcada NAO grava consentimento (e o agendamento vale)', { skip }, async () => {
+  const telefone = '12987650002';
+  const e164 = `55${telefone}`;
+  await pool.query('DELETE FROM whatsapp_optins WHERE telefone_e164=?', [e164]);
+  await pool.query('DELETE FROM usuarios WHERE email=?', ['optin.nao@test.local']);
+
+  const inicio = new Date(amanhaAs10h());
+  inicio.setHours(inicio.getHours() + 2); // outro horario, para nao colidir com o teste acima
+
+  const { status, body } = await postJson('/public/agendamentos', {
+    estabelecimento_id: ESTAB_ID,
+    servico_ids: [SERVICO_ID],
+    profissional_id: PROF_ID,
+    inicio: inicio.toISOString(),
+    nome: 'Cliente Nao Optou',
+    email: 'optin.nao@test.local',
+    telefone,
+    // sem whatsapp_optin — exatamente como fica quando a pessoa deixa a caixa desmarcada
+  });
+
+  // O agendamento TEM de funcionar. Condicionar o servico ao aceite seria consentimento forcado —
+  // nao vale para a Meta, nao vale para a LGPD, e ainda derrubaria a conversao.
+  assert.equal(status, 201, `status ${status}: ${body.slice(0, 300)}`);
+
+  const [rows] = await pool.query('SELECT id FROM whatsapp_optins WHERE telefone_e164=?', [e164]);
+  assert.equal(rows.length, 0, 'sem a caixa marcada NAO pode existir consentimento gravado');
+});

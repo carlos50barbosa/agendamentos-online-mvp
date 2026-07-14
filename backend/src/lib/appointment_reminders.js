@@ -168,7 +168,13 @@ async function sendReminder(pool, row) {
       result = r.result;
     }
 
-    if (result?.blocked && (result.reason === 'insufficient_balance' || result.reason === 'per_appointment_limit')) {
+    // Bloqueou o WhatsApp — por QUALQUER motivo — manda o lembrete por e-mail.
+    //
+    // Antes esta condição listava só 'insufficient_balance' e 'per_appointment_limit'. Uma lista
+    // fechada de motivos é uma armadilha: quem cria um motivo novo (foi o caso do 'no_optin') não
+    // tem como saber que precisa vir aqui, e o lembrete simplesmente para de existir — sem erro,
+    // sem log, sem ninguém notar. O que importa aqui é o fato "o WhatsApp não saiu", não o porquê.
+    if (result?.blocked) {
       const email = String(row?.cliente_email || '').trim().toLowerCase();
       if (email) {
         try {
