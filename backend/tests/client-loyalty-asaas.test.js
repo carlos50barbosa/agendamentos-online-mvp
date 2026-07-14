@@ -251,3 +251,36 @@ test('o ciclo e gravado no fuso LOCAL — senao o cliente paga e fica 3h sem ben
   assert.ok(Math.abs(difMin) < 2,
     `o inicio do ciclo tem de ser AGORA no fuso local, nao ${difMin.toFixed(0)}min no futuro (UTC gravado como local)`)
 })
+
+// ---------------------------------------------------------------------------
+// A vitrine publica NAO pode devolver 5xx quando a feature esta desligada.
+// Em producao, cada visitante da pagina do estabelecimento virava uma linha
+// `level: "error"` no log — vindo de gente que so estava abrindo o link do Instagram.
+// Log de erro que nao e erro e onde o erro de verdade se esconde.
+// ---------------------------------------------------------------------------
+test('vitrine publica com a feature DESLIGADA: 200 com lista vazia, nunca 503', async () => {
+  const { createRequire } = await import('node:module')
+  const require2 = createRequire(import.meta.url)
+  const express = require2('express')
+
+  process.env.LOYALTY_ENABLED = 'false'
+  const { config } = await import('../src/lib/config.js')
+  config.loyalty.enabled = false // garante o estado, independentemente da ordem de import
+
+  const { default: router } = await import('../src/routes/client_loyalty.js')
+  const app = express()
+  app.use(express.json())
+  app.use(router)
+
+  const server = app.listen(0, '127.0.0.1')
+  await new Promise((r) => server.once('listening', r))
+  const { port } = server.address()
+
+  const res = await fetch(`http://127.0.0.1:${port}/public/estabelecimentos/qualquer/loyalty-plans`)
+  const body = await res.json()
+
+  server.close()
+
+  assert.equal(res.status, 200, 'nao pode ser 503: o visitante nao tem culpa da flag estar off')
+  assert.deepEqual(body, { items: [] }, '"sem planos" e a verdade para quem so abriu a pagina')
+})

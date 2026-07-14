@@ -155,8 +155,22 @@ router.get('/loyalty/split-preview', auth, isEstabelecimento, ensureLoyaltyEnabl
 // PÚBLICO: a vitrine de planos do estabelecimento.
 // ---------------------------------------------------------------------------
 
-router.get('/public/estabelecimentos/:idOrSlug/loyalty-plans', ensureLoyaltyEnabled, async (req, res) => {
+/**
+ * A vitrine NÃO usa o `ensureLoyaltyEnabled`: com a flag desligada ela responde 200 com lista
+ * vazia, e não 503.
+ *
+ * Por quê: esta rota é chamada em TODA abertura da página pública do estabelecimento. Com o
+ * 503, cada visitante real virava uma linha `level: "error"` no log de produção — vi isso
+ * acontecendo com um salão que recebe tráfego do Instagram. Log de erro que não é erro é pior
+ * do que inútil: é onde o erro de verdade se esconde.
+ *
+ * E, para quem está só olhando a página, "sem planos" é a verdade — não uma falha. O 503
+ * continua valendo onde faz sentido: para o DONO (que precisa saber que o recurso não está
+ * habilitado) e para o CLIENTE que tenta assinar.
+ */
+router.get('/public/estabelecimentos/:idOrSlug/loyalty-plans', async (req, res) => {
   try {
+    if (!config.loyalty.enabled) return res.json({ items: [] });
     const key = String(req.params.idOrSlug || '').trim();
     const [rows] = await pool.query(
       'SELECT id FROM usuarios WHERE tipo=\'estabelecimento\' AND (id=? OR slug=?) LIMIT 1',
