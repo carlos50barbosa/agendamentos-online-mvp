@@ -28,6 +28,10 @@ function mapBookingError(e) {
   switch (code) {
     case 'cpf_required_for_deposit':
       return 'Informe seu CPF acima para pagar o sinal via PIX.';
+    case 'telefone_invalido':
+      return 'Informe um número de celular válido com DDD.';
+    case 'email_invalido':
+      return 'Informe um e-mail válido ou deixe o campo em branco.';
     case 'profissional_obrigatorio':
       return 'Selecione um profissional para este serviço.';
     case 'signal_too_low':
@@ -158,17 +162,19 @@ export default function BookingPublic() {
 
   const onConfirm = useCallback(async ({ services, professional, date, slot, guest, whatsappOptIn }) => {
     const cpfDigits = (guest?.cpf || '').replace(/\D/g, '');
+    const email = (guest?.email || '').trim();
     const inicio = typeof slot?.datetime === 'string' ? slot.datetime : new Date(slot.datetime).toISOString();
     const payload = {
       estabelecimento_id: Number(establishmentId),
       servico_ids: (services || []).map((s) => s.id),
       inicio,
       nome: (guest?.nome || '').trim(),
-      email: (guest?.email || '').trim(),
       telefone: (guest?.telefone || '').replace(/\D/g, ''),
       // Sem isto o backend não manda WhatsApp nenhum — nem confirmação, nem lembrete.
       whatsapp_optin: whatsappOptIn === true,
     };
+    // E-mail é opcional: só vai no payload quando informado (o backend cria um placeholder senão).
+    if (email) payload.email = email;
     if (cpfDigits) payload.cpf = cpfDigits;
     if (professional?.id) payload.profissional_id = professional.id;
 

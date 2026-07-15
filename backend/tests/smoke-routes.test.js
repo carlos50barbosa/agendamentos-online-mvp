@@ -477,3 +477,35 @@ test('agendamento publico SEM a caixa marcada NAO grava consentimento (e o agend
   const [rows] = await pool.query('SELECT id FROM whatsapp_optins WHERE telefone_e164=?', [e164]);
   assert.equal(rows.length, 0, 'sem a caixa marcada NAO pode existir consentimento gravado');
 });
+
+// --- E-mail opcional: nome + telefone bastam ------------------------------------------------------
+//
+// O campo e-mail saiu da lista de obrigatorios do agendamento publico. Como usuarios.email e
+// NOT NULL UNIQUE, um guest sem e-mail nao pode gravar '' (o segundo colidiria na UNIQUE e, pior, o
+// lookup por LOWER(email)='' casaria o proximo guest no cadastro do anterior — a pessoa ERRADA).
+// A rota resolve isso com um e-mail placeholder por telefone. Este teste prova que o caminho
+// sem e-mail cria o agendamento E o cliente com o placeholder esperado.
+test('agendamento publico SEM e-mail: nome + telefone bastam (e-mail placeholder por telefone)', { skip }, async () => {
+  const telefone = '12987650003';
+  const e164 = `55${telefone}`;
+  await pool.query('DELETE FROM usuarios WHERE telefone=?', [e164]);
+
+  const inicio = new Date(amanhaAs10h());
+  inicio.setHours(inicio.getHours() + 4); // horario proprio, para nao colidir com os testes acima
+
+  const { status, body } = await postJson('/public/agendamentos', {
+    estabelecimento_id: ESTAB_ID,
+    servico_ids: [SERVICO_ID],
+    profissional_id: PROF_ID,
+    inicio: inicio.toISOString(),
+    nome: 'Cliente Sem Email',
+    telefone,
+    // sem email — o campo agora e opcional
+  });
+  assert.equal(status, 201, `status ${status}: ${body.slice(0, 300)}`);
+
+  const [rows] = await pool.query('SELECT nome, email FROM usuarios WHERE telefone=? LIMIT 1', [e164]);
+  assert.equal(rows.length, 1, 'o cliente guest deveria ter sido criado');
+  assert.equal(rows[0].nome, 'Cliente Sem Email');
+  assert.match(rows[0].email, /@sem-email\.agendou\.local$/, 'sem e-mail informado -> e-mail placeholder por telefone');
+});

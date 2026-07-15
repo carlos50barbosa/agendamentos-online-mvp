@@ -17,7 +17,7 @@ import DayChips from '../agenda/DayChips.jsx';
 import SlotPicker from '../agenda/SlotPicker.jsx';
 import PixCheckout from '../agenda/PixCheckout.jsx';
 import { buildDayRange, fullDateLabel, hourLabel, durationLabel } from '../../utils/agendaDates.js';
-import { formatBRPhone, formatCpfCnpj } from '../../utils/masks.js';
+import { formatBRPhone, formatCpfCnpj, isValidMobileBR } from '../../utils/masks.js';
 import { WA_SENDER_NAME } from '../../utils/whatsappConsent.js';
 import { useWhatsAppAvailable } from '../../hooks/useWhatsAppStatus.js';
 import { site } from '../../config/site.js';
@@ -203,11 +203,13 @@ export default function BookingWizard({
     if (collectGuest) {
       const nome = guest.nome.trim();
       const email = guest.email.trim();
-      const telDigits = guest.telefone.replace(/\D/g, '');
       const cpfDigits = guest.cpf.replace(/\D/g, '');
       if (!nome) { setError('Informe seu nome.'); return; }
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { setError('Informe um e-mail válido.'); return; }
-      if (telDigits.length < 10) { setError('Informe um telefone válido (com DDD).'); return; }
+      // E-mail é opcional: só valida o formato quando a pessoa digitou algo.
+      if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { setError('Informe um e-mail válido ou deixe o campo em branco.'); return; }
+      // Celular obrigatório: com o e-mail opcional, é o canal de contato de quem não deu e-mail.
+      // Um fixo não recebe WhatsApp. Ver isValidMobileBR (espelha o backend).
+      if (!isValidMobileBR(guest.telefone)) { setError('Informe um número de celular válido com DDD.'); return; }
       if (cpfDigits && !(cpfDigits.length === 11 || cpfDigits.length === 14)) { setError('CPF/CNPJ inválido.'); return; }
     }
     setSubmitting(true);
@@ -407,8 +409,8 @@ export default function BookingWizard({
             {collectGuest && (
               <div className="tw-mt-3 tw-flex tw-flex-col tw-gap-2">
                 <GuestInput label="Nome" value={guest.nome} onChange={(v) => setGuest((g) => ({ ...g, nome: v }))} placeholder="Seu nome" autoComplete="name" />
-                <GuestInput label="E-mail" type="email" value={guest.email} onChange={(v) => setGuest((g) => ({ ...g, email: v }))} placeholder="voce@email.com" autoComplete="email" />
-                <GuestInput label="Telefone" value={guest.telefone} onChange={(v) => setGuest((g) => ({ ...g, telefone: v }))} format={formatBRPhone} placeholder="(11) 99999-9999" autoComplete="tel" inputMode="tel" />
+                <GuestInput label="E-mail (opcional)" type="email" value={guest.email} onChange={(v) => setGuest((g) => ({ ...g, email: v }))} placeholder="voce@email.com" autoComplete="email" />
+                <GuestInput label="Celular" value={guest.telefone} onChange={(v) => setGuest((g) => ({ ...g, telefone: v }))} format={formatBRPhone} placeholder="(11) 99999-9999" autoComplete="tel" inputMode="tel" />
                 <GuestInput label="CPF/CNPJ" value={guest.cpf} onChange={(v) => setGuest((g) => ({ ...g, cpf: v }))} format={formatCpfCnpj} placeholder="Necessário se houver sinal (PIX)" inputMode="numeric" />
               </div>
             )}

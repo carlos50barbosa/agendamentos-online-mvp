@@ -28,7 +28,7 @@ import { buildPublicDepositToken, verifyPublicDepositToken } from '../lib/public
 import { applyClientLoyaltyBenefitsTx, previewClientLoyaltyBenefits } from '../lib/client_loyalty_credits.js'
 import { cancelPendingPaymentAppointmentTx, cancelPublicPendingAppointmentTx } from '../lib/appointment_loyalty.js'
 import { checkAppointmentSlotCapacityTx, normalizeServiceSlotCapacity } from '../lib/service_capacity.js';
-import { normalizePhoneBR, toDigits } from '../lib/phone_br.js';
+import { normalizePhoneBR, toDigits, isValidMobileBR } from '../lib/phone_br.js';
 
 const router = Router();
 const TZ = 'America/Sao_Paulo';
@@ -48,6 +48,18 @@ const MIN_LEAD_MIN = (() => {
   return Number.isFinite(parsed) && parsed > 0 ? Math.round(parsed) : 0;
 })();
 const DEFAULT_DEPOSIT_HOLD_MINUTES = 15;
+
+// E-mail é opcional no agendamento público: nome + telefone bastam. Como usuarios.email é
+// NOT NULL UNIQUE, o cadastro sem e-mail recebe um placeholder determinístico pelo telefone —
+// preserva a unicidade sem inventar um endereço que possa colidir com o de outra pessoa. Nunca é
+// um e-mail real: as rotinas de envio o reconhecem pelo domínio e caem para o outro canal (nada
+// de bounce nem de cobrança por template enviado a lugar nenhum).
+const GUEST_PLACEHOLDER_EMAIL_DOMAIN = 'sem-email.agendou.local';
+const isPlaceholderGuestEmail = (email) =>
+  typeof email === 'string' && email.toLowerCase().endsWith(`@${GUEST_PLACEHOLDER_EMAIL_DOMAIN}`);
+const buildPlaceholderGuestEmail = (phoneKey) =>
+  `guest-${phoneKey}@${GUEST_PLACEHOLDER_EMAIL_DOMAIN}`;
+const isValidEmailFormat = (value) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || '').trim());
 
 const safeJson = (payload) => {
   try {
@@ -434,7 +446,9 @@ async function notifyPublicConfirmedAppointment(appointmentId) {
 
     try {
       const emailNorm = ag.cliente_email ? String(ag.cliente_email).trim().toLowerCase() : '';
-      if (emailNorm) {
+      // Placeholder de guest sem e-mail não é endereço real — pular o envio (a confirmação vai por
+      // WhatsApp quando houve opt-in). Ver buildPlaceholderGuestEmail.
+      if (emailNorm && !isPlaceholderGuestEmail(emailNorm)) {
         const subject = tmpl.email_subject || 'Agendamento confirmado';
         const rawTemplate =
           tmpl.email_html ||
@@ -571,10 +585,12 @@ router.post('/', ensureSubscriptionOperationalAccess({
     }
 
     const serviceIds = extractServiceIds(req.body || {});
-    if (!estabelecimento_id || !serviceIds.length || !inicio || !nome || !email || !telefone) {
+    // E-mail saiu da lista de obrigatórios: nome + telefone bastam. Quando informado, ele ainda é
+    // validado e usado; quando não, o cliente ganha um e-mail placeholder (ver abaixo).
+    if (!estabelecimento_id || !serviceIds.length || !inicio || !nome || !telefone) {
       return res.status(400).json({
         error: 'invalid_payload',
-        message: 'Campos obrigatórios: estabelecimento_id, servico_ids, inicio, nome, e-mail, telefone.'
+        message: 'Campos obrigatórios: estabelecimento_id, servico_ids, inicio, nome, telefone.'
       });
     }
 
@@ -696,9 +712,24 @@ router.post('/', ensureSubscriptionOperationalAccess({
       });
     }
 
-    const emailNorm = String(email).trim().toLowerCase();
+    const emailInput = String(email ?? '').trim().toLowerCase();
+    if (emailInput && !isValidEmailFormat(emailInput)) {
+      return res.status(400).json({ error: 'email_invalido', message: 'Informe um e-mail válido ou deixe o campo em branco.' });
+    }
+    const emailProvided = emailInput.length > 0;
+    // emailNorm = e-mail real e contactável, ou null quando o cliente não informou. O downstream
+    // (Asaas/MP/confirmação por e-mail) já trata null como "sem e-mail" e cai para o WhatsApp.
+    const emailNorm = emailProvided ? emailInput : null;
     const telDigits = toDigits(telefone);
     const telNorm = normalizePhoneBR(telefone);
+    // Com o e-mail opcional, o telefone vira a âncora de identidade, a chave do e-mail placeholder E
+    // — na prática — o único canal de contato de quem não deu e-mail. Por isso exigimos CELULAR
+    // (isValidMobileBR), não só um telefone normalizável: um fixo não recebe WhatsApp e, sem e-mail,
+    // deixaria o cliente inalcançável. isValidMobileBR já rejeita o não-normalizável, então telNorm
+    // é truthy quando ele passa. O front espelha; aqui também pega o acesso direto à API.
+    if (!isValidMobileBR(telefone)) {
+      return res.status(400).json({ error: 'telefone_invalido', message: 'Informe um número de celular válido com DDD.' });
+    }
 
     // OTP opcional (exigido via flag)
     const requireOtp = /^(1|true)$/i.test(String(process.env.PUBLIC_BOOKING_REQUIRE_OTP || ''));
@@ -818,7 +849,7 @@ router.post('/', ensureSubscriptionOperationalAccess({
     let userId = null;
     let userByEmail = null;
     let userByPhone = null;
-    {
+    if (emailProvided) {
       const [urows] = await pool.query(
         'SELECT id, nome, email, telefone FROM usuarios WHERE LOWER(email)=? LIMIT 1',
         [emailNorm]
@@ -857,11 +888,13 @@ router.post('/', ensureSubscriptionOperationalAccess({
     }
     if (!userId) {
       const hash = await bcrypt.hash(Math.random().toString(36), 10);
+      // Sem e-mail informado, grava um placeholder único por telefone (email é NOT NULL UNIQUE).
+      const emailForRecord = emailNorm || buildPlaceholderGuestEmail(telNorm);
       const [r] = await pool.query(
         "INSERT INTO usuarios (nome, email, telefone, cpf_cnpj, data_nascimento, cep, endereco, numero, complemento, bairro, cidade, estado, senha_hash, tipo) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,'cliente')",
         [
           String(nome).slice(0,120),
-          emailNorm,
+          emailForRecord,
           telNorm || null,
           cpfDigits || null,
           dataNascimentoValue,
@@ -880,6 +913,13 @@ router.post('/', ensureSubscriptionOperationalAccess({
       try {
         const updates = ['nome=COALESCE(nome,?)'];
         const params = [String(nome).slice(0,120)];
+        // Cliente que existia só com telefone (e-mail placeholder) e agora informou um e-mail real:
+        // captura o e-mail. O lookup por e-mail acima retornou vazio (!userByEmail), então ele não
+        // pertence a outra pessoa — sem risco de colidir na UNIQUE(email).
+        if (emailProvided && !userByEmail && isPlaceholderGuestEmail(existingUser.email)) {
+          updates.push('email=?');
+          params.push(emailNorm);
+        }
         if (telNorm) {
           updates.push('telefone=?');
           params.push(telNorm);
