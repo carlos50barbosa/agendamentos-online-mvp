@@ -33,6 +33,46 @@ export function formatBRPhone(value = '') {
   return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}`;
 }
 
+/**
+ * Os 67 DDDs que existem. Espelha lib/phone_br.js no backend — a fonte da verdade é lá; esta cópia
+ * existe porque o front não importa código do backend. Se um mudar, mude o outro.
+ */
+const DDD_VALIDOS_BR = new Set([
+  11, 12, 13, 14, 15, 16, 17, 18, 19,
+  21, 22, 24, 27, 28,
+  31, 32, 33, 34, 35, 37, 38,
+  41, 42, 43, 44, 45, 46, 47, 48, 49,
+  51, 53, 54, 55,
+  61, 62, 63, 64, 65, 66, 67, 68, 69,
+  71, 73, 74, 75, 77, 79,
+  81, 82, 83, 84, 85, 86, 87, 88, 89,
+  91, 92, 93, 94, 95, 96, 97, 98, 99,
+]);
+
+/** Normaliza para E.164-BR (55 + DDD + número). '' quando não dá para normalizar com segurança. */
+export function normalizePhoneBR(value = '') {
+  const digits = onlyDigits(value).replace(/^0+/, '');
+  if (!digits) return '';
+  if ((digits.length === 12 || digits.length === 13) && digits.startsWith('55')) return digits;
+  if (digits.length === 10 || digits.length === 11) return `55${digits}`;
+  return '';
+}
+
+/**
+ * Este número tem chance real de receber WhatsApp? Espelha isValidMobileBR de lib/phone_br.js
+ * (a régua e o porquê estão documentados lá). Aceita celular (13 díg. com nono 9, ou 12 díg.
+ * começando 6–9); rejeita fixo e DDD inexistente.
+ */
+export function isValidMobileBR(value = '') {
+  const e164 = normalizePhoneBR(value);
+  if (e164.length !== 12 && e164.length !== 13) return false;
+  const ddd = Number(e164.slice(2, 4));
+  if (!DDD_VALIDOS_BR.has(ddd)) return false;
+  const primeiro = e164[4];
+  if (e164.length === 13) return primeiro === '9';
+  return primeiro >= '6' && primeiro <= '9';
+}
+
 /** CPF (999.999.999-99) ou CNPJ (99.999.999/9999-99), conforme o tamanho. */
 export function formatCpfCnpj(value = '') {
   const digits = onlyDigits(value).slice(0, 14);
