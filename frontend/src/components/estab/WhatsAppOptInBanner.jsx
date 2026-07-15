@@ -10,7 +10,7 @@
 // Só aparece para quem PRECISA: dono com a notificação ligada de antes do opt-in existir e sem
 // aceite registrado. Para ele o envio está BLOQUEADO — e ele precisa saber disso, em vez de achar
 // que recebe. Quem já aceitou não vê nada.
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { MessageCircle, Check, Loader2 } from 'lucide-react';
 import { Api } from '../../utils/api';
 import { buildConsentText, CONSENT_AUDIENCE } from '../../utils/whatsappConsent.js';
@@ -18,6 +18,12 @@ import { useWhatsAppAvailable, useWhatsAppConsent } from '../../hooks/useWhatsAp
 import styles from './WhatsAppOptInBanner.module.css';
 
 const CONSENT_TEXT = buildConsentText({ audience: CONSENT_AUDIENCE.ESTABLISHMENT });
+
+// Quanto tempo a tela fica perguntando "já autorizou?" antes de desistir. Sem isto, uma aba deixada
+// aberta por quem clicou em Autorizar e NÃO enviou o AUTORIZO fica batendo no servidor a cada 3s para
+// sempre — o webhook nunca vai confirmar um envio que não aconteceu. Três minutos cobre com folga
+// quem foi mesmo mandar a mensagem; passou disso, é aba esquecida.
+const ESPERA_MAX_MS = 3 * 60 * 1000;
 
 export default function WhatsAppOptInBanner() {
   const available = useWhatsAppAvailable();
@@ -27,10 +33,23 @@ export default function WhatsAppOptInBanner() {
   // Depois de mandar o AUTORIZO, quem grava o consentimento é o WEBHOOK — não esta tela. Então ela
   // fica perguntando ao servidor até o aceite aparecer, e some sozinha quando aparece.
   const [aguardando, setAguardando] = useState(false);
+  // A espera desistiu sem confirmação: paramos de perguntar e avisamos que é para reenviar.
+  const [expirado, setExpirado] = useState(false);
+  // O prazo-limite mora num ref, não no estado do efeito: `refresh` troca de identidade a cada
+  // resposta e faz o efeito recriar o intervalo, o que zeraria qualquer contagem local. O ref
+  // sobrevive a esses re-renders, então o limite é absoluto — não reinicia a cada poll.
+  const prazoRef = useRef(0);
 
   useEffect(() => {
     if (!aguardando) return undefined;
-    const id = setInterval(refresh, 3000);
+    const id = setInterval(() => {
+      if (Date.now() >= prazoRef.current) {
+        setAguardando(false);
+        setExpirado(true);
+        return;
+      }
+      refresh();
+    }, 3000);
     return () => clearInterval(id);
   }, [aguardando, refresh]);
 
@@ -47,11 +66,14 @@ export default function WhatsAppOptInBanner() {
   const autorizar = async () => {
     setBusy(true);
     setErro(null);
+    setExpirado(false);
     try {
       const r = await Api.whatsappOptin();
       if (!r?.wa_link) throw new Error('sem link');
       // Abre numa aba nova: o dono volta para o painel e encontra o banner já resolvido.
       window.open(r.wa_link, '_blank', 'noopener');
+      // Zera a contagem A CADA clique: um reenvio começa a espera do zero, não herda o prazo antigo.
+      prazoRef.current = Date.now() + ESPERA_MAX_MS;
       setAguardando(true);
     } catch (e) {
       setErro(e?.data?.message || 'Não foi possível abrir o WhatsApp. Tente de novo.');
@@ -97,6 +119,14 @@ export default function WhatsAppOptInBanner() {
             <b>Abrimos o WhatsApp com a mensagem pronta.</b> É só <b>enviar</b> — assim que ela
             chegar, este aviso some sozinho. A confirmação precisa sair <b>do seu WhatsApp</b>: é
             assim que sabemos que o número é seu, e não de outra pessoa.
+          </p>
+        )}
+
+        {expirado && (
+          <p className={styles.lead} role="status">
+            <b>Ainda não recebemos sua confirmação.</b> Se você já enviou o <b>AUTORIZO</b>, aguarde
+            alguns instantes e recarregue a página. Se ainda não enviou, toque em{' '}
+            <b>Autorizar no WhatsApp</b> de novo para reabrir a mensagem.
           </p>
         )}
 
