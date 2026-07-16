@@ -114,6 +114,13 @@ async function seed() {
 
   // Um agendamento no passado (conta como atendimento realizado -> alimenta o CRM,
   // os relatorios e a contagem de "mais agendados") e um no futuro.
+  //
+  // O futuro fica a +48h (depois de amanha), e NAO a +24h, de proposito: os testes de booking
+  // marcam AMANHA (10h/12h/14h/16h), e o mesmo profissional (9003). Com o appt semeado a +24h, ele
+  // caia no mesmo DIA dos slots de teste — e, por causa do descasamento UTC/local do DATETIME (o
+  // `iso()` grava string UTC crua, o MySQL local le com +3h), o horario efetivo escorregava para
+  // perto das 10h e disparava 409 slot_ocupado, de forma flaky conforme a hora do dia. Dois dias
+  // distintos nunca colidem — resolve independente da hora e do fuso.
   const [past] = await pool.query(
     `INSERT INTO agendamentos
        (cliente_id, estabelecimento_id, servico_id, profissional_id, inicio, fim, status, total_centavos)
@@ -124,7 +131,7 @@ async function seed() {
     `INSERT INTO agendamentos
        (cliente_id, estabelecimento_id, servico_id, profissional_id, inicio, fim, status, total_centavos)
      VALUES (?, ?, ?, ?, ?, ?, 'confirmado', 5000)`,
-    [CLIENTE_ID, ESTAB_ID, SERVICO_ID, PROF_ID, iso(1440), iso(1470)]
+    [CLIENTE_ID, ESTAB_ID, SERVICO_ID, PROF_ID, iso(2880), iso(2910)]
   );
 
   for (const id of [past.insertId, future.insertId]) {

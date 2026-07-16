@@ -470,6 +470,21 @@ async function notifyPublicConfirmedAppointment(appointmentId) {
       }
     } catch {}
 
+    // E-mail ao ESTABELECIMENTO — faltava só no fluxo público. Os demais fluxos de confirmação
+    // (cliente logado, criado pelo estab, confirmação após sinal) já avisam o dono por e-mail; o
+    // agendamento por link público avisava só por WhatsApp. Com o WhatsApp fora, o dono não sabia
+    // que entrou horário. Mesmas condições dos outros fluxos: preferência ligada e envio ao estab
+    // não desativado. try/catch próprio para uma falha de e-mail não derrubar o resto.
+    try {
+      if (!blockEstabNotifications && est?.email && boolPref(est?.notify_email_estab, true)) {
+        await notifyEmail(
+          est.email,
+          'Novo agendamento recebido',
+          `<p>Você recebeu um novo agendamento de <b>${serviceLabel}</b>${profLabel} em <b>${inicioBR}</b> para o cliente <b>${ag.cliente_nome || ''}</b>.</p>`
+        );
+      }
+    } catch {}
+
     try {
         if (!blockWhatsappImmediate && !blockWhatsappConfirmation && !blockClientWhatsapp && telCli) {
           const paramMode = String(process.env.WA_TEMPLATE_PARAM_MODE || 'single').toLowerCase();
