@@ -19,8 +19,7 @@ import SlotPicker from '../agenda/SlotPicker.jsx';
 import PixCheckout from '../agenda/PixCheckout.jsx';
 import { buildDayRange, fullDateLabel, hourLabel, durationLabel } from '../../utils/agendaDates.js';
 import { formatBRPhone, formatCpfCnpj, isValidMobileBR } from '../../utils/masks.js';
-import { WA_SENDER_NAME } from '../../utils/whatsappConsent.js';
-import { useWhatsAppAvailable } from '../../hooks/useWhatsAppStatus.js';
+import { useWhatsAppConfig } from '../../hooks/useWhatsAppStatus.js';
 import { site } from '../../config/site.js';
 import { iconSizes } from '../../config/theme.js';
 
@@ -76,11 +75,12 @@ export default function BookingWizard({
   }));
   const [slotsState, setSlotsState] = useState({ loading: false, list: [] });
   const [detailService, setDetailService] = useState(null);
-  // Opt-in do WhatsApp. Nasce DESMARCADO e assim tem de ficar: caixa pré-marcada não é
-  // consentimento ativo — para a Meta e para a LGPD é como se não houvesse aceite nenhum, e é a
-  // primeira coisa que derruba um recurso. Marcar sozinho custaria a conta de novo.
-  const [waOptIn, setWaOptIn] = useState(false);
-  const waAvailable = useWhatsAppAvailable();
+  // "Quero receber notificações". Só INTENÇÃO — não grava consentimento de WhatsApp. Nesta rota
+  // pública, sem login, qualquer um poderia digitar o número de um estranho; consentimento por
+  // clique aqui é forjável, e foi o que custou a conta. A confirmação vai por e-mail; o WhatsApp só
+  // liga quando a pessoa envia "AUTORIZO" do próprio número (botão na tela de sucesso).
+  const [wantsNotify, setWantsNotify] = useState(false);
+  const { available: waAvailable, number: waNumber } = useWhatsAppConfig();
 
   const days = useMemo(() => daysProp || buildDayRange(new Date(), 14), [daysProp]);
 
@@ -227,7 +227,7 @@ export default function BookingWizard({
     setSubmitting(true);
     setError(null);
     try {
-      const result = await onConfirm({ services: selectedServices, professional, date, slot, guest, whatsappOptIn: waOptIn });
+      const result = await onConfirm({ services: selectedServices, professional, date, slot, guest, wantsNotify });
       setPix(result);
       go(STEP.PAGAMENTO);
     } catch (e) {
@@ -430,12 +430,15 @@ export default function BookingWizard({
               </div>
             )}
 
-            <WhatsAppOptIn
-              checked={waOptIn}
-              onChange={setWaOptIn}
-              establishmentName={establishment?.nome || establishmentName}
-              unavailable={!waAvailable}
-            />
+            {collectGuest && (
+              <NotifyOptIn
+                checked={wantsNotify}
+                onChange={setWantsNotify}
+                email={guest.email}
+                onEmailChange={(v) => setGuest((g) => ({ ...g, email: v }))}
+                available={waAvailable}
+              />
+            )}
 
             {error && (
               <p className="tw-mt-3 tw-text-sm" style={{ color: 'var(--status-cancelado-fg)' }}>
@@ -476,8 +479,21 @@ export default function BookingWizard({
                   <Check size={30} strokeWidth={3} style={{ color: '#fff' }} />
                 </span>
                 <p className="tw-m-0 tw-text-sm" style={{ color: 'var(--ink, #1E1B4B)' }}>
-                  {pix.message || 'Seu agendamento foi registrado. Confirme pelo link enviado no seu e-mail ou WhatsApp.'}
+                  {pix.message || 'Seu agendamento foi registrado. Enviamos a confirmação para o seu e-mail.'}
                 </p>
+                {/* O WhatsApp só liga aqui: a pessoa clica, o WhatsApp dela abre com "AUTORIZO"
+                    pronto, e ela envia. É a prova de posse do número que não dá para forjar. */}
+                {wantsNotify && (
+                  <>
+                    <AutorizoWhatsApp number={waNumber} available={waAvailable} />
+                    {waAvailable && waNumber && (
+                      <p className="tw-m-0 tw-text-xs" style={{ color: 'var(--muted-ink, #6B7280)' }}>
+                        Toque acima e <b>envie</b> a mensagem que abrir — é assim que confirmamos que o
+                        número é seu.
+                      </p>
+                    )}
+                  </>
+                )}
               </div>
             ) : (
               <>
@@ -525,22 +541,20 @@ function ProgressBar({ current, total }) {
 }
 
 /**
- * A caixa de opt-in do WhatsApp.
+ * "Deseja receber notificações por e-mail e WhatsApp?"
  *
- * Três decisões que parecem detalhe e não são:
+ * Uma PERGUNTA, não um aceite. Marcar não grava consentimento de WhatsApp nenhum — só revela o
+ * campo de e-mail e explica o que vem depois. É a diferença que fecha o buraco: esta é uma rota
+ * pública, sem login, e qualquer um poderia digitar o número de um estranho. Um clique aqui não
+ * pode virar autorização (foi assim que a conta caiu).
  *
- * 1. NASCE DESMARCADA. Caixa pré-marcada não é consentimento ativo — nem para a Meta, nem para a
- *    LGPD. Custa taxa de adesão, sim. Custa menos que a conta banida.
- *
- * 2. NÃO BLOQUEIA O AGENDAMENTO. Condicionar o serviço ao aceite é consentimento forçado, que não
- *    vale (e ainda derruba a conversão). Quem não marcar agenda igual e recebe por e-mail.
- *
- * 3. O TEXTO NOMEIA QUEM ENVIA. É o que a Meta exige e o que evita a denúncia: a pessoa precisa
- *    reconhecer o remetente quando a mensagem chegar. A frase é a mesma que o servidor grava como
- *    prova — ver utils/whatsappConsent.js.
+ * O que cada canal faz:
+ *   - E-MAIL: é a confirmação de verdade deste agendamento. Opcional, mas é o único canal que
+ *     entrega na hora, sem depender de mais nenhum passo.
+ *   - WHATSAPP: só liga quando a pessoa envia "AUTORIZO" do PRÓPRIO número — botão na tela de
+ *     sucesso. Aqui a gente só avisa que essa instrução vem a seguir.
  */
-function WhatsAppOptIn({ checked, onChange, establishmentName, unavailable = false }) {
-  const nome = String(establishmentName || '').trim();
+function NotifyOptIn({ checked, onChange, email, onEmailChange, available }) {
   return (
     <div className="tw-mt-3 tw-flex tw-flex-col">
       <label
@@ -556,33 +570,63 @@ function WhatsAppOptIn({ checked, onChange, establishmentName, unavailable = fal
         />
         <span className="tw-flex tw-flex-col tw-gap-0.5">
           <span className="tw-text-sm tw-font-semibold" style={{ color: 'var(--brand-deep, #1E1B4B)' }}>
-            Quero receber a confirmação e os lembretes no WhatsApp
+            Deseja receber notificações por e-mail e WhatsApp?
           </span>
           <span className="tw-text-xs" style={{ color: 'var(--text-muted, #6B7280)' }}>
-            Enviado por {WA_SENDER_NAME}{nome ? ` em nome de ${nome}` : ''}. Sem promoções — só sobre o seu
-            horário. Para sair, responda <b>PARAR</b>. Se preferir, deixe desmarcado: avisamos por e-mail.
+            Confirmação e lembretes do seu horário. Sem promoções.
           </span>
         </span>
       </label>
 
-      {/* Aviso de STATUS, deliberadamente FORA do rótulo da caixa.
-          O texto lá em cima é a prova: é ele que o servidor grava, palavra por palavra, e um teste
-          impede que a tela e o banco divirjam. Enfiar "está fora do ar hoje" lá dentro contaminaria
-          a prova com uma circunstância passageira — e daqui a um mês o registro diria que a pessoa
-          aceitou um aviso de apagão.
-          A caixa continua funcionando: um canal fora do ar é motivo para não PROMETER, não para
-          deixar de PERGUNTAR. O aceite fica guardado e vale quando o WhatsApp voltar. */}
-      {unavailable && checked && (
-        <p
-          className="tw-mt-2 tw-rounded-xl tw-px-3 tw-py-2 tw-text-xs"
-          style={{ background: 'var(--warning-bg, #FEF3C7)', color: 'var(--warning-text, #92400E)' }}
-        >
-          <b>Só um aviso:</b> nossas mensagens no WhatsApp estão temporariamente suspensas. Por
-          enquanto a confirmação e o lembrete vão para o seu <b>e-mail</b> — e seu aceite fica
-          guardado para quando o WhatsApp voltar.
-        </p>
+      {checked && (
+        <div className="tw-mt-2 tw-flex tw-flex-col tw-gap-2 tw-pl-1">
+          <GuestInput
+            label="E-mail (opcional)"
+            type="email"
+            value={email}
+            onChange={onEmailChange}
+            placeholder="voce@email.com"
+            autoComplete="email"
+          />
+          <p className="tw-text-xs" style={{ color: 'var(--text-muted, #6B7280)' }}>
+            {available ? (
+              <>
+                Enviaremos a <b>confirmação por e-mail</b>. Para ativar os lembretes no <b>WhatsApp</b>,
+                é só enviar uma mensagem — mostramos como assim que você concluir.
+              </>
+            ) : (
+              <>
+                Enviaremos a <b>confirmação por e-mail</b>. Nossas mensagens no WhatsApp estão
+                <b> temporariamente indisponíveis</b>; avisaremos assim que voltarem.
+              </>
+            )}
+          </p>
+        </div>
       )}
     </div>
+  );
+}
+
+/**
+ * Botão que abre o WhatsApp do cliente com "AUTORIZO" pronto — a ÚNICA forma de ligar o canal.
+ *
+ * A prova de que o número é dele é ele MANDAR a mensagem: ninguém envia do WhatsApp de um estranho.
+ * O clique aqui não autoriza nada; quem grava o consentimento é o servidor, quando a mensagem
+ * chega. Some quando o canal está fora do ar ou sem número configurado.
+ */
+function AutorizoWhatsApp({ number, available }) {
+  if (!available || !number) return null;
+  const link = `https://wa.me/${number}?text=${encodeURIComponent('AUTORIZO')}`;
+  return (
+    <a
+      href={link}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="tw-mt-3 tw-inline-flex tw-w-full tw-items-center tw-justify-center tw-gap-2 tw-rounded-xl tw-px-4 tw-font-semibold tw-text-white"
+      style={{ minHeight: 48, background: '#16A34A' }}
+    >
+      Ativar lembretes no WhatsApp
+    </a>
   );
 }
 

@@ -17,9 +17,15 @@ router.get('/config', (_req, res) => {
   // Cache curto: a flag muda uma vez a cada seis meses, mas quando muda (a conta voltou!) a gente
   // não quer esperar um cache longo expirar em cada navegador.
   res.set('Cache-Control', 'public, max-age=60');
+  // O número da plataforma (só dígitos), para o frontend montar o link do AUTORIZO — wa.me/<num>.
+  // É público por natureza: é o número que a gente divulga para receber mensagem. Vazio se não
+  // configurado, e aí o frontend simplesmente não oferece a ativação por WhatsApp.
+  const waNumber = String(process.env.WA_PUBLIC_NUMBER || '').replace(/\D/g, '');
+
   res.json({
     whatsapp: {
       available: whatsappAvailable(),
+      number: waNumber || null,
     },
   });
 });

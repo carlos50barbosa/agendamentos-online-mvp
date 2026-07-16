@@ -20,7 +20,21 @@ let configPromise = null;
  * do que deixar de anunciar um que existe, porque neste caso o e-mail cobre.
  */
 export function useWhatsAppAvailable() {
-  const [available, setAvailable] = useState(true);
+  return useWhatsAppConfig().available;
+}
+
+/**
+ * O status do canal + o número da plataforma para montar o link do AUTORIZO.
+ *
+ * `available` é otimista por padrão (`true`): se o endpoint falhar, a tela NÃO grita "WhatsApp fora
+ * do ar". Um alarme falso — anunciar um apagão que não existe para todos os visitantes de um salão —
+ * é pior do que deixar de anunciar um que existe, porque neste caso o e-mail cobre.
+ *
+ * `number` é o telefone da plataforma (só dígitos), ou null se não configurado — e aí a UI
+ * simplesmente não oferece a ativação por WhatsApp, em vez de mostrar um link quebrado.
+ */
+export function useWhatsAppConfig() {
+  const [state, setState] = useState({ available: true, number: null });
 
   useEffect(() => {
     if (!configPromise) {
@@ -29,12 +43,15 @@ export function useWhatsAppAvailable() {
     let alive = true;
     configPromise.then((cfg) => {
       if (!alive || !cfg) return;
-      setAvailable(cfg?.whatsapp?.available !== false);
+      setState({
+        available: cfg?.whatsapp?.available !== false,
+        number: cfg?.whatsapp?.number || null,
+      });
     });
     return () => { alive = false; };
   }, []);
 
-  return available;
+  return state;
 }
 
 /**

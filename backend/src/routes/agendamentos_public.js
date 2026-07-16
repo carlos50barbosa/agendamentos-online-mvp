@@ -16,7 +16,9 @@ import { computeSignalTotalCents, computeSplitCents, SignalTooLowError } from '.
 import { ensureSubscriptionOperationalAccess } from '../middleware/billing.js';
 import { estabNotificationsDisabled } from '../lib/estab_notifications.js';
 import { clientWhatsappDisabled, whatsappImmediateDisabled, whatsappConfirmationDisabled } from '../lib/client_notifications.js';
-import { grantWhatsAppConsent, OPTIN_SOURCES } from '../lib/whatsapp_consent.js';
+// Nota: esta rota NÃO importa mais grantWhatsAppConsent. Consentimento de cliente não nasce de um
+// clique numa rota pública sem login — só do "AUTORIZO" enviado do próprio número. Ver o bloco
+// "NÃO gravamos consentimento" abaixo.
 import { checkMonthlyAppointmentLimit, notifyAppointmentLimitReached } from '../lib/appointment_limits.js';
 import {
   extractPixPayloadFromRaw,
@@ -962,28 +964,22 @@ router.post('/', ensureSubscriptionOperationalAccess({
       } catch {}
     }
 
-    // Opt-in do WhatsApp — registrado AQUI, de forma síncrona, e não em fire-and-forget: a
-    // confirmação é disparada poucas linhas abaixo e consulta o consentimento. Se a gravação
-    // corresse em paralelo, a própria confirmação que o cliente acabou de autorizar sairia
-    // bloqueada por uma corrida.
+    // NÃO gravamos consentimento de WhatsApp aqui — e isto é a correção de um buraco que custou a
+    // conta DUAS vezes.
     //
-    // NÃO marcar a caixa não revoga um aceite anterior. A caixa nasce desmarcada, então tratar
-    // "desmarcada" como "quero sair" faria todo cliente que já autorizou perder a autorização ao
-    // reagendar. Para sair existem caminhos explícitos: responder PARAR ou a tela do cliente.
-    if (telNorm && whatsappOptIn) {
-      try {
-        await grantWhatsAppConsent({
-          phone: telNorm,
-          usuarioId: userId,
-          estabelecimentoId: estabelecimento_id,
-          origem: OPTIN_SOURCES.PUBLIC_BOOKING,
-          req,
-        });
-      } catch (err) {
-        // Não derruba o agendamento: sem o aceite gravado o cliente perde o WhatsApp, não a vaga.
-        console.warn('[optin][public] falha ao registrar consentimento', err?.message || err);
-      }
-    }
+    // Esta rota é PÚBLICA e SEM LOGIN: qualquer pessoa na internet pode digitar o telefone de um
+    // estranho e marcar a caixa. Gravar o aceite a partir disso é gravar um consentimento forjado —
+    // e o pior tipo, porque a vítima recebe um template de confirmação NA HORA. Foi exatamente esse
+    // o padrão do abuso (cadastro falso com número alheio → denúncia → banimento).
+    //
+    // O consentimento do cliente só nasce de um lugar: a mensagem "AUTORIZO" enviada DO PRÓPRIO
+    // número (whatsapp/inbound/optInConfirm.js). Ninguém envia do WhatsApp de um estranho. A caixa
+    // aqui é só INTENÇÃO: a confirmação deste agendamento vai por e-mail, e a tela de sucesso
+    // oferece o link do AUTORIZO para quem quiser ligar o WhatsApp.
+    //
+    // `whatsappOptIn` segue sendo lido do corpo só para não quebrar clientes antigos da API; não
+    // tem mais efeito de gravar aceite.
+    void whatsappOptIn;
 
     const loyaltyPreview = await previewClientLoyaltyBenefits({
       clienteId: userId,

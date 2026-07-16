@@ -160,7 +160,7 @@ export default function BookingPublic() {
       .map((s) => ({ datetime: s.datetime, available: s.status === 'free' }));
   }, [establishmentId]);
 
-  const onConfirm = useCallback(async ({ services, professional, date, slot, guest, whatsappOptIn }) => {
+  const onConfirm = useCallback(async ({ services, professional, date, slot, guest, wantsNotify }) => {
     const cpfDigits = (guest?.cpf || '').replace(/\D/g, '');
     const email = (guest?.email || '').trim();
     const inicio = typeof slot?.datetime === 'string' ? slot.datetime : new Date(slot.datetime).toISOString();
@@ -170,9 +170,12 @@ export default function BookingPublic() {
       inicio,
       nome: (guest?.nome || '').trim(),
       telefone: (guest?.telefone || '').replace(/\D/g, ''),
-      // Sem isto o backend não manda WhatsApp nenhum — nem confirmação, nem lembrete.
-      whatsapp_optin: whatsappOptIn === true,
     };
+    // NÃO mandamos flag de consentimento de WhatsApp: nesta rota pública sem login, um clique é
+    // forjável (foi o que custou a conta). `wantsNotify` é só intenção; o e-mail entrega a
+    // confirmação, e o WhatsApp liga pelo AUTORIZO na tela de sucesso. Reservado caso o backend
+    // passe a registrar a INTENÇÃO (para lembrar de ativar), sem gravar aceite.
+    void wantsNotify;
     // E-mail é opcional: só vai no payload quando informado (o backend cria um placeholder senão).
     if (email) payload.email = email;
     if (cpfDigits) payload.cpf = cpfDigits;
@@ -190,7 +193,7 @@ export default function BookingPublic() {
     if (!hasDeposit) {
       return {
         confirmed: true,
-        message: 'Agendamento registrado! Confirme pelo link enviado no seu e-mail ou WhatsApp para garantir o horário.',
+        message: 'Agendamento registrado! Enviamos a confirmação para o seu e-mail.',
       };
     }
 
