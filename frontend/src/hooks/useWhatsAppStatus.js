@@ -60,7 +60,7 @@ export function useWhatsAppConfig() {
  * precisa saber disso em vez de achar que recebe.
  */
 export function useWhatsAppConsent() {
-  const [state, setState] = useState({ loading: true, optin: false, precisaReaceitar: false });
+  const [state, setState] = useState({ loading: true, optin: false, precisaReaceitar: false, semTelefone: false });
 
   const refresh = async () => {
     try {
@@ -69,11 +69,14 @@ export function useWhatsAppConsent() {
         loading: false,
         optin: Boolean(r?.optin),
         precisaReaceitar: Boolean(r?.precisa_reaceitar),
+        // Sem telefone não há para onde enviar — a UI não deve oferecer ativação, e sim pedir o
+        // cadastro do número primeiro.
+        semTelefone: Boolean(r?.sem_telefone),
       });
     } catch {
       // Falhou a consulta: não inventa pendência. Um banner cobrando aceite de quem já aceitou é
       // ruído — e ruído que o dono aprende a ignorar, justamente no banner que um dia vai importar.
-      setState({ loading: false, optin: false, precisaReaceitar: false });
+      setState({ loading: false, optin: false, precisaReaceitar: false, semTelefone: false });
     }
   };
 

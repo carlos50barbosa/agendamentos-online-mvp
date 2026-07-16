@@ -6,7 +6,8 @@ import { getPlanContext, isDelinquentStatus, formatPlanLimitExceeded, planAllows
 import { auth as authRequired, isCliente, isEstabelecimento } from '../middleware/auth.js';
 import { notifyEmail } from '../lib/notifications.js';
 import { sendAppointmentWhatsApp, WA_AUDIENCE_ESTABLISHMENT } from '../lib/whatsapp_outbox.js';
-import { grantWhatsAppConsent, OPTIN_SOURCES } from '../lib/whatsapp_consent.js';
+// Sem grantWhatsAppConsent aqui: consentimento não nasce de um clique num agendamento — só do
+// "AUTORIZO" enviado do próprio número. Ver o bloco "5.1) NÃO gravamos consentimento" abaixo.
 import { buildConfirmacaoAgendamentoV2Components, isConfirmacaoAgendamentoV2 } from '../lib/whatsapp_templates.js';
 import { createMercadoPagoPixPayment } from '../lib/billing.js';
 import { resolveMpAccessToken } from '../services/mpAccounts.js';
@@ -1262,23 +1263,20 @@ router.post('/', authRequired, isCliente, ensureSubscriptionOperationalAccess({
       }
     }
 
-    // 5.1) Opt-in do WhatsApp. Antes do bloco de notificação, e com await: a confirmação abaixo
-    // consulta o consentimento, e um registro em fire-and-forget chegaria tarde demais — o cliente
-    // marcaria a caixa e mesmo assim não receberia a confirmação que acabou de autorizar.
-    if (whatsappOptIn && cli?.telefone) {
-      try {
-        await grantWhatsAppConsent({
-          phone: cli.telefone,
-          usuarioId: req.user.id,
-          estabelecimentoId: estabelecimento_id,
-          establishmentName: est?.nome || null,
-          origem: OPTIN_SOURCES.CLIENT_BOOKING,
-          req,
-        });
-      } catch (err) {
-        console.warn('[optin][cliente] falha ao registrar consentimento', err?.message || err);
-      }
-    }
+    // 5.1) NÃO gravamos consentimento de WhatsApp a partir de um clique — nem aqui.
+    //
+    // Esta rota exige login e usa o telefone da própria conta, então é menos abusável que a pública.
+    // Mas o telefone da conta foi definido no cadastro, que também foi um clique não verificado — um
+    // cliente pode ter se cadastrado com o número de outra pessoa. Consentimento por clique continua
+    // sendo declaração, não prova.
+    //
+    // Depois desta mudança, TODO consentimento — cliente e estabelecimento, público e logado — nasce
+    // de um só lugar: o "AUTORIZO" enviado do próprio número (whatsapp/inbound/optInConfirm.js).
+    // É a posição que sustenta o recurso junto à Meta: nada de forjável em lugar nenhum.
+    //
+    // A confirmação deste agendamento vai por e-mail. Quem quer WhatsApp ativa pelo AUTORIZO (card no
+    // painel do cliente). `whatsappOptIn` segue lido do corpo só para compat; não grava nada.
+    void whatsappOptIn;
 
     // 6) notificacao "best-effort" (NUNCA bloqueia a resposta)
     const inicioISO = new Date(novo.inicio).toISOString();
