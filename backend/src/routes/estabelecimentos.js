@@ -55,6 +55,8 @@ import {
 
   isDowngrade,
 
+  planAllowsDeposit,
+
 } from "../lib/plans.js";
 import { getLatestSubscriptionForEstabelecimento } from "../lib/subscriptions.js";
 import { setAudit } from "../lib/audit.js";
@@ -1163,7 +1165,7 @@ router.get('/:idOrSlug', async (req, res) => {
 
 
 
-    const [planContext, profileResult, rating, galleryImages] = await Promise.all([
+    const [planContext, profileResult, rating, galleryImages, depositResult] = await Promise.all([
 
       getPlanContext(est.id),
 
@@ -1179,6 +1181,14 @@ router.get('/:idOrSlug', async (req, res) => {
 
       fetchGalleryImages(est.id),
 
+      pool.query(
+
+        "SELECT deposit_enabled, deposit_percent, deposit_type, deposit_fixed_centavos FROM establishment_settings WHERE estabelecimento_id=? LIMIT 1",
+
+        [est.id]
+
+      ),
+
     ]);
 
 
@@ -1186,6 +1196,10 @@ router.get('/:idOrSlug', async (req, res) => {
     const [profileRows] = profileResult;
 
     const profileRow = profileRows?.[0] || null;
+
+    const [depositRows] = depositResult;
+
+    const depositRow = depositRows?.[0] || null;
 
 
 
@@ -1223,11 +1237,25 @@ router.get('/:idOrSlug', async (req, res) => {
       },
     });
 
+    // Sinal (PIX): o front usa `deposit.enabled` para revelar o CPF só quando o estabelecimento
+    // realmente cobra sinal — senão o formulário público fica só com Nome + Celular. Mesma regra do
+    // resolveDepositConfig da criação do agendamento (plano permite + habilitado + tem valor).
+    const depositAllowed = planAllowsDeposit(planContext?.plan);
+    const depositType = String(depositRow?.deposit_type || 'PERCENT').toUpperCase();
+    const depositPercent = depositRow?.deposit_percent != null ? Number(depositRow.deposit_percent) : null;
+    const depositFixed = depositRow?.deposit_fixed_centavos != null ? Number(depositRow.deposit_fixed_centavos) : null;
+    const depositHasValue = depositType === 'FIXED'
+      ? (Number.isFinite(depositFixed) && depositFixed > 0)
+      : (Number.isFinite(depositPercent) && depositPercent > 0);
+    const depositEnabled = Boolean(depositAllowed && Number(depositRow?.deposit_enabled || 0) && depositHasValue);
+
     const payload = {
 
       ...est,
 
       booking_enabled: Boolean(bookingState?.coreFeaturesAllowed),
+
+      deposit: { enabled: depositEnabled, type: depositType, percent: depositPercent },
 
       subscription_state: bookingState?.state || null,
 

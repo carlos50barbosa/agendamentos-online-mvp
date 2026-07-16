@@ -3,7 +3,8 @@
 //   Serviços (multi + busca) → Profissional → Dia → Horário → Confirmação (+ dados) → Pagamento (PIX).
 // Consome dados via props: mock (Fase 1) ou API real (Fase 2 — BookingPublic.jsx, que injeta
 // getSlots/publicAgendar do backend com sinal via Asaas). Props que ligam o real:
-//   collectGuest=true  -> mostra os campos nome/e-mail/telefone/CPF na confirmação
+//   collectGuest=true  -> mostra Nome + Celular na confirmação; CPF só quando há sinal (PIX),
+//                         via establishment.deposit.enabled (GET /establishments/:id)
 //   buildSlots(date, { serviceIds, professionalId }) pode ser sync (mock) OU async (Promise, API real)
 //   pollStatus(paymentId, token) -> vira o PIX para 'paid'/'expired' sozinho
 //   onConfirm({ services, professional, date, slot, guest, whatsappOptIn }) -> cria o agendamento e devolve o PIX
@@ -113,6 +114,14 @@ export default function BookingWizard({
     return selectedServices.reduce((sum, s) => sum + (Number(s.depositValue) || 0), 0);
   }, [selectedServices]);
 
+  // Sinal (PIX): decide se o formulário revela o CPF. `establishment.deposit.enabled` vem do
+  // backend (GET /establishments/:id); só há cobrança quando o total — já com os benefícios do
+  // plano — é > 0. Sem sinal, a confirmação fica só com Nome + Celular.
+  const hasSignal = useMemo(
+    () => Boolean(establishment?.deposit?.enabled) && totalPrice > 0,
+    [establishment, totalPrice],
+  );
+
   // Profissional: interseção dos vinculados aos serviços (API real) ou lista geral (mock).
   const professionalRequired = useMemo(() => selectedServices.some((s) => s?.professionals?.length), [selectedServices]);
   const professionalOptions = useMemo(() => {
@@ -202,15 +211,18 @@ export default function BookingWizard({
     if (!onConfirm) return;
     if (collectGuest) {
       const nome = guest.nome.trim();
-      const email = guest.email.trim();
       const cpfDigits = guest.cpf.replace(/\D/g, '');
       if (!nome) { setError('Informe seu nome.'); return; }
-      // E-mail é opcional: só valida o formato quando a pessoa digitou algo.
-      if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { setError('Informe um e-mail válido ou deixe o campo em branco.'); return; }
-      // Celular obrigatório: com o e-mail opcional, é o canal de contato de quem não deu e-mail.
-      // Um fixo não recebe WhatsApp. Ver isValidMobileBR (espelha o backend).
+      // Celular obrigatório: é o canal de contato do cliente (WhatsApp). Um fixo não recebe.
+      // Ver isValidMobileBR (espelha o backend).
       if (!isValidMobileBR(guest.telefone)) { setError('Informe um número de celular válido com DDD.'); return; }
-      if (cpfDigits && !(cpfDigits.length === 11 || cpfDigits.length === 14)) { setError('CPF/CNPJ inválido.'); return; }
+      // CPF só é exigido quando há sinal (PIX): o Asaas precisa do CPF do pagador. Sem sinal, um CPF
+      // digitado à toa ainda é validado por formato para não gravar lixo.
+      if (hasSignal) {
+        if (!(cpfDigits.length === 11 || cpfDigits.length === 14)) { setError('Informe seu CPF para pagar o sinal (PIX).'); return; }
+      } else if (cpfDigits && !(cpfDigits.length === 11 || cpfDigits.length === 14)) {
+        setError('CPF/CNPJ inválido.'); return;
+      }
     }
     setSubmitting(true);
     setError(null);
@@ -409,9 +421,12 @@ export default function BookingWizard({
             {collectGuest && (
               <div className="tw-mt-3 tw-flex tw-flex-col tw-gap-2">
                 <GuestInput label="Nome" value={guest.nome} onChange={(v) => setGuest((g) => ({ ...g, nome: v }))} placeholder="Seu nome" autoComplete="name" />
-                <GuestInput label="E-mail (opcional)" type="email" value={guest.email} onChange={(v) => setGuest((g) => ({ ...g, email: v }))} placeholder="voce@email.com" autoComplete="email" />
-                <GuestInput label="Celular" value={guest.telefone} onChange={(v) => setGuest((g) => ({ ...g, telefone: v }))} format={formatBRPhone} placeholder="(11) 99999-9999" autoComplete="tel" inputMode="tel" />
-                <GuestInput label="CPF/CNPJ" value={guest.cpf} onChange={(v) => setGuest((g) => ({ ...g, cpf: v }))} format={formatCpfCnpj} placeholder="Necessário se houver sinal (PIX)" inputMode="numeric" />
+                <GuestInput label="Celular (WhatsApp)" value={guest.telefone} onChange={(v) => setGuest((g) => ({ ...g, telefone: v }))} format={formatBRPhone} placeholder="(11) 99999-9999" autoComplete="tel" inputMode="tel" />
+                {/* CPF só aparece quando o estabelecimento cobra sinal (PIX): o Asaas exige o CPF do
+                    pagador. Sem sinal, o formulário fica só com Nome + Celular. */}
+                {hasSignal && (
+                  <GuestInput label="CPF/CNPJ" value={guest.cpf} onChange={(v) => setGuest((g) => ({ ...g, cpf: v }))} format={formatCpfCnpj} placeholder="Obrigatório para o sinal (PIX)" inputMode="numeric" />
+                )}
               </div>
             )}
 
