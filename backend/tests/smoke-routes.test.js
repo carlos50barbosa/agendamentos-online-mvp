@@ -53,6 +53,7 @@ let server = null;
 let baseUrl = '';
 let pool = null;
 let estabToken = '';
+let clienteToken = '';
 const serverLog = [];
 
 function freePort() {
@@ -185,6 +186,7 @@ before(async () => {
   if (!DISPOSABLE) return;
   await seed();
   estabToken = jwt.sign({ id: ESTAB_ID }, process.env.JWT_SECRET, { expiresIn: '15m' });
+  clienteToken = jwt.sign({ id: CLIENTE_ID }, process.env.JWT_SECRET, { expiresIn: '15m' });
   await startServer();
 });
 
@@ -509,4 +511,29 @@ test('agendamento publico SEM e-mail: nome + telefone bastam (e-mail placeholder
   assert.equal(rows.length, 1, 'o cliente guest deveria ter sido criado');
   assert.equal(rows[0].nome, 'Cliente Sem Email');
   assert.match(rows[0].email, /@sem-email\.agendou\.local$/, 'sem e-mail informado -> e-mail placeholder por telefone');
+});
+
+// A rota do cliente LOGADO (POST /agendamentos) tambem parou de gravar consentimento por clique.
+// Menos abusavel que a publica (exige login, usa o telefone da propria conta), mas o telefone da
+// conta veio de um cadastro por clique — declaracao, nao prova. Depois desta mudanca, TODO
+// consentimento nasce do "AUTORIZO" enviado do proprio numero.
+test('agendamento do cliente logado com whatsapp_optin NAO grava consentimento', { skip }, async () => {
+  const e164 = '5511988887777'; // telefone do Cliente Smoke, em E.164
+  await pool.query('DELETE FROM whatsapp_optins WHERE telefone_e164=?', [e164]);
+  await pool.query('DELETE FROM agendamentos WHERE cliente_id=? AND estabelecimento_id=? AND inicio > NOW()', [CLIENTE_ID, ESTAB_ID]);
+
+  const inicio = new Date(amanhaAs10h());
+  inicio.setHours(inicio.getHours() + 6); // horario proprio, longe dos demais testes
+
+  const { status, body } = await post('/agendamentos', {
+    estabelecimento_id: ESTAB_ID,
+    servico_ids: [SERVICO_ID],
+    profissional_id: PROF_ID,
+    inicio: inicio.toISOString(),
+    whatsapp_optin: true,   // o corpo antigo; nao pode mais ter efeito
+  }, { token: clienteToken });
+  assert.equal(status, 201, `status ${status}: ${body.slice(0, 300)}`);
+
+  const [rows] = await pool.query('SELECT id FROM whatsapp_optins WHERE telefone_e164=?', [e164]);
+  assert.equal(rows.length, 0, 'um clique num agendamento nao pode virar consentimento — nem logado');
 });

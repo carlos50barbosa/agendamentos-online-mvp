@@ -16,6 +16,7 @@ import ConfirmModal from '../components/client-appointments/ConfirmModal.jsx';
 import SkeletonList from '../components/client-appointments/SkeletonList.jsx';
 import EmptyState from '../components/client-appointments/EmptyState.jsx';
 import Button, { buttonClassName } from '../components/client-appointments/Button.jsx';
+import ClientWhatsAppActivate from '../components/client-appointments/ClientWhatsAppActivate.jsx';
 
 const STATUS_FILTER_OPTIONS = [
   { value: 'todos', label: 'Todos' },
@@ -504,6 +505,9 @@ export default function ClientAppointmentsPage() {
             })}
           </div>
         </section>
+
+      {/* Some sozinho para quem já autorizou / sem telefone / canal fora do ar. */}
+      <ClientWhatsAppActivate />
 
       {loading && <SkeletonList count={6} />}
 
