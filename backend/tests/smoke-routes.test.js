@@ -358,7 +358,14 @@ test('POST /whatsapp-optin NAO grava consentimento — so devolve o link do AUTO
   );
 });
 
-test('agendamento publico COM a caixa marcada grava o consentimento (com a prova)', { skip }, async () => {
+// Este teste tambem AFIRMAVA um buraco — o segundo, e o pior. Ele dizia: "marcar a caixa no
+// agendamento publico grava consentimento". Mas esta rota e PUBLICA e SEM LOGIN: qualquer um digita
+// o telefone de um estranho, marca a caixa, e a vitima recebe um template de confirmacao NA HORA.
+// Foi o padrao do abuso que derrubou a conta a segunda vez.
+//
+// Agora a caixa e so INTENCAO. O agendamento vale, a confirmacao vai por e-mail, e NENHUM
+// consentimento e gravado — ele so nasce do "AUTORIZO" enviado do proprio numero.
+test('agendamento publico com a caixa marcada NAO grava consentimento (rota publica = forjavel)', { skip }, async () => {
   const telefone = '12987650001';
   const e164 = `55${telefone}`;
   await pool.query('DELETE FROM whatsapp_optins WHERE telefone_e164=?', [e164]);
@@ -372,21 +379,15 @@ test('agendamento publico COM a caixa marcada grava o consentimento (com a prova
     nome: 'Cliente Optou',
     email: 'optin.sim@test.local',
     telefone,
-    whatsapp_optin: true,
+    whatsapp_optin: true,   // o corpo antigo; nao pode mais ter efeito
   });
+  // O agendamento TEM de funcionar — condicionar o servico ao aceite seria consentimento forcado.
   assert.equal(status, 201, `status ${status}: ${body.slice(0, 300)}`);
 
-  const [rows] = await pool.query(
-    'SELECT evento, origem, texto, texto_versao FROM whatsapp_optins WHERE telefone_e164=?',
-    [e164]
-  );
-  assert.equal(rows.length, 1, 'a caixa marcada tinha de virar exatamente uma linha de consentimento');
-  assert.equal(rows[0].evento, 'granted');
-  assert.equal(rows[0].origem, 'agendamento_publico');
-  assert.equal(rows[0].texto_versao, 'v1');
-  // O texto e renderizado pelo SERVIDOR e nomeia o salao — e isso que vale como prova.
-  assert.match(rows[0].texto, /Salao Smoke/);
-  assert.match(rows[0].texto, /PARAR/);
+  // A PROVA: um clique numa rota publica sem login NAO pode virar consentimento — o numero pode ser
+  // de qualquer pessoa. Era exatamente esta linha que o atacante conseguia criar.
+  const [rows] = await pool.query('SELECT id FROM whatsapp_optins WHERE telefone_e164=?', [e164]);
+  assert.equal(rows.length, 0, 'a rota publica nao pode gravar consentimento a partir de um clique');
 });
 
 // --- O que decide se o BANNER do dono aparece ----------------------------------------------------
