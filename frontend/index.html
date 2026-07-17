@@ -2,6 +2,10 @@
 <html lang="pt-BR">
   <head>
     <meta charset="UTF-8" />
+    <!-- Verificação de propriedade do domínio na Meta (Gerenciador de Negócios).
+         PRECISA ficar no <head> estático (o crawler da Meta lê o HTML cru, não o DOM do React)
+         e PRECISA viver na fonte (senão o próximo deploy apaga e o domínio des-verifica). -->
+    <meta name="facebook-domain-verification" content="p5ro1vxlsspko06l2x7rxb0shhhet1" />
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
