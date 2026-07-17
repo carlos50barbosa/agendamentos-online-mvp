@@ -184,7 +184,7 @@ export default function Termos() {
         <h2>17. Contato</h2>
         <p>
           Em caso de dúvidas sobre estes Termos, escreva para{' '}
-          <a href="mailto:servicos.negocios.digital@gmail.com">servicos.negocios.digital@gmail.com</a>.
+          <a href="mailto:contato@agenda0.com.br">contato@agenda0.com.br</a>.
         </p>
       </section>
     </div>

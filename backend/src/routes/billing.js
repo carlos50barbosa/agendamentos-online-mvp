@@ -5901,7 +5901,7 @@ router.post('/pix', auth, isEstabelecimento, async (req, res) => {
       const adminEmail =
         process.env.BILLING_ALERT_EMAIL ||
         process.env.NEW_USER_ALERT_EMAIL ||
-        'servicos.negocios.digital@gmail.com'
+        'contato@agenda0.com.br'
       if (adminEmail) {
         const amountCents = result?.pix?.amount_cents ?? result?.subscription?.amount_cents ?? null
         const amountLabel =

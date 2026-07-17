@@ -16,7 +16,7 @@ const SUPPORT_CHANNELS = [
     key: 'email',
     title: 'E-mail',
     description: 'Respostas em até um dia útil. Ideal para dúvidas sobre acesso e cobranças.',
-    href: 'mailto:servicos.negocios.digital@gmail.com?subject=Suporte%20Agendamentos%20Online',
+    href: 'mailto:contato@agenda0.com.br?subject=Suporte%20Agendamentos%20Online',
     action: 'Enviar e-mail',
     external: false,
   },
