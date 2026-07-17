@@ -248,6 +248,7 @@ export default function BookingPublic() {
       <BookingWizard
         establishmentName={state.establishment?.nome || 'Agendamento'}
         establishment={state.establishment}
+        establishmentHref={`/agendar/${encodeURIComponent(resolveKey)}`}
         services={wizardServices}
         buildSlots={buildSlots}
         onConfirm={onConfirm}
