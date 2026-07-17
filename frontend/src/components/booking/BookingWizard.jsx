@@ -49,6 +49,10 @@ export default function BookingWizard({
   preselectedServiceIds = [],
   establishment = null,
   initialGuest = null,
+  // URL da página pública do estabelecimento. Quando presente, a tela de "agendamento confirmado"
+  // oferece um link para voltar a ela. Só o fluxo real (BookingPublic) passa isto; o mock não tem
+  // página de estabelecimento, então o link não aparece lá.
+  establishmentHref = null,
   // Assinatura vencida: a página do estabelecimento continua inteira (capa, perfil, serviços,
   // preços) — só a AÇÃO de agendar é desligada. Esconder tudo puniria o cliente, que clicou
   // naquele link justamente para ver aquele estabelecimento.
@@ -493,6 +497,18 @@ export default function BookingWizard({
                       </p>
                     )}
                   </>
+                )}
+                {/* Volta para a página do estabelecimento. Âncora normal (recarrega a página fresca),
+                    e não navegação SPA: garante o retorno mesmo quando a URL de origem é a mesma. */}
+                {establishmentHref && (
+                  <a
+                    href={establishmentHref}
+                    className="tw-mt-2 tw-inline-flex tw-items-center tw-gap-1 tw-text-sm tw-font-semibold"
+                    style={{ color: 'var(--brand, #5049E5)' }}
+                  >
+                    <ChevronLeft size={16} strokeWidth={2.4} aria-hidden="true" />
+                    Voltar para {establishment?.nome || 'a página do estabelecimento'}
+                  </a>
                 )}
               </div>
             ) : (
