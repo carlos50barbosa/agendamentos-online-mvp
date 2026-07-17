@@ -16,7 +16,7 @@ const sections = [
     title: '2. Controlador dos dados',
     paragraphs: [
       'O controlador dos dados é o responsável pela plataforma Agendamentos Online.',
-      'Dúvidas, solicitações ou exercício de direitos podem ser encaminhados para servicos.negocios.digital@gmail.com.',
+      'Dúvidas, solicitações ou exercício de direitos podem ser encaminhados para contato@agenda0.com.br.',
     ],
   },
   {
@@ -164,7 +164,7 @@ export default function PoliticaPrivacidade() {
         <h2>15. Canal de contato</h2>
         <p>
           Para exercer direitos ou esclarecer dúvidas, envie e-mail para{' '}
-          <a href="mailto:servicos.negocios.digital@gmail.com">servicos.negocios.digital@gmail.com</a>.
+          <a href="mailto:contato@agenda0.com.br">contato@agenda0.com.br</a>.
         </p>
       </section>
     </div>

@@ -337,7 +337,7 @@ router.post('/register', async (req, res) => {
 
     // Emails de boas-vindas/alerta
     try {
-      const adminEmail = process.env.NEW_USER_ALERT_EMAIL || 'servicos.negocios.digital@gmail.com';
+      const adminEmail = process.env.NEW_USER_ALERT_EMAIL || 'contato@agenda0.com.br';
       const planKey = (planForTrial || 'starter').toString().toLowerCase();
       const planLabel = (planForTrial || 'starter').toString().toLowerCase() === 'pro' ? 'Pro' : 'Starter';
 

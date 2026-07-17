@@ -115,7 +115,7 @@ export default function PlanosLowerExtras({ plans = [], trialDays = 7, onTrial, 
         <div className="lp-shell lp-footer__inner">
           <p>© 2026 Agendamentos Online · Todos os direitos reservados.</p>
           <p>
-            <a href="mailto:servicos.negocios.digital@gmail.com">servicos.negocios.digital@gmail.com</a>
+            <a href="mailto:contato@agenda0.com.br">contato@agenda0.com.br</a>
           </p>
           <p>
             <Link to="/termos">Termos de Uso</Link> · <Link to="/politica-privacidade">Política de Privacidade</Link>
