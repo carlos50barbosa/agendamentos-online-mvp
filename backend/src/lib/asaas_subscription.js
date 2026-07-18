@@ -7,7 +7,7 @@ import { pool } from './db.js';
 import { createAsaasPayments } from '../services/asaas/payments.js';
 import { resolveAsaasCustomerId } from './deposit_provider.js';
 import { createSubscription as persistSubscription, updateSubscription, getLatestSubscriptionForEstabelecimento } from './subscriptions.js';
-import { getPlanPriceCents, normalizeBillingCycle, resolvePlanConfig, PLAN_TIERS } from './plans.js';
+import { getPlanPriceCents, normalizeBillingCycle, resolvePlanConfig, PLAN_TIERS, isDowngrade } from './plans.js';
 
 /** Provider ativo para a assinatura do tenant (independente do sinal). */
 export function resolveBillingProvider() {
@@ -161,6 +161,111 @@ export async function createTenantAsaasSubscription({
   }
 
   return { subscription: localSub, checkoutUrl, asaasSubscriptionId, firstPaymentId };
+}
+
+/**
+ * Decide O QUE fazer quando ja existe assinatura ATIVA e o dono pede um plano/ciclo. PURA (sem I/O)
+ * para ser 100% testavel — a ORDEM dos ramos e o que importa e o que um teste protege. A rota apenas
+ * mapeia a acao devolvida para a resposta HTTP.
+ *
+ * Ordem (proposital):
+ *  1) mesmo plano+ciclo            -> 'already_active'    (renova sozinho, nada a fazer)
+ *  2) periodo pago e ANUAL         -> 'annual_support'    (janela nao expirada grande demais; vai p/ suporte)
+ *  3) descer de tier               -> 'downgrade_unsupported'
+ *  4) sem assinatura ativa no gw   -> 'no_active_subscription'
+ *  5) senao (upgrade/ciclo mensal) -> 'change'            (update-in-place via changeTenantAsaasPlan)
+ *
+ * @returns {'already_active'|'annual_support'|'downgrade_unsupported'|'no_active_subscription'|'change'}
+ */
+export function resolveActiveSubscriptionChange({
+  currentPlan,
+  currentCycle,
+  requestedPlan,
+  requestedCycle,
+  hasActiveGatewaySub,
+} = {}) {
+  const curPlan = String(currentPlan || '').toLowerCase();
+  const reqPlan = String(requestedPlan || '').toLowerCase();
+  const curCycle = normalizeBillingCycle(currentCycle);
+  const reqCycle = normalizeBillingCycle(requestedCycle);
+  if (curPlan === reqPlan && curCycle === reqCycle) return 'already_active';
+  if (curCycle === 'anual') return 'annual_support';
+  if (isDowngrade(curPlan, reqPlan)) return 'downgrade_unsupported';
+  if (!hasActiveGatewaySub) return 'no_active_subscription';
+  return 'change';
+}
+
+/**
+ * Troca de plano/ciclo de uma assinatura Asaas JA ATIVA, via update-in-place (nao cancela+cria).
+ *
+ * Politica (MVP): o novo valor vale a partir da PROXIMA cobranca. updatePendingPayments=true reescreve
+ * so a cobranca PENDENTE (nao paga) para o novo valor; a cobranca ja paga do ciclo corrente nao e
+ * tocada (sem cobranca nem estorno imediato). O ACESSO ao novo tier sobe na hora (usuarios.plan), e o
+ * periodo ja pago (plan_active_until) fica inalterado — o resto do ciclo atual nao e recobrado.
+ *
+ * OBRIGATORIO atualizar a linha LOCAL (plan/amount_cents/billing_cycle): o webhook do tenant le o plano
+ * do banco LOCAL, nao do evento — sem isto a renovacao reativaria o tier ANTIGO.
+ *
+ * @param {object} subscription  assinatura ativa: precisa de { id, gatewaySubscriptionId }.
+ * @returns {{ ok, plan, planLabel, cycle, amountCents, subscriptionId }}
+ */
+export async function changeTenantAsaasPlan({
+  estabelecimentoId,
+  subscription,
+  plan,
+  cycle = 'mensal',
+  client,
+  db = pool,
+  payments = createAsaasPayments(client),
+} = {}) {
+  if (!estabelecimentoId) throw new Error('estabelecimento_required');
+  const planKey = String(plan || '').toLowerCase();
+  if (!PLAN_TIERS.includes(planKey)) throw new Error('invalid_plan');
+  if (!subscription?.id || !subscription?.gatewaySubscriptionId) throw new Error('no_active_asaas_subscription');
+
+  const cycleKey = normalizeBillingCycle(cycle);
+  const amountCents = getPlanPriceCents(planKey, cycleKey);
+  const value = Math.max(0, Math.round(Number(amountCents || 0))) / 100;
+  const planLabel = resolvePlanConfig(planKey).label;
+
+  // 1) Gateway PRIMEIRO: muda valor/ciclo da MESMA assinatura. updatePendingPayments reescreve a
+  //    cobranca PENDENTE (nao paga) para o novo valor; a cobranca ja paga do ciclo corrente nao e
+  //    tocada. Se falhar, nada local foi alterado -> estado consistente (antigo em todo lugar).
+  await payments.updateSubscription(subscription.gatewaySubscriptionId, {
+    value,
+    cycle: asaasCycle(cycleKey),
+    description: `Assinatura ${planLabel} (${cycleKey})`,
+    updatePendingPayments: true,
+  });
+
+  // 2) Linhas LOCAIS de forma ATOMICA: subscriptions (plan lido pelo webhook na renovacao) e usuarios
+  //    (acesso imediato ao novo tier; plan_active_until inalterado — o periodo pago continua). As duas
+  //    PRECISAM cair juntas: se divergissem, o guard de downgrade (que le usuarios.plan) poderia
+  //    reclassificar um downgrade real como upgrade. Sem suporte a transacao (ex.: testes), sequencial.
+  const applyLocal = async (runner) => {
+    await runner.query(
+      'UPDATE subscriptions SET plan=?, amount_cents=?, billing_cycle=?, updated_at=NOW() WHERE id=?',
+      [planKey, amountCents, cycleKey, subscription.id],
+    );
+    await runner.query(
+      "UPDATE usuarios SET plan=?, plan_cycle=? WHERE id=? AND tipo='estabelecimento'",
+      [planKey, cycleKey, estabelecimentoId],
+    );
+  };
+  if (typeof db.beginTransaction === 'function') {
+    await db.beginTransaction();
+    try {
+      await applyLocal(db);
+      await db.commit();
+    } catch (err) {
+      try { await db.rollback(); } catch {}
+      throw err;
+    }
+  } else {
+    await applyLocal(db);
+  }
+
+  return { ok: true, plan: planKey, planLabel, cycle: cycleKey, amountCents, subscriptionId: subscription.id };
 }
 
 /**

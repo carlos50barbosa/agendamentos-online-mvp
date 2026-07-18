@@ -566,6 +566,15 @@ export default function Assinatura() {
     setNotice({ type: '', message: '' });
     try {
       const response = await Api.billingAsaasCheckoutSession({ plan: targetPlan, billing_cycle: billingCycle, cpf_cnpj: cpfCnpj });
+      if (response?.plan_changed) {
+        // Troca in-place: NAO ha checkout (a MESMA assinatura muda de valor). Sucesso + reflete o novo plano.
+        await refreshData({ silent: true });
+        setNotice({
+          type: 'success',
+          message: response.message || 'Plano alterado. O acesso já vale e a nova cobrança entra na próxima renovação.',
+        });
+        return true;
+      }
       if (response?.init_point) {
         window.location.assign(response.init_point);
         return true;
@@ -580,7 +589,13 @@ export default function Assinatura() {
       // "Ja ativo" e "troca de plano" nao sao erros de operacao — sao estado informativo. Mostrar em
       // vermelho sugeriria que algo falhou. Trata como aviso (info) e reflete o estado atual.
       const code = requestError?.data?.error;
-      const informative = code === 'subscription_already_active' || code === 'plan_change_unsupported';
+      const informative = [
+        'subscription_already_active',
+        'plan_change_unsupported',
+        'plan_downgrade_unsupported',
+        'plan_change_annual_support',
+        'plan_change_no_active_subscription',
+      ].includes(code);
       setNotice({
         type: informative ? 'info' : 'error',
         message: getErrorMessage(requestError, 'Falha ao iniciar a assinatura no Asaas.'),
@@ -616,9 +631,27 @@ export default function Assinatura() {
     await startAsaasCheckout(plan, cycle || 'mensal', digits);
   }, [cpfModal, closeCpfModal, startAsaasCheckout]);
 
+  // Modal de confirmacao de TROCA de plano (so aparece quando ja ha assinatura ativa e o alvo difere).
+  const [planChangeModal, setPlanChangeModal] = useState({ open: false, plan: null, cycle: 'mensal' });
+  const closePlanChangeModal = useCallback(() => setPlanChangeModal({ open: false, plan: null, cycle: 'mensal' }), []);
+
   const handleStartCheckout = useCallback(async (targetPlan, billingCycle = 'mensal') => {
+    // Assinatura ATIVA + alvo com outro plano OU outro ciclo = TROCA. Confirma antes: o acesso muda na
+    // hora, mas a nova cobranca so entra na proxima renovacao — a confirmacao evita clique acidental.
+    const isChange = planStatusKey === 'active'
+      && (normalizePlanKey(targetPlan) !== planKey || (billingCycle || 'mensal') !== currentCycle);
+    if (isChange) {
+      setPlanChangeModal({ open: true, plan: normalizePlanKey(targetPlan), cycle: billingCycle || 'mensal' });
+      return false;
+    }
     return handleAsaasCheckout(targetPlan, billingCycle);
-  }, [handleAsaasCheckout]);
+  }, [handleAsaasCheckout, planStatusKey, planKey, currentCycle]);
+
+  const confirmPlanChange = useCallback(async () => {
+    const { plan, cycle } = planChangeModal;
+    await handleAsaasCheckout(plan, cycle || 'mensal');
+    setPlanChangeModal({ open: false, plan: null, cycle: 'mensal' });
+  }, [planChangeModal, handleAsaasCheckout]);
 
   const openCardChoice = useCallback(() => {
     if (typeof window === 'undefined') return;
@@ -1022,6 +1055,66 @@ export default function Assinatura() {
           ) : null}
         </Modal>
       ) : null}
+
+      {planChangeModal.open ? (() => {
+        const targetMeta = PLAN_META[planChangeModal.plan] || PLAN_META.starter;
+        const targetCycle = planChangeModal.cycle || 'mensal';
+        const targetPriceCents = targetCycle === 'anual' ? targetMeta.annualPriceCents : targetMeta.priceCents;
+        // Downgrade (descer de tier) nao e suportado por aqui. Assinatura ANUAL ativa: qualquer troca vai
+        // pro suporte (o periodo pago nao expirado e grande demais p/ acesso gratis ou converter sem
+        // proracao). Ambos espelham o 409 do backend, sem round-trip.
+        const isDowngradeChange = getPlanTier(planChangeModal.plan) < getPlanTier(planKey);
+        const annualLocked = currentCycle === 'anual';
+        const mustUseSupport = isDowngradeChange || annualLocked;
+        const renewalLabel = activeUntil ? new Date(activeUntil).toLocaleDateString('pt-BR') : null;
+        return (
+          <Modal
+            title={mustUseSupport ? 'Troca via suporte' : 'Confirmar troca de plano'}
+            onClose={closePlanChangeModal}
+            actions={mustUseSupport ? [
+              <button key="ok" type="button" className="btn btn--primary" onClick={closePlanChangeModal}>
+                Entendi
+              </button>,
+            ] : [
+              <button key="cancel" type="button" className="btn btn--outline" onClick={closePlanChangeModal} disabled={checkoutLoading}>
+                Cancelar
+              </button>,
+              <button key="ok" type="button" className="btn btn--primary" onClick={() => void confirmPlanChange()} disabled={checkoutLoading}>
+                {checkoutLoading ? <span className="spinner" /> : 'Confirmar troca'}
+              </button>,
+            ]}
+          >
+            {mustUseSupport ? (
+              annualLocked ? (
+                <p className="muted" style={{ marginTop: 0 }}>
+                  Sua assinatura <strong>anual</strong> está ativa{renewalLabel ? ` até ${renewalLabel}` : ''}. Para trocar de
+                  plano antes disso, fale com o suporte — ajustamos sem você perder o período já pago.
+                </p>
+              ) : (
+                <p className="muted" style={{ marginTop: 0 }}>
+                  Baixar do plano <strong>{planMeta.label}</strong> para <strong>{targetMeta.label}</strong> ainda não está
+                  disponível por aqui. Fale com o suporte para ajustar sem perder o período já pago.
+                </p>
+              )
+            ) : (
+              <>
+                <p className="muted" style={{ marginTop: 0 }}>
+                  Você vai trocar de <strong>{planMeta.label} · {BILLING_CYCLE_LABELS[currentCycle] || 'Mensal'}</strong> para{' '}
+                  <strong>{targetMeta.label} · {BILLING_CYCLE_LABELS[targetCycle] || 'Mensal'}</strong>.
+                </p>
+                <ul className="muted" style={{ marginTop: 0, paddingLeft: 18 }}>
+                  <li>O acesso ao novo plano vale imediatamente.</li>
+                  <li>
+                    A nova cobrança de {formatCurrencyFromCents(targetPriceCents)} entra na próxima renovação
+                    {renewalLabel ? ` (${renewalLabel})` : ''}.
+                  </li>
+                  <li>Não há cobrança agora — o período já pago é mantido.</li>
+                </ul>
+              </>
+            )}
+          </Modal>
+        );
+      })() : null}
     </div>
   );
 }
