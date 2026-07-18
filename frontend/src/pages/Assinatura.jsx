@@ -1452,24 +1452,22 @@ export default function Assinatura() {
       ) : null}
 
       {!loading ? (
-        <div className="subscription-page__summary-grid subscription-page__summary-grid--compact">
-          <div className="settings-module-card subscription-page__summary-card">
+        <div className="settings-module-card subscription-page__summary-combined">
+          <div className="subscription-page__summary-cell">
             <span className="subscription-page__eyebrow">Plano atual</span>
-            <h3>{planMeta.label}</h3>
             <div className="subscription-page__summary-value">{formatCurrencyFromCents(currentPlanPriceCents)}</div>
-            <span className="muted">{BILLING_CYCLE_LABELS[currentCycle] || 'Mensal'} · {planStatusLabel}</span>
+            <span className="muted">{planMeta.label} · {BILLING_CYCLE_LABELS[currentCycle] || 'Mensal'} · {planStatusLabel}</span>
           </div>
-
-          <div className="settings-module-card subscription-page__summary-card">
+          <div className="subscription-page__summary-cell">
             <span className="subscription-page__eyebrow">Vencimento</span>
-            <h3>{nextDueLabel}</h3>
-            <p className="muted">
+            <div className="subscription-page__summary-value">{nextDueLabel}</div>
+            <span className="muted">
               {planStatusKey === 'trialing' && trialEndsAt
                 ? `Teste grátis até ${formatDateLong(trialEndsAt)}.`
                 : activeUntil
                   ? 'Próxima cobrança do ciclo atual.'
-                  : 'Sem vencimento confirmado no momento.'}
-            </p>
+                  : 'Sem vencimento confirmado.'}
+            </span>
           </div>
         </div>
       ) : null}

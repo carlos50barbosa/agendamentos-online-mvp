@@ -2953,9 +2953,41 @@ a:hover { opacity: 1; text-decoration: underline; }
   border-color:var(--brand, #4f46e5);
   box-shadow:0 6px 20px rgba(79,70,229,.10);
 }
+/* Overflow guard: itens de grid e selects/inputs longos NAO podem estourar o card.
+   (o <select> global nao tem width/box-sizing, entao cresce ate a opcao mais larga —
+   ex.: "Anual ... (economia de R$ XXX)"; aqui travamos na largura do container). */
+.subscription-page__payments-card > *,
+.subscription-page__action-stack > *{
+  min-width:0;
+}
+.subscription-page__cycle-field,
+.subscription-page__cycle-field select,
+.subscription-page__cycle-field .input{
+  width:100%;
+  max-width:100%;
+  min-width:0;
+  box-sizing:border-box;
+}
+/* Card unico de status: Plano atual | Vencimento lado a lado (era dois cards) */
+.subscription-page__summary-combined{
+  display:grid;
+  grid-template-columns:repeat(2, minmax(0, 1fr));
+  gap:16px;
+  align-items:start;
+}
+.subscription-page__summary-cell{
+  display:grid;
+  gap:4px;
+  align-content:start;
+  min-width:0;
+}
 @media (max-width: 640px){
   .subscription-page__summary-grid--compact{
     grid-template-columns:1fr;
+  }
+  .subscription-page__summary-combined{
+    grid-template-columns:1fr;
+    gap:14px;
   }
 }
 .subscription-page__payment-grid{
