@@ -560,6 +560,11 @@ export default function Assinatura() {
   const currentPlanPriceCents = currentCycle === 'anual' ? planMeta.annualPriceCents : planMeta.priceCents;
   const checkoutCycle = selectedCycle || currentCycle || 'mensal';
   const selectedPlanPriceCents = checkoutCycle === 'anual' ? checkoutPlanMeta.annualPriceCents : checkoutPlanMeta.priceCents;
+  // Economia do anual vs. pagar 12 meses no mensal.
+  const annualSavingsCents = Math.max(
+    0,
+    (Number(checkoutPlanMeta.priceCents) || 0) * 12 - (Number(checkoutPlanMeta.annualPriceCents) || 0),
+  );
   const hasCheckoutSelection = checkoutPlanKey !== planKey || checkoutCycle !== currentCycle;
   const paymentMethodLabel = getPaymentMethodLabel(currentPaymentMethod);
   const hasDelinquentStatus = ['past_due', 'unpaid', 'expired'].includes(planStatusKey);
@@ -1484,7 +1489,7 @@ export default function Assinatura() {
             <span>Ciclo de cobrança</span>
             <select className="input" value={checkoutCycle} onChange={(event) => setSelectedCycle(event.target.value)}>
               <option value="mensal">Mensal — {formatCurrencyFromCents(checkoutPlanMeta.priceCents)}</option>
-              <option value="anual">Anual — {formatCurrencyFromCents(checkoutPlanMeta.annualPriceCents)}</option>
+              <option value="anual">{`Anual — ${formatCurrencyFromCents(checkoutPlanMeta.annualPriceCents)}${annualSavingsCents > 0 ? ` (economia de ${formatCurrencyFromCents(annualSavingsCents)})` : ''}`}</option>
             </select>
           </label>
 
