@@ -93,8 +93,13 @@ router.post('/checkout-session', auth, isEstabelecimento, ensureAsaasConfigured,
         && uState?.plan_active_until && new Date(uState.plan_active_until).getTime() > nowMs;
       const subActive = latest && String(latest.status) === 'active'
         && latest.current_period_end && new Date(latest.current_period_end).getTime() > nowMs;
+      // Periodo PAGO vigente + JA existe uma assinatura Asaas deste tenant = estado pago-mas-baguncado
+      // (a pendente orfa que corrompe plan_status; ver subscription_reconcile). NUNCA cria/reaproveita
+      // uma 2a cobranca aqui — cai no ramo ativo, que devolve 409 (already_active / no_active_subscription)
+      // e evita cobranca dupla. Sem `latest` (ex.: migracao MP->Asaas ainda no periodo pago) deixa criar.
+      const hasPaidPeriod = Boolean(uState?.plan_active_until) && new Date(uState.plan_active_until).getTime() > nowMs;
 
-      if (uActive || subActive) {
+      if (uActive || subActive || (hasPaidPeriod && latest)) {
         const currentPlan = String(uState?.plan || latest?.plan || '').toLowerCase();
         const currentCycle = normalizeBillingCycle(uState?.plan_cycle || latest?.billing_cycle || 'mensal');
         const activeUntil = uState?.plan_active_until ? new Date(uState.plan_active_until)

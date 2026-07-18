@@ -6,6 +6,7 @@ import { cleanupPasswordResets } from '../lib/maintenance.js';
 import { enrichMercadoPagoSubscriptionEvent } from '../lib/mercadopago_payment_outcome.js';
 import { getTenantBotSettings, upsertTenantBotSettings } from '../bot/storage/settingsStore.js';
 import { setAudit, diffFields } from '../lib/audit.js';
+import { reconcileTenantSubscription } from '../lib/subscription_reconcile.js';
 
 const IDENT_RE = /^[a-zA-Z0-9_]+$/;
 function isIdent(s = '') { return IDENT_RE.test(String(s)); }
@@ -60,6 +61,32 @@ function parseBool(value, fallback = false) {
 router.post('/cleanup', checkAdmin, async (_req, res) => {
   const r = await cleanupPasswordResets(pool);
   res.json({ ok: true, ...r });
+});
+
+// Reconcilia a assinatura de um tenant preso em "PIX pendente" apesar de ativo (pendente orfa que
+// sobrou de cliques repetidos antes da trava/supersede-protegido). DRY-RUN por padrao: so devolve o
+// plano. Passe apply=true para aplicar (cancela orfas local+gateway e restaura a linha paga).
+//   body: { estabelecimentoId | email, apply?, cancelGateway? }
+router.post('/subscriptions/reconcile', checkAdmin, auditAdmin('admin.subscription_reconcile'), async (req, res) => {
+  try {
+    let estabelecimentoId = Number(req.body?.estabelecimentoId || req.body?.estabelecimento_id || 0) || null;
+    const email = String(req.body?.email || '').trim();
+    if (!estabelecimentoId && email) {
+      const [rows] = await pool.query("SELECT id FROM usuarios WHERE email=? AND tipo='estabelecimento' LIMIT 1", [email]);
+      estabelecimentoId = rows?.[0]?.id || null;
+    }
+    if (!estabelecimentoId) {
+      return res.status(400).json({ error: 'estabelecimento_required', message: 'Informe estabelecimentoId ou email.' });
+    }
+    const apply = parseBool(req.body?.apply, false);
+    const cancelGateway = parseBool(req.body?.cancelGateway, true);
+    const report = await reconcileTenantSubscription(estabelecimentoId, { apply, cancelGateway });
+    return res.status(200).json({ ok: true, dry_run: !apply, ...report });
+  } catch (err) {
+    console.error('[admin/subscriptions/reconcile]', err?.message || err);
+    const code = err?.message === 'estabelecimento_not_found' ? 404 : 500;
+    return res.status(code).json({ error: 'reconcile_failed', message: err?.message || 'Falha ao reconciliar.' });
+  }
 });
 
 // Billing: listar eventos recentes (subscription_events)
