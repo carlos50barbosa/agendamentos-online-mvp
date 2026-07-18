@@ -770,20 +770,16 @@ export default function Assinatura() {
     return () => { alive = false; };
   }, []);
 
-  // Assinatura via Asaas: cria a assinatura e redireciona ao checkout hospedado.
-  const handleAsaasCheckout = useCallback(async (targetPlan, billingCycle = 'mensal') => {
-    if (!establishmentId || checkoutLoading) return false;
-    // Asaas exige CPF/CNPJ do pagador. Usa o do perfil; se faltar, coleta agora
-    // (o backend valida e salva no perfil).
-    let cpfCnpj = String(user?.cpf_cnpj || '').replace(/\D/g, '');
-    if (![11, 14].includes(cpfCnpj.length)) {
-      const entered = window.prompt('Para assinar, informe seu CPF ou CNPJ (somente números):');
-      cpfCnpj = String(entered || '').replace(/\D/g, '');
-      if (![11, 14].includes(cpfCnpj.length)) {
-        setNotice({ type: 'error', message: 'É necessário um CPF ou CNPJ válido para assinar.' });
-        return false;
-      }
-    }
+  // Modal de CPF/CNPJ para assinar via Asaas (substitui o antigo window.prompt do navegador).
+  const [cpfModal, setCpfModal] = useState({ open: false, plan: null, cycle: 'mensal', value: '', error: '' });
+  const closeCpfModal = useCallback(
+    () => setCpfModal({ open: false, plan: null, cycle: 'mensal', value: '', error: '' }),
+    [],
+  );
+
+  // Parte de API do checkout Asaas (cria a assinatura e redireciona ao checkout hospedado),
+  // isolada para ser reusada quando já há CPF no perfil OU depois que o modal coletar um.
+  const startAsaasCheckout = useCallback(async (targetPlan, billingCycle, cpfCnpj) => {
     setCheckoutLoading(true);
     setNotice({ type: '', message: '' });
     try {
@@ -807,7 +803,31 @@ export default function Assinatura() {
     } finally {
       setCheckoutLoading(false);
     }
-  }, [checkoutLoading, establishmentId, refreshData, user?.cpf_cnpj]);
+  }, [refreshData]);
+
+  // Assinatura via Asaas: usa o CPF/CNPJ do perfil; se faltar, abre o MODAL para coletar
+  // (antes era window.prompt). O backend valida e salva no perfil.
+  const handleAsaasCheckout = useCallback(async (targetPlan, billingCycle = 'mensal') => {
+    if (!establishmentId || checkoutLoading) return false;
+    const cpfCnpj = String(user?.cpf_cnpj || '').replace(/\D/g, '');
+    if (![11, 14].includes(cpfCnpj.length)) {
+      setCpfModal({ open: true, plan: targetPlan, cycle: billingCycle, value: '', error: '' });
+      return false;
+    }
+    return startAsaasCheckout(targetPlan, billingCycle, cpfCnpj);
+  }, [checkoutLoading, establishmentId, startAsaasCheckout, user?.cpf_cnpj]);
+
+  // Confirmação do modal de CPF/CNPJ -> valida e segue o checkout com o número informado.
+  const submitCpfModal = useCallback(async () => {
+    const digits = String(cpfModal.value || '').replace(/\D/g, '');
+    if (![11, 14].includes(digits.length)) {
+      setCpfModal((m) => ({ ...m, error: 'Informe um CPF (11 dígitos) ou CNPJ (14 dígitos) válido — somente números.' }));
+      return;
+    }
+    const { plan, cycle } = cpfModal;
+    closeCpfModal();
+    await startAsaasCheckout(plan, cycle || 'mensal', digits);
+  }, [cpfModal, closeCpfModal, startAsaasCheckout]);
 
   const handleStartCheckout = useCallback(async (targetPlan, billingCycle = 'mensal') => {
     if (!establishmentId || checkoutLoading) return false;
@@ -1998,6 +2018,42 @@ export default function Assinatura() {
                     : 'Pague pelo app do seu banco e aguarde a confirmação automática.'}
             </p>
           </div>
+        </Modal>
+      ) : null}
+
+      {cpfModal.open ? (
+        <Modal
+          title="Informe seu CPF ou CNPJ"
+          onClose={closeCpfModal}
+          actions={[
+            <button key="cancel" type="button" className="btn btn--outline" onClick={closeCpfModal} disabled={checkoutLoading}>
+              Cancelar
+            </button>,
+            <button key="ok" type="button" className="btn btn--primary" onClick={() => void submitCpfModal()} disabled={checkoutLoading}>
+              {checkoutLoading ? <span className="spinner" /> : 'Continuar para o pagamento'}
+            </button>,
+          ]}
+        >
+          <p className="muted" style={{ marginTop: 0 }}>
+            Para assinar, o Asaas precisa do CPF ou CNPJ do responsável pela cobrança. Guardamos no seu perfil para as próximas vezes.
+          </p>
+          <label className="label">
+            <span>CPF ou CNPJ (somente números)</span>
+            <input
+              className="input"
+              inputMode="numeric"
+              autoComplete="off"
+              autoFocus
+              value={cpfModal.value}
+              onChange={(event) => setCpfModal((m) => ({ ...m, value: event.target.value.replace(/\D/g, ''), error: '' }))}
+              onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); void submitCpfModal(); } }}
+              placeholder="Somente números"
+              maxLength={14}
+            />
+          </label>
+          {cpfModal.error ? (
+            <div className="notice notice--error" style={{ marginTop: 8 }}>{cpfModal.error}</div>
+          ) : null}
         </Modal>
       ) : null}
     </div>
