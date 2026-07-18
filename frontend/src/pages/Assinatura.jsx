@@ -374,9 +374,21 @@ export default function Assinatura() {
   const planStatusKey = normalizeStatusKey(
     subscriptionData?.subscription?.status || billingStatus?.subscription?.status || planContext?.status,
   );
-  const planStatusLabel = getStatusLabel(planStatusKey);
-  const planStatusTone = getStatusTone(planStatusKey);
-  const subscriptionStatusCardLabel = ['pending_payment', 'pending_pix', 'past_due', 'unpaid', 'expired'].includes(planStatusKey)
+  // "Ativo para a UI". NAO usa plan_status: o backend SINCRONIZA usuarios.plan_status com a assinatura
+  // EFETIVA, entao uma pendente orfa corrompe esse campo para 'pending_pix'. O que SOBREVIVE e o periodo
+  // pago (planContext.active_until = plan_active_until). Regra: status ja 'active', OU ha periodo pago
+  // VIGENTE e o status e apenas "pendente" (provavel orfa) — nunca past_due/expired/unpaid, que exigem
+  // acao real. Ver o endpoint admin de reconciliacao, que conserta o dado de fato (efetiva volta a active).
+  const userActiveUntilDate = planContext?.active_until ? new Date(planContext.active_until) : null;
+  const hasFuturePaidPeriod = !!userActiveUntilDate && userActiveUntilDate.getTime() > Date.now();
+  const softPendingStatus = ['pending_pix', 'pending_payment'].includes(planStatusKey);
+  const userIsActive = planStatusKey === 'active' || (hasFuturePaidPeriod && softPendingStatus);
+  // Status exibido: quando o dono esta ativo, confia nisso (nao mostra "PIX pendente" de uma orfa).
+  const displayStatusKey = userIsActive ? 'active' : planStatusKey;
+  const planStatusLabel = getStatusLabel(displayStatusKey);
+  const planStatusTone = getStatusTone(displayStatusKey);
+  const subscriptionStatusCardLabel = (!userIsActive
+    && ['pending_payment', 'pending_pix', 'past_due', 'unpaid', 'expired'].includes(planStatusKey))
     ? 'Regularizacao pendente'
     : planStatusLabel;
   const currentCycle =
@@ -638,14 +650,14 @@ export default function Assinatura() {
   const handleStartCheckout = useCallback(async (targetPlan, billingCycle = 'mensal') => {
     // Assinatura ATIVA + alvo com outro plano OU outro ciclo = TROCA. Confirma antes: o acesso muda na
     // hora, mas a nova cobranca so entra na proxima renovacao — a confirmacao evita clique acidental.
-    const isChange = planStatusKey === 'active'
+    const isChange = userIsActive
       && (normalizePlanKey(targetPlan) !== planKey || (billingCycle || 'mensal') !== currentCycle);
     if (isChange) {
       setPlanChangeModal({ open: true, plan: normalizePlanKey(targetPlan), cycle: billingCycle || 'mensal' });
       return false;
     }
     return handleAsaasCheckout(targetPlan, billingCycle);
-  }, [handleAsaasCheckout, planStatusKey, planKey, currentCycle]);
+  }, [handleAsaasCheckout, userIsActive, planKey, currentCycle]);
 
   const confirmPlanChange = useCallback(async () => {
     const { plan, cycle } = planChangeModal;
@@ -793,7 +805,7 @@ export default function Assinatura() {
       {!loading && notice.message ? (
         <div className={notice.type ? `notice notice--${notice.type}` : 'notice'}>{notice.message}</div>
       ) : null}
-      {!loading && accessMode !== 'full' ? (
+      {!loading && !userIsActive && accessMode !== 'full' ? (
         <div className={`notice notice--${coreFeaturesAllowed ? 'warn' : 'error'}`}>
           {coreFeaturesAllowed
             ? 'Existe uma cobrança pendente. Regularize cartão ou PIX para evitar bloqueio.'
@@ -805,9 +817,11 @@ export default function Assinatura() {
         <section ref={paymentSectionRef} className="settings-module-card subscription-page__payments-card subscription-page__pay-card">
           <div className="subscription-page__section-head">
             <div>
-              <h3>Pagar assinatura</h3>
+              <h3>{userIsActive ? 'Trocar de plano' : 'Pagar assinatura'}</h3>
               <p className="muted">
-                Escolha o ciclo e confirme. O pagamento (cartão ou PIX) é concluído na tela segura do Asaas.
+                {userIsActive
+                  ? `Sua assinatura está ativa${userActiveUntilDate ? ` até ${formatDateLong(userActiveUntilDate)}` : ''}. Para mudar de plano ou ciclo, use as opções abaixo — você não precisa gerar um novo pagamento agora.`
+                  : 'Escolha o ciclo e confirme. O pagamento (cartão ou PIX) é concluído na tela segura do Asaas.'}
               </p>
             </div>
           </div>
@@ -826,7 +840,7 @@ export default function Assinatura() {
           </div>
 
           <div className="subscription-page__action-stack">
-            {trialAvailable ? (
+            {!userIsActive && trialAvailable ? (
               <button type="button" className="btn btn--outline btn--outline-brand" onClick={() => void handleStartTrial()} disabled={trialLoading}>
                 {trialLoading ? <span className="spinner" /> : 'Ativar 7 dias grátis do Pro'}
               </button>
@@ -837,7 +851,9 @@ export default function Assinatura() {
               onClick={() => void handleStartCheckout(checkoutPlanKey, checkoutCycle)}
               disabled={checkoutLoading || !providerReady}
             >
-              {checkoutLoading ? <span className="spinner" /> : `Assinar ${checkoutPlanMeta.label} ${BILLING_CYCLE_LABELS[checkoutCycle] || 'Mensal'}`}
+              {checkoutLoading
+                ? <span className="spinner" />
+                : `${userIsActive ? 'Trocar para' : 'Assinar'} ${checkoutPlanMeta.label} ${BILLING_CYCLE_LABELS[checkoutCycle] || 'Mensal'}`}
             </button>
             <Link className="btn btn--ghost" to="/planos#planos">
               Comparar planos
