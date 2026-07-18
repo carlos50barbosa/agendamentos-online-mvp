@@ -7,6 +7,7 @@ import { config } from '../lib/config.js';
 import { pool } from '../lib/db.js';
 import { serializeSubscription } from '../lib/subscriptions.js';
 import { createTenantAsaasSubscription, resolveBillingProvider } from '../lib/asaas_subscription.js';
+import { createAsaasPayments } from '../services/asaas/payments.js';
 import { PLAN_TIERS, normalizeBillingCycle } from '../lib/plans.js';
 
 const router = Router();
@@ -46,20 +47,134 @@ router.post('/checkout-session', auth, isEstabelecimento, ensureAsaasConfigured,
       cpfDigits = provided;
     }
 
-    const result = await createTenantAsaasSubscription({
-      estabelecimentoId: req.user.id,
-      plan,
-      cycle,
-    });
+    // Trava anti-duplicidade / ja-ativo / troca-de-plano (fix A). GET_LOCK por estabelecimento
+    // serializa o check-then-create (fecha a race de cliques/abas simultaneos). A conexao DEDICADA e
+    // obrigatoria: GET_LOCK e RELEASE_LOCK precisam rodar na MESMA conexao (pool.query pega conexoes
+    // diferentes a cada chamada). Todas as queries do bloco correm nessa conexao.
+    const lockKey = `asaas_sub:${req.user.id}`;
+    const conn = await pool.getConnection();
+    let lockAcquired = false;
+    let cleaned = false;
+    const cleanup = async () => {
+      if (cleaned) return;
+      cleaned = true;
+      try { if (lockAcquired) await conn.query('SELECT RELEASE_LOCK(?)', [lockKey]); } catch {}
+      conn.release();
+    };
+    try {
+      // GET_LOCK devolve 1 (adquiriu), 0 (timeout em 5s — outro pedido segura) ou NULL (erro).
+      // Ignorar o retorno reabriria a race: no timeout seguiriamos SEM o lock. Falha fechado.
+      const [[lockRow]] = await conn.query('SELECT GET_LOCK(?, 5) AS got', [lockKey]);
+      lockAcquired = Number(lockRow?.got) === 1;
+      if (!lockAcquired) {
+        return res.status(409).json({
+          error: 'checkout_in_progress',
+          message: 'Já há um pedido de assinatura em andamento. Aguarde alguns segundos e tente de novo.',
+        });
+      }
 
-    return res.status(201).json({
-      provider: 'asaas',
-      init_point: result.checkoutUrl,
-      checkout_url: result.checkoutUrl,
-      asaas_subscription_id: result.asaasSubscriptionId,
-      first_payment_id: result.firstPaymentId,
-      subscription: serializeSubscription(result.subscription),
-    });
+      // Estado atual das DUAS fontes: usuarios (autoritativo, setado no webhook) E a subscription
+      // Asaas mais recente. Checar so usuarios deixaria uma janela: se o webhook grava subscriptions
+      // 'active' mas falha antes de gravar usuarios, um novo checkout criaria uma 2a assinatura e o
+      // supersede (que protege 'active' vigente) NAO cancelaria a antiga -> duas cobrando em paralelo.
+      const [[uState]] = await conn.query(
+        'SELECT plan_status, plan_active_until, plan, plan_cycle FROM usuarios WHERE id=? LIMIT 1',
+        [req.user.id],
+      );
+      const [latestRows] = await conn.query(
+        `SELECT status, plan, billing_cycle, current_period_end FROM subscriptions
+           WHERE estabelecimento_id=? AND gateway='asaas' AND external_reference LIKE 'subscription:estab:%'
+           ORDER BY created_at DESC LIMIT 1`,
+        [req.user.id],
+      );
+      const latest = latestRows?.[0] || null;
+      const nowMs = Date.now();
+      const uActive = String(uState?.plan_status || '').toLowerCase() === 'active'
+        && uState?.plan_active_until && new Date(uState.plan_active_until).getTime() > nowMs;
+      const subActive = latest && String(latest.status) === 'active'
+        && latest.current_period_end && new Date(latest.current_period_end).getTime() > nowMs;
+
+      if (uActive || subActive) {
+        const currentPlan = String(uState?.plan || latest?.plan || '').toLowerCase();
+        const currentCycle = normalizeBillingCycle(uState?.plan_cycle || latest?.billing_cycle || 'mensal');
+        const activeUntil = uState?.plan_active_until ? new Date(uState.plan_active_until)
+          : (latest?.current_period_end ? new Date(latest.current_period_end) : null);
+        const untilLabel = activeUntil ? activeUntil.toLocaleDateString('pt-BR') : null;
+        if (currentPlan === plan && currentCycle === cycle) {
+          // Mesmo plano+ciclo: nada a fazer (renova sozinho) — o caso que o dono relatou.
+          return res.status(409).json({
+            error: 'subscription_already_active',
+            message: untilLabel
+              ? `Sua assinatura já está ativa até ${untilLabel} e renova automaticamente — não é necessário gerar um novo pagamento.`
+              : 'Sua assinatura já está ativa — não é necessário gerar um novo pagamento.',
+            active_until: activeUntil ? activeUntil.toISOString() : null,
+          });
+        }
+        // Plano/ciclo diferente = troca de plano. Ainda NAO suportada com seguranca por aqui (a
+        // proracao do Asaas nao esta conectada); nao criamos uma 2a assinatura para nao cobrar em
+        // paralelo nem cancelar a paga antes de a nova ser quitada.
+        return res.status(409).json({
+          error: 'plan_change_unsupported',
+          message: untilLabel
+            ? `Sua assinatura está ativa até ${untilLabel}. A troca automática de plano ainda não está disponível por aqui — fale com o suporte para ajustar.`
+            : 'A troca de plano com uma assinatura ativa ainda não está disponível por aqui — fale com o suporte.',
+          active_until: activeUntil ? activeUntil.toISOString() : null,
+        });
+      }
+
+      // Reaproveita cobranca pendente PAGAVEL do MESMO plano+ciclo (nunca de outro plano — senao o
+      // dono pagaria o plano/valor errado). Sem match, cai no create (o supersede cancela a pendente
+      // antiga nao-ativa).
+      const [pendRows] = await conn.query(
+        `SELECT gateway_subscription_id FROM subscriptions
+           WHERE estabelecimento_id=? AND gateway='asaas'
+             AND external_reference LIKE 'subscription:estab:%'
+             AND status IN ('pending_payment','pending_pix')
+             AND plan=? AND billing_cycle=?
+           ORDER BY created_at DESC LIMIT 1`,
+        [req.user.id, plan, cycle],
+      );
+      const pendingGatewayId = pendRows?.[0]?.gateway_subscription_id || null;
+      if (pendingGatewayId) {
+        try {
+          const charges = await createAsaasPayments().getSubscriptionPayments(pendingGatewayId);
+          const first = Array.isArray(charges) ? charges[0] : null;
+          const payable = first && String(first.status || '').toUpperCase() === 'PENDING';
+          const checkoutUrl = payable ? (first.invoiceUrl || first.bankSlipUrl || null) : null;
+          if (checkoutUrl) {
+            return res.status(200).json({
+              provider: 'asaas',
+              reused: true,
+              init_point: checkoutUrl,
+              checkout_url: checkoutUrl,
+              asaas_subscription_id: pendingGatewayId,
+              first_payment_id: first?.id ? String(first.id) : null,
+            });
+          }
+        } catch (err) {
+          console.warn('[billing/asaas][checkout-session] falha ao reaproveitar cobranca pendente', err?.message || err);
+          // cai para criar uma nova
+        }
+      }
+
+      const result = await createTenantAsaasSubscription({
+        estabelecimentoId: req.user.id,
+        plan,
+        cycle,
+        db: conn,
+      });
+
+      return res.status(201).json({
+        provider: 'asaas',
+        init_point: result.checkoutUrl,
+        checkout_url: result.checkoutUrl,
+        asaas_subscription_id: result.asaasSubscriptionId,
+        first_payment_id: result.firstPaymentId,
+        subscription: serializeSubscription(result.subscription),
+      });
+    } finally {
+      await cleanup();
+    }
   } catch (err) {
     // O 502 genérico escondia a causa: um AsaasError já traz a descrição do Asaas em .message,
     // além de .status e .body. Loga o payload completo para diagnóstico (antes só ia err.message).

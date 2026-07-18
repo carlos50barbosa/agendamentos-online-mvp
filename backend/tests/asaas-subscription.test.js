@@ -130,6 +130,35 @@ test('todo plano tem preço anual > mensal — anual nunca cai no fallback do me
   }
 })
 
+test('criacao nasce pending_payment (nao pending_pix) e o supersede protege assinatura ativa vigente (fix B/C)', async () => {
+  const db = fakeDb([
+    { match: /SELECT nome, email, telefone, cpf_cnpj FROM usuarios/, result: [[{ nome: 'Barbearia', email: 'b@x.com', telefone: '11999998888', cpf_cnpj: '12345678000199' }]] },
+    { match: /SELECT asaas_customer_id FROM usuarios/, result: [[{ asaas_customer_id: 'cus_estab' }]] },
+    { match: /INSERT INTO subscriptions/, result: [{ insertId: 12 }] },
+    { match: /SELECT \* FROM subscriptions WHERE id=/, result: [[{ ...SUB_ROW, id: 12, status: 'pending_payment' }]] },
+    { match: /UPDATE usuarios SET plan_subscription_id/, result: [{ affectedRows: 1 }] },
+  ])
+  const payments = fakePayments()
+
+  await createTenantAsaasSubscription({ estabelecimentoId: 9, plan: 'pro', cycle: 'mensal', db, payments })
+
+  // Fix C: a assinatura nasce com status generico 'pending_payment' (nao 'pending'/'pending_pix'),
+  // para a UI nao mostrar "PIX pendente" antes de o cliente escolher o metodo no checkout Asaas.
+  const insert = db.calls.find((c) => /INSERT INTO subscriptions/.test(c.sql))
+  assert.ok(insert.params.includes('pending_payment'), 'status inicial deve ser pending_payment')
+
+  // Fix B: os DOIS WHERE do supersede (SELECT no gateway + UPDATE local) devem excluir assinatura
+  // 'active' com periodo vigente — senao um novo checkout mataria uma assinatura JA PAGA.
+  const supersedeSelect = db.calls.find((c) => /SELECT id, gateway_subscription_id FROM subscriptions/.test(c.sql))
+  const supersedeUpdate = db.calls.find((c) => /UPDATE subscriptions SET status='canceled'/.test(c.sql))
+  assert.ok(supersedeSelect, 'o SELECT do supersede deve rodar')
+  assert.ok(supersedeUpdate, 'o UPDATE do supersede deve rodar')
+  for (const call of [supersedeSelect, supersedeUpdate]) {
+    assert.match(call.sql, /NOT \(status='active'/, 'supersede precisa do guard de status active')
+    assert.match(call.sql, /current_period_end > NOW\(\)/, 'supersede precisa checar periodo vigente')
+  }
+})
+
 test('plano inválido é rejeitado', async () => {
   await assert.rejects(
     () => createTenantAsaasSubscription({ estabelecimentoId: 9, plan: 'ouro', db: fakeDb(), payments: fakePayments() }),

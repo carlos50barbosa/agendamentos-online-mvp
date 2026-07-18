@@ -96,7 +96,7 @@ function getStatusLabel(value) {
     trialing: 'Teste gratuito',
     active: 'Ativo',
     pending: 'Pagamento pendente',
-    pending_payment: 'Aguardando cartão',
+    pending_payment: 'Pagamento pendente',
     pending_pix: 'PIX pendente',
     past_due: 'Cartão recusado',
     unpaid: 'Inadimplente',
@@ -577,10 +577,15 @@ export default function Assinatura() {
       });
       return true;
     } catch (requestError) {
+      // "Ja ativo" e "troca de plano" nao sao erros de operacao — sao estado informativo. Mostrar em
+      // vermelho sugeriria que algo falhou. Trata como aviso (info) e reflete o estado atual.
+      const code = requestError?.data?.error;
+      const informative = code === 'subscription_already_active' || code === 'plan_change_unsupported';
       setNotice({
-        type: 'error',
+        type: informative ? 'info' : 'error',
         message: getErrorMessage(requestError, 'Falha ao iniciar a assinatura no Asaas.'),
       });
+      if (informative) refreshData({ silent: true });
       return false;
     } finally {
       setCheckoutLoading(false);

@@ -77,11 +77,17 @@ export async function createTenantAsaasSubscription({
       estabelecimentoId,
       plan: planKey,
       gateway: 'asaas',
+      // Placeholder: o checkout e HOSPEDADO (billingType UNDEFINED); o metodo real (pix/cartao) so
+      // e conhecido na confirmacao — o webhook sobrescreve via COALESCE. A coluna e NOT NULL
+      // DEFAULT 'pix', entao mantemos 'pix' aqui apenas como default (nao dita o rotulo exibido).
       paymentMethod: 'pix',
       gatewayCustomerId: customerId,
       gatewaySubscriptionId: asaasSubscriptionId,
       externalReference: `subscription:estab:${estabelecimentoId}`,
-      status: 'pending',
+      // 'pending_payment' (generico), NAO 'pending' — que, com paymentMethod!='credit_card',
+      // normalizaria para 'pending_pix' e a UI mostraria "PIX pendente" ANTES de o cliente escolher
+      // o metodo na tela do Asaas. Ver subscription_normalization.js:31-33.
+      status: 'pending_payment',
       amountCents,
       currency: 'BRL',
       billingCycle: cycleKey,
@@ -95,12 +101,17 @@ export async function createTenantAsaasSubscription({
   //     canceled_at. Escopo positivo em 'subscription:estab:%' para NÃO tocar topups de WhatsApp
   //     (pending_pix/active) nem assinaturas MP históricas (que, com o período setado no webhook,
   //     já não brigam com esta).
+  // PROTEÇÃO (fix B): NÃO cancela uma assinatura 'active' com período vigente (current_period_end no
+  //     futuro) — senão um novo checkout mataria a recorrência de uma assinatura já PAGA. A trava do
+  //     checkout (billing_asaas.js) já impede criar nova enquanto ativo; isto é defesa em profundidade.
+  //     Os DOIS WHERE (SELECT do gateway + UPDATE local) precisam do mesmo guard para não divergir.
   try {
     const [oldAsaas] = await db.query(
       `SELECT id, gateway_subscription_id FROM subscriptions
         WHERE estabelecimento_id=? AND id<>? AND gateway='asaas'
           AND status NOT IN ('canceled') AND gateway_subscription_id IS NOT NULL
-          AND external_reference LIKE 'subscription:estab:%'`,
+          AND external_reference LIKE 'subscription:estab:%'
+          AND NOT (status='active' AND current_period_end IS NOT NULL AND current_period_end > NOW())`,
       [estabelecimentoId, localSub.id],
     );
     for (const old of oldAsaas || []) {
@@ -118,7 +129,8 @@ export async function createTenantAsaasSubscription({
     await db.query(
       `UPDATE subscriptions SET status='canceled', canceled_at=NOW(), updated_at=NOW()
         WHERE estabelecimento_id=? AND id<>? AND gateway='asaas'
-          AND status NOT IN ('canceled') AND external_reference LIKE 'subscription:estab:%'`,
+          AND status NOT IN ('canceled') AND external_reference LIKE 'subscription:estab:%'
+          AND NOT (status='active' AND current_period_end IS NOT NULL AND current_period_end > NOW())`,
       [estabelecimentoId, localSub.id],
     );
   } catch (err) {
