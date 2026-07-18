@@ -85,3 +85,32 @@ test('computeSubscriptionState promotes pending PIX to due_soon inside the warni
   assert.equal(state.state, 'due_soon');
   assert.equal(state.daysToDue, 3);
 });
+
+// Caso real (18/07/2026): um estabelecimento (Studio Dihcampos) gerou um PIX durante o trial para
+// TESTAR o pagamento e nao pagou. A subscription virou pending_pix SEM um current_period_end que
+// cobrisse o trial, e o compute passou a usar o status da subscription — ignorando o trial que
+// ainda tinha dias. Resultado: bloqueado na hora, so por ter testado o pagamento. O fix faz o trial
+// ativo cobrir o acesso mesmo com pagamento pendente.
+test('computeSubscriptionState: pending_pix durante o trial NAO bloqueia', () => {
+  const now = new Date('2026-04-21T12:00:00.000Z');
+  const state = computeSubscriptionState({
+    subscription: { status: 'pending_pix', paymentMethod: 'pix' }, // sem current_period_end
+    planContext: { status: 'pending_pix', trialEndsAt: new Date('2026-05-10T12:00:00.000Z') }, // trial ainda tem dias
+    now,
+  });
+
+  assert.equal(state.coreFeaturesAllowed, true, 'trial ativo cobre o acesso mesmo com PIX pendente');
+  assert.equal(state.state, 'trial');
+});
+
+test('computeSubscriptionState: pending_pix com o trial JA EXPIRADO continua bloqueando (sem regressao)', () => {
+  const now = new Date('2026-06-21T12:00:00.000Z'); // depois do fim do trial
+  const state = computeSubscriptionState({
+    subscription: { status: 'pending_pix', paymentMethod: 'pix' },
+    planContext: { status: 'pending_pix', trialEndsAt: new Date('2026-05-10T12:00:00.000Z') },
+    now,
+  });
+
+  assert.equal(state.coreFeaturesAllowed, false, 'sem trial ativo e sem periodo/graca, PIX nao pago bloqueia');
+  assert.equal(state.state, 'blocked');
+});

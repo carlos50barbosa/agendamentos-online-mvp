@@ -165,14 +165,22 @@ export function computeSubscriptionState({
   } else if (resolvedStatus === 'pending_payment' || resolvedStatus === 'pending_pix' || resolvedStatus === 'past_due') {
     const withinDueWindow = currentPeriodEnd && currentPeriodEnd.getTime() > now.getTime()
     const withinGraceWindow = graceUntil && graceUntil.getTime() > now.getTime()
+    // O trial ainda ativo cobre o acesso mesmo com um pagamento pendente. Gerar um PIX — para
+    // testar, ou pretendendo pagar depois — NÃO pode descartar os dias de trial que a pessoa já
+    // tem. Sem esta condição, quem testava o pagamento durante o trial era bloqueado na hora
+    // (a subscription 'pending_pix' fazia o compute ignorar o ramo do trial). Não abre abuso: o
+    // acesso continua limitado ao fim do trial; depois dele, PIX não pago volta a bloquear.
+    const trialStillActive = trialEndsAt && trialEndsAt.getTime() > now.getTime()
     const daysUntilDue = withinDueWindow ? calcDayDiff(currentPeriodEnd, now) : null
-    coreFeaturesAllowed = Boolean(withinDueWindow || withinGraceWindow)
+    coreFeaturesAllowed = Boolean(withinDueWindow || withinGraceWindow || trialStillActive)
     accessState = 'partial'
     state = withinDueWindow
       ? (daysUntilDue != null && daysUntilDue <= warnDays ? 'due_soon' : 'pending')
       : withinGraceWindow
         ? 'overdue'
-        : 'blocked'
+        : trialStillActive
+          ? 'trial'
+          : 'blocked'
 
     if (!coreFeaturesAllowed) {
       resolvedStatus = resolvedStatus === 'pending_pix' ? 'expired' : 'unpaid'
