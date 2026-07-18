@@ -7,7 +7,7 @@ process.env.DB_PASS ??= 'root'
 process.env.DB_NAME ??= 'test'
 process.env.JWT_SECRET ??= 'test-secret'
 
-const { createTenantAsaasSubscription, setTenantAsaasSubscriptionStatus, resolveBillingProvider } = await import('../src/lib/asaas_subscription.js')
+const { createTenantAsaasSubscription, setTenantAsaasSubscriptionStatus, changeTenantAsaasPlan, resolveBillingProvider } = await import('../src/lib/asaas_subscription.js')
 
 function fakeDb(handlers = []) {
   const calls = []
@@ -32,6 +32,7 @@ function fakePayments(overrides = {}) {
     calls,
     createCustomer: wrap('createCustomer', overrides.createCustomer || (() => ({ id: 'cus_new' }))),
     createSubscription: wrap('createSubscription', overrides.createSubscription || (() => ({ id: 'sub_asaas_1' }))),
+    updateSubscription: wrap('updateSubscription', overrides.updateSubscription || (() => ({ id: 'sub_asaas_1' }))),
     getSubscriptionPayments: wrap('getSubscriptionPayments', overrides.getSubscriptionPayments || (() => [{ id: 'pay_1', invoiceUrl: 'https://asaas/checkout/1' }])),
     setSubscriptionStatus: wrap('setSubscriptionStatus', overrides.setSubscriptionStatus || (() => ({ status: 'INACTIVE' }))),
     createPixCharge: wrap('createPixCharge'),
@@ -162,6 +163,129 @@ test('criacao nasce pending_payment (nao pending_pix) e o supersede protege assi
 test('plano inválido é rejeitado', async () => {
   await assert.rejects(
     () => createTenantAsaasSubscription({ estabelecimentoId: 9, plan: 'ouro', db: fakeDb(), payments: fakePayments() }),
+    (e) => /invalid_plan/.test(e.message),
+  )
+})
+
+test('troca de plano (upgrade) faz update-in-place: novo valor no gateway + linha local + usuarios, sem 2a assinatura', async () => {
+  const db = fakeDb([
+    { match: /UPDATE subscriptions SET plan=/, result: [{ affectedRows: 1 }] },
+    { match: /UPDATE usuarios SET plan=/, result: [{ affectedRows: 1 }] },
+  ])
+  const payments = fakePayments()
+
+  const res = await changeTenantAsaasPlan({
+    estabelecimentoId: 9,
+    subscription: { id: 10, gatewaySubscriptionId: 'sub_asaas_1' },
+    plan: 'premium',
+    cycle: 'mensal',
+    db,
+    payments,
+  })
+
+  // Gateway: MESMA assinatura muda de valor (premium mensal = 9990 -> 99.9) e reescreve a cobranca
+  // pendente. NUNCA cria uma 2a assinatura (nada de cobrar em paralelo).
+  assert.equal(payments.calls.filter((c) => c.name === 'createSubscription').length, 0)
+  const upd = payments.calls.find((c) => c.name === 'updateSubscription')
+  assert.equal(upd.args[0], 'sub_asaas_1')
+  assert.equal(upd.args[1].value, 99.9)
+  assert.equal(upd.args[1].cycle, 'MONTHLY')
+  assert.equal(upd.args[1].updatePendingPayments, true)
+
+  // Linha local: plan/amount/billing_cycle no novo tier.
+  const subUpdate = db.calls.find((c) => /UPDATE subscriptions SET plan=/.test(c.sql))
+  assert.ok(subUpdate.params.includes('premium'))
+  assert.ok(subUpdate.params.includes(9990))
+  // usuarios: acesso ao novo tier ja.
+  const userUpdate = db.calls.find((c) => /UPDATE usuarios SET plan=/.test(c.sql))
+  assert.ok(userUpdate.params.includes('premium'))
+
+  assert.deepEqual(
+    { ok: res.ok, plan: res.plan, cycle: res.cycle, amountCents: res.amountCents, subscriptionId: res.subscriptionId },
+    { ok: true, plan: 'premium', cycle: 'mensal', amountCents: 9990, subscriptionId: 10 },
+  )
+})
+
+test('troca para ciclo ANUAL manda valor anual + YEARLY (nao o mensal)', async () => {
+  const db = fakeDb([
+    { match: /UPDATE subscriptions SET plan=/, result: [{ affectedRows: 1 }] },
+    { match: /UPDATE usuarios SET plan=/, result: [{ affectedRows: 1 }] },
+  ])
+  const payments = fakePayments()
+
+  await changeTenantAsaasPlan({
+    estabelecimentoId: 9,
+    subscription: { id: 10, gatewaySubscriptionId: 'sub_asaas_1' },
+    plan: 'pro',
+    cycle: 'anual',
+    db,
+    payments,
+  })
+
+  const upd = payments.calls.find((c) => c.name === 'updateSubscription')
+  assert.equal(upd.args[1].value, 299) // pro anual = 29900
+  assert.equal(upd.args[1].cycle, 'YEARLY')
+})
+
+function fakeTxDb(handlers = [], { failOnLocal = false } = {}) {
+  const base = fakeDb(handlers)
+  const tx = []
+  return {
+    calls: base.calls,
+    tx,
+    beginTransaction: async () => { tx.push('begin') },
+    commit: async () => { tx.push('commit') },
+    rollback: async () => { tx.push('rollback') },
+    query: async (sql, params) => {
+      if (failOnLocal && /UPDATE usuarios SET plan=/.test(sql)) throw new Error('db_down')
+      return base.query(sql, params)
+    },
+  }
+}
+
+test('quando a conexao suporta transacao, os dois writes locais entram na MESMA transacao e commitam', async () => {
+  const db = fakeTxDb()
+  const payments = fakePayments()
+  await changeTenantAsaasPlan({
+    estabelecimentoId: 9,
+    subscription: { id: 10, gatewaySubscriptionId: 'sub_asaas_1' },
+    plan: 'premium',
+    cycle: 'mensal',
+    db,
+    payments,
+  })
+  // begin antes dos UPDATEs, commit depois, sem rollback.
+  assert.deepEqual(db.tx, ['begin', 'commit'])
+})
+
+test('se um write local falha dentro da transacao, faz rollback e propaga o erro (nao commita pela metade)', async () => {
+  const db = fakeTxDb([], { failOnLocal: true })
+  const payments = fakePayments()
+  await assert.rejects(
+    () => changeTenantAsaasPlan({
+      estabelecimentoId: 9,
+      subscription: { id: 10, gatewaySubscriptionId: 'sub_asaas_1' },
+      plan: 'premium',
+      cycle: 'mensal',
+      db,
+      payments,
+    }),
+    (e) => /db_down/.test(e.message),
+  )
+  assert.deepEqual(db.tx, ['begin', 'rollback'])
+  assert.ok(!db.tx.includes('commit'), 'nao pode commitar quando o write local falhou')
+})
+
+test('troca de plano exige assinatura ativa com id + gatewaySubscriptionId', async () => {
+  await assert.rejects(
+    () => changeTenantAsaasPlan({ estabelecimentoId: 9, subscription: { id: 10 }, plan: 'premium', db: fakeDb(), payments: fakePayments() }),
+    (e) => /no_active_asaas_subscription/.test(e.message),
+  )
+})
+
+test('troca de plano rejeita plano invalido', async () => {
+  await assert.rejects(
+    () => changeTenantAsaasPlan({ estabelecimentoId: 9, subscription: { id: 10, gatewaySubscriptionId: 'sub_asaas_1' }, plan: 'ouro', db: fakeDb(), payments: fakePayments() }),
     (e) => /invalid_plan/.test(e.message),
   )
 })
