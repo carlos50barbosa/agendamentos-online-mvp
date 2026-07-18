@@ -92,6 +92,44 @@ test('cria assinatura Asaas, persiste (gateway=asaas) e devolve link hospedado',
   assert.ok(insert.params.includes('sub_asaas_1'))
 })
 
+test('assinatura ANUAL cobra o preço anual e recorrência YEARLY (não mensal)', async () => {
+  const db = fakeDb([
+    { match: /SELECT nome, email, telefone, cpf_cnpj FROM usuarios/, result: [[{ nome: 'Barbearia', email: 'b@x.com', telefone: '11999998888', cpf_cnpj: '12345678000199' }]] },
+    { match: /SELECT asaas_customer_id FROM usuarios/, result: [[{ asaas_customer_id: 'cus_estab' }]] },
+    { match: /INSERT INTO subscriptions/, result: [{ insertId: 11 }] },
+    { match: /SELECT \* FROM subscriptions WHERE id=/, result: [[{ ...SUB_ROW, id: 11, billing_cycle: 'anual', amount_cents: 29900 }]] },
+    { match: /UPDATE usuarios SET plan_subscription_id/, result: [{ affectedRows: 1 }] },
+  ])
+  const payments = fakePayments()
+
+  const result = await createTenantAsaasSubscription({ estabelecimentoId: 9, plan: 'pro', cycle: 'anual', db, payments })
+
+  // O que vai pro Asaas: valor ANUAL (pro 29900 = R$ 299,00) e recorrência YEARLY — o bug clássico
+  // aqui seria cobrar o preço mensal (29.9) ou mandar MONTHLY para um plano anual.
+  const subCall = payments.calls.find((c) => c.name === 'createSubscription')
+  assert.equal(subCall.args[0].value, 299)
+  assert.equal(subCall.args[0].cycle, 'YEARLY')
+
+  // Persistiu o ciclo anual e o valor anual localmente (billing_cycle / amount_cents).
+  const insert = db.calls.find((c) => /INSERT INTO subscriptions/.test(c.sql))
+  assert.ok(insert.params.includes('anual'))
+  assert.ok(insert.params.includes(29900))
+
+  // E o retorno reflete o ciclo anual.
+  assert.equal(result.subscription.billingCycle, 'anual')
+})
+
+test('todo plano tem preço anual > mensal — anual nunca cai no fallback do mensal', async () => {
+  // Guarda getPlanPriceCents: se annualPriceCents sumir de um plano, o anual cairia
+  // silenciosamente no preço MENSAL. Aqui isso vira teste vermelho.
+  const { getPlanPriceCents, PLAN_TIERS } = await import('../src/lib/plans.js')
+  for (const plan of PLAN_TIERS) {
+    const mensal = getPlanPriceCents(plan, 'mensal')
+    const anual = getPlanPriceCents(plan, 'anual')
+    assert.ok(anual > mensal, `${plan}: anual (${anual}) deveria ser > mensal (${mensal})`)
+  }
+})
+
 test('plano inválido é rejeitado', async () => {
   await assert.rejects(
     () => createTenantAsaasSubscription({ estabelecimentoId: 9, plan: 'ouro', db: fakeDb(), payments: fakePayments() }),
