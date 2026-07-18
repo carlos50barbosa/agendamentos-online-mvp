@@ -593,6 +593,7 @@ export default function Assinatura() {
         'subscription_already_active',
         'plan_change_unsupported',
         'plan_downgrade_unsupported',
+        'plan_change_annual_support',
         'plan_change_no_active_subscription',
       ].includes(code);
       setNotice({
@@ -1059,14 +1060,18 @@ export default function Assinatura() {
         const targetMeta = PLAN_META[planChangeModal.plan] || PLAN_META.starter;
         const targetCycle = planChangeModal.cycle || 'mensal';
         const targetPriceCents = targetCycle === 'anual' ? targetMeta.annualPriceCents : targetMeta.priceCents;
-        // Downgrade (descer de tier) nao e suportado por aqui — mesmo bloqueio do backend, sem round-trip.
+        // Downgrade (descer de tier) nao e suportado por aqui. Assinatura ANUAL ativa: qualquer troca vai
+        // pro suporte (o periodo pago nao expirado e grande demais p/ acesso gratis ou converter sem
+        // proracao). Ambos espelham o 409 do backend, sem round-trip.
         const isDowngradeChange = getPlanTier(planChangeModal.plan) < getPlanTier(planKey);
+        const annualLocked = currentCycle === 'anual';
+        const mustUseSupport = isDowngradeChange || annualLocked;
         const renewalLabel = activeUntil ? new Date(activeUntil).toLocaleDateString('pt-BR') : null;
         return (
           <Modal
-            title={isDowngradeChange ? 'Troca indisponível por aqui' : 'Confirmar troca de plano'}
+            title={mustUseSupport ? 'Troca via suporte' : 'Confirmar troca de plano'}
             onClose={closePlanChangeModal}
-            actions={isDowngradeChange ? [
+            actions={mustUseSupport ? [
               <button key="ok" type="button" className="btn btn--primary" onClick={closePlanChangeModal}>
                 Entendi
               </button>,
@@ -1079,11 +1084,18 @@ export default function Assinatura() {
               </button>,
             ]}
           >
-            {isDowngradeChange ? (
-              <p className="muted" style={{ marginTop: 0 }}>
-                Baixar do plano <strong>{planMeta.label}</strong> para <strong>{targetMeta.label}</strong> ainda não está
-                disponível por aqui. Fale com o suporte para ajustar sem perder o período já pago.
-              </p>
+            {mustUseSupport ? (
+              annualLocked ? (
+                <p className="muted" style={{ marginTop: 0 }}>
+                  Sua assinatura <strong>anual</strong> está ativa{renewalLabel ? ` até ${renewalLabel}` : ''}. Para trocar de
+                  plano antes disso, fale com o suporte — ajustamos sem você perder o período já pago.
+                </p>
+              ) : (
+                <p className="muted" style={{ marginTop: 0 }}>
+                  Baixar do plano <strong>{planMeta.label}</strong> para <strong>{targetMeta.label}</strong> ainda não está
+                  disponível por aqui. Fale com o suporte para ajustar sem perder o período já pago.
+                </p>
+              )
             ) : (
               <>
                 <p className="muted" style={{ marginTop: 0 }}>

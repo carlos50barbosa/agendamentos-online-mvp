@@ -6,9 +6,9 @@ import { auth, isEstabelecimento } from '../middleware/auth.js';
 import { config } from '../lib/config.js';
 import { pool } from '../lib/db.js';
 import { serializeSubscription } from '../lib/subscriptions.js';
-import { createTenantAsaasSubscription, changeTenantAsaasPlan, resolveBillingProvider } from '../lib/asaas_subscription.js';
+import { createTenantAsaasSubscription, changeTenantAsaasPlan, resolveActiveSubscriptionChange, resolveBillingProvider } from '../lib/asaas_subscription.js';
 import { createAsaasPayments } from '../services/asaas/payments.js';
-import { PLAN_TIERS, normalizeBillingCycle, isDowngrade } from '../lib/plans.js';
+import { PLAN_TIERS, normalizeBillingCycle } from '../lib/plans.js';
 
 const router = Router();
 
@@ -100,35 +100,56 @@ router.post('/checkout-session', auth, isEstabelecimento, ensureAsaasConfigured,
         const activeUntil = uState?.plan_active_until ? new Date(uState.plan_active_until)
           : (latest?.current_period_end ? new Date(latest.current_period_end) : null);
         const untilLabel = activeUntil ? activeUntil.toLocaleDateString('pt-BR') : null;
-        if (currentPlan === plan && currentCycle === cycle) {
+        const activeUntilIso = activeUntil ? activeUntil.toISOString() : null;
+        const activeSub = latest && String(latest.status) === 'active' && latest.gateway_subscription_id ? latest : null;
+        // Decisao PURA (ordem: ja-ativo -> anual -> downgrade -> sem-gateway -> troca). Ver
+        // resolveActiveSubscriptionChange (testado em asaas-subscription.test.js).
+        const action = resolveActiveSubscriptionChange({
+          currentPlan,
+          currentCycle,
+          requestedPlan: plan,
+          requestedCycle: cycle,
+          hasActiveGatewaySub: Boolean(activeSub),
+        });
+        if (action === 'already_active') {
           // Mesmo plano+ciclo: nada a fazer (renova sozinho) — o caso que o dono relatou.
           return res.status(409).json({
             error: 'subscription_already_active',
             message: untilLabel
               ? `Sua assinatura já está ativa até ${untilLabel} e renova automaticamente — não é necessário gerar um novo pagamento.`
               : 'Sua assinatura já está ativa — não é necessário gerar um novo pagamento.',
-            active_until: activeUntil ? activeUntil.toISOString() : null,
+            active_until: activeUntilIso,
           });
         }
-        // Plano/ciclo diferente = TROCA via update-in-place (nao cancela+cria): muda o valor da MESMA
-        // assinatura; o novo valor vale na proxima cobranca e o acesso sobe na hora (ver changeTenantAsaasPlan).
-        if (isDowngrade(currentPlan, plan)) {
+        if (action === 'annual_support') {
+          // Periodo PAGO anual: janela nao expirada grande demais para dar acesso de graca (subir de
+          // tier) ou converter em mensal sem proracao. Vai pro suporte (ajuste manual: Asaas + banco).
+          return res.status(409).json({
+            error: 'plan_change_annual_support',
+            message: untilLabel
+              ? `Sua assinatura anual está ativa até ${untilLabel}. Para trocar de plano antes disso, fale com o suporte — ajustamos sem você perder o período já pago.`
+              : 'Para trocar de plano com uma assinatura anual ativa, fale com o suporte — ajustamos sem você perder o período já pago.',
+            active_until: activeUntilIso,
+          });
+        }
+        if (action === 'downgrade_unsupported') {
           // Downgrade (descer de tier) fica de fora do MVP — precisaria de troca AGENDADA p/ fim do ciclo.
           return res.status(409).json({
             error: 'plan_downgrade_unsupported',
             message: untilLabel
               ? `Sua assinatura está ativa até ${untilLabel}. Baixar de plano ainda não está disponível por aqui — fale com o suporte.`
               : 'Baixar de plano com uma assinatura ativa ainda não está disponível por aqui — fale com o suporte.',
-            active_until: activeUntil ? activeUntil.toISOString() : null,
+            active_until: activeUntilIso,
           });
         }
-        const activeSub = latest && String(latest.status) === 'active' && latest.gateway_subscription_id ? latest : null;
-        if (!activeSub) {
+        if (action === 'no_active_subscription') {
           return res.status(409).json({
             error: 'plan_change_no_active_subscription',
             message: 'Não encontramos sua assinatura ativa no gateway para trocar o plano. Tente novamente em instantes.',
           });
         }
+        // action === 'change': TROCA (partindo do MENSAL) via update-in-place — muda o valor da MESMA
+        // assinatura; o novo valor vale na proxima cobranca e o acesso ao novo tier sobe na hora.
         const changed = await changeTenantAsaasPlan({
           estabelecimentoId: req.user.id,
           subscription: { id: activeSub.id, gatewaySubscriptionId: activeSub.gateway_subscription_id },
@@ -141,7 +162,7 @@ router.post('/checkout-session', auth, isEstabelecimento, ensureAsaasConfigured,
           plan_changed: true,
           plan: changed.plan,
           cycle: changed.cycle,
-          active_until: activeUntil ? activeUntil.toISOString() : null,
+          active_until: activeUntilIso,
           message: untilLabel
             ? `Plano alterado para ${changed.planLabel}. O acesso já vale; a nova cobrança entra na próxima renovação (${untilLabel}).`
             : `Plano alterado para ${changed.planLabel}. O acesso já vale.`,

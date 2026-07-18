@@ -7,7 +7,7 @@ import { pool } from './db.js';
 import { createAsaasPayments } from '../services/asaas/payments.js';
 import { resolveAsaasCustomerId } from './deposit_provider.js';
 import { createSubscription as persistSubscription, updateSubscription, getLatestSubscriptionForEstabelecimento } from './subscriptions.js';
-import { getPlanPriceCents, normalizeBillingCycle, resolvePlanConfig, PLAN_TIERS } from './plans.js';
+import { getPlanPriceCents, normalizeBillingCycle, resolvePlanConfig, PLAN_TIERS, isDowngrade } from './plans.js';
 
 /** Provider ativo para a assinatura do tenant (independente do sinal). */
 export function resolveBillingProvider() {
@@ -161,6 +161,38 @@ export async function createTenantAsaasSubscription({
   }
 
   return { subscription: localSub, checkoutUrl, asaasSubscriptionId, firstPaymentId };
+}
+
+/**
+ * Decide O QUE fazer quando ja existe assinatura ATIVA e o dono pede um plano/ciclo. PURA (sem I/O)
+ * para ser 100% testavel — a ORDEM dos ramos e o que importa e o que um teste protege. A rota apenas
+ * mapeia a acao devolvida para a resposta HTTP.
+ *
+ * Ordem (proposital):
+ *  1) mesmo plano+ciclo            -> 'already_active'    (renova sozinho, nada a fazer)
+ *  2) periodo pago e ANUAL         -> 'annual_support'    (janela nao expirada grande demais; vai p/ suporte)
+ *  3) descer de tier               -> 'downgrade_unsupported'
+ *  4) sem assinatura ativa no gw   -> 'no_active_subscription'
+ *  5) senao (upgrade/ciclo mensal) -> 'change'            (update-in-place via changeTenantAsaasPlan)
+ *
+ * @returns {'already_active'|'annual_support'|'downgrade_unsupported'|'no_active_subscription'|'change'}
+ */
+export function resolveActiveSubscriptionChange({
+  currentPlan,
+  currentCycle,
+  requestedPlan,
+  requestedCycle,
+  hasActiveGatewaySub,
+} = {}) {
+  const curPlan = String(currentPlan || '').toLowerCase();
+  const reqPlan = String(requestedPlan || '').toLowerCase();
+  const curCycle = normalizeBillingCycle(currentCycle);
+  const reqCycle = normalizeBillingCycle(requestedCycle);
+  if (curPlan === reqPlan && curCycle === reqCycle) return 'already_active';
+  if (curCycle === 'anual') return 'annual_support';
+  if (isDowngrade(curPlan, reqPlan)) return 'downgrade_unsupported';
+  if (!hasActiveGatewaySub) return 'no_active_subscription';
+  return 'change';
 }
 
 /**

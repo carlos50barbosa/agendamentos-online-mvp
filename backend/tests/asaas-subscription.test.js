@@ -7,7 +7,7 @@ process.env.DB_PASS ??= 'root'
 process.env.DB_NAME ??= 'test'
 process.env.JWT_SECRET ??= 'test-secret'
 
-const { createTenantAsaasSubscription, setTenantAsaasSubscriptionStatus, changeTenantAsaasPlan, resolveBillingProvider } = await import('../src/lib/asaas_subscription.js')
+const { createTenantAsaasSubscription, setTenantAsaasSubscriptionStatus, changeTenantAsaasPlan, resolveActiveSubscriptionChange, resolveBillingProvider } = await import('../src/lib/asaas_subscription.js')
 
 function fakeDb(handlers = []) {
   const calls = []
@@ -225,6 +225,42 @@ test('troca para ciclo ANUAL manda valor anual + YEARLY (nao o mensal)', async (
   const upd = payments.calls.find((c) => c.name === 'updateSubscription')
   assert.equal(upd.args[1].value, 299) // pro anual = 29900
   assert.equal(upd.args[1].cycle, 'YEARLY')
+})
+
+const decide = (o) => resolveActiveSubscriptionChange({ hasActiveGatewaySub: true, ...o })
+
+test('decisao da troca: mesmo plano+ciclo = already_active (mensal e anual)', () => {
+  assert.equal(decide({ currentPlan: 'pro', currentCycle: 'mensal', requestedPlan: 'pro', requestedCycle: 'mensal' }), 'already_active')
+  assert.equal(decide({ currentPlan: 'pro', currentCycle: 'anual', requestedPlan: 'pro', requestedCycle: 'anual' }), 'already_active')
+})
+
+test('decisao da troca: periodo pago ANUAL manda QUALQUER troca pro suporte (precede downgrade)', () => {
+  // upgrade de tier no anual
+  assert.equal(decide({ currentPlan: 'pro', currentCycle: 'anual', requestedPlan: 'premium', requestedCycle: 'anual' }), 'annual_support')
+  // anual -> mensal (mesmo tier): NAO e downgrade de tier, mas o periodo anual pago barra
+  assert.equal(decide({ currentPlan: 'pro', currentCycle: 'anual', requestedPlan: 'pro', requestedCycle: 'mensal' }), 'annual_support')
+  // ORDEM: anual precede o ramo de downgrade — descer de tier no anual tambem vai pro suporte (nao
+  // 'downgrade_unsupported'), senao a mensagem/tratamento seria o errado.
+  assert.equal(decide({ currentPlan: 'premium', currentCycle: 'anual', requestedPlan: 'pro', requestedCycle: 'anual' }), 'annual_support')
+})
+
+test('decisao da troca: partindo do MENSAL, descer de tier = downgrade_unsupported', () => {
+  assert.equal(decide({ currentPlan: 'premium', currentCycle: 'mensal', requestedPlan: 'pro', requestedCycle: 'mensal' }), 'downgrade_unsupported')
+  assert.equal(decide({ currentPlan: 'pro', currentCycle: 'mensal', requestedPlan: 'starter', requestedCycle: 'mensal' }), 'downgrade_unsupported')
+})
+
+test('decisao da troca: upgrade/ciclo no MENSAL = change (com assinatura no gateway)', () => {
+  // subir de tier
+  assert.equal(decide({ currentPlan: 'pro', currentCycle: 'mensal', requestedPlan: 'premium', requestedCycle: 'mensal' }), 'change')
+  // mensal -> anual (mesmo tier): sobe o compromisso, e permitido
+  assert.equal(decide({ currentPlan: 'pro', currentCycle: 'mensal', requestedPlan: 'pro', requestedCycle: 'anual' }), 'change')
+})
+
+test('decisao da troca: sem assinatura ativa no gateway = no_active_subscription (fail-safe)', () => {
+  assert.equal(
+    resolveActiveSubscriptionChange({ currentPlan: 'pro', currentCycle: 'mensal', requestedPlan: 'premium', requestedCycle: 'mensal', hasActiveGatewaySub: false }),
+    'no_active_subscription',
+  )
 })
 
 function fakeTxDb(handlers = [], { failOnLocal = false } = {}) {
