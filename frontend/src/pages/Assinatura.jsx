@@ -1420,14 +1420,30 @@ export default function Assinatura() {
           </p>
         </div>
         <div className="settings-module-hero__meta subscription-page__hero-meta">
-          <div className="settings-module-hero__pill">{planMeta.label} - {BILLING_CYCLE_LABELS[currentCycle] || 'Mensal'}</div>
           <div className={`subscription-page__status-chip subscription-page__status-chip--${planStatusTone}`}>
             {planStatusLabel}
           </div>
-          <Link className="btn btn--outline btn--sm" to="/configuracoes">
-            Voltar
-          </Link>
         </div>
+        {!loading ? (
+          <div className="subscription-page__hero-status">
+            <div className="subscription-page__summary-cell">
+              <span className="subscription-page__eyebrow">Plano atual</span>
+              <div className="subscription-page__summary-value">{formatCurrencyFromCents(currentPlanPriceCents)}</div>
+              <span className="muted">{planMeta.label} · {BILLING_CYCLE_LABELS[currentCycle] || 'Mensal'}</span>
+            </div>
+            <div className="subscription-page__summary-cell">
+              <span className="subscription-page__eyebrow">Vencimento</span>
+              <div className="subscription-page__summary-value">{nextDueLabel}</div>
+              <span className="muted">
+                {planStatusKey === 'trialing' && trialEndsAt
+                  ? `Teste grátis até ${formatDateLong(trialEndsAt)}.`
+                  : activeUntil
+                    ? 'Próxima cobrança do ciclo atual.'
+                    : 'Sem vencimento confirmado.'}
+              </span>
+            </div>
+          </div>
+        ) : null}
       </section>
 
       {loading ? (
@@ -1448,27 +1464,6 @@ export default function Assinatura() {
           {coreFeaturesAllowed
             ? 'Existe uma cobrança pendente. Regularize cartão ou PIX para evitar bloqueio.'
             : 'As funcionalidades principais estão bloqueadas até a regularização. Login, assinatura, PIX e histórico financeiro continuam liberados.'}
-        </div>
-      ) : null}
-
-      {!loading ? (
-        <div className="settings-module-card subscription-page__summary-combined">
-          <div className="subscription-page__summary-cell">
-            <span className="subscription-page__eyebrow">Plano atual</span>
-            <div className="subscription-page__summary-value">{formatCurrencyFromCents(currentPlanPriceCents)}</div>
-            <span className="muted">{planMeta.label} · {BILLING_CYCLE_LABELS[currentCycle] || 'Mensal'} · {planStatusLabel}</span>
-          </div>
-          <div className="subscription-page__summary-cell">
-            <span className="subscription-page__eyebrow">Vencimento</span>
-            <div className="subscription-page__summary-value">{nextDueLabel}</div>
-            <span className="muted">
-              {planStatusKey === 'trialing' && trialEndsAt
-                ? `Teste grátis até ${formatDateLong(trialEndsAt)}.`
-                : activeUntil
-                  ? 'Próxima cobrança do ciclo atual.'
-                  : 'Sem vencimento confirmado.'}
-            </span>
-          </div>
         </div>
       ) : null}
 

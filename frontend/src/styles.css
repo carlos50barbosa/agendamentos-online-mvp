@@ -2981,6 +2981,22 @@ a:hover { opacity: 1; text-decoration: underline; }
   align-content:start;
   min-width:0;
 }
+/* Status embutido no hero (card unico): quebra para uma linha propria abaixo do titulo/chip */
+.subscription-page__hero-status{
+  flex:1 1 100%;
+  display:grid;
+  grid-template-columns:repeat(2, minmax(0, 1fr));
+  gap:16px;
+  padding-top:14px;
+  margin-top:4px;
+  border-top:1px solid var(--border, #e2e8f0);
+}
+@media (max-width: 640px){
+  .subscription-page__hero-status{
+    grid-template-columns:1fr;
+    gap:12px;
+  }
+}
 @media (max-width: 640px){
   .subscription-page__summary-grid--compact{
     grid-template-columns:1fr;
