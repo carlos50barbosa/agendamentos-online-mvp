@@ -89,6 +89,70 @@ router.post('/subscriptions/reconcile', checkAdmin, auditAdmin('admin.subscripti
   }
 });
 
+// Panorama de TODOS os estabelecimentos: plano/status/vencimento + contagens (profissionais, servicos
+// ativos/inativos, agendamentos). Agregados por GROUP BY (uma query por metrica) e casados em memoria —
+// bem mais barato que subquery correlacionada por linha.
+router.get('/establishments/overview', checkAdmin, auditAdmin('admin.establishments_overview', { entidade: 'estabelecimentos' }), async (_req, res) => {
+  try {
+    const now = new Date();
+    const startOfMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01 00:00:00`;
+
+    const [estabs] = await pool.query(
+      `SELECT id, nome, email, plan, plan_status, plan_cycle, plan_active_until
+         FROM usuarios WHERE tipo='estabelecimento' ORDER BY nome ASC`,
+    );
+    const [profRows] = await pool.query(
+      `SELECT estabelecimento_id AS eid, COUNT(*) AS total, SUM(ativo=1) AS ativos
+         FROM profissionais GROUP BY estabelecimento_id`,
+    );
+    // servico ativo = ativo IS NULL OR ativo=1 (mesma regra do app); inativo = ativo=0 explicito.
+    const [svcRows] = await pool.query(
+      `SELECT estabelecimento_id AS eid, COUNT(*) AS total,
+              SUM(ativo IS NULL OR ativo=1) AS ativos, SUM(ativo=0) AS inativos
+         FROM servicos GROUP BY estabelecimento_id`,
+    );
+    const [aptRows] = await pool.query(
+      `SELECT estabelecimento_id AS eid, COUNT(*) AS total,
+              SUM(inicio >= ?) AS mes, SUM(status='cancelado') AS cancelados
+         FROM agendamentos GROUP BY estabelecimento_id`,
+      [startOfMonth],
+    );
+
+    const indexBy = (rows) => {
+      const m = new Map();
+      for (const r of rows) m.set(Number(r.eid), r);
+      return m;
+    };
+    const profMap = indexBy(profRows);
+    const svcMap = indexBy(svcRows);
+    const aptMap = indexBy(aptRows);
+    const num = (v) => Number(v || 0);
+
+    const establishments = estabs.map((e) => {
+      const p = profMap.get(Number(e.id)) || {};
+      const s = svcMap.get(Number(e.id)) || {};
+      const a = aptMap.get(Number(e.id)) || {};
+      return {
+        id: e.id,
+        nome: e.nome,
+        email: e.email,
+        plan: e.plan || null,
+        plan_status: e.plan_status || null,
+        plan_cycle: e.plan_cycle || null,
+        plan_active_until: e.plan_active_until || null,
+        professionals: { active: num(p.ativos), total: num(p.total) },
+        services: { active: num(s.ativos), inactive: num(s.inativos), total: num(s.total) },
+        appointments: { total: num(a.total), month: num(a.mes), canceled: num(a.cancelados) },
+      };
+    });
+
+    return res.json({ ok: true, count: establishments.length, generated_at: now.toISOString(), month_start: startOfMonth, establishments });
+  } catch (e) {
+    console.error('[admin/establishments/overview]', e?.message || e);
+    return res.status(500).json({ error: 'db_error', message: e?.message || String(e) });
+  }
+});
+
 // Billing: listar eventos recentes (subscription_events)
 router.get('/billing/events', checkAdmin, async (req, res) => {
   const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 500);
