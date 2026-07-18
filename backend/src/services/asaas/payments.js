@@ -24,6 +24,19 @@ function requireField(value, name) {
   return value;
 }
 
+// O Asaas separa `phone` (fixo) de `mobilePhone` (celular) e VALIDA o formato de cada um: um fixo
+// enviado como `mobilePhone` é recusado ("O celular informado é inválido") e derruba a criação do
+// cliente — e, com ela, a assinatura/checkout inteiro. Antes mandávamos o mesmo número nos dois
+// campos. Aqui separamos pelo comprimento local (11 díg. = celular; 10 = fixo), removendo o DDI 55.
+// Entrada estranha vira undefined (ambos os campos são opcionais no Asaas).
+function splitBrPhone(value) {
+  let d = String(value ?? '').replace(/\D/g, '');
+  if (d.startsWith('55') && d.length >= 12) d = d.slice(2);
+  if (d.length === 11) return { phone: undefined, mobilePhone: d };
+  if (d.length === 10) return { phone: d, mobilePhone: undefined };
+  return { phone: undefined, mobilePhone: undefined };
+}
+
 export function createAsaasPayments(client = getAsaasClient()) {
   /**
    * Cria (ou registra) um cliente no Asaas.
@@ -31,13 +44,14 @@ export function createAsaasPayments(client = getAsaasClient()) {
    */
   async function createCustomer({ name, cpfCnpj, email, phone, externalReference } = {}) {
     requireField(name, 'name');
+    const { phone: landline, mobilePhone } = splitBrPhone(phone);
     return client.post('/v3/customers', {
       body: {
         name,
         cpfCnpj: cpfCnpj || undefined,
         email: email || undefined,
-        phone: phone || undefined,
-        mobilePhone: phone || undefined,
+        phone: landline,
+        mobilePhone,
         externalReference: externalReference || undefined,
       },
     });
@@ -50,13 +64,14 @@ export function createAsaasPayments(client = getAsaasClient()) {
    */
   async function updateCustomer(id, { name, cpfCnpj, email, phone } = {}) {
     requireField(id, 'id');
+    const { phone: landline, mobilePhone } = splitBrPhone(phone);
     return client.post(`/v3/customers/${encodeURIComponent(String(id))}`, {
       body: {
         name: name || undefined,
         cpfCnpj: cpfCnpj || undefined,
         email: email || undefined,
-        phone: phone || undefined,
-        mobilePhone: phone || undefined,
+        phone: landline,
+        mobilePhone,
       },
     });
   }
