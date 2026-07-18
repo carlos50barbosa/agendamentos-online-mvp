@@ -588,6 +588,30 @@ export const Api = {
 
     }),
 
+  // Reconcilia a assinatura de um tenant (dry-run se apply!==true). payload: { email|estabelecimentoId, apply, cancelGateway }
+
+  adminReconcileSubscription: (adminToken, payload = {}) =>
+
+    req('/admin/subscriptions/reconcile', {
+
+      method: 'POST',
+
+      headers: { 'X-Admin-Token': String(adminToken || '') },
+
+      body: JSON.stringify(payload || {}),
+
+    }),
+
+  // Lista assinaturas recentes (para achar o estabelecimento).
+
+  adminListSubscriptions: (adminToken, limit = 50) =>
+
+    req(`/admin/billing/subscriptions?limit=${encodeURIComponent(limit)}`, {
+
+      headers: { 'X-Admin-Token': String(adminToken || '') },
+
+    }),
+
 
 
   // Público (sem login)
