@@ -3,10 +3,6 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import Modal from '../components/Modal.jsx';
 import { Api } from '../utils/api.js';
 import { getUser } from '../utils/auth.js';
-import {
-  getMercadoPagoCardErrorMessage,
-  isMercadoPagoCardTokenRefreshRequired,
-} from '../utils/mercadoPagoCard.js';
 import { buildSubscriptionFinancialHistory } from '../utils/subscriptionFinancialHistory.js';
 
 const PLAN_META = {
@@ -42,25 +38,8 @@ const PAYMENT_METHOD_LABELS = {
 
 const FINANCIAL_EVENT_LABELS = {};
 
-const PIX_POLL_INTERVAL_MS = 2000;
-const PIX_POLL_MAX_ATTEMPTS = 60;
-let mercadoPagoSdkPromise = null;
-
-function generateIdempotencyKey() {
-  try {
-    if (typeof window !== 'undefined' && window.crypto?.randomUUID) {
-      return window.crypto.randomUUID();
-    }
-  } catch {}
-  return `subscription-recovery-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-}
-
 function getErrorMessage(error, fallback) {
   return error?.data?.message || error?.message || fallback;
-}
-
-function getPaymentResultMessage(result, fallback) {
-  return result?.payment_result?.user_message || result?.message || fallback;
 }
 
 function formatCurrencyFromCents(value) {
@@ -158,80 +137,12 @@ function getUsageTone(total, limit) {
   return 'ok';
 }
 
-function getPixCode(data) {
-  return data?.qr_code || data?.copia_e_cola || '';
-}
-
-function getPixPaymentId(data) {
-  return data?.payment_id || data?.paymentId || data?.gateway_preference_id || null;
-}
-
-function getPixStatusMeta(statusValue, confirmed) {
-  const raw = confirmed ? 'approved' : String(statusValue || '').toLowerCase();
-  if (raw.includes('approved') || raw.includes('paid') || raw.includes('confirmed')) {
-    return { tone: 'success', label: 'Pagamento confirmado', icon: 'OK' };
-  }
-  if (raw.includes('pending') || raw.includes('in_process') || raw.includes('authorized')) {
-    return { tone: 'pending', label: 'Pagamento pendente', icon: '...' };
-  }
-  if (raw.includes('rejected') || raw.includes('cancel') || raw.includes('fail')) {
-    return { tone: 'error', label: 'Pagamento não confirmado', icon: '!' };
-  }
-  return raw
-    ? { tone: 'neutral', label: 'Status em processamento', icon: 'o' }
-    : { tone: '', label: '', icon: 'o' };
-}
-
-async function copyText(value) {
-  if (!value) return false;
-  if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(value);
-    return true;
-  }
-  if (typeof document === 'undefined') return false;
-  const textarea = document.createElement('textarea');
-  textarea.value = value;
-  textarea.style.position = 'fixed';
-  textarea.style.opacity = '0';
-  document.body.appendChild(textarea);
-  textarea.focus();
-  textarea.select();
-  const ok = document.execCommand('copy');
-  document.body.removeChild(textarea);
-  return ok;
-}
-
 function clearIntentStorage() {
   try {
     localStorage.removeItem('intent_kind');
     localStorage.removeItem('intent_plano');
     localStorage.removeItem('intent_plano_ciclo');
   } catch {}
-}
-
-async function loadMercadoPagoSdk() {
-  if (typeof window === 'undefined') throw new Error('browser_unavailable');
-  if (window.MercadoPago) return window.MercadoPago;
-  if (mercadoPagoSdkPromise) return mercadoPagoSdkPromise;
-
-  mercadoPagoSdkPromise = new Promise((resolve, reject) => {
-    const existing = document.querySelector('script[data-mercadopago-sdk="true"]');
-    if (existing) {
-      existing.addEventListener('load', () => resolve(window.MercadoPago), { once: true });
-      existing.addEventListener('error', () => reject(new Error('sdk_load_failed')), { once: true });
-      return;
-    }
-
-    const script = document.createElement('script');
-    script.src = 'https://sdk.mercadopago.com/js/v2';
-    script.async = true;
-    script.dataset.mercadopagoSdk = 'true';
-    script.onload = () => resolve(window.MercadoPago);
-    script.onerror = () => reject(new Error('sdk_load_failed'));
-    document.head.appendChild(script);
-  });
-
-  return mercadoPagoSdkPromise;
 }
 
 function UsageCard({ label, value, hint, tone = 'ok' }) {
@@ -394,57 +305,9 @@ export default function Assinatura() {
   const [checkoutLoading, setCheckoutLoading] = useState(false);
   const [billingProvider, setBillingProvider] = useState('mercadopago');
   const [providerReady, setProviderReady] = useState(false);
-  const [renewalLoading, setRenewalLoading] = useState(false);
-  const [cardState, setCardState] = useState({ ready: false, loading: false, submitting: false, error: '' });
-  const [cardRecoveryReady, setCardRecoveryReady] = useState(false);
-  const [cardRecoveryNeedsNewToken, setCardRecoveryNeedsNewToken] = useState(false);
-  const [cardFormResetKey, setCardFormResetKey] = useState(0);
-  const [pixModal, setPixModal] = useState({ open: false, data: null });
-  const [pixConfirmed, setPixConfirmed] = useState(false);
-  const [pixNotice, setPixNotice] = useState('');
-  const [pixCopyNotice, setPixCopyNotice] = useState('');
 
-  const cardFormRef = useRef(null);
-  const cardSubmittingRef = useRef(false);
-  const cardSubmitIntentRef = useRef('save');
-  const pixIntervalRef = useRef(null);
-  const pixAttemptsRef = useRef(0);
-  const pixBusyRef = useRef(false);
   const intentHandledRef = useRef('');
   const paymentSectionRef = useRef(null);
-
-  const clearPixPolling = useCallback(() => {
-    if (pixIntervalRef.current) {
-      clearInterval(pixIntervalRef.current);
-      pixIntervalRef.current = null;
-    }
-    pixAttemptsRef.current = 0;
-    pixBusyRef.current = false;
-  }, []);
-
-  const closePixModal = useCallback(() => {
-    clearPixPolling();
-    setPixConfirmed(false);
-    setPixNotice('');
-    setPixCopyNotice('');
-    setPixModal({ open: false, data: null });
-  }, [clearPixPolling]);
-
-  const resetCardFormForNewToken = useCallback(() => {
-    try {
-      cardFormRef.current?.unmount?.();
-    } catch {}
-    cardFormRef.current = null;
-    cardSubmittingRef.current = false;
-    cardSubmitIntentRef.current = 'save';
-    setCardFormResetKey((current) => current + 1);
-    setCardState((current) => ({
-      ...current,
-      ready: false,
-      loading: true,
-      submitting: false,
-    }));
-  }, []);
 
   const refreshData = useCallback(async ({ silent = false } = {}) => {
     if (!isEstablishment || !establishmentId) return null;
@@ -497,14 +360,7 @@ export default function Assinatura() {
 
   useEffect(() => {
     void refreshData();
-    return () => {
-      clearPixPolling();
-      try {
-        cardFormRef.current?.unmount?.();
-      } catch {}
-      cardFormRef.current = null;
-    };
-  }, [clearPixPolling, refreshData]);
+  }, [refreshData]);
 
   const planContext = subscriptionData?.plan || null;
   const planKey = normalizePlanKey(
@@ -535,13 +391,8 @@ export default function Assinatura() {
     billingStatus?.subscription?.currentPeriodEnd ||
     planContext?.active_until ||
     null;
-  const currentPaymentMethod =
-    subscriptionData?.subscription?.payment_method ||
-    billingStatus?.subscription?.paymentMethod ||
-    'pix';
   const accessMode = String(billingStatus?.access?.mode || '').toLowerCase() || 'full';
   const coreFeaturesAllowed = billingStatus?.access?.core_features_allowed !== false;
-  const cardGatewayPublicKey = billingStatus?.payment_methods?.public_key || null;
   const trialInfo = billingStatus?.trial || {};
   const trialEndsAt = trialInfo?.endsAt || planContext?.trial?.ends_at || null;
   const trialDaysLeft =
@@ -551,10 +402,8 @@ export default function Assinatura() {
         ? Math.max(0, Math.floor((new Date(trialEndsAt).getTime() - Date.now()) / 86400000))
         : null;
   const trialAvailable = planKey === 'starter' && !trialInfo?.wasUsed;
-  const canOfferProCheckout = !trialAvailable && getPlanTier(planKey) < getPlanTier('pro');
   const renewalInfo = billingStatus?.billing || {};
   const renewalRequired = Boolean(renewalInfo.renewalRequired);
-  const openRenewalPayment = renewalInfo.hasOpenPayment ? renewalInfo.openPayment || null : null;
   const checkoutPlanKey = normalizePlanKey(selectedPlan || planKey);
   const checkoutPlanMeta = PLAN_META[checkoutPlanKey] || PLAN_META.starter;
   const currentPlanPriceCents = currentCycle === 'anual' ? planMeta.annualPriceCents : planMeta.priceCents;
@@ -565,48 +414,6 @@ export default function Assinatura() {
     0,
     (Number(checkoutPlanMeta.priceCents) || 0) * 12 - (Number(checkoutPlanMeta.annualPriceCents) || 0),
   );
-  const hasCheckoutSelection = checkoutPlanKey !== planKey || checkoutCycle !== currentCycle;
-  const paymentMethodLabel = getPaymentMethodLabel(currentPaymentMethod);
-  const hasDelinquentStatus = ['past_due', 'unpaid', 'expired'].includes(planStatusKey);
-  const cardAction = useMemo(() => {
-    if (hasCheckoutSelection && !hasDelinquentStatus) {
-      const planChanged = checkoutPlanKey !== planKey;
-      return {
-        mode: 'subscribe',
-        label: planChanged
-          ? (currentPaymentMethod === 'credit_card'
-            ? `Migrar para ${checkoutPlanMeta.label} com cartão`
-            : `Assinar ${checkoutPlanMeta.label} com cartão`)
-          : `Assinar ${checkoutPlanMeta.label} ${BILLING_CYCLE_LABELS[checkoutCycle] || 'Mensal'} no cartão`,
-      };
-    }
-    if (currentPaymentMethod === 'credit_card' && (hasDelinquentStatus || planStatusKey === 'pending_payment')) {
-      return {
-        mode: 'update',
-        label: hasDelinquentStatus ? 'Atualizar cartão da assinatura' : 'Atualizar cartão',
-      };
-    }
-    if (currentPaymentMethod === 'credit_card') {
-      return { mode: 'update', label: 'Trocar cartão' };
-    }
-    if (hasDelinquentStatus) {
-      return { mode: 'subscribe', label: 'Atualizar cartão da assinatura' };
-    }
-    if (currentPaymentMethod === 'credit_card' && (hasDelinquentStatus || planStatusKey === 'pending_payment')) {
-      return {
-        mode: 'update',
-        label: hasDelinquentStatus ? 'Salvar cartão para regularizar' : 'Atualizar cartão',
-      };
-    }
-    if (currentPaymentMethod === 'credit_card') {
-      return { mode: 'update', label: 'Trocar cartão' };
-    }
-    return {
-      mode: 'subscribe',
-      label: hasDelinquentStatus ? 'Salvar cartão para reativar' : 'Assinar com cartão',
-    };
-  }, [checkoutCycle, checkoutPlanKey, checkoutPlanMeta.label, currentPaymentMethod, hasCheckoutSelection, hasDelinquentStatus, planKey, planStatusKey]);
-
   const appointmentUsage = useMemo(() => {
     const data = planContext?.usage?.appointments || {};
     return {
@@ -667,8 +474,6 @@ export default function Assinatura() {
   const financialEvents = financialHistory.timeline.slice(0, 10);
   const latestCardAttempt = financialHistory.latest_card_attempt;
   const openPixEvent = financialHistory.open_pix_event;
-  const recoveryGuard = subscriptionData?.recovery_guard || null;
-  const recoveryBlocked = hasDelinquentStatus && recoveryGuard?.can_run === false;
   const creditSummary = subscriptionData?.credits?.summary || {};
   const creditPreview = subscriptionData?.credits?.preview || null;
   const creditEntries = useMemo(() => {
@@ -699,34 +504,6 @@ export default function Assinatura() {
     : activeUntil
       ? formatDateLong(activeUntil)
       : '-';
-
-  const pixPaymentId = useMemo(() => getPixPaymentId(pixModal.data), [pixModal.data]);
-  const pixCode = useMemo(() => getPixCode(pixModal.data), [pixModal.data]);
-  const pixStatus = useMemo(
-    () => getPixStatusMeta(pixModal.data?.status, pixConfirmed),
-    [pixConfirmed, pixModal.data?.status],
-  );
-  const isRenewalPix = pixModal.data?.kind === 'renewal';
-  const isCheckoutPix = pixModal.data?.kind === 'checkout';
-
-  useEffect(() => {
-    if (!hasDelinquentStatus) {
-      setCardRecoveryNeedsNewToken(false);
-      setCardRecoveryReady(false);
-      return;
-    }
-    if (recoveryBlocked) {
-      setCardRecoveryReady(false);
-    }
-  }, [hasDelinquentStatus, recoveryBlocked]);
-
-  const openPixModal = useCallback((data) => {
-    clearPixPolling();
-    setPixConfirmed(false);
-    setPixNotice('');
-    setPixCopyNotice('');
-    setPixModal({ open: true, data });
-  }, [clearPixPolling]);
 
   const handleStartTrial = useCallback(async () => {
     if (!establishmentId || trialLoading) return false;
@@ -835,471 +612,8 @@ export default function Assinatura() {
   }, [cpfModal, closeCpfModal, startAsaasCheckout]);
 
   const handleStartCheckout = useCallback(async (targetPlan, billingCycle = 'mensal') => {
-    if (!establishmentId || checkoutLoading) return false;
-    if (billingProvider === 'asaas') return handleAsaasCheckout(targetPlan, billingCycle);
-    setCheckoutLoading(true);
-    setNotice({ type: '', message: '' });
-    try {
-      const response = await Api.billingPixCheckout({ plan: targetPlan, billing_cycle: billingCycle });
-      if (response?.pix && (response.pix.qr_code || response.pix.ticket_url || response.pix.qr_code_base64)) {
-        openPixModal({
-          ...response.pix,
-          init_point: response.init_point,
-          kind: 'checkout',
-          plan: targetPlan,
-          billing_cycle: billingCycle,
-          status: response?.pix?.status || 'pending',
-        });
-      } else if (response?.init_point) {
-        window.location.assign(response.init_point);
-        return true;
-      }
-      await refreshData({ silent: true });
-      setNotice({
-        type: 'info',
-        message: 'PIX gerado com sucesso. Pague e acompanhe a confirmação pelo seu banco.',
-      });
-      return true;
-    } catch (requestError) {
-      setNotice({
-        type: 'error',
-        message: getErrorMessage(requestError, 'Falha ao gerar cobrança PIX.'),
-      });
-      return false;
-    } finally {
-      setCheckoutLoading(false);
-    }
-  }, [checkoutLoading, establishmentId, openPixModal, refreshData, billingProvider, handleAsaasCheckout]);
-
-  const handleOpenPendingRenewal = useCallback(() => {
-    if (!openRenewalPayment) return;
-    openPixModal({ ...openRenewalPayment, kind: 'renewal' });
-  }, [openPixModal, openRenewalPayment]);
-
-  const handleGenerateRenewalPix = useCallback(async () => {
-    if (!establishmentId || renewalLoading) return false;
-    // Assinatura Asaas renova automaticamente — não há PIX de renovação manual (é rota MP).
-    if (billingProvider === 'asaas') {
-      setNotice({ type: 'info', message: 'Sua assinatura Asaas renova automaticamente — não é preciso gerar PIX de renovação.' });
-      return false;
-    }
-    setRenewalLoading(true);
-    setNotice({ type: '', message: '' });
-    try {
-      const response = await Api.billingRenewalPix();
-      await refreshData({ silent: true });
-      const payment = response?.renewal?.openPayment || null;
-      if (payment) {
-        openPixModal({ ...payment, kind: 'renewal' });
-      }
-      setNotice({
-        type: 'info',
-        message: 'PIX de renovação gerado. Assim que o pagamento confirmar, a assinatura será atualizada automaticamente.',
-      });
-      return true;
-    } catch (requestError) {
-      setNotice({
-        type: 'error',
-        message: getErrorMessage(requestError, 'Falha ao gerar PIX de renovação.'),
-      });
-      return false;
-    } finally {
-      setRenewalLoading(false);
-    }
-  }, [billingProvider, establishmentId, openPixModal, refreshData, renewalLoading]);
-
-  const handleSubmitCard = useCallback(async (cardFormData) => {
-    if (!establishmentId || cardSubmittingRef.current) return false;
-    // Asaas não captura cartão na interface: redireciona ao checkout hospedado.
-    if (billingProvider === 'asaas') {
-      const asaasPlan = cardAction.mode === 'update' ? planKey : checkoutPlanKey;
-      const asaasCycle = cardAction.mode === 'update' ? currentCycle : checkoutCycle;
-      return handleAsaasCheckout(asaasPlan, asaasCycle);
-    }
-    const submitIntent = cardSubmitIntentRef.current === 'recover' ? 'recover' : 'save';
-    cardSubmitIntentRef.current = 'save';
-    cardSubmittingRef.current = true;
-    setCardState((current) => ({ ...current, submitting: true, error: '' }));
-    setNotice({ type: '', message: '' });
-
-    try {
-      const cardTargetPlan = cardAction.mode === 'update' ? planKey : checkoutPlanKey;
-      const cardTargetCycle = cardAction.mode === 'update' ? currentCycle : checkoutCycle;
-      const payload = {
-        plan: cardTargetPlan,
-        billing_cycle: cardTargetCycle,
-        card_token: cardFormData?.token,
-        payer_email: cardFormData?.cardholderEmail || user?.email || '',
-        payment_method_id: cardFormData?.paymentMethodId || null,
-        issuer_id: cardFormData?.issuerId || null,
-        identification_type: cardFormData?.identificationType || null,
-        identification_number: cardFormData?.identificationNumber || null,
-      };
-
-      if (!payload.card_token) {
-        throw new Error('Não foi possível tokenizar o cartão.');
-      }
-
-      if (submitIntent === 'recover') {
-        const idempotencyKey = generateIdempotencyKey();
-        const response = await Api.billingCardRecover(payload, { idempotencyKey });
-        await refreshData({ silent: true });
-        if (response?.paid) {
-          setCardRecoveryReady(false);
-          setNotice({
-            type: 'success',
-            message: 'Pagamento aprovado. A assinatura foi reativada e a renovação automática segue no cartão.',
-          });
-          return true;
-        }
-        resetCardFormForNewToken();
-        if (response?.pending) {
-          setCardRecoveryReady(false);
-          setCardState((current) => ({ ...current, error: '' }));
-          setNotice({
-            type: 'warning',
-            message: getPaymentResultMessage(
-              response,
-              'O pagamento está em análise pelo Mercado Pago. Aguarde a confirmação antes de tentar novamente.',
-            ),
-          });
-          return false;
-        }
-        setCardRecoveryReady(response?.payment_result?.manual_retry_allowed !== false);
-        const fallbackMessage = getPaymentResultMessage(
-          response,
-          'A cobrança pendente não foi aprovada. Gere um PIX ou tente outro cartão.',
-        );
-        const message = response?.message || 'A cobrança pendente não foi aprovada. Gere um PIX ou tente outro cartão.';
-        setCardState((current) => ({ ...current, error: fallbackMessage }));
-        setNotice({ type: 'error', message: fallbackMessage });
-        return false;
-      }
-
-      let response;
-      if (cardAction.mode === 'update') {
-        response = await Api.billingCardUpdate(payload);
-      } else {
-        response = await Api.billingCardSubscribe(payload);
-      }
-
-      await refreshData({ silent: true });
-      if (response?.recovery_required) {
-        const recoveryAllowed = response?.recovery_guard?.can_run !== false;
-        setCardRecoveryReady(recoveryAllowed);
-        setNotice({
-          type: 'warning',
-          message: 'Cartão cadastrado com sucesso. Falta quitar a pendência para reativar o plano.',
-        });
-      } else {
-        setCardRecoveryReady(false);
-        setNotice({
-          type: 'success',
-          message: cardAction.mode === 'update'
-            ? 'Cartão atualizado. Vamos sincronizar a cobrança recorrente automaticamente.'
-            : `Assinatura do plano ${PLAN_META[normalizePlanKey(cardTargetPlan)]?.label || 'selecionado'} enviada no cartão. A renovação automática passa a ser o fluxo principal.`,
-        });
-      }
-      return true;
-    } catch (requestError) {
-      const message = getErrorMessage(requestError, 'Falha ao processar o cartão agora.');
-      if (isMercadoPagoCardTokenRefreshRequired(requestError)) {
-        resetCardFormForNewToken();
-      }
-      setCardState((current) => ({ ...current, error: message }));
-      if (submitIntent === 'recover') {
-        setCardRecoveryReady(requestError?.data?.recovery_guard?.can_run === true);
-      }
-      setNotice({ type: 'error', message });
-      return false;
-    } finally {
-      cardSubmittingRef.current = false;
-      setCardState((current) => ({ ...current, submitting: false }));
-    }
-  }, [cardAction.mode, checkoutCycle, checkoutPlanKey, currentCycle, establishmentId, planKey, refreshData, resetCardFormForNewToken, user?.email, billingProvider, handleAsaasCheckout]);
-
-  const handleCardSubmitSecure = useCallback(async (cardFormData) => {
-    if (!establishmentId || cardSubmittingRef.current) return false;
-    // Asaas não captura cartão na interface: redireciona ao checkout hospedado.
-    if (billingProvider === 'asaas') {
-      const asaasPlan = cardAction.mode === 'update' ? planKey : checkoutPlanKey;
-      const asaasCycle = cardAction.mode === 'update' ? currentCycle : checkoutCycle;
-      return handleAsaasCheckout(asaasPlan, asaasCycle);
-    }
-    const submitIntent = cardSubmitIntentRef.current === 'recover' ? 'recover' : 'save';
-    cardSubmitIntentRef.current = 'save';
-    cardSubmittingRef.current = true;
-    setCardState((current) => ({ ...current, submitting: true, error: '' }));
-    setNotice({ type: '', message: '' });
-
-    try {
-      const cardTargetPlan = cardAction.mode === 'update' ? planKey : checkoutPlanKey;
-      const cardTargetCycle = cardAction.mode === 'update' ? currentCycle : checkoutCycle;
-      const payload = {
-        plan: cardTargetPlan,
-        billing_cycle: cardTargetCycle,
-        card_token: cardFormData?.token,
-        payer_email: cardFormData?.cardholderEmail || user?.email || '',
-        payment_method_id: cardFormData?.paymentMethodId || null,
-        issuer_id: cardFormData?.issuerId || null,
-        identification_type: cardFormData?.identificationType || null,
-        identification_number: cardFormData?.identificationNumber || null,
-      };
-
-      if (!payload.card_token) {
-        throw new Error('Não foi possível tokenizar o cartão.');
-      }
-
-      if (submitIntent === 'recover') {
-        const idempotencyKey = generateIdempotencyKey();
-        const response = await Api.billingCardRecover(payload, { idempotencyKey });
-        await refreshData({ silent: true });
-
-        if (response?.paid) {
-          setCardRecoveryReady(false);
-          setCardRecoveryNeedsNewToken(false);
-          resetCardFormForNewToken();
-          setNotice({
-            type: 'success',
-            message: 'Pagamento aprovado. A assinatura foi reativada e a renovação automática segue no cartão.',
-          });
-          return true;
-        }
-
-        resetCardFormForNewToken();
-
-        if (response?.pending) {
-          setCardRecoveryReady(false);
-          setCardRecoveryNeedsNewToken(false);
-          setCardState((current) => ({ ...current, error: '' }));
-          setNotice({
-            type: 'warning',
-            message: getPaymentResultMessage(
-              response,
-              'O pagamento está em análise pelo Mercado Pago. Aguarde a confirmação antes de tentar novamente.',
-            ),
-          });
-          return false;
-        }
-
-        const manualRetryAllowed = response?.payment_result?.manual_retry_allowed !== false;
-        setCardRecoveryReady(manualRetryAllowed);
-        setCardRecoveryNeedsNewToken(manualRetryAllowed);
-        const message = getPaymentResultMessage(
-          response,
-          'Não foi possível concluir a cobrança agora. Tente novamente em instantes.',
-        );
-        setCardState((current) => ({ ...current, error: message }));
-        setNotice({ type: 'error', message });
-        return false;
-      }
-
-      const response = cardAction.mode === 'update'
-        ? await Api.billingCardUpdate(payload)
-        : await Api.billingCardSubscribe(payload);
-
-      await refreshData({ silent: true });
-      resetCardFormForNewToken();
-
-      if (response?.recovery_required) {
-        const recoveryAllowed = response?.recovery_guard?.can_run !== false;
-        setCardRecoveryReady(recoveryAllowed);
-        setCardRecoveryNeedsNewToken(true);
-        setNotice({
-          type: 'warning',
-          message: recoveryAllowed
-            ? 'Cartão da assinatura atualizado. Para cobrar a pendência agora, confirme novamente os dados do cartão para gerar um novo token de segurança.'
-            : 'Cartão da assinatura atualizado. A pendência continua em aberto e será necessário confirmar novamente os dados do cartão quando a cobrança manual estiver disponível.',
-        });
-      } else {
-        setCardRecoveryReady(false);
-        setCardRecoveryNeedsNewToken(false);
-        setNotice({
-          type: 'success',
-          message: cardAction.mode === 'update'
-            ? 'Cartão atualizado. Vamos sincronizar a cobrança recorrente automaticamente.'
-            : `Assinatura do plano ${PLAN_META[normalizePlanKey(cardTargetPlan)]?.label || 'selecionado'} enviada no cartão. A renovação automática passa a ser o fluxo principal.`,
-        });
-      }
-      return true;
-    } catch (requestError) {
-      const requiresNewToken = isMercadoPagoCardTokenRefreshRequired(requestError);
-      const message = getMercadoPagoCardErrorMessage(requestError, 'Falha ao processar o cartão agora.');
-
-      if (requiresNewToken) {
-        resetCardFormForNewToken();
-        if (submitIntent === 'recover' || hasDelinquentStatus) {
-          setCardRecoveryNeedsNewToken(true);
-        }
-      }
-
-      setCardState((current) => ({ ...current, error: message }));
-      if (submitIntent === 'recover' && requestError?.data?.recovery_guard) {
-        setCardRecoveryReady(requestError?.data?.recovery_guard?.can_run === true);
-      }
-      setNotice({ type: 'error', message });
-      return false;
-    } finally {
-      cardSubmittingRef.current = false;
-      setCardState((current) => ({ ...current, submitting: false }));
-    }
-  }, [cardAction.mode, checkoutCycle, checkoutPlanKey, currentCycle, establishmentId, hasDelinquentStatus, planKey, refreshData, resetCardFormForNewToken, user?.email, billingProvider, handleAsaasCheckout]);
-
-  const handleRecoverNowWithCard = useCallback(() => {
-    const form = document.getElementById('subscription-card-form');
-    if (!form) return;
-    cardSubmitIntentRef.current = 'recover';
-    if (typeof form.requestSubmit === 'function') {
-      form.requestSubmit();
-      return;
-    }
-    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-  }, []);
-
-  useEffect(() => {
-    if (!isEstablishment || !cardGatewayPublicKey) {
-      setCardState((current) => ({ ...current, ready: false, error: '' }));
-      return undefined;
-    }
-    let cancelled = false;
-
-    const mountCardForm = async () => {
-      setCardState((current) => ({ ...current, loading: true, error: '' }));
-      try {
-        const MercadoPagoCtor = await loadMercadoPagoSdk();
-        if (cancelled) return;
-
-        try {
-          cardFormRef.current?.unmount?.();
-        } catch {}
-
-        const mp = new MercadoPagoCtor(cardGatewayPublicKey, { locale: 'pt-BR' });
-        const amount = (selectedPlanPriceCents / 100).toFixed(2);
-        const cardForm = mp.cardForm({
-          amount,
-          iframe: true,
-          form: {
-            id: 'subscription-card-form',
-            cardNumber: { id: 'subscription-card-number', placeholder: 'Número do cartão' },
-            expirationDate: { id: 'subscription-card-expiration', placeholder: 'MM/AA' },
-            securityCode: { id: 'subscription-card-security-code', placeholder: 'CVV' },
-            cardholderName: { id: 'subscription-cardholder-name', placeholder: 'Titular do cartão' },
-            issuer: { id: 'subscription-card-issuer', placeholder: 'Banco emissor' },
-            installments: { id: 'subscription-card-installments', placeholder: 'Parcelas' },
-            identificationType: { id: 'subscription-card-id-type', placeholder: 'Documento' },
-            identificationNumber: { id: 'subscription-card-id-number', placeholder: 'Número do documento' },
-            cardholderEmail: { id: 'subscription-card-email', placeholder: 'E-mail' },
-          },
-          callbacks: {
-            onFormMounted: (error) => {
-              if (cancelled) return;
-              if (error) {
-                setCardState((current) => ({
-                  ...current,
-                  ready: false,
-                  loading: false,
-                  error: 'Não foi possível montar o formulário do cartão.',
-                }));
-                return;
-              }
-              setCardState((current) => ({ ...current, ready: true, loading: false, error: '' }));
-            },
-            onSubmit: async (event) => {
-              event.preventDefault();
-              const data = cardForm.getCardFormData();
-              await handleCardSubmitSecure(data);
-            },
-          },
-        });
-
-        cardFormRef.current = cardForm;
-      } catch (sdkError) {
-        if (cancelled) return;
-        setCardState((current) => ({
-          ...current,
-          ready: false,
-          loading: false,
-          error: 'Não foi possível carregar o SDK de cartão do gateway.',
-        }));
-      }
-    };
-
-    void mountCardForm();
-
-    return () => {
-      cancelled = true;
-      try {
-        cardFormRef.current?.unmount?.();
-      } catch {}
-      cardFormRef.current = null;
-    };
-  }, [cardFormResetKey, cardGatewayPublicKey, handleCardSubmitSecure, isEstablishment, selectedPlanPriceCents]);
-
-  const refreshRenewalPixStatus = useCallback(async ({ silent = true } = {}) => {
-    if (!isRenewalPix || !pixPaymentId || pixBusyRef.current) return null;
-    pixBusyRef.current = true;
-    pixAttemptsRef.current += 1;
-    try {
-      const response = await Api.billingRenewalPixStatus(pixPaymentId);
-      if (response?.openPayment) {
-        setPixModal((current) => (
-          current?.data ? { ...current, data: { ...current.data, ...response.openPayment } } : current
-        ));
-      }
-      if (response?.paid) {
-        clearPixPolling();
-        setPixConfirmed(true);
-        setPixNotice('Pagamento confirmado! Renovamos o plano automaticamente.');
-        setPixModal((current) => (
-          current?.data ? { ...current, data: { ...current.data, status: 'approved' } } : current
-        ));
-        await refreshData({ silent: true });
-      } else if (pixAttemptsRef.current >= PIX_POLL_MAX_ATTEMPTS) {
-        clearPixPolling();
-        setPixNotice('Ainda não confirmou. Se você já pagou, aguarde alguns instantes e clique em Atualizar.');
-      }
-      return response;
-    } catch (requestError) {
-      if (!silent) {
-        setPixNotice(getErrorMessage(requestError, 'Não foi possível atualizar o status agora.'));
-      }
-      return null;
-    } finally {
-      pixBusyRef.current = false;
-    }
-  }, [clearPixPolling, isRenewalPix, pixPaymentId, refreshData]);
-
-  useEffect(() => {
-    if (!pixModal.open || !isRenewalPix || !pixPaymentId) {
-      clearPixPolling();
-      return undefined;
-    }
-    clearPixPolling();
-    setPixConfirmed(false);
-    setPixNotice('');
-    setPixCopyNotice('');
-    void refreshRenewalPixStatus({ silent: true });
-    const intervalId = window.setInterval(() => {
-      void refreshRenewalPixStatus({ silent: true });
-    }, PIX_POLL_INTERVAL_MS);
-    pixIntervalRef.current = intervalId;
-    return () => {
-      clearInterval(intervalId);
-      if (pixIntervalRef.current === intervalId) pixIntervalRef.current = null;
-    };
-  }, [clearPixPolling, isRenewalPix, pixModal.open, pixPaymentId, refreshRenewalPixStatus]);
-
-  const copyPixCode = useCallback(async () => {
-    if (!pixCode) return false;
-    try {
-      const ok = await copyText(pixCode);
-      setPixCopyNotice(ok ? 'Chave PIX copiada.' : 'Não foi possível copiar agora.');
-      return ok;
-    } catch {
-      setPixCopyNotice('Não foi possível copiar agora.');
-      return false;
-    }
-  }, [pixCode]);
+    return handleAsaasCheckout(targetPlan, billingCycle);
+  }, [handleAsaasCheckout]);
 
   const openCardChoice = useCallback(() => {
     if (typeof window === 'undefined') return;
@@ -1346,18 +660,7 @@ export default function Assinatura() {
           }
         }
 
-        if (action === 'gerar_pix') {
-          if (openRenewalPayment) {
-            handleOpenPendingRenewal();
-          } else if (renewalRequired) {
-            await handleGenerateRenewalPix();
-          } else {
-            await handleStartCheckout(planKey, checkoutCycle);
-          }
-        } else if (intentKind === 'renewal') {
-          if (openRenewalPayment) handleOpenPendingRenewal();
-          else await handleGenerateRenewalPix();
-        } else if (intentKind === 'trial') {
+        if (intentKind === 'trial') {
           if (trialAvailable) {
             await handleStartTrial();
           } else {
@@ -1387,10 +690,7 @@ export default function Assinatura() {
       }
     })();
   }, [
-    currentCycle,
-    handleGenerateRenewalPix,
-    handleOpenPendingRenewal,
-    handleStartCheckout,
+    checkoutCycle,
     handleStartTrial,
     isEstablishment,
     loading,
@@ -1398,10 +698,6 @@ export default function Assinatura() {
     location.search,
     navigate,
     openCardChoice,
-    openRenewalPayment,
-    planKey,
-    renewalRequired,
-    checkoutCycle,
     trialAvailable,
   ]);
 
@@ -1614,241 +910,6 @@ export default function Assinatura() {
           </div>
         </details>
 
-        {false ? (
-        <aside className="settings-module-card subscription-page__aside-card">
-          <div className="subscription-page__section-head subscription-page__section-head--compact">
-            <div>
-              <h3>PIX manual</h3>
-              <p className="muted">Use PIX para primeira assinatura, renovação, reativação ou contingência.</p>
-            </div>
-          </div>
-
-          {hasCheckoutSelection ? (
-            <div className="subscription-page__callout">
-              <strong>Plano selecionado: {checkoutPlanMeta.label}</strong>
-              <p className="muted">
-                Escolha como deseja concluir a contratação: cartão com renovação automática ou PIX manual no ciclo {BILLING_CYCLE_LABELS[checkoutCycle] || 'Mensal'}.
-              </p>
-            </div>
-          ) : null}
-
-          <label className="label subscription-page__cycle-field">
-            <span>Ciclo para PIX</span>
-            <select className="input" value={checkoutCycle} onChange={(event) => setSelectedCycle(event.target.value)}>
-              <option value="mensal">Mensal</option>
-              <option value="anual">Anual</option>
-            </select>
-          </label>
-
-          <div className="subscription-page__action-stack">
-            {trialAvailable ? (
-              <button type="button" className="btn btn--outline btn--outline-brand" onClick={() => void handleStartTrial()} disabled={trialLoading}>
-                {trialLoading ? <span className="spinner" /> : 'Ativar 7 dias grátis do Pro'}
-              </button>
-            ) : null}
-            {hasCheckoutSelection && !hasDelinquentStatus ? (
-              <button type="button" className="btn btn--outline" onClick={openCardChoice}>
-                Pagar {checkoutPlanMeta.label} com cartão
-              </button>
-            ) : null}
-            {canOfferProCheckout && !hasCheckoutSelection ? (
-              <button type="button" className="btn btn--primary" onClick={() => {
-                setSelectedPlan('pro');
-                openCardChoice();
-              }}>
-                Escolher pagamento do Pro
-              </button>
-            ) : null}
-            {hasCheckoutSelection ? (
-              <button type="button" className="btn btn--primary" onClick={() => void handleStartCheckout(checkoutPlanKey, checkoutCycle)} disabled={checkoutLoading || !providerReady}>
-                {checkoutLoading ? <span className="spinner" /> : (billingProvider === 'asaas' ? `Assinar ${checkoutPlanMeta.label}` : `Gerar PIX do ${checkoutPlanMeta.label}`)}
-              </button>
-            ) : null}
-
-            <Link className="btn btn--ghost" to="/planos#planos">
-              Ver comparativo completo
-            </Link>
-          </div>
-
-          <div className="subscription-page__callout">
-            <strong>Regra do PIX</strong>
-            <p className="muted">
-              PIX não renova sozinho. Se a cobrança vencer sem pagamento, a assinatura não continua automaticamente e o acesso principal pode ser bloqueado.
-            </p>
-          </div>
-        </aside>
-        ) : null}
-
-      {false ? (
-      <section className="settings-module-card subscription-page__payments-card">
-        <div className="subscription-page__section-head">
-          <div>
-            <h3>Forma de pagamento</h3>
-            <p className="muted">
-              {hasCheckoutSelection
-                ? `Plano selecionado: ${checkoutPlanMeta.label}. Escolha entre cartão com renovação automática ou PIX manual.`
-                : 'Cartão de crédito é o método principal com renovação automática. PIX continua como alternativa manual.'}
-            </p>
-          </div>
-          <div className={`subscription-page__status-chip subscription-page__status-chip--${currentPaymentMethod === 'credit_card' ? 'success' : 'warning'}`}>
-            {paymentMethodLabel}
-          </div>
-        </div>
-
-        <div className="subscription-page__payment-grid">
-          <div className="subscription-page__payment-panel subscription-page__payment-panel--recommended">
-            <span className="subscription-page__payment-tag">Recomendado</span>
-            <h4>Cartão de crédito</h4>
-            <p className="muted">Renovação automática, sem interrupções enquanto as cobranças forem aprovadas.</p>
-            {hasCheckoutSelection && !hasDelinquentStatus ? (
-              <p className="muted">
-                Contratação do plano {checkoutPlanMeta.label} ({BILLING_CYCLE_LABELS[checkoutCycle] || 'Mensal'}) com cobrança recorrente no cartão.
-              </p>
-            ) : null}
-            {['past_due', 'unpaid', 'expired', 'pending_payment'].includes(planStatusKey) ? (
-              <p className="muted">
-                Regularização do plano {planMeta.label} ({BILLING_CYCLE_LABELS[currentCycle] || 'Mensal'}). Esse envio mantém o plano atual.
-              </p>
-            ) : null}
-            {latestCardAttempt && planStatusKey !== 'active' && ['rejected', 'pending'].includes(String(latestCardAttempt.status_group || '').toLowerCase()) ? (
-              <div className="subscription-page__callout">
-                <strong>
-                  {String(latestCardAttempt.status_group || '').toLowerCase() === 'pending'
-                    ? 'Existe uma tentativa com cartão em análise.'
-                    : 'A última tentativa com cartão não foi aprovada.'}
-                </strong>
-                <p className="muted">
-                  {latestCardAttempt.display_message || 'Revise os dados do cartão ou tente outra forma de pagamento.'}
-                </p>
-              </div>
-            ) : null}
-            <form key={cardFormResetKey} id="subscription-card-form" className="subscription-page__card-form">
-              <div id="subscription-card-number" className="input subscription-page__card-frame" />
-              <div className="subscription-page__card-inline">
-                <div id="subscription-card-expiration" className="input subscription-page__card-frame" />
-                <div id="subscription-card-security-code" className="input subscription-page__card-frame" />
-              </div>
-              <input id="subscription-cardholder-name" className="input" placeholder="Titular do cartão" />
-              <div className="subscription-page__card-inline">
-                <select id="subscription-card-issuer" className="input" defaultValue="" />
-                <select id="subscription-card-installments" className="input" defaultValue="" />
-              </div>
-              <div className="subscription-page__card-inline">
-                <select id="subscription-card-id-type" className="input" defaultValue="" />
-                <input id="subscription-card-id-number" className="input" placeholder="Número do documento" />
-              </div>
-              <input id="subscription-card-email" className="input" type="email" placeholder="E-mail" defaultValue={user?.email || ''} />
-              <button
-                id="subscription-card-submit"
-                type="submit"
-                className="btn btn--primary"
-                onClick={() => { cardSubmitIntentRef.current = 'save'; }}
-                disabled={cardState.loading || cardState.submitting || !cardState.ready || !cardGatewayPublicKey}
-              >
-                {cardState.submitting
-                  ? <span className="spinner" />
-                  : cardAction.label}
-              </button>
-            </form>
-            {cardState.loading ? <span className="muted">Carregando formulário seguro do gateway...</span> : null}
-            {cardState.error ? (
-              <div className="subscription-page__callout subscription-page__callout--danger" role="alert">
-                <strong>Não foi possível continuar com este cartão.</strong>
-                <p className="muted">{cardState.error}</p>
-              </div>
-            ) : null}
-            {cardRecoveryNeedsNewToken && hasDelinquentStatus ? (
-              <p className="muted">
-                Os dados do cartão precisam ser confirmados novamente para gerar um novo token de segurança antes da cobrança manual.
-              </p>
-            ) : null}
-            {recoveryBlocked ? (
-              <div className="subscription-page__callout">
-                <strong>Regularização temporariamente indisponível no cartão.</strong>
-                <p className="muted">
-                  {recoveryGuard?.user_message || 'Já existe uma tentativa recente de cobrança em processamento ou recusada. Aguarde alguns minutos antes de tentar novamente.'}
-                </p>
-                <div className="subscription-page__payment-actions">
-                  <button
-                    type="button"
-                    className="btn btn--outline"
-                    onClick={() => {
-                      if (openRenewalPayment) {
-                        handleOpenPendingRenewal();
-                        return;
-                      }
-                      void handleGenerateRenewalPix();
-                    }}
-                    disabled={renewalLoading}
-                  >
-                    {renewalLoading ? <span className="spinner" /> : 'Gerar PIX'}
-                  </button>
-                </div>
-              </div>
-            ) : null}
-            {cardRecoveryReady && hasDelinquentStatus && !recoveryBlocked ? (
-              <div className="subscription-page__callout">
-                <strong>Cartão cadastrado com sucesso. Falta quitar a pendência para reativar o plano.</strong>
-                <p className="muted">
-                  O cadastro do cartão não libera o acesso sozinho. Quite a cobrança pendente agora ou gere um PIX manual.
-                </p>
-                <div className="subscription-page__payment-actions">
-                  <button
-                    type="button"
-                    className="btn btn--primary"
-                    onClick={handleRecoverNowWithCard}
-                    disabled={cardState.loading || cardState.submitting || !cardState.ready || !cardGatewayPublicKey}
-                  >
-                    {cardState.submitting ? <span className="spinner" /> : 'Pagar agora com cartão'}
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn--outline"
-                    onClick={() => {
-                      if (openRenewalPayment) {
-                        handleOpenPendingRenewal();
-                        return;
-                      }
-                      void handleGenerateRenewalPix();
-                    }}
-                    disabled={renewalLoading}
-                  >
-                    {renewalLoading ? <span className="spinner" /> : 'Gerar PIX'}
-                  </button>
-                </div>
-              </div>
-            ) : null}
-          </div>
-
-          <div className="subscription-page__payment-panel">
-            <span className="subscription-page__payment-tag subscription-page__payment-tag--manual">Manual</span>
-            <h4>PIX</h4>
-            <p className="muted">Gere um PIX para contratar, renovar, reativar ou cobrir falha do cartão. Se não pagar, a renovação não acontece sozinha.</p>
-            <div className="subscription-page__payment-actions">
-              {openRenewalPayment ? (
-                <button type="button" className="btn btn--outline" onClick={handleOpenPendingRenewal}>
-                  Ver PIX pendente
-                </button>
-              ) : null}
-              {!openRenewalPayment && renewalRequired ? (
-                <button type="button" className="btn btn--outline" onClick={() => void handleGenerateRenewalPix()} disabled={renewalLoading}>
-                  {renewalLoading ? <span className="spinner" /> : 'Gerar PIX de renovação'}
-                </button>
-              ) : null}
-              <button
-                type="button"
-                className="btn btn--outline"
-                onClick={() => void handleStartCheckout(checkoutPlanKey, checkoutCycle)}
-                disabled={checkoutLoading || !providerReady}
-              >
-                {checkoutLoading ? <span className="spinner" /> : (billingProvider === 'asaas' ? `Assinar ${checkoutPlanMeta.label}` : `Gerar PIX do ${checkoutPlanMeta.label}`)}
-              </button>
-            </div>
-          </div>
-        </div>
-      </section>
-      ) : null}
-
       <details className="settings-module-card subscription-page__details">
         <summary className="subscription-page__details-summary">Histórico financeiro</summary>
         {financialHistory.has_open_pix_and_rejected_card ? (
@@ -1920,104 +981,6 @@ export default function Assinatura() {
           <div className="subscription-page__empty">Nenhuma movimentação recente para exibir.</div>
         ) : null}
       </details>
-
-      {false && pixModal.open ? (
-        <Modal
-          title="Pagamento via PIX"
-          onClose={closePixModal}
-          actions={[
-            pixModal.data?.ticket_url ? (
-              <a key="open" className="btn btn--primary" href={pixModal.data.ticket_url} target="_blank" rel="noreferrer">
-                Abrir no app do banco
-              </a>
-            ) : null,
-            <button key="close" type="button" className="btn btn--outline" onClick={closePixModal}>
-              Fechar
-            </button>,
-          ].filter(Boolean)}
-        >
-          <div className="pix-checkout">
-            {pixStatus.label ? (
-              <div className={`pix-checkout__status${pixStatus.tone ? ` pix-checkout__status--${pixStatus.tone}` : ''}`} role="status" aria-live="polite">
-                <div className="pix-checkout__status-main">
-                  <span className="pix-checkout__status-icon" aria-hidden="true">{pixStatus.icon}</span>
-                  <span>{pixStatus.label}</span>
-                </div>
-                {pixModal.data?.status ? (
-                  <span className="pix-checkout__status-code">Status: {String(pixModal.data.status || '').toUpperCase()}</span>
-                ) : null}
-              </div>
-            ) : null}
-
-            {isRenewalPix ? (
-              <div className={`box pix-checkout__topup-status${pixConfirmed ? ' is-success' : ' is-pending'}`} role="status" aria-live="polite">
-                {pixConfirmed ? (
-                  <div className="row" style={{ alignItems: 'center', gap: 8 }}>
-                    <span className="pix-checkout__topup-icon" aria-hidden="true">OK</span>
-                    <strong>Pagamento confirmado</strong>
-                  </div>
-                ) : (
-                  <div className="row" style={{ alignItems: 'center', gap: 8 }}>
-                    <span className="spinner" aria-hidden="true" />
-                    <span>Aguardando confirmação do pagamento...</span>
-                  </div>
-                )}
-                {pixNotice ? <p className="muted" style={{ margin: 0 }}>{pixNotice}</p> : null}
-                {!pixConfirmed ? (
-                  <div className="row" style={{ gap: 8 }}>
-                    <button type="button" className="btn btn--sm btn--outline" onClick={() => void refreshRenewalPixStatus({ silent: false })} disabled={!pixPaymentId}>
-                      Atualizar agora
-                    </button>
-                  </div>
-                ) : null}
-              </div>
-            ) : null}
-
-            {typeof pixModal.data?.amount_cents === 'number' ? (
-              <div className="pix-checkout__amount">
-                Valor a pagar: {formatCurrencyFromCents(pixModal.data.amount_cents)}
-              </div>
-            ) : null}
-
-            {pixModal.data?.qr_code_base64 ? (
-              <img src={`data:image/png;base64,${pixModal.data.qr_code_base64}`} alt="QR Code PIX" className="pix-checkout__qr" />
-            ) : (
-              <p className="muted pix-checkout__hint">Abra o link acima para visualizar o QR Code.</p>
-            )}
-
-            {pixCode ? (
-              <div className="pix-checkout__code">
-                <label htmlFor="subscription-pix-code">Chave copia e cola</label>
-                <textarea id="subscription-pix-code" readOnly value={pixCode} rows={3} className="input" />
-                <div className="pix-checkout__code-actions">
-                  <button type="button" className="btn btn--sm btn--primary" onClick={() => void copyPixCode()}>
-                    Copiar chave
-                  </button>
-                </div>
-                {pixCopyNotice ? <span className="muted">{pixCopyNotice}</span> : null}
-              </div>
-            ) : null}
-
-            {pixModal.data?.expires_at ? (
-              <p className="muted pix-checkout__expires">
-                Expira em {formatDateTime(pixModal.data.expires_at)}
-              </p>
-            ) : null}
-
-            <p className="muted pix-checkout__note">
-              {pixConfirmed
-                ? isRenewalPix
-                  ? 'Pagamento confirmado. Renovamos o plano automaticamente.'
-                  : 'Pagamento confirmado. Atualizamos a assinatura automaticamente.'
-                : isRenewalPix
-                  ? 'Pague pelo app do seu banco e aguarde a confirmação automática. Renovação liberada após a aprovação.'
-                  : isCheckoutPix
-                    ? 'Pague pelo app do seu banco e aguarde a confirmação automática. O novo plano será liberado após a aprovação.'
-                    : 'Pague pelo app do seu banco e aguarde a confirmação automática.'}
-            </p>
-          </div>
-        </Modal>
-      ) : null}
 
       {cpfModal.open ? (
         <Modal
