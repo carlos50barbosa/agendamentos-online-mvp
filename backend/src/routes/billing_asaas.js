@@ -61,7 +61,25 @@ router.post('/checkout-session', auth, isEstabelecimento, ensureAsaasConfigured,
       subscription: serializeSubscription(result.subscription),
     });
   } catch (err) {
-    console.error('[billing/asaas][checkout-session]', err?.message || err);
+    // O 502 genérico escondia a causa: um AsaasError já traz a descrição do Asaas em .message,
+    // além de .status e .body. Loga o payload completo para diagnóstico (antes só ia err.message).
+    const asaasStatus = Number(err?.status) || null;
+    console.error('[billing/asaas][checkout-session]', {
+      estabelecimentoId: req.user?.id,
+      message: err?.message || String(err),
+      status: asaasStatus,
+      body: err?.body ?? null,
+    });
+    // Quando é erro de VALIDAÇÃO do Asaas (400/422), devolve a mensagem dele ao dono: ela é sobre o
+    // dado do próprio cadastro (CPF/CNPJ, telefone, e-mail) e é ACIONÁVEL. "Tente novamente" só faria
+    // reenviar o mesmo dado inválido. Demais erros (auth, indisponibilidade, rede) seguem genéricos —
+    // não são acionáveis pelo usuário e podem expor configuração.
+    if (err?.name === 'AsaasError' && (asaasStatus === 400 || asaasStatus === 422)) {
+      return res.status(400).json({
+        error: 'asaas_validation_error',
+        message: err.message || 'Revise seus dados de cobrança (CPF/CNPJ e telefone) e tente novamente.',
+      });
+    }
     return res.status(502).json({
       error: 'asaas_subscription_failed',
       message: 'Não foi possível iniciar a assinatura no Asaas. Tente novamente.',

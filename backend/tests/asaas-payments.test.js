@@ -48,6 +48,25 @@ test('createCustomer exige name', async () => {
   await assert.rejects(() => pay.createCustomer({}), (e) => e.code === 'missing_field')
 })
 
+// Regressão do incidente do checkout: um fixo mandado como mobilePhone é recusado pelo Asaas e
+// derruba a criação do cliente (e a assinatura inteira). Celular -> mobilePhone; fixo -> phone.
+test('createCustomer separa celular (mobilePhone) de fixo (phone)', async () => {
+  const client = stubClient({ 'POST /v3/customers': { id: 'cus_2' } })
+  const pay = createAsaasPayments(client)
+
+  await pay.createCustomer({ name: 'Cel', cpfCnpj: '12345678909', phone: '11999998888' }) // celular (11)
+  assert.equal(client.calls[0].body.mobilePhone, '11999998888')
+  assert.equal(client.calls[0].body.phone, undefined)
+
+  await pay.createCustomer({ name: 'Fixo', cpfCnpj: '12345678909', phone: '1133334444' }) // fixo (10)
+  assert.equal(client.calls[1].body.phone, '1133334444')
+  assert.equal(client.calls[1].body.mobilePhone, undefined)
+
+  await pay.createCustomer({ name: 'E164', cpfCnpj: '12345678909', phone: '5511999998888' }) // com DDI 55
+  assert.equal(client.calls[2].body.mobilePhone, '11999998888')
+  assert.equal(client.calls[2].body.phone, undefined)
+})
+
 test('createSubscription usa cycle MONTHLY e nextDueDate normalizado', async () => {
   const client = stubClient({ 'POST /v3/subscriptions': { id: 'sub_1' } })
   const pay = createAsaasPayments(client)
