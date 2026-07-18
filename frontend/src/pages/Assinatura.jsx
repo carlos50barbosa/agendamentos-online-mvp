@@ -1388,10 +1388,10 @@ export default function Assinatura() {
     <div className="grid config-page settings-module-page subscription-page" style={{ gap: 16 }}>
       <section className="card config-page__hero settings-module-hero subscription-page__hero">
         <div className="settings-module-hero__copy subscription-page__hero-copy">
-          <span className="settings-module-hero__eyebrow">Gestão da assinatura</span>
+          <span className="settings-module-hero__eyebrow">Assinatura</span>
           <h2>Plano e assinatura</h2>
           <p className="muted">
-            Acompanhe o plano atual, limites operacionais, status da cobrança e os próximos passos da sua conta.
+            Pague ou renove seu plano em poucos cliques.
           </p>
         </div>
         <div className="settings-module-hero__meta subscription-page__hero-meta">
@@ -1400,7 +1400,7 @@ export default function Assinatura() {
             {planStatusLabel}
           </div>
           <Link className="btn btn--outline btn--sm" to="/configuracoes">
-            Voltar para Configurações
+            Voltar
           </Link>
         </div>
       </section>
@@ -1426,71 +1426,84 @@ export default function Assinatura() {
         </div>
       ) : null}
 
-      <div className="subscription-page__summary-grid">
-        <div className="settings-module-card subscription-page__summary-card">
-          <span className="subscription-page__eyebrow">Plano atual</span>
-          <h3>{planMeta.label}</h3>
-          <p className="muted">{planMeta.description}</p>
-          <div className="subscription-page__summary-value">{formatCurrencyFromCents(currentPlanPriceCents)}</div>
-          <span className="muted">{BILLING_CYCLE_LABELS[currentCycle] || 'Mensal'}</span>
-        </div>
+      {!loading ? (
+        <div className="subscription-page__summary-grid subscription-page__summary-grid--compact">
+          <div className="settings-module-card subscription-page__summary-card">
+            <span className="subscription-page__eyebrow">Plano atual</span>
+            <h3>{planMeta.label}</h3>
+            <div className="subscription-page__summary-value">{formatCurrencyFromCents(currentPlanPriceCents)}</div>
+            <span className="muted">{BILLING_CYCLE_LABELS[currentCycle] || 'Mensal'} · {planStatusLabel}</span>
+          </div>
 
-        <div className="settings-module-card subscription-page__summary-card">
-          <span className="subscription-page__eyebrow">Próximo marco</span>
-          <h3>{nextDueLabel}</h3>
-          <p className="muted">
-            {planStatusKey === 'past_due'
-              ? 'Cartão falhou. Regularize dentro da tolerância para evitar bloqueio.'
-              : renewalRequired
-                ? 'Existe renovação manual ou cobrança pendente para resolver.'
+          <div className="settings-module-card subscription-page__summary-card">
+            <span className="subscription-page__eyebrow">Vencimento</span>
+            <h3>{nextDueLabel}</h3>
+            <p className="muted">
+              {planStatusKey === 'trialing' && trialEndsAt
+                ? `Teste grátis até ${formatDateLong(trialEndsAt)}.`
                 : activeUntil
-                  ? 'Ciclo atual registrado no backend de cobrança.'
+                  ? 'Próxima cobrança do ciclo atual.'
                   : 'Sem vencimento confirmado no momento.'}
-          </p>
+            </p>
+          </div>
         </div>
+      ) : null}
 
-        <div className="settings-module-card subscription-page__summary-card">
-          <span className="subscription-page__eyebrow">Teste grátis</span>
-          <h3>
-            {trialDaysLeft != null && planStatusKey === 'trialing'
-              ? `${trialDaysLeft} ${trialDaysLeft === 1 ? 'dia' : 'dias'}`
-              : trialAvailable
-                ? 'Disponível'
-                : 'Encerrado'}
-          </h3>
-          <p className="muted">
-            {planStatusKey === 'trialing' && trialEndsAt
-              ? `Válido até ${formatDateLong(trialEndsAt)}.`
-              : trialAvailable
-                ? 'Ative 7 dias do plano Pro sem cartão.'
-                : canOfferProCheckout
-                  ? 'O período de teste já foi consumido. Você ainda pode seguir direto com a contratação do Pro via PIX.'
-                  : 'O período de teste já foi consumido nesta conta.'}
-          </p>
-        </div>
-
-        <div className="settings-module-card subscription-page__summary-card">
-          <span className="subscription-page__eyebrow">Forma principal</span>
-          <h3>{paymentMethodLabel}</h3>
-          <p className="muted">
-            {currentPaymentMethod === 'credit_card'
-              ? 'Renovação automática habilitada no cartão.'
-              : `PIX manual ativo. Referência atual: ${formatCurrencyFromCents(selectedPlanPriceCents)} para ${checkoutPlanMeta.label}.`}
-          </p>
-        </div>
-      </div>
-
-      {hasCreditData ? (
-        <section className="settings-module-card subscription-page__history-card">
+      {!loading ? (
+        <section ref={paymentSectionRef} className="settings-module-card subscription-page__payments-card subscription-page__pay-card">
           <div className="subscription-page__section-head">
             <div>
-              <h3>Crédito proporcional</h3>
-              <p className="muted">Saldo financeiro gerado por upgrades antecipados e abatimento previsto nas próximas cobranças.</p>
-            </div>
-            <div className="subscription-page__status-chip subscription-page__status-chip--success">
-              {formatCurrencyFromCents(availableCreditCents)}
+              <h3>Pagar assinatura</h3>
+              <p className="muted">
+                Escolha o ciclo e confirme. O pagamento (cartão ou PIX) é concluído na tela segura do Asaas.
+              </p>
             </div>
           </div>
+
+          <label className="label subscription-page__cycle-field">
+            <span>Ciclo de cobrança</span>
+            <select className="input" value={checkoutCycle} onChange={(event) => setSelectedCycle(event.target.value)}>
+              <option value="mensal">Mensal — {formatCurrencyFromCents(checkoutPlanMeta.priceCents)}</option>
+              <option value="anual">Anual — {formatCurrencyFromCents(checkoutPlanMeta.annualPriceCents)}</option>
+            </select>
+          </label>
+
+          <div className="subscription-page__callout">
+            <strong>{checkoutPlanMeta.label} · {BILLING_CYCLE_LABELS[checkoutCycle] || 'Mensal'}</strong>
+            <p className="muted">Total: {formatCurrencyFromCents(selectedPlanPriceCents)}</p>
+          </div>
+
+          <div className="subscription-page__action-stack">
+            {trialAvailable ? (
+              <button type="button" className="btn btn--outline btn--outline-brand" onClick={() => void handleStartTrial()} disabled={trialLoading}>
+                {trialLoading ? <span className="spinner" /> : 'Ativar 7 dias grátis do Pro'}
+              </button>
+            ) : null}
+            <button
+              type="button"
+              className="btn btn--primary"
+              onClick={() => void handleStartCheckout(checkoutPlanKey, checkoutCycle)}
+              disabled={checkoutLoading || !providerReady}
+            >
+              {checkoutLoading ? <span className="spinner" /> : `Assinar ${checkoutPlanMeta.label} ${BILLING_CYCLE_LABELS[checkoutCycle] || 'Mensal'}`}
+            </button>
+            <Link className="btn btn--ghost" to="/planos#planos">
+              Comparar planos
+            </Link>
+          </div>
+
+          <p className="muted">
+            No cartão a renovação é automática; no PIX você paga a cada ciclo. Ambos são concluídos na tela segura do Asaas.
+          </p>
+        </section>
+      ) : null}
+
+      {hasCreditData ? (
+        <details className="settings-module-card subscription-page__history-card subscription-page__details">
+          <summary className="subscription-page__details-summary">
+            <span>Crédito proporcional</span>
+            <span className="subscription-page__status-chip subscription-page__status-chip--success">{formatCurrencyFromCents(availableCreditCents)}</span>
+          </summary>
           <div className="subscription-page__financial-overview">
             <FinancialOverviewCard
               eyebrow="Saldo"
@@ -1532,20 +1545,11 @@ export default function Assinatura() {
               ))}
             </ul>
           ) : null}
-        </section>
+        </details>
       ) : null}
 
-      <div className="subscription-page__content-grid">
-        <section className="settings-module-card subscription-page__primary-card">
-          <div className="subscription-page__section-head">
-            <div>
-              <h3>Resumo operacional</h3>
-              <p className="muted">Limites do plano e uso atual da operação do estabelecimento.</p>
-            </div>
-            <Link className="btn btn--ghost btn--sm" to="/planos#planos">
-              Comparar planos
-            </Link>
-          </div>
+      <details className="settings-module-card subscription-page__details">
+        <summary className="subscription-page__details-summary">Detalhes do plano e uso</summary>
 
           <div className="subscription-page__usage-grid">
             <UsageCard
@@ -1590,8 +1594,9 @@ export default function Assinatura() {
               tone={planContext?.limits?.allowAdvancedReports ? 'ok' : 'warning'}
             />
           </div>
-        </section>
+        </details>
 
+        {false ? (
         <aside className="settings-module-card subscription-page__aside-card">
           <div className="subscription-page__section-head subscription-page__section-head--compact">
             <div>
@@ -1654,9 +1659,10 @@ export default function Assinatura() {
             </p>
           </div>
         </aside>
-      </div>
+        ) : null}
 
-      <section ref={paymentSectionRef} className="settings-module-card subscription-page__payments-card">
+      {false ? (
+      <section className="settings-module-card subscription-page__payments-card">
         <div className="subscription-page__section-head">
           <div>
             <h3>Forma de pagamento</h3>
@@ -1823,17 +1829,10 @@ export default function Assinatura() {
           </div>
         </div>
       </section>
+      ) : null}
 
-      <section className="settings-module-card subscription-page__history-card">
-        <div className="subscription-page__section-head">
-          <div>
-            <h3>Histórico financeiro</h3>
-            <p className="muted">Eventos recentes de assinatura, cobrança, PIX e regularização.</p>
-          </div>
-          <div className={`subscription-page__status-chip subscription-page__status-chip--${planStatusTone}`}>
-            {planStatusLabel}
-          </div>
-        </div>
+      <details className="settings-module-card subscription-page__details">
+        <summary className="subscription-page__details-summary">Histórico financeiro</summary>
         {financialHistory.has_open_pix_and_rejected_card ? (
           <div className="subscription-page__callout">
             <strong>Há um PIX em aberto aguardando pagamento.</strong>
@@ -1902,9 +1901,9 @@ export default function Assinatura() {
         {!history.length && !financialEvents.length ? (
           <div className="subscription-page__empty">Nenhuma movimentação recente para exibir.</div>
         ) : null}
-      </section>
+      </details>
 
-      {pixModal.open ? (
+      {false && pixModal.open ? (
         <Modal
           title="Pagamento via PIX"
           onClose={closePixModal}

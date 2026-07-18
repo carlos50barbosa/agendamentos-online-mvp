@@ -2919,6 +2919,45 @@ a:hover { opacity: 1; text-decoration: underline; }
   display:grid;
   gap:14px;
 }
+/* Resumo compacto (foco em pagar): 2 colunas em vez de 4 */
+.subscription-page__summary-grid--compact{
+  grid-template-columns:repeat(2, minmax(0, 1fr));
+}
+/* Blocos secundarios recolhiveis (uso, historico, credito) — abrem sob demanda */
+.subscription-page__details > summary{
+  list-style:none;
+  cursor:pointer;
+  font-weight:600;
+  color:var(--ink, #1e1b4b);
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:8px;
+}
+.subscription-page__details > summary::-webkit-details-marker{
+  display:none;
+}
+.subscription-page__details > summary::after{
+  content:"\25be";
+  color:var(--muted-ink, #6b7280);
+  transition:transform .18s ease;
+}
+.subscription-page__details[open] > summary::after{
+  transform:rotate(180deg);
+}
+.subscription-page__details[open] > summary{
+  margin-bottom:14px;
+}
+/* Destaque do bloco de pagamento (acao principal) */
+.subscription-page__pay-card{
+  border-color:var(--brand, #4f46e5);
+  box-shadow:0 6px 20px rgba(79,70,229,.10);
+}
+@media (max-width: 640px){
+  .subscription-page__summary-grid--compact{
+    grid-template-columns:1fr;
+  }
+}
 .subscription-page__payment-grid{
   display:grid;
   grid-template-columns:repeat(2, minmax(0, 1fr));
