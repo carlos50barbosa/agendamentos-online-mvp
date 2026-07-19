@@ -83,10 +83,16 @@ export default function InstallAppBanner() {
             {/* iPhone: sem API, o passo a passo é o produto. Os ícones abaixo são
                 os mesmos que a pessoa vê na barra do Safari, para ela reconhecer
                 o alvo em vez de caçar por nome. */}
+            {/* A promessa é escopada à notificação NA TELA, e não ao aviso em
+                geral: o dono recebe por e-mail de qualquer jeito. Dizer "único
+                jeito de receber o aviso" o fazia entender que ficaria sem saber
+                dos agendamentos, o que assusta sem motivo — e é falso.
+                Só o push depende da instalação, e só no iPhone. */}
             <p className={styles.lead}>
-              Vira um <b>app</b> no seu iPhone em dois toques — e é o único jeito de
-              receber o aviso de <b>novo agendamento</b>, porque o Safari só libera
-              notificação depois disso.
+              Vira um <b>app</b> no seu iPhone em dois toques. É o que faz o aviso de
+              novo agendamento <b>aparecer na tela do celular</b> — o Safari só libera
+              isso depois da instalação. Os avisos por <b>e-mail</b> continuam
+              chegando normalmente.
             </p>
             <ol className={styles.steps}>
               <li>
