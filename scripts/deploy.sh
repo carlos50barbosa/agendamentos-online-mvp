@@ -45,9 +45,12 @@ if [[ "${DEPLOY_LOCKED:-}" != "1" ]]; then
     echo "==> Aguardando lock de deploy ($LOCK_FILE, timeout ${LOCK_TIMEOUT}s)"
     # --conflict-exit-code separa "nao consegui o lock" (75) de "o deploy falhou" (1).
     # Sem isso o flock sai 1 mudo e o CI mostra uma falha sem causa aparente.
+    # `bash "$0"` e nao `"$0"`: o flock EXECUTA o alvo, o que exigiria bit de execucao.
+    # O script e' versionado como 100644 e chamado via `bash scripts/deploy.sh`, entao
+    # passar o caminho direto falha com "Permission denied" (exit 69).
     set +e
     env DEPLOY_LOCKED=1 flock --timeout "$LOCK_TIMEOUT" --conflict-exit-code 75 \
-      "$LOCK_FILE" "$0" "$@"
+      "$LOCK_FILE" bash "$0" "$@"
     rc=$?
     set -e
     if [[ $rc -eq 75 ]]; then
