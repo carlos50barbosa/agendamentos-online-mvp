@@ -128,13 +128,29 @@ jobs:
           mkdir -p ~/.ssh
           printf '%s\n' "$SSH_KEY" > ~/.ssh/id_deploy
           chmod 600 ~/.ssh/id_deploy
-          ssh-keyscan -p "$PORT" -H "$SSH_HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
+          ssh-keyscan -T 10 -p "$PORT" -H "$SSH_HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
           API_ARG=""
           if [ -n "${DEPLOY_API_URL:-}" ]; then API_ARG="API_URL=$DEPLOY_API_URL"; fi
           echo "==> Disparando scripts/deploy.sh em $SSH_USER@$SSH_HOST:$PORT ($DIR)"
-          ssh -i ~/.ssh/id_deploy -p "$PORT" -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new \
+          # ConnectTimeout: sem ele um host/porta inalcançável só falha após ~140s do timeout
+          # de TCP, sem mensagem — o job parece travado em vez de mal configurado.
+          # ServerAlive*: o deploy leva minutos; derruba a sessão se a conexão morrer no meio
+          # em vez de pendurar o job até o limite do runner.
+          set +e
+          ssh -i ~/.ssh/id_deploy -p "$PORT" \
+            -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new \
+            -o ConnectTimeout=15 -o ServerAliveInterval=30 -o ServerAliveCountMax=6 \
             "$SSH_USER@$SSH_HOST" \
             "cd '$DIR' && BRANCH=main $API_ARG bash scripts/deploy.sh"
+          rc=$?
+          set -e
+          # 75 = scripts/deploy.sh nao conseguiu o lock (outro deploy em andamento).
+          if [ "$rc" -eq 75 ]; then
+            echo "::error::Outro deploy esta em andamento na VPS. Aguarde terminar e re-execute este workflow."
+          elif [ "$rc" -eq 255 ]; then
+            echo "::error::Falha de SSH (nao conectou). Confira DEPLOY_SSH_HOST/PORT, a chave e o firewall da VPS."
+          fi
+          exit $rc
 
       - name: Smoke check (opcional)
         env:

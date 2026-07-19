@@ -32,6 +32,32 @@ BRANCH=${BRANCH:-}
 NGINX_RELOAD=${NGINX_RELOAD:-0}
 SKIP_BACKEND=${SKIP_BACKEND:-0}
 SKIP_FRONTEND=${SKIP_FRONTEND:-0}
+LOCK_FILE=${LOCK_FILE:-/var/lock/deploy-agendamentos.lock}
+LOCK_TIMEOUT=${LOCK_TIMEOUT:-900}
+
+# Exclusao mutua entre deploys. Dois deploys simultaneos no mesmo diretorio se atropelam:
+# `git pull`, `npm ci` e `npm run build` disputam a mesma arvore e o resultado e' um deploy
+# que falha no meio (aconteceu em 18/07/2026, um deploy manual colidindo com o do CI).
+#
+# Reexecuta o script sob flock. DEPLOY_LOCKED evita recursao infinita na segunda entrada.
+if [[ "${DEPLOY_LOCKED:-}" != "1" ]]; then
+  if command -v flock >/dev/null 2>&1; then
+    echo "==> Aguardando lock de deploy ($LOCK_FILE, timeout ${LOCK_TIMEOUT}s)"
+    # --conflict-exit-code separa "nao consegui o lock" (75) de "o deploy falhou" (1).
+    # Sem isso o flock sai 1 mudo e o CI mostra uma falha sem causa aparente.
+    set +e
+    env DEPLOY_LOCKED=1 flock --timeout "$LOCK_TIMEOUT" --conflict-exit-code 75 \
+      "$LOCK_FILE" "$0" "$@"
+    rc=$?
+    set -e
+    if [[ $rc -eq 75 ]]; then
+      echo "Erro: outro deploy esta em andamento (lock $LOCK_FILE nao liberou em ${LOCK_TIMEOUT}s)." >&2
+      echo "      Aguarde o deploy atual terminar e rode de novo." >&2
+    fi
+    exit $rc
+  fi
+  echo "AVISO: flock indisponivel — seguindo SEM protecao contra deploy concorrente." >&2
+fi
 
 need() { command -v "$1" >/dev/null 2>&1 || { echo "Erro: comando '$1' não encontrado." >&2; exit 1; }; }
 
