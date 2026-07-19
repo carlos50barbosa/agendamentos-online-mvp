@@ -1,6 +1,7 @@
 import { notifyEmail } from './notifications.js';
 import { sendAppointmentWhatsApp } from './whatsapp_outbox.js';
 import { clientWhatsappDisabled } from './client_notifications.js';
+import { issueConfirmLink } from './appointment_confirm_link.js';
 
 const TZ = 'America/Sao_Paulo';
 const INTERVAL_MS = Number(process.env.REMINDER_8H_INTERVAL_MS || 60_000); // 1 min default
@@ -63,13 +64,61 @@ async function markReminderSent(pool, id, messageId) {
   }
 }
 
+/**
+ * Manda o lembrete por e-mail, com link de confirmação de presença.
+ *
+ * Existe para ser chamado de TODO caminho em que o WhatsApp não sai — bloqueado pelo outbox,
+ * desligado por env, ou cliente sem telefone. Enquanto isso era um bloco inline dentro do
+ * `if (result.blocked)`, os dois `return` antecipados de sendReminder pulavam por cima dele e o
+ * cliente ficava sem lembrete nenhum: sem WhatsApp e sem e-mail, silenciosamente.
+ *
+ * Nunca lança: um lembrete que falha não pode derrubar o tick nem impedir a marcação de enviado.
+ */
+async function sendReminderEmail(pool, row, { motivo } = {}) {
+  const email = String(row?.cliente_email || '').trim().toLowerCase();
+  if (!email) return { ok: false, reason: 'no_email' };
+
+  try {
+    const inicioISO = new Date(row.inicio).toISOString();
+    const hora = brTime(inicioISO);
+    const data = brDate(inicioISO);
+    const estNomeFriendly = row?.estabelecimento_nome || 'nosso estabelecimento';
+    const saudacao = firstName(row?.cliente_nome) ? `, <b>${firstName(row?.cliente_nome)}</b>` : '';
+
+    // Sem WhatsApp, o cliente perde o caminho do "responda CONFIRMAR". O link cobre esse buraco:
+    // um clique grava a mesma confirmação. Se a emissão do token falhar, o e-mail sai mesmo
+    // assim — lembrete sem botão ainda é melhor que lembrete nenhum.
+    const link = await issueConfirmLink(pool, row.id, { inicio: row.inicio });
+    const cta = link
+      ? `<p>Pode confirmar sua presença clicando aqui:</p>
+         <p><a href="${link.url}" style="display:inline-block;padding:12px 20px;background:#4f46e5;color:#fff;border-radius:8px;text-decoration:none;font-weight:bold">Confirmar presença</a></p>
+         <p style="color:#64748b;font-size:12px">Se o botão não funcionar, copie este endereço no navegador:<br />${link.url}</p>`
+      : '';
+
+    await notifyEmail(
+      email,
+      'Lembrete do seu agendamento',
+      `<p>Olá${saudacao}! Faltam 8 horas para o seu agendamento de <b>${row.servico_nome}</b> em <b>${estNomeFriendly}</b> (${hora} de ${data}).</p>${cta}`
+    );
+    return { ok: true, linked: Boolean(link) };
+  } catch (err) {
+    console.warn('[reminder8h][email] falhou', { agendamentoId: row?.id, motivo, erro: err?.message || err });
+    return { ok: false, reason: 'error' };
+  }
+}
+
 async function sendReminder(pool, row) {
   const telCli = normalizePhoneBR(row?.cliente_telefone);
   if (!telCli) {
+    // Sem telefone o WhatsApp nunca vai sair — mas o e-mail sai, e é o único aviso que essa
+    // pessoa vai receber.
+    await sendReminderEmail(pool, row, { motivo: 'no_phone' });
     await markReminderSent(pool, row.id); // sem telefone, nao adianta tentar de novo
     return { sent: false, reason: 'no_phone' };
   }
   if (clientWhatsappDisabled()) {
+    // Desligar WhatsApp do cliente é uma decisão sobre o CANAL, não sobre avisar ou não.
+    await sendReminderEmail(pool, row, { motivo: 'client_whatsapp_disabled' });
     await markReminderSent(pool, row.id); // evita reprocessar se optou por desligar cliente
     return { sent: false, reason: 'client_whatsapp_disabled' };
   }
@@ -175,18 +224,7 @@ async function sendReminder(pool, row) {
     // tem como saber que precisa vir aqui, e o lembrete simplesmente para de existir — sem erro,
     // sem log, sem ninguém notar. O que importa aqui é o fato "o WhatsApp não saiu", não o porquê.
     if (result?.blocked) {
-      const email = String(row?.cliente_email || '').trim().toLowerCase();
-      if (email) {
-        try {
-          await notifyEmail(
-            email,
-            'Lembrete do seu agendamento',
-            `<p>Ol\u00e1${firstName(row?.cliente_nome) ? `, <b>${firstName(row?.cliente_nome)}</b>` : ''}! Faltam 8 horas para o seu agendamento de <b>${row.servico_nome}</b> em <b>${estNomeFriendly}</b> (${hora} de ${data}).</p>`
-          );
-        } catch (err) {
-          console.warn('[reminder8h][email-fallback] failed', err?.message || err);
-        }
-      }
+      await sendReminderEmail(pool, row, { motivo: result.reason });
       await markReminderSent(pool, row.id, null);
       return { sent: false, reason: result.reason };
     }

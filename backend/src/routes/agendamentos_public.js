@@ -373,6 +373,16 @@ const firstName = (full) => {
   return parts[0] || '';
 };
 
+// renderConfirmPage interpola direto no HTML; nomes de serviço e de estabelecimento são texto
+// livre editado pelo lojista, então passam por aqui antes de entrar na página.
+const escapeHtml = (value) =>
+  String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+
 const renderConfirmPage = ({ title, message }) => `<!doctype html>
 <html lang="pt-BR">
   <head>
@@ -1421,7 +1431,18 @@ router.get('/confirm', async (req, res) => {
     }
     const tokenHash = hashToken(token);
     const [[ag]] = await pool.query(
-      'SELECT id, status, public_confirm_expires_at FROM agendamentos WHERE public_confirm_token_hash=? LIMIT 1',
+      `SELECT a.id, a.status, a.inicio, a.public_confirm_expires_at, a.cliente_confirmou_whatsapp_at,
+              e.nome AS estabelecimento_nome,
+              COALESCE(NULLIF(GROUP_CONCAT(s.nome ORDER BY ai.ordem SEPARATOR ' + '), ''), s0.nome) AS servico_nome
+         FROM agendamentos a
+         JOIN usuarios e ON e.id = a.estabelecimento_id
+         LEFT JOIN agendamento_itens ai ON ai.agendamento_id = a.id
+         LEFT JOIN servicos s ON s.id = ai.servico_id
+         LEFT JOIN servicos s0 ON s0.id = a.servico_id
+        WHERE a.public_confirm_token_hash=?
+        GROUP BY a.id, a.status, a.inicio, a.public_confirm_expires_at,
+                 a.cliente_confirmou_whatsapp_at, e.nome, s0.nome
+        LIMIT 1`,
       [tokenHash]
     );
     if (!ag) {
@@ -1430,36 +1451,65 @@ router.get('/confirm', async (req, res) => {
         message: 'Este link não é válido ou já expirou.',
       }));
     }
-    if (ag.status === 'confirmado') {
-      return res.status(200).send(renderConfirmPage({
-        title: 'Agendamento confirmado',
-        message: 'Seu agendamento já estava confirmado.',
-      }));
-    }
     if (ag.status === 'cancelado') {
       return res.status(410).send(renderConfirmPage({
-        title: 'Confirmação expirada',
-        message: 'Este agendamento foi cancelado por falta de confirmação.',
+        title: 'Agendamento cancelado',
+        message: 'Este agendamento foi cancelado e não pode ser confirmado.',
       }));
     }
     if (ag.public_confirm_expires_at && new Date(ag.public_confirm_expires_at).getTime() < Date.now()) {
-      await cancelPublicPendingAppointmentTx(ag.id, { db: pool });
+      // Só o fluxo legado (status 'pendente') cancela por falta de confirmação. Um agendamento
+      // já confirmado com link vencido apenas perde o link — cancelá-lo aqui seria destruir um
+      // compromisso válido porque o cliente clicou tarde demais.
+      if (ag.status === 'pendente') {
+        await cancelPublicPendingAppointmentTx(ag.id, { db: pool });
+        return res.status(410).send(renderConfirmPage({
+          title: 'Confirmação expirada',
+          message: 'Este agendamento foi cancelado por falta de confirmação.',
+        }));
+      }
       return res.status(410).send(renderConfirmPage({
-        title: 'Confirmação expirada',
-        message: 'Este agendamento foi cancelado por falta de confirmação.',
+        title: 'Link expirado',
+        message: 'Este link de confirmação não é mais válido.',
       }));
     }
 
-    const [r] = await pool.query(
-      "UPDATE agendamentos SET status='confirmado', public_confirmed_at=NOW(), public_confirm_expires_at=NULL WHERE id=? AND status='pendente'",
+    // Fluxo legado: agendamento criado como 'pendente' vira 'confirmado' no clique.
+    if (ag.status === 'pendente') {
+      const [r] = await pool.query(
+        "UPDATE agendamentos SET status='confirmado', public_confirmed_at=NOW(), public_confirm_expires_at=NULL WHERE id=? AND status='pendente'",
+        [ag.id]
+      );
+      if (r?.affectedRows) {
+        notifyPublicConfirmedAppointment(ag.id);
+      }
+    }
+
+    // Carimba a confirmação do cliente. Hoje o agendamento já nasce 'confirmado', então o que o
+    // clique registra não é uma transição de status e sim "o cliente viu o lembrete e vai vir" —
+    // exatamente o mesmo sinal que o CONFIRMAR do WhatsApp grava. Reusamos a MESMA coluna de
+    // propósito: o cockpit do estabelecimento já lê cliente_confirmou_whatsapp_at, então o clique
+    // no e-mail acende o indicador existente sem tocar no frontend. O nome da coluna ficou preso
+    // ao canal de origem; o significado é "confirmado pelo cliente", qualquer que seja o canal.
+    await pool.query(
+      'UPDATE agendamentos SET cliente_confirmou_whatsapp_at = COALESCE(cliente_confirmou_whatsapp_at, NOW()) WHERE id=? LIMIT 1',
       [ag.id]
     );
-    if (r?.affectedRows) {
-      notifyPublicConfirmedAppointment(ag.id);
-    }
+
+    const quando = ag.inicio
+      ? `${new Date(ag.inicio).toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' })} às ${new Date(ag.inicio).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Sao_Paulo' })}`
+      : '';
+    const detalhes = [
+      ag.servico_nome ? `<b>${escapeHtml(ag.servico_nome)}</b>` : null,
+      quando ? `em ${escapeHtml(quando)}` : null,
+      ag.estabelecimento_nome ? `no ${escapeHtml(ag.estabelecimento_nome)}` : null,
+    ].filter(Boolean).join(' ');
+
     return res.status(200).send(renderConfirmPage({
-      title: 'Agendamento confirmado',
-      message: 'Confirmação registrada com sucesso.',
+      title: 'Presença confirmada!',
+      message: detalhes
+        ? `Recebemos sua confirmação: ${detalhes}. Até lá!`
+        : 'Recebemos sua confirmação. Até lá!',
     }));
   } catch (e) {
     console.error('[public/agendamentos][confirm]', e?.message || e);
