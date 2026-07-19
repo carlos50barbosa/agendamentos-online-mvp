@@ -64,9 +64,14 @@ export default function InstallAppBanner() {
 
         {state.mode === 'native' ? (
           <>
+            {/* NÃO prometer que instalar "libera as notificações" aqui: no Android
+                o push funciona numa aba normal do Chrome — quem entrega é o
+                service worker, que roda no site com ou sem ícone na tela. O
+                atalho é só um lançador. Essa promessa vale no iPhone (ramo
+                abaixo), onde o Safari realmente exige a instalação. */}
             <p className={styles.lead}>
-              Fica igual a um <b>app</b>: abre pelo ícone, em tela cheia — e é o que
-              libera o aviso de <b>novo agendamento</b> no seu celular.
+              Fica igual a um <b>app</b>: abre pelo ícone em tela cheia, sem precisar
+              procurar o site no navegador.
             </p>
             <button type="button" className={styles.cta} onClick={instalar} disabled={busy}>
               <Download size={16} strokeWidth={2.2} aria-hidden="true" />
