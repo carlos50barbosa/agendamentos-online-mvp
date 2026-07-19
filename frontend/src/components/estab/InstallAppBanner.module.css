@@ -6,12 +6,21 @@
  * mudar, os dois acompanham juntos — foi exatamente a divergência entre esses
  * dois números que escondeu conteúdo atrás da nav antes.
  *
- * Tom NEUTRO (surface), não âmbar: âmbar é a cor de pendência, reservada ao
- * banner do WhatsApp, que sinaliza envio bloqueado. Isto é uma oferta — quem
- * ignorar não perde nada hoje. Pintar oferta com cor de alerta é o caminho mais
- * rápido para o dono aprender a ignorar as duas.
+ * AMARELO para destacar. Ele é bem mais saturado que o #FEF3C7 pálido do
+ * WhatsAppOptInBanner, então os dois não se confundem — é o que evita que uma
+ * oferta pareça a mesma coisa que uma pendência bloqueante.
+ *
+ * O texto é ESCURO, não branco: sobre amarelo claro, branco tem contraste
+ * baixíssimo e o banner fica ilegível no sol — que é exatamente onde o dono de
+ * salão usa o celular.
+ *
+ * Um lugar só para trocar o tom, se quiser calibrar:
  */
 .wrap {
+  --install-yellow: #F6D95A;
+  --install-yellow-border: #E3C032;
+  --install-ink: #2A2205;
+
   position: fixed;
   left: 12px;
   right: 12px;
@@ -21,9 +30,9 @@
   gap: 10px;
   padding: 14px 14px 14px 16px;
   border-radius: 16px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.18);
+  background: var(--install-yellow);
+  border: 1px solid var(--install-yellow-border);
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.22);
   animation: install-rise .28s ease-out;
 }
 
@@ -41,15 +50,18 @@
 .title {
   margin: 0;
   font-size: 15px;
-  font-weight: 700;
-  color: var(--text);
+  font-weight: 800;
+  color: var(--install-ink);
 }
 
+/* Sem var(--muted) aqui: o token de texto secundário foi calibrado para fundo
+   claro do tema, e sobre o amarelo ele quase some. Tom fixo, com opacidade. */
 .lead {
   margin: 4px 0 0;
   font-size: 13px;
   line-height: 1.45;
-  color: var(--muted);
+  color: var(--install-ink);
+  opacity: .82;
 }
 
 /* Passo a passo do iPhone: ícone + texto na mesma linha, para a pessoa
@@ -69,11 +81,15 @@
   gap: 8px;
   font-size: 13px;
   line-height: 1.35;
-  color: var(--text);
+  color: var(--install-ink);
 }
 
-.steps li svg { flex: 0 0 auto; color: var(--primary-600); }
+/* Índigo da marca sobre o amarelo: os ícones precisam saltar do fundo, e é o
+   par de cores que o app já usa. */
+.steps li svg { flex: 0 0 auto; color: #3D34C7; }
 
+/* Índigo escuro sobre amarelo: contraste alto nos dois sentidos, e mantém o
+   botão reconhecível como a ação primária do app. */
 .cta {
   margin-top: 12px;
   display: inline-flex;
@@ -84,10 +100,10 @@
   padding: 0 18px;
   border: 0;
   border-radius: 12px;
-  background: var(--brand, #5049E5);
+  background: #2E2794;
   color: #fff;
   font-size: 14px;
-  font-weight: 600;
+  font-weight: 700;
   cursor: pointer;
 }
 
@@ -108,8 +124,9 @@
   border: 0;
   border-radius: 999px;
   background: transparent;
-  color: var(--muted);
+  color: var(--install-ink);
+  opacity: .65;
   cursor: pointer;
 }
 
-.close:hover { background: var(--hover); color: var(--text); }
+.close:hover { background: rgba(42, 34, 5, .12); opacity: 1; }

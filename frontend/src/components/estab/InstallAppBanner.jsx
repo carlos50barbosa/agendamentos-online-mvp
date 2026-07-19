@@ -58,17 +58,19 @@ export default function InstallAppBanner() {
       </button>
 
       <div className={styles.body}>
-        <p className={styles.title}>Deixe a agenda na tela de início</p>
+        {/* "Aplicativo" logo no título: sem essa palavra o dono lê "atalho" e
+            descarta, sem entender que ganha ícone, tela cheia e notificação. */}
+        <p className={styles.title}>Instale o aplicativo no seu celular</p>
 
         {state.mode === 'native' ? (
           <>
             <p className={styles.lead}>
-              Abre como aplicativo, sem barra de endereço — e é o que permite
-              receber o aviso de <b>novo agendamento</b> no celular.
+              Fica igual a um <b>app</b>: abre pelo ícone, em tela cheia — e é o que
+              libera o aviso de <b>novo agendamento</b> no seu celular.
             </p>
             <button type="button" className={styles.cta} onClick={instalar} disabled={busy}>
               <Download size={16} strokeWidth={2.2} aria-hidden="true" />
-              {busy ? 'Instalando…' : 'Instalar app'}
+              {busy ? 'Instalando…' : 'Instalar aplicativo'}
             </button>
           </>
         ) : (
@@ -77,8 +79,9 @@ export default function InstallAppBanner() {
                 os mesmos que a pessoa vê na barra do Safari, para ela reconhecer
                 o alvo em vez de caçar por nome. */}
             <p className={styles.lead}>
-              No iPhone são dois toques — e é o único jeito de receber o aviso de{' '}
-              <b>novo agendamento</b>, porque o Safari só libera notificação depois disso.
+              Vira um <b>app</b> no seu iPhone em dois toques — e é o único jeito de
+              receber o aviso de <b>novo agendamento</b>, porque o Safari só libera
+              notificação depois disso.
             </p>
             <ol className={styles.steps}>
               <li>
