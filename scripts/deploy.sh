@@ -7,7 +7,7 @@ set -euo pipefail
 #   PROJECT_DIR=/opt/apps/agendamentos-online-mvp
 #   FRONT_DIR="$PROJECT_DIR/frontend"
 #   BACK_DIR="$PROJECT_DIR/backend"
-#   DOCROOT=/var/www/agenda0.com.br
+#   DOCROOT="$FRONT_DIR/dist"   (o nginx serve o dist direto; veja a nota abaixo)
 #   API_URL=https://agenda0.com.br/api
 #   PM2_PROCESS=agendamento-api
 #   BRANCH=(current)
@@ -22,7 +22,10 @@ set -euo pipefail
 PROJECT_DIR=${PROJECT_DIR:-/opt/apps/agendamentos-online-mvp}
 FRONT_DIR=${FRONT_DIR:-"$PROJECT_DIR/frontend"}
 BACK_DIR=${BACK_DIR:-"$PROJECT_DIR/backend"}
-DOCROOT=${DOCROOT:-/var/www/agenda0.com.br}
+# Default = o proprio dist. O nginx da VPS tem `root .../frontend/dist`, entao o build
+# ja publica no lugar certo. Defina DOCROOT explicitamente so' se o servidor web servir
+# de um diretorio separado (ai o rsync abaixo entra em acao).
+DOCROOT=${DOCROOT:-"$FRONT_DIR/dist"}
 API_URL=${API_URL:-https://agenda0.com.br/api}
 PM2_PROCESS=${PM2_PROCESS:-agendamento-api}
 BRANCH=${BRANCH:-}
@@ -69,8 +72,19 @@ if [[ "$SKIP_FRONTEND" != "1" ]]; then
   echo "==> Frontend: build com VITE_API_URL=$API_URL"
   export VITE_API_URL="$API_URL"
   npm run build
-  echo "==> Publicando dist/ em $DOCROOT"
-  rsync -avz --delete dist/ "$DOCROOT/"
+
+  # Na VPS o nginx aponta o `root` direto para $FRONT_DIR/dist, entao o build ja
+  # publica sozinho e o rsync abaixo so criava uma copia morta em outro diretorio
+  # (que ninguem servia). Se DOCROOT for o proprio dist, um `rsync --delete dist/ dist/`
+  # seria o diretorio sobre si mesmo — pular e' obrigatorio, nao so' otimizacao.
+  DIST_DIR="$(cd dist && pwd -P)"
+  DOCROOT_REAL="$(cd "$DOCROOT" 2>/dev/null && pwd -P || echo "$DOCROOT")"
+  if [[ "$DIST_DIR" == "$DOCROOT_REAL" ]]; then
+    echo "==> DOCROOT e' o proprio dist/ ($DIST_DIR) — build ja publicado, nada a copiar"
+  else
+    echo "==> Publicando dist/ em $DOCROOT"
+    rsync -avz --delete dist/ "$DOCROOT/"
+  fi
 else
   echo "==> (PULANDO frontend)"
 fi
