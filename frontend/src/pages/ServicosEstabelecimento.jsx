@@ -4,6 +4,8 @@ import { Link } from "react-router-dom";
 
 import { Api, resolveAssetUrl } from "../utils/api";
 
+import { compressImageToDataUrl, MAX_ENTRADA_BYTES } from "../utils/imageCompress";
+
 
 
 const MAX_SERVICE_IMAGE_SIZE = 2 * 1024 * 1024; // 2MB
@@ -18,21 +20,6 @@ const SERVICE_DURATION_OPTIONS = (() => {
 })();
 
 
-function readFileAsDataUrl(file) {
-
-  return new Promise((resolve, reject) => {
-
-    const reader = new FileReader();
-
-    reader.onload = () => resolve(reader.result);
-
-    reader.onerror = () => reject(reader.error || new Error("file_read_error"));
-
-    reader.readAsDataURL(file);
-
-  });
-
-}
 
 
 
@@ -300,7 +287,10 @@ export default function ServicosEstabelecimento() {
 
     if (!file) return false;
 
-    if (!file.type.startsWith('image/')) {
+    // Mesma regex do backend (lib/service_images.js): antes aceitava qualquer image/*
+    // aqui e o usuario so descobria que GIF/AVIF nao serve pelo erro generico do servidor.
+
+    if (!/^image\/(png|jpe?g|webp)$/i.test(file.type)) {
 
       showToast('error', 'Envie uma imagem PNG, JPG ou WEBP.');
 
@@ -310,9 +300,9 @@ export default function ServicosEstabelecimento() {
 
     }
 
-    if (file.size > MAX_SERVICE_IMAGE_SIZE) {
+    if (file.size > MAX_ENTRADA_BYTES) {
 
-      if (setError) setError('Imagem maior que 2MB.');
+      if (setError) setError('Imagem grande demais para processar.');
 
       return false;
 
@@ -320,7 +310,17 @@ export default function ServicosEstabelecimento() {
 
     try {
 
-      const dataUrl = await readFileAsDataUrl(file);
+      // Comprime antes de medir: foto de celular so cabe no limite depois de reduzida.
+
+      const { dataUrl, bytes } = await compressImageToDataUrl(file);
+
+      if (bytes > MAX_SERVICE_IMAGE_SIZE) {
+
+        if (setError) setError('Imagem maior que 2MB.');
+
+        return false;
+
+      }
 
       onSuccess(dataUrl);
 

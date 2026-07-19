@@ -6,6 +6,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Api, resolveAssetUrl } from '../../utils/api';
 import { getUser, saveUser } from '../../utils/auth';
 import { onlyDigits, formatPhoneBR } from './helpers.js';
+import { compressImageToDataUrl, MAX_ENTRADA_BYTES } from '../../utils/imageCompress';
 import './settings.css';
 
 const AVATAR_MAX_BYTES = 2 * 1024 * 1024;
@@ -57,33 +58,35 @@ export default function AccountProfileSection() {
   const avatarPreview = avatarUrl ? resolveAssetUrl(avatarUrl) : '';
 
   // ---- foto do perfil (salva assim que escolhe) ----
-  const acceptAvatar = (file) => {
+  const acceptAvatar = async (file) => {
     setFeedback(null);
     if (!file) return;
     if (!/^image\/(png|jpe?g|webp)$/i.test(file.type)) {
       setFeedback({ type: 'error', message: 'Formato não aceito. Envie PNG, JPG ou WEBP.' });
       return;
     }
-    if (file.size > AVATAR_MAX_BYTES) {
-      setFeedback({ type: 'error', message: `A imagem tem ${formatSize(file.size)} — o limite é 2 MB.` });
+    if (file.size > MAX_ENTRADA_BYTES) {
+      setFeedback({ type: 'error', message: `A imagem tem ${formatSize(file.size)} — está grande demais para processar.` });
       return;
     }
-    const reader = new FileReader();
-    reader.onload = async () => {
-      setAvatarBusy(true);
-      try {
-        const resp = await Api.updateProfile({ avatar: reader.result });
-        if (resp?.user) { saveUser(resp.user); setAvatarUrl(resp.user.avatar_url || ''); }
-        setFeedback({ type: 'success', message: 'Foto do perfil atualizada.' });
-      } catch (err) {
-        setFeedback({ type: 'error', message: err?.data?.message || 'Não foi possível salvar a foto.' });
-      } finally {
-        setAvatarBusy(false);
-        if (fileRef.current) fileRef.current.value = '';
+    setAvatarBusy(true);
+    try {
+      // Comprime antes de medir: foto de celular passa do limite crua mas cabe folgada
+      // depois de reduzida. Se a compressao falhar, `dataUrl` e' o arquivo original.
+      const { dataUrl, bytes } = await compressImageToDataUrl(file, { maxDimensao: 512 });
+      if (bytes > AVATAR_MAX_BYTES) {
+        setFeedback({ type: 'error', message: `A imagem tem ${formatSize(bytes)} — o limite é 2 MB.` });
+        return;
       }
-    };
-    reader.onerror = () => setFeedback({ type: 'error', message: 'Não foi possível ler a imagem.' });
-    reader.readAsDataURL(file);
+      const resp = await Api.updateProfile({ avatar: dataUrl });
+      if (resp?.user) { saveUser(resp.user); setAvatarUrl(resp.user.avatar_url || ''); }
+      setFeedback({ type: 'success', message: 'Foto do perfil atualizada.' });
+    } catch (err) {
+      setFeedback({ type: 'error', message: err?.data?.message || 'Não foi possível salvar a foto.' });
+    } finally {
+      setAvatarBusy(false);
+      if (fileRef.current) fileRef.current.value = '';
+    }
   };
 
   const onRemoveAvatar = async () => {

@@ -9,6 +9,19 @@ server {
     return 301 /api/;
   }
 
+  # Uploads servidos direto do disco, sem passar pelo Node.
+  # ^~ garante precedencia sobre location regex e sobre /api/.
+  # O Express continua montado em /api/uploads (backend/src/index.js) como
+  # fallback caso este bloco seja removido.
+  # Ajuste o alias para o caminho real do backend na maquina.
+  location ^~ /api/uploads/ {
+    alias /opt/apps/agendamentos-online-mvp/backend/uploads/;
+    expires 30d;
+    access_log off;
+    add_header X-Content-Type-Options "nosniff" always;
+    try_files $uri =404;
+  }
+
   location /api/ {
     proxy_http_version 1.1;
     proxy_pass http://127.0.0.1:3002;
