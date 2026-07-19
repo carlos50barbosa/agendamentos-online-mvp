@@ -63,10 +63,20 @@ function waNumber(v) {
   return d;
 }
 
+// Mensagem de win-back pre-preenchida (o remetente ainda pode editar no WhatsApp antes de enviar).
+function buildWinbackMessage(nome) {
+  const saudacao = nome ? `Oi, ${nome}!` : 'Oi!';
+  return [
+    `${saudacao} Aqui é o José, do Agendamentos Online. Você testou a gente lá no comecinho — e, sendo sincero, na época tava cheio de problema: lento, não abria direito no Instagram, uns bugs chatos. Isso me incomodava e a gente corrigiu tudo isso desde então.`,
+    'Queria muito te perguntar, de verdade: o que te fez não continuar naquela época? Tua resposta me ajuda demais.',
+    'E se topar dar uma segunda chance, eu te libero mais 30 dias de teste e faço a configuração inicial junto com você. Posso te mostrar rapidinho o que mudou?',
+  ].join('\n\n');
+}
+
 function WhatsAppButton({ phone, nome }) {
   const num = waNumber(phone);
   if (!num) return null;
-  const text = encodeURIComponent(`Olá${nome ? `, ${nome}` : ''}!`);
+  const text = encodeURIComponent(buildWinbackMessage(nome));
   return (
     <a className="ae-wa" href={`https://wa.me/${num}?text=${text}`} target="_blank" rel="noopener noreferrer" title="Chamar no WhatsApp">
       <svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor" aria-hidden="true">
