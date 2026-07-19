@@ -54,6 +54,29 @@ function formatPhone(v) {
   return String(v);
 }
 
+// Numero para o wa.me: garante o DDI 55 (Brasil) quando vier so DDD+numero.
+function waNumber(v) {
+  const d = String(v || '').replace(/\D/g, '');
+  if (!d) return '';
+  if (d.startsWith('55') && d.length >= 12) return d;
+  if (d.length === 10 || d.length === 11) return `55${d}`;
+  return d;
+}
+
+function WhatsAppButton({ phone, nome }) {
+  const num = waNumber(phone);
+  if (!num) return null;
+  const text = encodeURIComponent(`Olá${nome ? `, ${nome}` : ''}!`);
+  return (
+    <a className="ae-wa" href={`https://wa.me/${num}?text=${text}`} target="_blank" rel="noopener noreferrer" title="Chamar no WhatsApp">
+      <svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor" aria-hidden="true">
+        <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51l-.57-.01c-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.71.306 1.263.489 1.694.625.712.227 1.36.195 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.989 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z" />
+      </svg>
+      WhatsApp
+    </a>
+  );
+}
+
 const SORTS = {
   nome: (a, b) => String(a.nome || '').localeCompare(String(b.nome || '')),
   vencimento: (a, b) => (new Date(a.plan_active_until || 0).getTime() || 0) - (new Date(b.plan_active_until || 0).getTime() || 0),
@@ -153,8 +176,11 @@ export default function AdminEstablishments() {
         .ae-table tbody tr:hover { background: var(--surface-soft); }
         .ae-num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
         .ae-name { font-weight: 600; color: var(--text); }
-        .ae-contact { display: flex; align-items: center; gap: 5px; color: var(--muted); font-size: 12px; margin-top: 3px; }
+        .ae-contact { display: flex; align-items: center; gap: 5px; color: var(--muted); font-size: 12px; margin-top: 3px; flex-wrap: wrap; }
         .ae-contact svg { flex: none; opacity: .75; }
+        .ae-wa { display: inline-flex; align-items: center; gap: 4px; margin-left: 4px; padding: 2px 8px; border-radius: 8px; font-size: 11.5px; font-weight: 600; color: #fff; background: #25D366; text-decoration: none; line-height: 1.5; }
+        .ae-wa:hover { background: #1ebe5b; }
+        .ae-wa svg { opacity: 1; }
         .ae-badge { display: inline-flex; align-items: center; padding: 3px 10px; border-radius: 9999px; font-size: 12px; font-weight: 600; white-space: nowrap; text-transform: capitalize; }
         .ae-muted { color: var(--muted); }
         .ae-empty { text-align: center; padding: 28px 16px; color: var(--muted); }
@@ -216,7 +242,7 @@ export default function AdminEstablishments() {
                       <div className="ae-name">{r.nome || `#${r.id}`}</div>
                       <div className="ae-contact"><span className="ae-muted">#{r.id}</span></div>
                       <div className="ae-contact"><Mail size={13} /> {r.email || <span className="ae-muted">sem e-mail</span>}</div>
-                      <div className="ae-contact"><Phone size={13} /> {phone || <span className="ae-muted">sem telefone</span>}</div>
+                      <div className="ae-contact"><Phone size={13} /> {phone || <span className="ae-muted">sem telefone</span>}<WhatsAppButton phone={r.telefone} nome={r.nome} /></div>
                     </td>
                     <td>
                       <div style={{ fontWeight: 600, textTransform: 'capitalize' }}>{r.plan || '—'}</div>
