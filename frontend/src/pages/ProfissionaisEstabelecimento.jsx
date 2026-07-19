@@ -8,6 +8,7 @@ import {
   IconUsers,
 } from '../components/Icons.jsx';
 import { Api, resolveAssetUrl } from '../utils/api';
+import { compressImageToDataUrl, MAX_ENTRADA_BYTES } from '../utils/imageCompress';
 
 const MAX_AVATAR_SIZE = 2 * 1024 * 1024;
 const DESCRIPTION_MAX_LENGTH = 200;
@@ -16,15 +17,6 @@ const STATUS_FILTERS = [
   { value: 'ativos', label: 'Ativos' },
   { value: 'inativos', label: 'Inativos' },
 ];
-
-function readFileAsDataUrl(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
-    reader.onerror = () => reject(reader.error || new Error('file_read_error'));
-    reader.readAsDataURL(file);
-  });
-}
 
 function getInitials(name) {
   const parts = String(name || '')
@@ -355,17 +347,24 @@ export default function ProfissionaisEstabelecimento() {
 
   async function handleAvatarSelection(file, onSuccess) {
     if (!file) return;
-    if (!file.type.startsWith('image/')) {
+    // Mesma regex do backend (lib/avatar.js): antes aceitava qualquer image/* aqui e o
+    // usuario so descobria que GIF/AVIF nao serve depois do erro generico do servidor.
+    if (!/^image\/(png|jpe?g|webp)$/i.test(file.type)) {
       showToast('error', 'Envie uma imagem PNG, JPG ou WEBP.');
       return;
     }
-    if (file.size > MAX_AVATAR_SIZE) {
-      showToast('error', 'A imagem deve ter no máximo 2MB.');
+    if (file.size > MAX_ENTRADA_BYTES) {
+      showToast('error', 'A imagem está grande demais para processar.');
       return;
     }
 
     try {
-      const dataUrl = await readFileAsDataUrl(file);
+      // Comprime antes de medir: foto de celular so cabe no limite depois de reduzida.
+      const { dataUrl, bytes } = await compressImageToDataUrl(file, { maxDimensao: 512 });
+      if (bytes > MAX_AVATAR_SIZE) {
+        showToast('error', 'A imagem deve ter no máximo 2MB.');
+        return;
+      }
       onSuccess(dataUrl);
     } catch {
       showToast('error', 'Não foi possível ler a imagem.');

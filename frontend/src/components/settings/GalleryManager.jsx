@@ -5,6 +5,7 @@
 // como alternativa acessível. A capa é definida pela ordem: a primeira foto é a capa.
 import React, { useEffect, useRef, useState } from 'react';
 import { Api, resolveAssetUrl } from '../../utils/api';
+import { compressImageToDataUrl, MAX_ENTRADA_BYTES } from '../../utils/imageCompress';
 import './settings.css';
 
 const MAX_BYTES = 3 * 1024 * 1024;
@@ -67,21 +68,31 @@ export default function GalleryManager({ establishmentId }) {
   }, [establishmentId]);
 
   // ---- seleção de arquivo (clique ou drop) ----
-  const acceptFile = (file) => {
+  const acceptFile = async (file) => {
     setMsg(null);
     if (!file) return;
     if (!/^image\/(png|jpe?g|webp)$/i.test(file.type)) {
       setMsg({ type: 'error', message: 'Formato não aceito. Envie PNG, JPG ou WEBP.' });
       return;
     }
-    if (file.size > MAX_BYTES) {
-      setMsg({ type: 'error', message: `A imagem tem ${formatSize(file.size)} — o limite é 3 MB.` });
+    if (file.size > MAX_ENTRADA_BYTES) {
+      setMsg({ type: 'error', message: `A imagem tem ${formatSize(file.size)} — está grande demais para processar.` });
       return;
     }
-    const reader = new FileReader();
-    reader.onload = () => setPending({ dataUrl: reader.result, name: file.name, size: file.size });
-    reader.onerror = () => setMsg({ type: 'error', message: 'Não foi possível ler a imagem.' });
-    reader.readAsDataURL(file);
+    setBusy(true);
+    try {
+      // Comprime antes de medir contra MAX_BYTES: foto de celular so passa depois de reduzida.
+      const { dataUrl, bytes } = await compressImageToDataUrl(file);
+      if (bytes > MAX_BYTES) {
+        setMsg({ type: 'error', message: `A imagem tem ${formatSize(bytes)} — o limite é 3 MB.` });
+        return;
+      }
+      setPending({ dataUrl, name: file.name, size: bytes });
+    } catch {
+      setMsg({ type: 'error', message: 'Não foi possível ler a imagem.' });
+    } finally {
+      setBusy(false);
+    }
   };
 
   const clearPending = () => {
