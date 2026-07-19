@@ -1,0 +1,115 @@
+/*
+ * InstallAppBanner — convite para instalar o app na tela de início.
+ *
+ * Fixo no rodapé, ACIMA da barra de navegação: usa --mobile-nav-h, a mesma
+ * variável que o .app-main usa para compensar a nav. Se um dia a altura da barra
+ * mudar, os dois acompanham juntos — foi exatamente a divergência entre esses
+ * dois números que escondeu conteúdo atrás da nav antes.
+ *
+ * Tom NEUTRO (surface), não âmbar: âmbar é a cor de pendência, reservada ao
+ * banner do WhatsApp, que sinaliza envio bloqueado. Isto é uma oferta — quem
+ * ignorar não perde nada hoje. Pintar oferta com cor de alerta é o caminho mais
+ * rápido para o dono aprender a ignorar as duas.
+ */
+.wrap {
+  position: fixed;
+  left: 12px;
+  right: 12px;
+  bottom: calc(var(--mobile-nav-h, 64px) + env(safe-area-inset-bottom, 0px) + 10px);
+  z-index: 70; /* abaixo da .mobile-nav (80): a navegação nunca é encoberta */
+  display: flex;
+  gap: 10px;
+  padding: 14px 14px 14px 16px;
+  border-radius: 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.18);
+  animation: install-rise .28s ease-out;
+}
+
+@keyframes install-rise {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wrap { animation: none; }
+}
+
+.body { flex: 1 1 auto; min-width: 0; }
+
+.title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.lead {
+  margin: 4px 0 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+/* Passo a passo do iPhone: ícone + texto na mesma linha, para a pessoa
+   reconhecer o alvo pelo desenho em vez de procurar pelo nome. */
+.steps {
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.steps li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  line-height: 1.35;
+  color: var(--text);
+}
+
+.steps li svg { flex: 0 0 auto; color: var(--primary-600); }
+
+.cta {
+  margin-top: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 44px; /* alvo de toque confortável, igual ao resto do app */
+  padding: 0 18px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--brand, #5049E5);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.cta:disabled { opacity: .7; cursor: default; }
+
+/* O X é discreto mas tem área de toque cheia: dispensar precisa ser fácil.
+   Convite que é difícil de fechar vira armadilha, e aí o dono não fecha — ele
+   para de olhar para aquele canto da tela. */
+.close {
+  flex: 0 0 auto;
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  margin: -4px -4px 0 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.close:hover { background: var(--hover); color: var(--text); }

@@ -4,6 +4,7 @@ import { getUser, USER_EVENT } from '../utils/auth'
 import Modal from '../components/Modal.jsx'
 import CockpitOverview from '../components/estab/CockpitOverview.jsx'
 import WhatsAppOptInBanner from '../components/estab/WhatsAppOptInBanner.jsx'
+import InstallAppBanner from '../components/estab/InstallAppBanner.jsx'
 import { useLocation, useSearchParams } from 'react-router-dom'
 
 
@@ -1331,6 +1332,11 @@ export default function DashboardEstabelecimento() {
           a713972): é acionável, resolve-se de uma vez, e sem ela o dono não descobre que os avisos
           dele estão bloqueados. */}
       <WhatsAppOptInBanner />
+
+      {/* Convite para instalar o app. NÃO ocupa o topo: é fixo no rodapé, acima
+          da barra de navegação. O topo continua reservado ao banner acima, que é
+          pendência bloqueante; isto é oferta, e oferta não empurra conteúdo. */}
+      <InstallAppBanner />
 
       <CockpitOverview
         establishmentId={establishmentId}
