@@ -14,6 +14,12 @@ export default defineConfig({
       // linkado no index.html. O plugin cuida só do service worker.
       manifest: false,
       registerType: 'autoUpdate',
+      // O registro é feito à mão em main.jsx. O registerSW.js que o plugin
+      // injetava só chamava register() e nunca recarregava a página — com
+      // skipWaiting ativo, o SW novo assumia o controle enquanto a tela seguia
+      // com o JS antigo. Além de mostrar conteúdo velho, isso quebra: o bundle
+      // antigo pede chunks com hash que o build novo já apagou do disco.
+      injectRegister: null,
       // SW só no build. Habilitar em dev deixa o hot reload servindo asset velho.
       devOptions: { enabled: false },
       workbox: {
