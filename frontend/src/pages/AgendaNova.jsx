@@ -15,10 +15,11 @@ export default function AgendaNova() {
 
   return (
     <div style={{ background: 'var(--bg-lav, #F6F5FB)', minHeight: '100%' }}>
-      <div
-        className="tw-mx-auto tw-w-full tw-max-w-6xl tw-p-4"
-        style={{ paddingBottom: 'calc(88px + env(safe-area-inset-bottom, 0px))' }}
-      >
+      {/* Sem paddingBottom próprio: o .app-main já compensa a barra inferior
+          via --mobile-nav-h. Esta tela compensava sozinha porque a variável
+          estava zerada no mobile; agora que ela vale a altura real, manter os
+          88px daqui somaria duas vezes e abriria um vão no fim da lista. */}
+      <div className="tw-mx-auto tw-w-full tw-max-w-6xl tw-p-4">
         <AgendaView
           appointments={appointments}
           selectedDate={selectedDate}

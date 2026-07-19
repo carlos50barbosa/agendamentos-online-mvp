@@ -478,14 +478,16 @@ body{
 .toast .toast-icon{ margin-right:4px; }
 .toast .toast-close{ border:0; background:transparent; font-size:18px; cursor:pointer; }
 @media (max-width: 780px){
+  /* O toast sobe acima da barra inferior. --toast-offset-h é o empurrão EXTRA
+     para telas que têm algo a mais no rodapé; separá-lo de --mobile-nav-h é o
+     que permite ajustar o toast sem mexer no padding de layout de todas as
+     telas (era um só, e mexer num quebrava o outro). */
   .toast{
-    bottom: calc(var(--mobile-nav-h, 64px) + 12px + env(safe-area-inset-bottom, 0px));
+    bottom: calc(var(--mobile-nav-h, 64px) + var(--toast-offset-h, 0px) + 12px + env(safe-area-inset-bottom, 0px));
   }
-  /* /estab tem um FAB fixo no canto inferior direito (CockpitOverview) e o :root
-     zera --mobile-nav-h no mobile — sem isto o toast nasceria embaixo do FAB.
-     A var é herdada pelo .toast (descendente do painel); o .app-main é ANCESTRAL
-     e continua com o valor do :root, então nenhum padding de layout muda. */
-  .dashboard-estab-pro{ --mobile-nav-h: 72px; }
+  /* /estab tem um FAB fixo no canto inferior direito (CockpitOverview): sem
+     este empurrão o toast nasceria embaixo dele. */
+  .dashboard-estab-pro{ --toast-offset-h: 60px; }
 }
 /* =======================
    Modal
@@ -4292,59 +4294,82 @@ button.danger:disabled,
   bottom: 0;
   z-index: 80;
   display: none;
-  padding: 4px 8px calc(var(--mobile-nav-padding) + env(safe-area-inset-bottom, 0px));
+  padding: 6px 8px calc(var(--mobile-nav-padding) + env(safe-area-inset-bottom, 0px));
   background: var(--surface);
   border-top: 1px solid var(--border);
   box-shadow: 0 -10px 24px rgba(15, 23, 42, 0.12);
   gap: 4px;
-  overflow-x: auto;
-  overflow-y: visible; /* permite tooltips sairem do contêiner */
-  -webkit-overflow-scrolling: touch;
+  /* Sem scroll horizontal: agora são no máximo 5 itens e todos cabem. Rolagem
+     com scrollbar escondida era exatamente o que tornava os itens extras
+     invisíveis — o que não cabe vai para o "Mais", não para fora da tela. */
+  overflow: visible;
 }
-.mobile-nav::-webkit-scrollbar{ display: none; height: 0; }
 .mobile-nav__item{
   flex: 1 1 0;
-  min-width: 56px;
-  max-width: 120px;
-  height: 40px;
-  padding: 2px 4px;
+  min-width: 0;
+  /* 48px passa a recomendação de 44px de alvo de toque com folga, e é o que
+     permite empilhar ícone + rótulo sem espremer. */
+  min-height: 48px;
+  padding: 4px 2px;
   border-radius: 10px;
   border: 0;
   background: transparent;
   color: var(--muted);
-  font-size: 11px;
-  line-height: 1.1;
+  font-size: 10px;
+  line-height: 1.15;
   display: inline-flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 0;
+  gap: 3px;
   text-decoration: none;
   cursor: pointer;
   transition: background .18s ease, color .18s ease;
   overflow: visible; /* não corta tooltip */
 }
-.mobile-nav__item svg{ width: 16px; height: 16px; }
-.mobile-nav__item span{ display: none; }
+.mobile-nav__item svg{ width: 20px; height: 20px; flex: 0 0 auto; }
+/* O rótulo é o ponto da mudança: ícone mudo só se decifra quando é universal, e
+   "Planos" ou "Sinal e PIX" não são. Trunca em vez de quebrar em duas linhas,
+   que desalinharia a altura dos itens vizinhos. */
+.mobile-nav__item span{
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Menu "Mais": lista vertical, onde o rótulo tem espaço de sobra. */
+.mobile-more{ display: flex; flex-direction: column; gap: 2px; }
+.mobile-more__item{
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 48px;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--text);
+  font-size: 15px;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+  width: 100%;
+}
+.mobile-more__item svg{ width: 20px; height: 20px; flex: 0 0 auto; color: var(--muted); }
+.mobile-more__item:hover{ background: var(--hover); }
+.mobile-more__item.is-active{ background: var(--brand-100); color: var(--primary-600); }
+.mobile-more__item.is-active svg{ color: var(--primary-600); }
+.mobile-more__item--action{ color: var(--danger-text); }
+.mobile-more__item--action svg{ color: var(--danger-text); }
 .mobile-nav__item:focus-visible{ outline: none; box-shadow: var(--ring-shadow); }
 .mobile-nav__item:hover{ background: var(--hover); color: var(--text); }
 .mobile-nav__item.is-active{ background: var(--brand-100); box-shadow: 0 0 0 1px var(--brand-200) inset; color: var(--primary-600); }
 .mobile-nav__item--action{ color: var(--danger-text); }
 .mobile-nav__item--action:hover{ background: var(--danger-bg); }
-.mobile-nav--labeled{ justify-content:center; }
-.mobile-nav--labeled .mobile-nav__item{
-  flex: 0 1 auto;
-  min-width: 88px;
-  max-width: 140px;
-  height: 46px;
-  padding: 6px 10px;
-  gap: 4px;
-}
-.mobile-nav--labeled .mobile-nav__item span{
-  display: block;
-  font-size: 11px;
-}
-.mobile-nav--labeled .mobile-nav__item svg{ width: 18px; height: 18px; }
+/* .mobile-nav--labeled foi removida: existia para mostrar rótulo só no menu de
+   visitante, e agora TODO item tem rótulo — a regra virou letra morta. */
 .services-table-plain td,.services-table-plain th{font-size:13px;vertical-align:middle;}
 .service-form{display:grid;gap:10px;}
 .service-form .input{width:100%;}
@@ -6255,7 +6280,17 @@ button.danger:disabled,
   .app-topbar__inner{
     overflow: visible;
   }
-  :root{ --mobile-nav-h: 0px; }
+  /* Altura REAL da barra inferior: 6px + 48px do item + 8px de padding + 1px de
+     borda. O `.app-main` usa isto como padding-bottom para o conteúdo não
+     terminar embaixo da barra.
+
+     Isto era `0px`, e o efeito colateral passou despercebido: o zero foi posto
+     para o toast do /estab não nascer embaixo do FAB, mas a MESMA variável é o
+     que compensa a nav no `.app-main` — então ~53px do rodapé de TODA tela
+     ficavam atrás da barra, deixando o último item de qualquer lista fora de
+     alcance. O toast agora tem variável própria (--toast-offset-h), então cada
+     uma faz um trabalho só. */
+  :root{ --mobile-nav-h: 63px; --toast-offset-h: 0px; }
   .app-shell, .app-main, .container{ min-width: 0; }
   .dashboard-narrow{ 
     min-width: 0; 

@@ -165,11 +165,15 @@ export default function WhatsAppBusiness() {
           </p>
         </div>
 
+        {/* min(320px, 100%) e não 320px puro: em 375px de tela a largura útil
+            dentro do card fica ~305px, abaixo do mínimo, e a coluna estourava.
+            O overflow-x: hidden global escondia o estouro em vez de rolar, então
+            o conteúdo cortado ficava inalcançável e sem sintoma visível. */}
         <div
           style={{
             display: 'grid',
             gap: 16,
-            gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(min(320px, 100%), 1fr))',
             alignItems: 'start',
           }}
         >
