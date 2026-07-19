@@ -98,7 +98,7 @@ router.get('/establishments/overview', checkAdmin, auditAdmin('admin.establishme
     const startOfMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01 00:00:00`;
 
     const [estabs] = await pool.query(
-      `SELECT id, nome, email, plan, plan_status, plan_cycle, plan_active_until
+      `SELECT id, nome, email, telefone, plan, plan_status, plan_cycle, plan_active_until
          FROM usuarios WHERE tipo='estabelecimento' ORDER BY nome ASC`,
     );
     const [profRows] = await pool.query(
@@ -136,6 +136,7 @@ router.get('/establishments/overview', checkAdmin, auditAdmin('admin.establishme
         id: e.id,
         nome: e.nome,
         email: e.email,
+        telefone: e.telefone || null,
         plan: e.plan || null,
         plan_status: e.plan_status || null,
         plan_cycle: e.plan_cycle || null,
