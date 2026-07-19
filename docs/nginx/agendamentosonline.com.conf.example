@@ -9,6 +9,17 @@ server {
     return 301 /api/;
   }
 
+  # Prefixo legado: links antigos (e-mail/WhatsApp) podem usar /uploads sem o /api.
+  # Sem esta regra caem no `location /` e recebem o index.html do SPA com status 200 —
+  # uma imagem quebrada que parece sucesso em qualquer log.
+  location ^~ /uploads/ {
+    alias /opt/apps/agendamentos-online-mvp/backend/uploads/;
+    expires 30d;
+    access_log off;
+    add_header X-Content-Type-Options "nosniff" always;
+    try_files $uri =404;
+  }
+
   # Uploads servidos direto do disco, sem passar pelo Node.
   # ^~ garante precedencia sobre location regex e sobre /api/.
   # O Express continua montado em /api/uploads (backend/src/index.js) como

@@ -267,6 +267,9 @@ app.use((req, res, next) => {
   }).catch(next);
 });
 
+// Em producao o nginx serve os dois prefixos direto do disco e estas rotas nunca sao
+// alcancadas (o proxy so' encaminha /api, e /api/uploads e' interceptado antes).
+// Ficam como fallback para dev/local e para o caso de o bloco do nginx sair do ar.
 app.use('/uploads', express.static(UPLOADS_DIR, { maxAge: '7d' }));
 app.use('/api/uploads', express.static(UPLOADS_DIR, { maxAge: '7d' }));
 
