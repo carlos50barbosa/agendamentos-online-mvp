@@ -384,7 +384,24 @@ const escapeHtml = (value) =>
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
 
-const renderConfirmPage = ({ title, message }) => `<!doctype html>
+// Selo de sucesso. SVG INLINE porque esta pagina e servida pelo backend, fora do
+// bundle do frontend: um <img> apontando para /icon.png dependeria do nginx e
+// falharia calado se o caminho mudasse. Inline sempre renderiza.
+//
+// aria-hidden: o <h2> logo abaixo ja diz "Presenca confirmada!". Anunciar o
+// icone tambem faria o leitor de tela repetir a mesma informacao duas vezes.
+const OK_ICON = `<svg class="ok" width="56" height="56" viewBox="0 0 56 56" aria-hidden="true" focusable="false">
+        <circle cx="28" cy="28" r="27" fill="#16A34A" opacity=".10"/>
+        <circle cx="28" cy="28" r="22" fill="#16A34A" opacity=".16"/>
+        <circle cx="28" cy="28" r="18" fill="#16A34A"/>
+        <path d="M20.5 28.5l5.2 5.2L35.5 24" fill="none" stroke="#fff" stroke-width="3.2"
+              stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>`;
+
+// `ok` so entra no caminho de sucesso: esta funcao tambem desenha as telas de
+// erro (token invalido, link expirado, agendamento cancelado), e um visto verde
+// em cima de "Agendamento cancelado" diria o contrario do texto.
+const renderConfirmPage = ({ title, message, ok = false }) => `<!doctype html>
 <html lang="pt-BR">
   <head>
     <meta charset="utf-8" />
@@ -395,10 +412,13 @@ const renderConfirmPage = ({ title, message }) => `<!doctype html>
       .card { max-width: 520px; padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px; }
       .muted { color: #64748b; font-size: 14px; }
       a { color: #2563eb; text-decoration: none; }
+      .ok { display: block; margin: 4px 0 12px; }
+      h2 { margin: 0 0 8px; }
     </style>
   </head>
   <body>
     <div class="card">
+      ${ok ? OK_ICON : ''}
       <h2>${title}</h2>
       <p>${message}</p>
       <p class="muted"><a href="${FRONTEND_BASE}">Ir para o site</a></p>
@@ -417,8 +437,8 @@ const renderConfirmPage = ({ title, message }) => `<!doctype html>
  * O `text/plain` global é uma defesa proposital (string devolvida por engano não vira HTML
  * executável) — por isso a exceção mora aqui, na única rota que serve HTML de verdade, e não lá.
  */
-const sendConfirmPage = (res, status, { title, message }) =>
-  res.status(status).type('html').send(renderConfirmPage({ title, message }));
+const sendConfirmPage = (res, status, { title, message, ok = false }) =>
+  res.status(status).type('html').send(renderConfirmPage({ title, message, ok }));
 
 async function notifyPublicConfirmedAppointment(appointmentId) {
   try {
@@ -1538,6 +1558,7 @@ router.get('/confirm', async (req, res) => {
     ].filter(Boolean).join(' ');
 
     return sendConfirmPage(res, 200, {
+      ok: true,
       title: 'Presença confirmada!',
       message: detalhes
         ? `Recebemos sua confirmação: ${detalhes}. Até lá!`
