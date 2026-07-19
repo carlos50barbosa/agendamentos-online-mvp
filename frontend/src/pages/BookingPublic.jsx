@@ -244,7 +244,7 @@ export default function BookingPublic() {
     <div style={{ ...(themeStyle || {}), background: 'var(--bg-lav, #F6F5FB)', minHeight: '100%' }}>
       {/* Vitrine de planos + "meu plano". Some sozinha quando o estabelecimento nao vende
           plano — a pagina de quem nao usa o recurso nao muda em nada. */}
-      <LoyaltyPlans establishmentId={establishmentId} idOrSlug={resolveKey} />
+      <LoyaltyPlans establishmentId={establishmentId} idOrSlug={resolveKey} contexto={loyalty} />
       <BookingWizard
         establishmentName={state.establishment?.nome || 'Agendamento'}
         establishment={state.establishment}
