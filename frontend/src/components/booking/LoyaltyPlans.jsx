@@ -12,10 +12,13 @@ import { getUser } from '../../utils/auth';
 
 const money = (cents) => ((Number(cents) || 0) / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
-export default function LoyaltyPlans({ establishmentId, idOrSlug }) {
+// `contexto` vem por prop, do BookingPublic. Este componente já buscou o mesmo
+// /cliente/loyalty/context que o pai busca para precificar o wizard — dois GET idênticos por
+// mount, porque nenhum dos dois sabia do outro. O pai precisa do contexto de qualquer forma
+// (sem ele o wizard mostra preço cheio para quem paga descontado), então quem sobra é este.
+export default function LoyaltyPlans({ establishmentId, idOrSlug, contexto }) {
   const [planos, setPlanos] = useState([]);
   const [assinatura, setAssinatura] = useState(null);
-  const [contexto, setContexto] = useState(null);
   const [erro, setErro] = useState('');
   const [enviando, setEnviando] = useState(0);
 
@@ -34,12 +37,8 @@ export default function LoyaltyPlans({ establishmentId, idOrSlug }) {
     }
     if (!isCliente || !establishmentId) return;
     try {
-      const [sub, ctx] = await Promise.all([
-        Api.clientLoyaltySubscription({ estabelecimento_id: establishmentId }),
-        Api.clientLoyaltyContext({ estabelecimento_id: establishmentId }).catch(() => null),
-      ]);
+      const sub = await Api.clientLoyaltySubscription({ estabelecimento_id: establishmentId });
       setAssinatura(sub?.subscription || null);
-      setContexto(ctx || null);
     } catch {
       setAssinatura(null);
     }
