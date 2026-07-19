@@ -405,6 +405,20 @@ const renderConfirmPage = ({ title, message }) => `<!doctype html>
   </body>
 </html>`;
 
+/**
+ * Envia a página de confirmação DECLARANDO o Content-Type.
+ *
+ * Sem o `res.type('html')` explícito o navegador mostra o código-fonte cru em vez da página: o
+ * override global de `res.send` em index.js crava `text/plain` para toda string enviada sem tipo
+ * definido, e ele roda antes de o Express inferir `text/html`. Com `X-Content-Type-Options:
+ * nosniff` ligado, o navegador não tem permissão para corrigir o palpite errado.
+ *
+ * O `text/plain` global é uma defesa proposital (string devolvida por engano não vira HTML
+ * executável) — por isso a exceção mora aqui, na única rota que serve HTML de verdade, e não lá.
+ */
+const sendConfirmPage = (res, status, { title, message }) =>
+  res.status(status).type('html').send(renderConfirmPage({ title, message }));
+
 async function notifyPublicConfirmedAppointment(appointmentId) {
   try {
     const [[ag]] = await pool.query(
@@ -1424,10 +1438,10 @@ router.get('/confirm', async (req, res) => {
   try {
     const token = String(req.query?.token || '').trim();
     if (!token) {
-      return res.status(400).send(renderConfirmPage({
+      return sendConfirmPage(res, 400, {
         title: 'Token inválido',
         message: 'Link de confirmação inválido ou ausente.',
-      }));
+      });
     }
     const tokenHash = hashToken(token);
     const [[ag]] = await pool.query(
@@ -1446,16 +1460,16 @@ router.get('/confirm', async (req, res) => {
       [tokenHash]
     );
     if (!ag) {
-      return res.status(404).send(renderConfirmPage({
+      return sendConfirmPage(res, 404, {
         title: 'Agendamento não encontrado',
         message: 'Este link não é válido ou já expirou.',
-      }));
+      });
     }
     if (ag.status === 'cancelado') {
-      return res.status(410).send(renderConfirmPage({
+      return sendConfirmPage(res, 410, {
         title: 'Agendamento cancelado',
         message: 'Este agendamento foi cancelado e não pode ser confirmado.',
-      }));
+      });
     }
     if (ag.public_confirm_expires_at && new Date(ag.public_confirm_expires_at).getTime() < Date.now()) {
       // Só o fluxo legado (status 'pendente') cancela por falta de confirmação. Um agendamento
@@ -1463,15 +1477,15 @@ router.get('/confirm', async (req, res) => {
       // compromisso válido porque o cliente clicou tarde demais.
       if (ag.status === 'pendente') {
         await cancelPublicPendingAppointmentTx(ag.id, { db: pool });
-        return res.status(410).send(renderConfirmPage({
+        return sendConfirmPage(res, 410, {
           title: 'Confirmação expirada',
           message: 'Este agendamento foi cancelado por falta de confirmação.',
-        }));
+        });
       }
-      return res.status(410).send(renderConfirmPage({
+      return sendConfirmPage(res, 410, {
         title: 'Link expirado',
         message: 'Este link de confirmação não é mais válido.',
-      }));
+      });
     }
 
     // Fluxo legado: agendamento criado como 'pendente' vira 'confirmado' no clique.
@@ -1505,18 +1519,18 @@ router.get('/confirm', async (req, res) => {
       ag.estabelecimento_nome ? `no ${escapeHtml(ag.estabelecimento_nome)}` : null,
     ].filter(Boolean).join(' ');
 
-    return res.status(200).send(renderConfirmPage({
+    return sendConfirmPage(res, 200, {
       title: 'Presença confirmada!',
       message: detalhes
         ? `Recebemos sua confirmação: ${detalhes}. Até lá!`
         : 'Recebemos sua confirmação. Até lá!',
-    }));
+    });
   } catch (e) {
     console.error('[public/agendamentos][confirm]', e?.message || e);
-    return res.status(500).send(renderConfirmPage({
+    return sendConfirmPage(res, 500, {
       title: 'Erro na confirmação',
       message: 'Não foi possível confirmar agora. Tente novamente.',
-    }));
+    });
   }
 });
 
