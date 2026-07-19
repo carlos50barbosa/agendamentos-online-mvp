@@ -10,6 +10,7 @@
 // aqui é, na prática, público para sempre.
 import { Router } from 'express';
 import { whatsappAvailable } from '../lib/whatsapp_availability.js';
+import { pushEnabled, pushPublicKey } from '../lib/web_push.js';
 
 const router = Router();
 
@@ -26,6 +27,14 @@ router.get('/config', (_req, res) => {
     whatsapp: {
       available: whatsappAvailable(),
       number: waNumber || null,
+    },
+    // A chave publica VAPID e publica por definicao — ela viaja em toda
+    // requisicao de inscricao e o navegador a expoe pelo DevTools. Vem por aqui
+    // em vez de VITE_* para nao exigir rebuild do bundle quando as chaves forem
+    // rotacionadas ou configuradas pela primeira vez na VPS.
+    push: {
+      available: pushEnabled(),
+      publicKey: pushPublicKey(),
     },
   });
 });

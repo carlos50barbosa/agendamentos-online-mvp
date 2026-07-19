@@ -46,6 +46,19 @@ server {
     # enviar esse header e a assinatura do webhook depende do valor original.
   }
 
+  # O service worker e o script que o registra nunca podem ser cacheados.
+  # Se um sw.js velho ficar preso no cache do navegador, o usuario para de
+  # receber qualquer deploy novo — e nao ha como forcar do lado do servidor.
+  location = /sw.js {
+    add_header Cache-Control "no-cache, no-store, must-revalidate";
+    expires off;
+  }
+
+  location = /registerSW.js {
+    add_header Cache-Control "no-cache, no-store, must-revalidate";
+    expires off;
+  }
+
   location / {
     try_files $uri $uri/ /index.html;
   }

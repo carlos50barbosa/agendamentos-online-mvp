@@ -13,6 +13,7 @@ import agendamentosRouter from './routes/agendamentos.js';
 import slotsRouter from './routes/slots.js';
 import estabelecimentosRoutes from './routes/estabelecimentos.js';
 import notificationsRouter from './routes/notifications.js'; // opcional
+import pushRouter from './routes/push.js';
 import notifyRouter from './routes/notify.js'; // rota de teste de notificações
 import adminRouter from './routes/admin.js';
 import relatoriosRouter from './routes/relatorios.js';
@@ -301,6 +302,7 @@ app.use('/servicos', servicosRouter);
 app.use('/agendamentos', agendamentosRouter);
 app.use('/slots', slotsRouter);
 app.use('/notifications', notificationsRouter);
+app.use('/push', pushRouter);
 app.use('/establishments', estabelecimentosRoutes);
 app.use('/estabelecimentos', estabelecimentosRoutes);
 app.use('/estabelecimento/onboarding', onboardingRouter);
@@ -335,6 +337,7 @@ app.use('/api/servicos', servicosRouter);
 app.use('/api/agendamentos', agendamentosRouter);
 app.use('/api/slots', slotsRouter);
 app.use('/api/notifications', notificationsRouter);
+app.use('/api/push', pushRouter);
 app.use('/api/establishments', estabelecimentosRoutes);
 app.use('/api/estabelecimentos', estabelecimentosRoutes);
 app.use('/api/estabelecimento/onboarding', onboardingRouter);

@@ -12,6 +12,7 @@ import React, { useEffect, useState } from 'react';
 import { Api } from '../../utils/api';
 import { getUser, saveUser } from '../../utils/auth';
 import { buildConsentText, CONSENT_AUDIENCE } from '../../utils/whatsappConsent.js';
+import PushToggle from './PushToggle.jsx';
 import './settings.css';
 
 const CONSENT_TEXT = buildConsentText({ audience: CONSENT_AUDIENCE.ESTABLISHMENT });
@@ -123,6 +124,11 @@ export default function NotificationsSection() {
           </span>
         </label>
       </div>
+
+      {/* Push é permissão do navegador, não preferência de conta: ativa na hora,
+          com botão próprio, e não depende do Salvar abaixo. */}
+      <PushToggle />
+
       {feedback && <div className={`notice notice--${feedback.type}`} role="alert">{feedback.message}</div>}
       <div className="set-actions">
         <button type="submit" className="btn btn--primary" disabled={busy}>{busy ? 'Salvando…' : 'Salvar'}</button>

@@ -13,7 +13,9 @@
 
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <link rel="apple-touch-icon" href="/icon.svg" />
+    <!-- PNG, não SVG: o Safari ignora apple-touch-icon em SVG e usa um
+         screenshot da página como ícone da home screen. Gerado por npm run icons. -->
+    <link rel="apple-touch-icon" sizes="180x180" href="/icon-180.png" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <meta name="theme-color" content="#5049E5" />
     <meta name="description" content="Agende horários e confirme com sinal via PIX — rápido e sem complicação." />

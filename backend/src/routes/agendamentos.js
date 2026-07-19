@@ -5,6 +5,7 @@ import { assertDentroExpediente, formatExpedienteMessage, getExpediente, getLoca
 import { getPlanContext, isDelinquentStatus, formatPlanLimitExceeded, planAllowsDeposit } from '../lib/plans.js';
 import { auth as authRequired, isCliente, isEstabelecimento } from '../middleware/auth.js';
 import { notifyEmail } from '../lib/notifications.js';
+import { sendPushToUser } from '../lib/web_push.js';
 import { sendAppointmentWhatsApp, WA_AUDIENCE_ESTABLISHMENT } from '../lib/whatsapp_outbox.js';
 // Sem grantWhatsAppConsent aqui: consentimento não nasce de um clique num agendamento — só do
 // "AUTORIZO" enviado do próprio número. Ver o bloco "5.1) NÃO gravamos consentimento" abaixo.
@@ -1379,6 +1380,26 @@ router.post('/', authRequired, isCliente, ensureSubscriptionOperationalAccess({
     });
 
     // (c) Lembretes de 8h: agora gerenciados por um worker em background que reprocessa mesmo apos restart
+
+    // (d) Web Push para o dono (PWA instalado)
+    // So o estabelecimento: e ele que fica de olho na agenda o dia inteiro. O
+    // cliente ja recebe e-mail e WhatsApp, e praticamente nao instala o app.
+    //
+    // Nao ha checagem de preferencia aqui de proposito. As flags
+    // notify_email_estab / notify_whatsapp_estab sao por canal, e o opt-in
+    // deste canal e a propria permissao que o dono deu no navegador — se ele
+    // nao quiser mais, revoga no aparelho e a assinatura morre sozinha (410).
+    fireAndForget(async () => {
+      if (blockEstabNotifications) return;
+      await sendPushToUser(estabelecimento_id, {
+        title: 'Novo agendamento',
+        body: `${cli?.nome || 'Cliente'} — ${serviceLabel}${profLabel} em ${inicioBR}`,
+        url: '/estab',
+        // Um tag por agendamento: se este mesmo evento for reenviado, o SO
+        // substitui a notificacao em vez de empilhar duas iguais.
+        tag: `agendamento-${novo.id}`,
+      });
+    });
 
     // 7) resposta (NUNCA depende das notificacoes)
     return res.status(201).json({

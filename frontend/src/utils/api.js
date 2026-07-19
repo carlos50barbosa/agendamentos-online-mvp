@@ -295,6 +295,14 @@ export const Api = {
   whatsappOptin: () => req('/auth/me/whatsapp-optin', { method: 'POST' }),
   whatsappOptout: () => req('/auth/me/whatsapp-optin', { method: 'DELETE' }),
 
+  // Web Push (PWA). A assinatura vem do PushManager do navegador; o backend só
+  // consegue empurrar notificação para aparelhos que passaram por aqui.
+  pushSubscribe: (subscription) =>
+    req('/push/subscribe', { method: 'POST', body: JSON.stringify({ subscription }) }),
+  pushUnsubscribe: (endpoint) =>
+    req('/push/subscribe', { method: 'DELETE', body: JSON.stringify({ endpoint }) }),
+  pushTest: () => req('/push/test', { method: 'POST' }),
+
   confirmEmailChange: (payload) => req('/auth/me/email-confirm', { method: 'POST', body: JSON.stringify(payload) }),
 
   requestPasswordReset: (email) => req('/auth/forgot', { method: 'POST', body: JSON.stringify({ email }) }),
