@@ -6,6 +6,7 @@ import { assertDentroExpediente, formatExpedienteMessage, getExpediente, getLoca
 import { getPlanContext, isDelinquentStatus, formatPlanLimitExceeded, planAllowsDeposit } from '../lib/plans.js';
 import bcrypt from 'bcryptjs';
 import { notifyEmail } from '../lib/notifications.js';
+import { sendPushToUser } from '../lib/web_push.js';
 import { sendAppointmentWhatsApp, WA_AUDIENCE_ESTABLISHMENT } from '../lib/whatsapp_outbox.js';
 import { buildConfirmacaoAgendamentoV2Components, isConfirmacaoAgendamentoV2 } from '../lib/whatsapp_templates.js';
 import { createMercadoPagoPixPayment } from '../lib/billing.js';
@@ -506,6 +507,23 @@ async function notifyPublicConfirmedAppointment(appointmentId) {
           'Novo agendamento recebido',
           `<p>Você recebeu um novo agendamento de <b>${serviceLabel}</b>${profLabel} em <b>${inicioBR}</b> para o cliente <b>${ag.cliente_nome || ''}</b>.</p>`
         );
+      }
+    } catch {}
+
+    // Web Push ao ESTABELECIMENTO. Este e o fluxo que mais importa para o push:
+    // e o link publico que traz a maior parte das reservas, e o dono costuma
+    // estar longe do computador quando uma entra.
+    //
+    // Sem checagem de notify_*_estab: aquelas flags sao por canal, e o opt-in
+    // deste e a permissao que o dono deu no proprio navegador.
+    try {
+      if (!blockEstabNotifications) {
+        await sendPushToUser(ag.estabelecimento_id, {
+          title: 'Novo agendamento',
+          body: `${ag.cliente_nome || 'Cliente'} — ${serviceLabel}${profLabel} em ${inicioBR}`,
+          url: '/estab',
+          tag: `agendamento-${ag.id}`,
+        });
       }
     } catch {}
 

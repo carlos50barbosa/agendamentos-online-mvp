@@ -2352,6 +2352,20 @@ router.put('/:id/cancel', authRequired, isCliente, async (req, res) => {
         }
       }
 
+      // Web Push: um horario vagou e o dono pode reoferecer. So neste caminho —
+      // o cancelamento FEITO pelo estabelecimento nao gera push, porque avisar
+      // alguem do que ele mesmo acabou de fazer e ruido.
+      try {
+        await sendPushToUser(a?.estabelecimento_id, {
+          title: 'Agendamento cancelado',
+          body: `${clientName} cancelou ${serviceName}${profLabel} de ${whenLabel}`,
+          url: '/estab',
+          tag: `agendamento-${id}`,
+        });
+      } catch (err) {
+        console.warn('[cancel/estab][push]', err?.message || err);
+      }
+
       if (canWhatsappEst && telEst && !blockWhatsappImmediate) {
         const paramMode = String(
           process.env.WA_TEMPLATE_PARAM_MODE_ESTAB_CANCEL ||

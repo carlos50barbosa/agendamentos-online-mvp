@@ -1,6 +1,7 @@
 // backend/src/lib/appointment_confirmation.js
 import { pool } from './db.js';
 import { notifyEmail } from './notifications.js';
+import { sendPushToUser } from './web_push.js';
 import { sendAppointmentWhatsApp, WA_AUDIENCE_ESTABLISHMENT } from './whatsapp_outbox.js';
 import { buildConfirmacaoAgendamentoV2Components, isConfirmacaoAgendamentoV2 } from './whatsapp_templates.js';
 import { estabNotificationsDisabled } from './estab_notifications.js';
@@ -107,6 +108,19 @@ await notifyEmail( ag.estabelecimento_email,
         );
 }
     } catch {}
+// Web Push ao dono quando o sinal e confirmado. Diferente da criacao: aqui o
+// horario deixou de ser uma promessa e virou dinheiro na conta, e e quando o
+// dono de fato precisa contar com aquele horario na agenda.
+try {
+  if (!blockEstabNotifications) {
+    await sendPushToUser(ag.estabelecimento_id, {
+      title: 'Sinal confirmado',
+      body: `${ag.cliente_nome || 'Cliente'} — ${serviceLabel}${profLabel} em ${inicioBR}`,
+      url: '/estab',
+      tag: `agendamento-${ag.id}`,
+    });
+  }
+} catch {}
 try {
 if (!blockWhatsappImmediate && !blockWhatsappConfirmation) {
 const paramMode = String(process.env.WA_TEMPLATE_PARAM_MODE || 'single').toLowerCase();
