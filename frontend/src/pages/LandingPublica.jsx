@@ -16,6 +16,7 @@ import {
 import { Api, resolveAssetUrl } from '../utils/api.js';
 import { getUser } from '../utils/auth.js';
 import LogoAO from '../components/LogoAO.jsx';
+import { getLegalEntityLine } from '../utils/legal.js';
 import styles from './LandingPublica.module.css';
 
 const CATEGORIES = [
@@ -254,6 +255,7 @@ export default function LandingPublica() {
           <Link to="/ajuda">Ajuda</Link>
         </div>
         <p className={styles.footerCopy}>© {year} Agendamentos Online</p>
+        <p className={styles.footerLegal}>{getLegalEntityLine()}</p>
       </footer>
     </div>
   );

@@ -20,6 +20,20 @@
     <meta name="theme-color" content="#5049E5" />
     <meta name="description" content="Agende horários e confirme com sinal via PIX — rápido e sem complicação." />
     <title>Agendamentos Online</title>
+    <!-- Razão social em HTML estático: a verificação de empresa da Meta lê o HTML cru
+         e recusa quando não acha o nome registrado no CNPJ. O mesmo texto é renderizado
+         para gente no rodapé (src/utils/legal.js) — se mudar lá, mude aqui também. -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "Organization",
+        "name": "Agendamentos Online",
+        "legalName": "68.068.260 JOSE CARLOS BARBOSA",
+        "taxID": "68.068.260/0001-32",
+        "url": "https://agenda0.com.br",
+        "email": "contato@agenda0.com.br"
+      }
+    </script>
   </head>
   <body>
     <div id="root">
@@ -29,6 +43,7 @@
           <p style="margin:0 0 12px;">Não foi possível carregar a aplicação.</p>
           <p style="margin:0 0 12px;">Se você estiver no Instagram, toque em "..." e escolha "Abrir no navegador".</p>
           <p style="margin:0;">Ou tente atualizar a página.</p>
+          <p style="margin:12px 0 0;font-size:12px;color:#64748b;">68.068.260 JOSE CARLOS BARBOSA — CNPJ 68.068.260/0001-32</p>
         </div>
       </div>
     </div>

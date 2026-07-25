@@ -1,6 +1,6 @@
 // src/pages/PoliticaPrivacidade.jsx
 import React, { useMemo } from 'react';
-import { LEGAL_METADATA } from '../utils/legal.js';
+import { LEGAL_METADATA, getLegalEntityLine } from '../utils/legal.js';
 
 const sections = [
   {
@@ -166,6 +166,7 @@ export default function PoliticaPrivacidade() {
           Para exercer direitos ou esclarecer dúvidas, envie e-mail para{' '}
           <a href="mailto:contato@agenda0.com.br">contato@agenda0.com.br</a>.
         </p>
+        <p>Controladora dos dados: {getLegalEntityLine()}.</p>
       </section>
     </div>
   );

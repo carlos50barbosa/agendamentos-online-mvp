@@ -1,6 +1,6 @@
 // src/pages/Termos.jsx
 import React, { useMemo } from 'react';
-import { LEGAL_METADATA } from '../utils/legal.js';
+import { LEGAL_METADATA, getLegalEntityLine } from '../utils/legal.js';
 
 const sections = [
   {
@@ -186,6 +186,7 @@ export default function Termos() {
           Em caso de dúvidas sobre estes Termos, escreva para{' '}
           <a href="mailto:contato@agenda0.com.br">contato@agenda0.com.br</a>.
         </p>
+        <p>Plataforma operada por {getLegalEntityLine()}.</p>
       </section>
     </div>
   );

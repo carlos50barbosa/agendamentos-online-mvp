@@ -403,6 +403,11 @@
 .footerCopy {
   margin: 10px 0 0;
 }
+/* razão social: exigida pela verificação de empresa da Meta, discreta mas legível */
+.footerLegal {
+  margin: 4px 0 0;
+  font-size: 12px;
+}
 
 /* wider screens: a touch more breathing room, keep the app column feel */
 @media (min-width: 640px) {
