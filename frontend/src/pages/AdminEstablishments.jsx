@@ -1,7 +1,7 @@
 // src/pages/AdminEstablishments.jsx
 // Panorama super-admin: todos os estabelecimentos com plano/status/vencimento + contagens.
 import React, { useEffect, useMemo, useState } from 'react';
-import { Mail, Phone, Search, RefreshCw, Users, CheckCircle2, AlertTriangle, CalendarDays } from 'lucide-react';
+import { Mail, Phone, Search, RefreshCw, Users, CheckCircle2, AlertTriangle, CalendarDays, ArrowUp, ArrowDown } from 'lucide-react';
 import { API_BASE_URL as API_BASE } from '../utils/api';
 
 // plan_status -> tom semantico (usa as variaveis do tema, logo acompanha claro/escuro).
@@ -87,11 +87,25 @@ function WhatsAppButton({ phone, nome }) {
   );
 }
 
+// Comparadores TODOS crescentes — inclusive agendamentos, que antes ordenava ao contrário dos
+// outros. Com a direção virando um botão, "decrescente" precisa querer dizer a mesma coisa em
+// qualquer coluna; comparador que já vem invertido faria o botão mentir na metade das opções.
 const SORTS = {
+  id: (a, b) => (Number(a.id) || 0) - (Number(b.id) || 0),
   nome: (a, b) => String(a.nome || '').localeCompare(String(b.nome || '')),
   vencimento: (a, b) => (new Date(a.plan_active_until || 0).getTime() || 0) - (new Date(b.plan_active_until || 0).getTime() || 0),
-  agendamentos: (a, b) => (b.appointments?.total || 0) - (a.appointments?.total || 0),
+  agendamentos: (a, b) => (a.appointments?.total || 0) - (b.appointments?.total || 0),
   status: (a, b) => String(a.plan_status || '').localeCompare(String(b.plan_status || '')),
+};
+
+// A direção que faz sentido ao ESCOLHER cada campo — quem ordena por agendamentos quer ver os
+// maiores, quem ordena por nome quer o alfabeto. Só o padrão: o botão continua mandando depois.
+const DEFAULT_DIR = {
+  id: 'asc',
+  nome: 'asc',
+  vencimento: 'asc',
+  agendamentos: 'desc',
+  status: 'asc',
 };
 
 function Kpi({ icon: Icon, label, value, tone }) {
@@ -118,6 +132,7 @@ export default function AdminEstablishments() {
   const [error, setError] = useState('');
   const [q, setQ] = useState('');
   const [sort, setSort] = useState('nome');
+  const [dir, setDir] = useState(DEFAULT_DIR.nome);
 
   useEffect(() => { try { localStorage.setItem('admin_token', token || ''); } catch {} }, [token]);
 
@@ -146,8 +161,10 @@ export default function AdminEstablishments() {
         String(r.telefone || '').replace(/\D/g, '').includes(term.replace(/\D/g, '')) ||
         String(r.id || '').includes(term));
     }
-    return [...list].sort(SORTS[sort] || SORTS.nome);
-  }, [rows, q, sort]);
+    const cmp = SORTS[sort] || SORTS.nome;
+    const mult = dir === 'desc' ? -1 : 1;
+    return [...list].sort((a, b) => mult * cmp(a, b));
+  }, [rows, q, sort, dir]);
 
   const totals = useMemo(() => {
     const t = { estab: rows.length, ativos: 0, atencao: 0, agend: 0 };
@@ -209,13 +226,35 @@ export default function AdminEstablishments() {
             <input className="input" placeholder="Buscar nome, e-mail, telefone ou ID" value={q} onChange={(e) => setQ(e.target.value)} style={{ minWidth: 240 }} />
           </span>
           <label className="label" style={{ margin: 0, display: 'inline-flex', alignItems: 'center', gap: 6 }}>Ordenar
-            <select className="input" value={sort} onChange={(e) => setSort(e.target.value)}>
+            <select
+              className="input"
+              value={sort}
+              onChange={(e) => {
+                const next = e.target.value;
+                setSort(next);
+                // Troca a direção junto com o campo: escolher "Agendamentos" e ver os zerados no
+                // topo obrigaria um segundo clique toda vez.
+                setDir(DEFAULT_DIR[next] || 'asc');
+              }}
+            >
+              <option value="id">ID</option>
               <option value="nome">Nome</option>
               <option value="vencimento">Vencimento</option>
               <option value="agendamentos">Agendamentos</option>
               <option value="status">Status</option>
             </select>
           </label>
+          <button
+            type="button"
+            className="btn"
+            onClick={() => setDir((d) => (d === 'asc' ? 'desc' : 'asc'))}
+            title={dir === 'asc' ? 'Ordem crescente — clique para inverter' : 'Ordem decrescente — clique para inverter'}
+            aria-label={`Ordem ${dir === 'asc' ? 'crescente' : 'decrescente'}. Clique para inverter.`}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+          >
+            {dir === 'asc' ? <ArrowUp size={16} /> : <ArrowDown size={16} />}
+            {dir === 'asc' ? 'Crescente' : 'Decrescente'}
+          </button>
         </div>
         {error && <div className="notice notice--error" role="alert" style={{ marginTop: 12 }}>{error}</div>}
       </div>
