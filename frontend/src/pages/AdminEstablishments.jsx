@@ -99,9 +99,10 @@ const SORTS = {
 };
 
 // A direção que faz sentido ao ESCOLHER cada campo — quem ordena por agendamentos quer ver os
-// maiores, quem ordena por nome quer o alfabeto. Só o padrão: o botão continua mandando depois.
+// maiores, quem ordena por nome quer o alfabeto, quem ordena por ID quer as contas mais novas
+// primeiro. Só o padrão: o botão continua mandando depois.
 const DEFAULT_DIR = {
-  id: 'asc',
+  id: 'desc',
   nome: 'asc',
   vencimento: 'asc',
   agendamentos: 'desc',
@@ -131,8 +132,9 @@ export default function AdminEstablishments() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [q, setQ] = useState('');
-  const [sort, setSort] = useState('nome');
-  const [dir, setDir] = useState(DEFAULT_DIR.nome);
+  // Abre por ID decrescente: quem entra aqui quase sempre quer ver quem se cadastrou por último.
+  const [sort, setSort] = useState('id');
+  const [dir, setDir] = useState(DEFAULT_DIR.id);
 
   useEffect(() => { try { localStorage.setItem('admin_token', token || ''); } catch {} }, [token]);
 
