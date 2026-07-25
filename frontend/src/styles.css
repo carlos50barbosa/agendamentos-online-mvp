@@ -499,9 +499,17 @@ body{
 .modal{background:var(--surface);border:1px solid var(--border);border-radius:12px;width:min(560px,95vw);max-height:92vh;box-shadow:0 10px 30px rgba(0,0,0,.12);display:flex;flex-direction:column;overflow:hidden;}
 .modal__header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 16px 12px;border-bottom:1px solid var(--border);}
 .modal__header--compact{padding:6px 8px;border-bottom:none;}
-.modal__header--compact .modal__close{width:22px;height:22px;font-size:16px;}
+/* O cabeçalho compacto é o do visualizador de imagem/comprovante: ali o X é deliberadamente
+   miúdo e sobreposto ao conteúdo, então ele fica de fora do alvo de 44px acima. */
+.modal__header--compact .modal__close{width:22px;height:22px;min-width:22px;min-height:22px;font-size:16px;}
 .modal__title{margin:0;font-size:18px;font-weight:600;color:var(--text);}
 .modal__close{background:transparent;border:0;width:32px;height:32px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:22px;color:var(--muted);cursor:pointer;transition:background .18s ease,color .18s ease;}
+/* Alvo de toque de 44px (o mínimo recomendado) só onde o ponteiro é o dedo — no mouse, 32px já
+   é confortável e um X gigante desequilibraria o cabeçalho. Vinha do dashboard, que era a única
+   tela a corrigir isso; virou regra de todos os modais. */
+@media (pointer: coarse){
+  .modal__close{min-width:44px;min-height:44px;}
+}
 .modal__close:hover,.modal__close:focus-visible{background:var(--surface-soft);color:var(--text);outline:none;}
 .modal__body{padding:16px;overflow-x:hidden;}
 .modal__body--scroll{max-height:420px;overflow-y:auto;padding-right:18px;}
@@ -5944,10 +5952,8 @@ button.danger:disabled,
   min-width: 0;
   overflow-wrap: anywhere;
 }
-.dashboard-pro .modal__close{
-  min-width: var(--agenda-tap);
-  min-height: var(--agenda-tap);
-}
+/* Movida para .modal__close (perto das outras regras do modal) quando o diálogo virou portal no
+   <body>: como descendente do dashboard ele deixou de ser, esta regra parou de casar. */
 .dashboard-pro .pro-agenda__event-ctl{
   margin-left:auto;
   display:inline-flex;

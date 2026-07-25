@@ -1,6 +1,21 @@
 // src/components/Modal.jsx
-
+//
+// O diálogo é renderizado por PORTAL no <body>, e não no lugar onde foi escrito na árvore.
+//
+// Motivo concreto: o "Sair da conta" mora dentro da sidebar, que tem `transform: translateX(0)`.
+// Um transform diferente de `none` transforma o elemento em bloco contentor dos descendentes
+// `position: fixed` — então o `inset: 0` do backdrop passava a valer contra a SIDEBAR (260px de
+// largura, começando abaixo da topbar) em vez da janela, e o `overflow-y: auto` dela ainda
+// recortava o resto. O modal aparecia espremido dentro do menu.
+//
+// Não é um caso isolado: qualquer ancestral com transform, filter, backdrop-filter, contain ou
+// will-change repete o problema. Por isso a correção mora aqui, e não numa regra de CSS para a
+// sidebar — assim vale para todo modal do app, inclusive os que ainda não existem.
+//
+// Portal é seguro neste projeto porque o tema vive em `:root` (data-theme no documentElement) e
+// nenhum CSS escopa `.modal`/`.modal-backdrop` sob um pai específico.
 import React, { useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 
 const FOCUSABLE =
   'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
@@ -86,7 +101,7 @@ export default function Modal({
 
 
 
-  return (
+  const dialogo = (
 
     <div className="modal-backdrop" role="presentation" onClick={handleBackdropClick}>
 
@@ -134,6 +149,12 @@ export default function Modal({
     </div>
 
   );
+
+  // Sem `document` (SSR/teste sem DOM) devolve inline: melhor renderizar no lugar errado do que
+  // quebrar a página inteira.
+  if (typeof document === 'undefined' || !document.body) return dialogo;
+
+  return createPortal(dialogo, document.body);
 
 }
 
