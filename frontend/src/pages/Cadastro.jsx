@@ -23,44 +23,16 @@ import { LEGAL_METADATA } from '../utils/legal.js';
 
 import { WA_SENDER_NAME } from '../utils/whatsappConsent.js';
 import { useWhatsAppAvailable } from '../hooks/useWhatsAppStatus.js';
+// masks.js nasceu justamente extraindo estes helpers daqui ("Mesma lógica já usada em
+// Cadastro.jsx, centralizada para reuso") — mas o Cadastro seguiu com as cópias locais. Agora usa a
+// versão compartilhada, que é a mesma do booking e espelha lib/phone_br.js do backend.
+import { formatBRPhone, normalizePhoneBR, isValidMobileBR, onlyLocalDigits } from '../utils/masks.js';
 
 const normalizeUiText = (value = '') =>
   String(value || '')
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase();
-
-
-
-const formatBRPhone = (value = '') => {
-
-  const digits = value.replace(/\D/g, '').slice(0, 11);
-
-  if (digits.length <= 2) return digits;
-
-  if (digits.length <= 6) return `(${digits.slice(0, 2)}) ${digits.slice(2)}`;
-
-  if (digits.length <= 10) return `(${digits.slice(0, 2)}) ${digits.slice(2, 6)}-${digits.slice(6)}`;
-
-  return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}`;
-
-};
-
-
-
-const normalizeToE164BR = (value = '') => {
-
-  const digits = value.replace(/\D/g, '');
-
-  if (!digits) return '';
-
-  if (digits.startsWith('55')) return digits;
-
-  if (digits.length === 10 || digits.length === 11) return `55${digits}`;
-
-  return digits;
-
-};
 
 
 
@@ -229,22 +201,6 @@ export default function Cadastro() {
 
 
 
-  const emailReady = useMemo(() => {
-
-    const email = form.email.trim();
-
-    const confirm = confirmEmail.trim();
-
-    if (!email || !confirm) return false;
-
-    const valid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-
-    if (!valid) return false;
-
-    return email.toLowerCase() === confirm.toLowerCase();
-
-  }, [form.email, confirmEmail]);
-
   const senhaScore = useMemo(() => {
 
     const s = form.senha || '';
@@ -273,15 +229,15 @@ export default function Cadastro() {
 
 
 
-  const phoneOk = useMemo(() => {
+  // Só contar dígitos não serve aqui. O campo é o WhatsApp: aceitar um fixo ou um DDD que não
+  // existe cria a conta e deixa a pessoa sem notificação PARA SEMPRE, em silêncio — o envio é
+  // bloqueado lá na frente e ninguém avisa ninguém. `isValidMobileBR` é a mesma régua do backend
+  // (masks.js espelha lib/phone_br.js) e barra só o impossível: fixo, DDD inexistente e 13 dígitos
+  // cujo nono não é 9. Celular de 12 dígitos, sem o nono, continua passando — existe em produção.
+  const phoneOk = useMemo(() => isValidMobileBR(form.telefone), [form.telefone]);
 
-    if (!phoneDigits) return false;
-
-    if (phoneDigits.startsWith('55')) return phoneDigits.length === 12 || phoneDigits.length === 13;
-
-    return phoneDigits.length === 10 || phoneDigits.length === 11;
-
-  }, [phoneDigits]);
+  // "Tem dígitos suficientes, mas não é um celular" merece uma dica diferente de "faltou digitar".
+  const phoneCompleto = phoneDigits.length >= 10;
 
 
 
@@ -297,51 +253,69 @@ export default function Cadastro() {
 
 
 
-  const addressOk = useMemo(() => {
+  // Tudo que impede o envio, NA ORDEM EM QUE OS CAMPOS APARECEM NA TELA.
+  //
+  // Antes isto era um booleano só (`disabled`) que desligava o botão. Quem esquecia um campo via um
+  // botão cinza e nenhuma explicação — e o `required` dos inputs nunca ajudava, porque a validação
+  // nativa do navegador só roda quando o form é submetido, e ele nunca era. Um formulário de 14
+  // campos que se recusa a dizer qual falta é um formulário abandonado.
+  //
+  // A lista alimenta três coisas de uma vez: o resumo do que falta, o destaque de cada campo e o
+  // foco no primeiro pendente. A ordem importa — é ela que decide para onde a tela rola.
+  const problemas = useMemo(() => {
+    const lista = [];
+    const add = (id, texto) => lista.push({ id, texto });
 
-    if (!isEstab) return true;
+    if (!nomeOk) add('cadastro-nome', 'Nome: informe pelo menos 2 caracteres.');
 
-    return (
+    if (!form.email.trim()) add('cadastro-email', 'E-mail: campo obrigatório.');
+    else if (!emailFormatValid) add('cadastro-email', 'E-mail: verifique o formato (exemplo@dominio.com).');
+    else if (!confirmEmail.trim()) add('cadastro-email-confirm', 'Confirmar e-mail: repita o e-mail digitado.');
+    else if (confirmEmailMismatch) add('cadastro-email-confirm', 'Confirmar e-mail: os dois e-mails não coincidem.');
 
-      cepDigits.length === 8 &&
+    if (!phoneOk) {
+      add(
+        'cadastro-telefone',
+        phoneDigits.length >= 10
+          ? 'Telefone: precisa ser um celular com DDD válido (fixo não recebe WhatsApp).'
+          : 'Telefone: informe o DDD e o número completo.'
+      );
+    }
+    if (!senhaOk) add('cadastro-senha', 'Senha: use no mínimo 8 caracteres e 1 caractere especial.');
+    if (!matchOk) add('cadastro-confirmar-senha', 'Confirmar senha: as senhas não coincidem.');
+    if (!cpfCnpjOk) add('cadastro-cpf-cnpj', 'CPF/CNPJ: informe 11 dígitos (CPF) ou 14 (CNPJ).');
 
-      form.endereco.trim() &&
+    if (isEstab) {
+      if (cepDigits.length !== 8) add('cadastro-cep', 'CEP: informe os 8 dígitos.');
+      if (!form.endereco.trim()) add('cadastro-endereco', 'Endereço: campo obrigatório.');
+      if (!form.numero.trim()) add('cadastro-numero', 'Número: campo obrigatório.');
+      if (!form.bairro.trim()) add('cadastro-bairro', 'Bairro: campo obrigatório.');
+      if (!form.cidade.trim()) add('cadastro-cidade', 'Cidade: campo obrigatório.');
+      if (!/^[A-Za-z]{2}$/.test(form.estado.trim())) add('cadastro-estado', 'Estado: informe a UF com 2 letras (ex.: SP).');
+    }
 
-      form.numero.trim() &&
+    if (!form.tipo) add('cadastro-form', 'Escolha se a conta é de estabelecimento ou de cliente.');
+    if (!acceptPolicies) add('cadastro-termos', 'É preciso aceitar os Termos de Uso e a Política de Privacidade.');
 
-      form.bairro.trim() &&
+    return lista;
+  }, [
+    nomeOk, form.email, emailFormatValid, confirmEmail, confirmEmailMismatch, phoneOk,
+    phoneDigits.length, senhaOk, matchOk, cpfCnpjOk, isEstab, cepDigits.length, form.endereco,
+    form.numero, form.bairro, form.cidade, form.estado, form.tipo, acceptPolicies,
+  ]);
 
-      form.cidade.trim() &&
+  const podeEnviar = problemas.length === 0;
 
-      /^[A-Za-z]{2}$/.test(form.estado.trim())
+  // Só depois da PRIMEIRA tentativa os campos vazios ficam vermelhos. Gritar erro em campo que a
+  // pessoa ainda nem visitou é hostil — ela abre a tela e já está tudo errado.
+  const [tentouEnviar, setTentouEnviar] = useState(false);
 
-    );
+  const idsComProblema = useMemo(() => new Set(problemas.map((p) => p.id)), [problemas]);
 
-  }, [isEstab, cepDigits.length, form.endereco, form.numero, form.bairro, form.cidade, form.estado]);
-
-
-
-  const disabled =
-
-    loading ||
-
-    !nomeOk ||
-
-    !emailReady ||
-
-    !senhaOk ||
-
-    !matchOk ||
-
-    !phoneOk ||
-
-    !cpfCnpjOk ||
-
-    !form.tipo ||
-
-    !addressOk ||
-
-    !acceptPolicies;
+  const erroNoCampo = useCallback(
+    (id) => tentouEnviar && idsComProblema.has(id),
+    [tentouEnviar, idsComProblema]
+  );
 
 
 
@@ -515,6 +489,36 @@ export default function Cadastro() {
 
 
 
+  // Leva a tela até o primeiro pendente. Sem isto, o resumo de erros no topo obrigaria a pessoa a
+  // caçar o campo sozinha num formulário que não cabe em uma tela de celular.
+  const focarPrimeiroProblema = useCallback((lista) => {
+
+    if (typeof window === 'undefined') return;
+
+    const alvo = document.getElementById(lista?.[0]?.id || '');
+
+    if (!alvo) return;
+
+    try {
+
+      const y = alvo.getBoundingClientRect().top + window.scrollY - 100;
+
+      window.scrollTo({ top: y, behavior: 'smooth' });
+
+      // O foco vem DEPOIS da rolagem e com `preventScroll`: focar antes faz o navegador dar o pulo
+      // seco que a rolagem suave estava justamente evitando.
+      setTimeout(() => {
+
+        try { alvo.focus({ preventScroll: true }); } catch { alvo.focus?.(); }
+
+      }, 320);
+
+    } catch {}
+
+  }, []);
+
+
+
   const submit = async (event) => {
 
     event.preventDefault();
@@ -523,13 +527,22 @@ export default function Cadastro() {
 
     setSuccessMsg('');
 
-    if (disabled) return;
+    if (loading) return;
+
+    // Faltou coisa: em vez de não fazer nada, diz o que falta, pinta os campos e leva a pessoa até
+    // o primeiro deles. O botão continua clicável de propósito — clicar e ser respondido é o que
+    // transforma "não funciona" em "ah, é o CEP".
+    if (problemas.length) {
+      setTentouEnviar(true);
+      focarPrimeiroProblema(problemas);
+      return;
+    }
 
     setLoading(true);
 
     try {
 
-      const telefoneNorm = normalizeToE164BR(form.telefone.trim());
+      const telefoneNorm = normalizePhoneBR(form.telefone.trim());
 
       const cpfCnpjValue = cpfCnpjDigits || undefined;
 
@@ -706,6 +719,49 @@ export default function Cadastro() {
 
               ) : null}
 
+              {/* O que falta preencher. Renderiza direto de `problemas` em vez de guardar um texto
+                  no estado: assim a lista encolhe sozinha conforme a pessoa corrige, e o aviso some
+                  no instante em que o último item é resolvido — sem depender de clicar de novo. */}
+              {tentouEnviar && problemas.length ? (
+
+                <div id="cadastro-pendencias" className="login-preview__alert login-preview__alert--error" role="alert" aria-live="polite">
+
+                  <span className="login-preview__alert-dot" aria-hidden="true" />
+
+                  <div>
+
+                    <div className="login-preview__alert-title">
+
+                      {problemas.length === 1 ? 'Falta 1 campo' : `Faltam ${problemas.length} campos`}
+
+                    </div>
+
+                    <ul className="login-preview__alert-text" style={{ margin: '4px 0 0', paddingLeft: 16 }}>
+
+                      {problemas.map((p) => (
+
+                        <li key={p.id + p.texto}>
+
+                          <button
+                            type="button"
+                            className="cadastro-problema"
+                            onClick={() => focarPrimeiroProblema([p])}
+                          >
+                            {p.texto}
+                          </button>
+
+                        </li>
+
+                      ))}
+
+                    </ul>
+
+                  </div>
+
+                </div>
+
+              ) : null}
+
 
 
               <div className="ao-login__seg" role="tablist" aria-label="Tipo de conta">
@@ -741,7 +797,7 @@ export default function Cadastro() {
 
                     <label className="login-preview__label" htmlFor="cadastro-nome">Nome</label>
 
-                    <div className={`auth-portal__field-shell${form.nome && !nomeOk ? ' is-error' : ''}`}>
+                    <div className={`auth-portal__field-shell${(form.nome && !nomeOk) || erroNoCampo('cadastro-nome') ? ' is-error' : ''}`}>
                       {isEstab ? <IconBuilding className="auth-portal__field-icon" /> : <IconUser className="auth-portal__field-icon" />}
                       <input
                         className="login-preview__input auth-portal__input-control"
@@ -767,7 +823,7 @@ export default function Cadastro() {
 
                     <label className="login-preview__label" htmlFor="cadastro-email">E-mail</label>
 
-                    <div className={`auth-portal__field-shell${form.email && !emailFormatValid ? ' is-error' : ''}`}>
+                    <div className={`auth-portal__field-shell${(form.email && !emailFormatValid) || erroNoCampo('cadastro-email') ? ' is-error' : ''}`}>
                       <IconMail className="auth-portal__field-icon" />
                       <input
                         className="login-preview__input auth-portal__input-control"
@@ -800,7 +856,7 @@ export default function Cadastro() {
 
                     <label className="login-preview__label" htmlFor="cadastro-email-confirm">Confirmar e-mail</label>
 
-                    <div className={`auth-portal__field-shell${confirmEmailMismatch ? ' is-error' : ''}`}>
+                    <div className={`auth-portal__field-shell${confirmEmailMismatch || erroNoCampo('cadastro-email-confirm') ? ' is-error' : ''}`}>
                       <IconMail className="auth-portal__field-icon" />
                       <input
                         className="login-preview__input auth-portal__input-control"
@@ -833,7 +889,7 @@ export default function Cadastro() {
 
                     <label className="login-preview__label" htmlFor="cadastro-telefone">Telefone WhatsApp</label>
 
-                    <div className={`auth-portal__field-shell${!phoneOk && phoneDigits ? ' is-error' : ''}`}>
+                    <div className={`auth-portal__field-shell${(!phoneOk && phoneDigits) || erroNoCampo('cadastro-telefone') ? ' is-error' : ''}`}>
                       <IconPhone className="auth-portal__field-icon" />
                       <input
                         className="login-preview__input auth-portal__input-control"
@@ -843,8 +899,10 @@ export default function Cadastro() {
                         placeholder="WhatsApp com DDD (11) 99999-9999"
                         value={formatBRPhone(form.telefone)}
                         onChange={(e) => {
-                          const digits = e.target.value.replace(/\D/g, '').slice(0, 13);
-                          updateField('telefone', digits);
+                          // Guarda sempre em DDD+número (o 55 do país entra só no envio). Guardar
+                          // 13 dígitos crus, como antes, deixava o campo mostrar um número e
+                          // validar outro quando alguém colava com o código do país.
+                          updateField('telefone', onlyLocalDigits(e.target.value));
                         }}
                         autoComplete="tel"
                         required
@@ -853,7 +911,11 @@ export default function Cadastro() {
 
                     <div className={`login-preview__hint${!phoneOk && phoneDigits ? ' is-error' : ''}`}>
 
-                      {!phoneOk && phoneDigits
+                      {!phoneOk && phoneCompleto
+
+                        ? 'Precisa ser um celular com DDD válido — fixo não recebe WhatsApp.'
+
+                        : !phoneOk && phoneDigits
 
                          ? 'Digite todos os dígitos (DDD + número). Ex.: (11) 99999-9999'
 
@@ -901,7 +963,7 @@ export default function Cadastro() {
 
                     <label className="login-preview__label" htmlFor="cadastro-senha">Senha</label>
 
-                    <div className={`auth-portal__field-shell${form.senha && !senhaOk ? ' is-error' : ''}`}>
+                    <div className={`auth-portal__field-shell${(form.senha && !senhaOk) || erroNoCampo('cadastro-senha') ? ' is-error' : ''}`}>
                       <IconLock className="auth-portal__field-icon" />
                       <input
                         className="login-preview__input auth-portal__input-control"
@@ -953,7 +1015,7 @@ export default function Cadastro() {
 
                     <label className="login-preview__label" htmlFor="cadastro-confirmar-senha">Confirmar senha</label>
 
-                    <div className={`auth-portal__field-shell${confirm && !matchOk ? ' is-error' : ''}`}>
+                    <div className={`auth-portal__field-shell${(confirm && !matchOk) || erroNoCampo('cadastro-confirmar-senha') ? ' is-error' : ''}`}>
                       <IconLock className="auth-portal__field-icon" />
                       <input
                         className="login-preview__input auth-portal__input-control"
@@ -1049,7 +1111,7 @@ export default function Cadastro() {
 
                         <input
 
-                          className="login-preview__input"
+                          className={`login-preview__input${erroNoCampo('cadastro-cpf-cnpj') ? ' is-error' : ''}`}
 
                           id="cadastro-cpf-cnpj"
 
@@ -1081,7 +1143,7 @@ export default function Cadastro() {
 
                         <input
 
-                          className="login-preview__input"
+                          className={`login-preview__input${erroNoCampo('cadastro-cep') ? ' is-error' : ''}`}
 
                           id="cadastro-cep"
 
@@ -1111,7 +1173,7 @@ export default function Cadastro() {
 
                         <input
 
-                          className="login-preview__input"
+                          className={`login-preview__input${erroNoCampo('cadastro-endereco') ? ' is-error' : ''}`}
 
                           id="cadastro-endereco"
 
@@ -1133,7 +1195,7 @@ export default function Cadastro() {
 
                           <input
 
-                            className="login-preview__input"
+                            className={`login-preview__input${erroNoCampo('cadastro-numero') ? ' is-error' : ''}`}
 
                             id="cadastro-numero"
 
@@ -1173,7 +1235,7 @@ export default function Cadastro() {
 
                         <input
 
-                          className="login-preview__input"
+                          className={`login-preview__input${erroNoCampo('cadastro-bairro') ? ' is-error' : ''}`}
 
                           id="cadastro-bairro"
 
@@ -1195,7 +1257,7 @@ export default function Cadastro() {
 
                           <input
 
-                            className="login-preview__input"
+                            className={`login-preview__input${erroNoCampo('cadastro-cidade') ? ' is-error' : ''}`}
 
                             id="cadastro-cidade"
 
@@ -1215,7 +1277,7 @@ export default function Cadastro() {
 
                           <input
 
-                            className="login-preview__input"
+                            className={`login-preview__input${erroNoCampo('cadastro-estado') ? ' is-error' : ''}`}
 
                             id="cadastro-estado"
 
@@ -1235,9 +1297,11 @@ export default function Cadastro() {
 
                   )}
 
-                  <label className="terms-check">
+                  <label className={`terms-check${erroNoCampo('cadastro-termos') ? ' is-error' : ''}`}>
 
                     <input
+
+                      id="cadastro-termos"
 
                       type="checkbox"
 
@@ -1267,7 +1331,15 @@ export default function Cadastro() {
 
   
 
-                  <button type="submit" className={`login-preview__submit${!disabled ? ' is-ready' : ''}`} disabled={disabled}>
+                  {/* Só o envio em curso desabilita — faltar campo NÃO desabilita mais. O botão
+                      morto era a origem do problema: sem clique não há resposta, e sem resposta a
+                      pessoa não tem como descobrir o que falta. */}
+                  <button
+                    type="submit"
+                    className={`login-preview__submit${podeEnviar && !loading ? ' is-ready' : ''}`}
+                    disabled={loading}
+                    aria-describedby={tentouEnviar && problemas.length ? 'cadastro-pendencias' : undefined}
+                  >
 
                     {loading ? (
 

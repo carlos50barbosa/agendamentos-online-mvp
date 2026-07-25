@@ -1293,6 +1293,27 @@ a:hover { opacity: 1; text-decoration: underline; }
   cursor:pointer;
   accent-color:var(--brand, #5049E5);
 }
+
+/* Cada pendência do resumo é um BOTÃO, não um texto: clicar leva direto ao campo. Num formulário
+   de 14 campos, ler "falta o bairro" e ter que procurar o bairro é metade do problema. */
+.cadastro-problema{
+  appearance:none;
+  background:none;
+  border:0;
+  padding:0;
+  font:inherit;
+  color:inherit;
+  text-align:left;
+  cursor:pointer;
+  text-decoration:underline;
+  text-underline-offset:2px;
+}
+.cadastro-problema:hover{ opacity:.8; }
+/* O aceite dos termos não tem moldura para pintar de vermelho como os inputs — então o destaque
+   vai no texto e no quadradinho. */
+.terms-check.is-error{ color:var(--login-error, #dc2626); }
+.terms-check.is-error input{ outline:2px solid var(--login-error, #dc2626); outline-offset:2px; }
+
 .login-preview__chooser-note{
   margin-top:8px;
   font-size:12px;
