@@ -10,6 +10,12 @@
 // Só aparece para quem PRECISA: dono com a notificação ligada de antes do opt-in existir e sem
 // aceite registrado. Para ele o envio está BLOQUEADO — e ele precisa saber disso, em vez de achar
 // que recebe. Quem já aceitou não vê nada.
+//
+// E some quando o CANAL está fora do ar (`WHATSAPP_UNAVAILABLE`). Antes ele só trocava o texto e
+// continuava pedindo o AUTORIZO — mas o AUTORIZO tem de chegar NO NÚMERO DA PLATAFORMA, e é
+// justamente ele que está indisponível. O dono clicava, mandava a mensagem, nada confirmava, e a
+// espera acabava em "ainda não recebemos sua confirmação" — para sempre. Pedir uma autorização que
+// não tem como ser recebida não é honestidade sobre o apagão, é um beco sem saída.
 import React, { useEffect, useRef, useState } from 'react';
 import { MessageCircle, Check, Loader2 } from 'lucide-react';
 import { Api } from '../../utils/api';
@@ -53,7 +59,8 @@ export default function WhatsAppOptInBanner() {
     return () => clearInterval(id);
   }, [aguardando, refresh]);
 
-  if (loading || !precisaReaceitar) return null;
+  // Canal fora do ar: nem pede. Volta sozinho quando a env sair do .env — sem build, sem deploy.
+  if (loading || !precisaReaceitar || !available) return null;
 
   /**
    * Não grava mais nada aqui — só abre o WhatsApp do dono com "AUTORIZO" pronto.
@@ -87,27 +94,12 @@ export default function WhatsAppOptInBanner() {
       <MessageCircle size={20} strokeWidth={2.2} aria-hidden="true" className={styles.icon} />
 
       <div className={styles.body}>
-        <p className={styles.title}>
-          {available
-            ? 'Seus avisos no WhatsApp estão pausados'
-            : 'Autorize seus avisos no WhatsApp'}
-        </p>
+        <p className={styles.title}>Seus avisos no WhatsApp estão pausados</p>
 
+        {/* Só existe o texto do canal NO AR: com ele fora, o componente inteiro já saiu acima. */}
         <p className={styles.lead}>
-          {available ? (
-            <>
-              A Meta passou a exigir um aceite explícito e registrado antes de qualquer envio — e o
-              seu ainda não existe. Enquanto isso, os avisos continuam chegando por <b>e-mail</b>.
-            </>
-          ) : (
-            <>
-              {/* Honestidade custa uma frase e evita um chamado de suporte: sem isto, o dono
-                  autoriza, não recebe nada, e abre ticket achando que quebrou. */}
-              Nossas mensagens no WhatsApp estão <b>temporariamente suspensas</b>. Autorize agora e
-              você volta a receber assim que restabelecermos — sem precisar fazer nada depois. Até
-              lá, os avisos chegam por <b>e-mail</b>.
-            </>
-          )}
+          A Meta passou a exigir um aceite explícito e registrado antes de qualquer envio — e o seu
+          ainda não existe. Enquanto isso, os avisos continuam chegando por <b>e-mail</b>.
         </p>
 
         {/* O texto do aceite fica À VISTA, e não atrás de um "saiba mais": é ele que o servidor

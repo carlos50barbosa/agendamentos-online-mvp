@@ -22,6 +22,7 @@ import { saveToken, saveUser } from '../utils/auth';
 import { LEGAL_METADATA } from '../utils/legal.js';
 
 import { WA_SENDER_NAME } from '../utils/whatsappConsent.js';
+import { useWhatsAppAvailable } from '../hooks/useWhatsAppStatus.js';
 
 const normalizeUiText = (value = '') =>
   String(value || '')
@@ -110,6 +111,11 @@ export default function Cadastro() {
   const nav = useNavigate();
 
   const loc = useLocation();
+
+  // Canal do WhatsApp no ar? Com ele fora (`WHATSAPP_UNAVAILABLE`), a caixa de aceite não aparece:
+  // ela prometeria confirmação e lembretes por um canal que não envia, e quem marca fica esperando
+  // uma mensagem que nunca chega. O aceite volta a ser pedido sozinho quando a env sair do .env.
+  const waAvailable = useWhatsAppAvailable();
 
   const [form, setForm] = useState({
 
@@ -541,8 +547,10 @@ export default function Cadastro() {
 
         telefone: telefoneNorm,
 
-        // Sem isto o backend não envia WhatsApp nenhum a este número.
-        whatsapp_optin: form.whatsappOptin === true,
+        // Sem isto o backend não envia WhatsApp nenhum a este número. O `waAvailable` fecha a
+        // brecha da corrida: `/public/config` responde depois do primeiro render (o padrão é
+        // otimista), então dá para marcar a caixa no instante em que ela ainda está visível.
+        whatsapp_optin: form.whatsappOptin === true && waAvailable,
 
         data_nascimento: form.data_nascimento || undefined,
 
@@ -858,6 +866,7 @@ export default function Cadastro() {
                         mensagem de um remetente que nunca autorizou. Foi assim que a conta caiu.
                         A caixa nasce desmarcada e não trava o cadastro: quem não marcar recebe por
                         e-mail. */}
+                    {waAvailable && (
                     <label className="cadastro-optin">
                       <input
                         type="checkbox"
@@ -882,6 +891,7 @@ export default function Cadastro() {
                         )}
                       </span>
                     </label>
+                    )}
 
                   </div>
 
