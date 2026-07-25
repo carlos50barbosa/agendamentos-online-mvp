@@ -1129,9 +1129,9 @@ export default function Cadastro() {
 
                           {!cpfCnpjOk && cpfCnpjDigits
 
-                             ? 'Informe 11 ou 14 digitos.'
+                             ? 'Informe 11 ou 14 dígitos.'
 
-                            : 'Opcional para identificacao fiscal.'}
+                            : 'Opcional para identificação fiscal.'}
 
                         </div>
 
