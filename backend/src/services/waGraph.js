@@ -275,6 +275,42 @@ export async function fetchWabaDetails(accessToken, wabaId) {
   });
 }
 
+/**
+ * Assina NOSSO app aos webhooks da WABA do tenant.
+ *
+ * Sem isto, o Embedded Signup termina "com sucesso", a tela mostra Conectado — e nenhuma mensagem
+ * dos clientes daquele salão chega. É a falha mais confusa possível: não há erro em lugar nenhum,
+ * só silêncio. A assinatura é por WABA e é feita UMA vez, no fim da conexão.
+ */
+export async function subscribeAppToWaba({ accessToken, wabaId }) {
+  if (!accessToken || !wabaId) throw new Error('wa_missing_token_or_waba');
+  return postGraph(`${wabaId}/subscribed_apps`, accessToken, {});
+}
+
+/** Confere o que já está assinado — usado para diagnosticar "conectou mas não chega nada". */
+export async function listWabaSubscribedApps({ accessToken, wabaId }) {
+  if (!accessToken || !wabaId) return null;
+  return getGraph(`${wabaId}/subscribed_apps`, accessToken);
+}
+
+/**
+ * Registra o número na Cloud API. Obrigatório antes do primeiro envio: número não registrado
+ * responde erro 133010 ("not registered") em toda mensagem.
+ *
+ * O `pin` é o PIN de verificação em duas etapas. Quando o número NUNCA teve 2FA, a Meta aceita
+ * definir um agora; se o tenant já tinha um PIN diferente, a chamada falha com 136024 e não há como
+ * adivinhar — nesse caso quem tem de informar é o dono, e o erro precisa chegar legível na tela.
+ */
+export async function registerWhatsAppPhoneNumber({ accessToken, phoneNumberId, pin }) {
+  if (!accessToken || !phoneNumberId) throw new Error('wa_missing_token_or_phone');
+  const codigo = String(pin || '').trim();
+  if (!/^\d{6}$/.test(codigo)) throw new Error('wa_invalid_pin');
+  return postGraph(`${phoneNumberId}/register`, accessToken, {
+    messaging_product: 'whatsapp',
+    pin: codigo,
+  });
+}
+
 export async function sendWhatsAppMessage({ accessToken, phoneNumberId, payload }) {
   if (!accessToken || !phoneNumberId) {
     throw new Error('wa_missing_token_or_phone');

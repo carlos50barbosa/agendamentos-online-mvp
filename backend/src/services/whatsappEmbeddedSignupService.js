@@ -4,6 +4,8 @@ import {
   fetchPhoneNumberDetails,
   fetchWabaAssets,
   fetchWabaDetails,
+  registerWhatsAppPhoneNumber,
+  subscribeAppToWaba,
 } from './waGraph.js';
 import {
   disconnectWaAccount,
@@ -478,6 +480,64 @@ export async function completeEmbeddedSignup({
     await releaseWaPhoneNumberFromAccount(conflictingAccount.estabelecimento_id).catch(() => null);
   }
 
+  // ── Assinar o webhook da WABA do tenant ───────────────────────────────────────────────────────
+  // FATAL de propósito. Sem esta assinatura o onboarding "termina bem", a tela mostra Conectado e
+  // nenhuma mensagem dos clientes daquele salão chega — sem erro em lugar nenhum. Marcar como
+  // conectado nesse estado é mentir para o dono; melhor falhar aqui, alto e claro.
+  try {
+    await subscribeAppToWaba({ accessToken, wabaId: resolvedAssets.wabaId });
+    console.info('[wa][embedded-signup][subscribed]', {
+      estabelecimento_id: tenantId,
+      waba_id: resolvedAssets.wabaId,
+    });
+  } catch (err) {
+    const info = describeEmbeddedSignupError(err);
+    console.error('[wa][embedded-signup][subscribe_error]', {
+      estabelecimento_id: tenantId,
+      waba_id: resolvedAssets.wabaId,
+      error: info.graph,
+    });
+    await persistAccountError({
+      estabelecimentoId: tenantId,
+      sessionInfo: normalizedSession,
+      lastError: 'webhook_subscribe_failed',
+      metadata: { phase: 'subscribe_app', graph_error: info.graph },
+      accessTokenEnc: encryptedToken.enc,
+      tokenLast4: encryptedToken.last4,
+    }).catch(() => null);
+    throw createHttpError(
+      info.status,
+      'wa_embedded_signup_subscribe_failed',
+      'Conectamos a conta, mas não conseguimos assinar os avisos de mensagem. Tente de novo — sem isso as mensagens dos seus clientes não chegam.',
+      info.graph
+    );
+  }
+
+  // ── Registrar o número na Cloud API ───────────────────────────────────────────────────────────
+  // NÃO fatal, ao contrário do acima. Número criado pelo próprio Embedded Signup em geral já vem
+  // registrado, e um PIN divergente (o tenant já tinha 2FA com outro) não deve derrubar uma conexão
+  // que funciona. O resultado fica no metadata para o suporte saber por que o 1º envio falhou com
+  // 133010, se falhar.
+  let registro = { attempted: false };
+  const registerPin = String(process.env.WA_REGISTER_PIN || '').trim()
+    || String(Math.floor(100000 + Math.random() * 900000));
+  try {
+    await registerWhatsAppPhoneNumber({
+      accessToken,
+      phoneNumberId: resolvedAssets.phoneNumberId,
+      pin: registerPin,
+    });
+    registro = { attempted: true, ok: true, pin_source: process.env.WA_REGISTER_PIN ? 'env' : 'gerado' };
+  } catch (err) {
+    const info = describeEmbeddedSignupError(err);
+    console.warn('[wa][embedded-signup][register_skip]', {
+      estabelecimento_id: tenantId,
+      phone_number_id: resolvedAssets.phoneNumberId,
+      error: info.graph,
+    });
+    registro = { attempted: true, ok: false, error: info.code, graph_error: info.graph };
+  }
+
   const persisted = await upsertWaAccount(tenantId, {
     provider: 'meta_embedded_signup',
     waba_id: resolvedAssets.wabaId,
@@ -498,6 +558,10 @@ export async function completeEmbeddedSignup({
         flow: 'meta_embedded_signup',
         source: 'embedded_signup_exchange',
       },
+      // Prova de que o webhook foi assinado e o que houve no registro do número. É a primeira coisa
+      // a olhar quando o dono diz "conectei e não chega nada".
+      subscribed_app: true,
+      register: registro,
       session_info: normalizedSession,
       graph: graphAssets,
       waba: wabaDetails ? { id: wabaDetails.id || resolvedAssets.wabaId, name: wabaDetails.name || null } : null,
