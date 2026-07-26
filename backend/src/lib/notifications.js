@@ -69,6 +69,19 @@ function isAllowed(to) {
   return cfg.allowedList.includes(n);
 }
 
+/**
+ * O bloqueio por ALLOWED_LIST é a coisa mais silenciosa do módulo: o envio some, a função devolve
+ * `{blocked:true}` e o aviso ficava atrás de `cfg.debug` — ou seja, em produção, rastro NENHUM.
+ *
+ * Uma lista esquecida de um período de contenção derruba todo o WhatsApp sem uma linha de log, e o
+ * sintoma ("não chega mensagem") não aponta para o `.env`. Por isso agora loga sempre.
+ */
+function logBlockedByAllowedList({ phone, stage, context }) {
+  const base = { code: 'wa_send_blocked_allowlist', stage, to: maskPhone(phone) };
+  if (context) base.context = context;
+  console.warn('[wa/allowlist] bloqueado por WHATSAPP_ALLOWED_LIST, skip send', base);
+}
+
 function maskPhone(phone) {
   const digits = toDigits(phone);
   if (!digits) return '';
@@ -164,7 +177,8 @@ function normalizeTemplateBodyParams({ name, bodyParams, phone, context }) {
         to: maskPhone(phone),
       };
       if (context) base.context = context;
-      console.warn('[wa/template] missing params, skip send', base);
+      // `error`, não `warn`: isto não é um aviso, é uma mensagem que NÃO chegou em ninguém.
+      console.error('[wa/template] missing params, skip send', { code: 'wa_send_aborted', ...base });
       throw buildTemplateParamError({ name, expected: 3, provided: rawParams.length });
     }
     return buildConfirmacaoAgendamentoV2Components({
@@ -181,7 +195,7 @@ function normalizeTemplateBodyParams({ name, bodyParams, phone, context }) {
       to: maskPhone(phone),
     };
     if (context) base.context = context;
-    console.warn('[wa/template] missing params, skip send', base);
+    console.error('[wa/template] missing params, skip send', { code: 'wa_send_aborted', ...base });
     throw buildTemplateParamError({ name, expected: 1, provided: 0 });
   }
   return rawParams;
@@ -235,7 +249,7 @@ async function sendText({ to, message, context, tenant }) {
     return { invalid: true };
   }
   if (!isAllowed(phone)) {
-    if (cfg.debug) console.warn('[whatsapp] bloqueado por ALLOWED_LIST -> %s', phone);
+    logBlockedByAllowedList({ phone, stage: 'text', context });
     return { blocked: true };
   }
   const resolved = tenant || await resolveTenantConfig(context);
@@ -283,7 +297,7 @@ export async function sendTemplate({
     return { invalid: true };
   }
   if (!isAllowed(phone)) {
-    if (cfg.debug) console.warn('[whatsapp] bloqueado por ALLOWED_LIST -> %s', phone);
+    logBlockedByAllowedList({ phone, stage: 'template', context });
     return { blocked: true };
   }
   const resolved = tenant || await resolveTenantConfig(context || { estabelecimentoId });
@@ -480,7 +494,7 @@ export async function sendWhatsAppSmart({
         to: maskPhone(phone),
       };
       if (ctx) base.context = ctx;
-      console.warn('[wa/template] missing params, skip send', base);
+      console.error('[wa/template] missing params, skip send', { code: 'wa_send_aborted', ...base });
       return { ok: false, error: 'template_params_missing' };
     }
     if (canUseOverride) {
@@ -494,9 +508,12 @@ export async function sendWhatsAppSmart({
       });
     }
     if (!templatePayload) {
+      // Este caminho é DELIBERADO (`template: null` com a janela fechada), mas ainda assim é uma
+      // mensagem que não saiu — e quando a mensagem é a confirmação de um PARAR, não sair é
+      // descumprir o que a Meta exige. Tem de ser encontrável no log, não sussurrado.
       const base = { to: maskPhone(phone) };
       if (ctx) base.context = ctx;
-      console.warn('[wa/template] template disabled, skip send', base);
+      console.error('[wa/template] template disabled, skip send', { code: 'wa_send_aborted', ...base });
       return { ok: false, error: 'template_missing' };
     }
     return sendTemplateSafely({
@@ -580,7 +597,7 @@ export async function scheduleWhatsApp({
     return { invalid: true };
   }
   if (!isAllowed(phone)) {
-    if (cfg.debug) console.warn('[whatsapp] bloqueado por ALLOWED_LIST -> %s (schedule)', phone);
+    logBlockedByAllowedList({ phone, stage: 'schedule' });
     return { blocked: true };
   }
 
