@@ -151,14 +151,9 @@ const sections = [
 
 export default function Termos() {
   const meta = useMemo(() => LEGAL_METADATA.terms, []);
-  const dataExtenso = useMemo(() => {
-    const hoje = new Date();
-    return new Intl.DateTimeFormat('pt-BR', {
-      day: '2-digit',
-      month: 'long',
-      year: 'numeric',
-    }).format(hoje);
-  }, []);
+  // Mesma correção da Política: a data vem do metadado, não de `new Date()`. Antes o documento
+  // afirmava ter sido atualizado hoje, todo dia, e `updatedAt` era código morto.
+  const dataExtenso = meta.updatedAt;
 
   return (
     <div className="legal-page">

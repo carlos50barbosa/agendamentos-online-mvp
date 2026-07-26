@@ -7,8 +7,10 @@ export const LEGAL_METADATA = Object.freeze({
     title: 'Termos de Uso',
   },
   privacy: {
-    version: '2025-10-26',
-    updatedAt: '26 de outubro de 2025',
+    // 2026-07-26: nova seção 7 (Solicitações de autoridades públicas) e identificação do
+    // controlador pela razão social. Mudança material — por isso a versão sobe.
+    version: '2026-07-26',
+    updatedAt: '26 de julho de 2026',
     title: 'Política de Privacidade',
   },
 });

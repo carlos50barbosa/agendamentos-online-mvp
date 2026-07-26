@@ -15,7 +15,7 @@ const sections = [
     id: 'controlador',
     title: '2. Controlador dos dados',
     paragraphs: [
-      'O controlador dos dados é o responsável pela plataforma Agendamentos Online.',
+      `O controlador dos dados é ${getLegalEntityLine()}, responsável pela plataforma Agendamentos Online.`,
       'Dúvidas, solicitações ou exercício de direitos podem ser encaminhados para contato@agenda0.com.br.',
     ],
   },
@@ -55,13 +55,25 @@ const sections = [
     paragraphs: [
       'Estabelecimentos e clientes trocam informações entre si apenas quando necessário para a prestação do serviço.',
       'Prestadores de serviços terceirizados podem tratar dados em nome da plataforma (ex.: hospedagem, ferramentas de e-mail, gateways de pagamento), sempre sujeitos a obrigações contratuais de confidencialidade e segurança.',
-      'Autoridades públicas podem ter acesso aos dados mediante ordem legal ou requisição administrativa válida.',
+      'Autoridades públicas podem ter acesso aos dados mediante ordem legal ou requisição administrativa válida, observado o procedimento descrito na seção 7.',
       'Não comercializamos dados pessoais.',
     ],
   },
   {
+    id: 'autoridades',
+    title: '7. Solicitações de autoridades públicas',
+    paragraphs: [
+      'Pedidos de autoridades públicas devem chegar por escrito a contato@agenda0.com.br, com identificação do órgão e de quem assina, os dados solicitados, o titular e o período. Pedidos feitos por telefone ou mensagem são tratados após essa formalização.',
+      'Toda solicitação passa por conferência de legalidade antes de qualquer resposta. Verificamos o documento, o órgão que o assina e se a base legal invocada alcança o que foi pedido. Quando a lei exige ordem judicial, não entregamos os dados sem ela.',
+      'Pedido sem base legal, fora da competência do órgão ou mais amplo do que a lei autoriza é recusado por escrito, com o motivo. Mantemos a recusa até que sobrevenha ordem judicial e podemos contestá-la pelos meios cabíveis.',
+      'Entregamos o mínimo necessário — inclusive menos do que foi pedido, quando o pedido for mais amplo que a base legal. Não mantemos acesso direto, contínuo ou automatizado aos nossos sistemas para autoridades: cada entrega é pontual e manual. Alguns registros, como um agendamento, envolvem cliente, estabelecimento e profissional ao mesmo tempo e não podem ser separados.',
+      'Registramos cada solicitação recebida: data, órgão, o que foi pedido, a base legal e o que foi entregue ou o motivo da recusa. O registro fica sob responsabilidade do controlador, pelo prazo necessário para comprovar o atendimento, e pode ser apresentado à ANPD.',
+      'Avisamos o titular de que seus dados foram solicitados sempre que a lei permitir e não houver determinação de sigilo.',
+    ],
+  },
+  {
     id: 'armazenamento',
-    title: '7. Armazenamento e segurança',
+    title: '8. Armazenamento e segurança',
     paragraphs: [
       'Adotamos medidas técnicas e administrativas razoáveis para proteger os dados contra acessos não autorizados, perda, alteração ou destruição.',
       'O acesso interno é restrito a profissionais que necessitam das informações para executar suas atividades, seguindo políticas de sigilo.',
@@ -70,7 +82,7 @@ const sections = [
   },
   {
     id: 'direitos',
-    title: '8. Direitos dos titulares',
+    title: '9. Direitos dos titulares',
     paragraphs: [
       'Confirmar se realizamos o tratamento de seus dados.',
       'Acessar, corrigir, atualizar ou solicitar a portabilidade das informações.',
@@ -81,7 +93,7 @@ const sections = [
   },
   {
     id: 'cookies',
-    title: '9. Cookies e tecnologias semelhantes',
+    title: '10. Cookies e tecnologias semelhantes',
     paragraphs: [
       'Utilizamos cookies essenciais para garantir funcionalidades básicas do site e cookies de desempenho para entender como os usuários interagem com a plataforma.',
       'Cookies não essenciais são armazenados somente mediante consentimento, quando aplicável. O usuário pode ajustar preferências no navegador, sabendo que isso pode limitar recursos.',
@@ -89,7 +101,7 @@ const sections = [
   },
   {
     id: 'comunicacao',
-    title: '10. Comunicações',
+    title: '11. Comunicações',
     paragraphs: [
       'Podemos enviar e-mails, notificações push ou mensagens via WhatsApp para confirmar agendamentos, informar atualizações ou responder solicitações de suporte.',
       'Mensagens promocionais são enviadas apenas mediante consentimento. O usuário pode cancelar o recebimento a qualquer momento pelos canais indicados na comunicação.',
@@ -97,7 +109,7 @@ const sections = [
   },
   {
     id: 'retencao',
-    title: '11. Retenção e descarte',
+    title: '12. Retenção e descarte',
     paragraphs: [
       'Os dados são mantidos enquanto a conta estiver ativa e pelo período necessário para cumprir obrigações legais, resolver disputas e garantir direitos.',
       'Após o prazo legal, os dados são eliminados ou anonimizados de forma segura.',
@@ -105,14 +117,14 @@ const sections = [
   },
   {
     id: 'transferencias',
-    title: '12. Transferências internacionais',
+    title: '13. Transferências internacionais',
     paragraphs: [
       'Serviços de terceiros podem armazenar ou processar dados fora do Brasil. Nesses casos, garantimos que haja contrato adequado ou que o país proporcione grau de proteção equivalente ao exigido pela legislação brasileira.',
     ],
   },
   {
     id: 'criancas',
-    title: '13. Dados de menores',
+    title: '14. Dados de menores',
     paragraphs: [
       'A plataforma não é direcionada a menores de 18 anos. Eventuais cadastros de menores devem ser realizados por responsável legal.',
       'Ao detectar informações sem autorização adequada, removeremos os dados conforme as normas aplicáveis.',
@@ -120,7 +132,7 @@ const sections = [
   },
   {
     id: 'atualizacoes',
-    title: '14. Atualizações desta Política',
+    title: '15. Atualizações desta Política',
     paragraphs: [
       'Podemos atualizar este documento para refletir mudanças regulatórias, ajustes na oferta de serviços ou inclusão de novas funcionalidades.',
       'Manteremos a data da última revisão visível e comunicaremos alterações materiais pelos canais apropriados.',
@@ -131,14 +143,11 @@ const sections = [
 
 export default function PoliticaPrivacidade() {
   const meta = useMemo(() => LEGAL_METADATA.privacy, []);
-  const dataExtenso = useMemo(() => {
-    const hoje = new Date();
-    return new Intl.DateTimeFormat('pt-BR', {
-      day: '2-digit',
-      month: 'long',
-      year: 'numeric',
-    }).format(hoje);
-  }, []);
+  // A data vem do METADADO, não de `new Date()`. Antes o documento dizia "última atualização em
+  // <hoje>" a cada visita — ou seja, afirmava ter mudado todo dia, e a única evidência de quando o
+  // texto realmente mudou desaparecia. Num documento que declara vigência, isso é falso por
+  // construção. Ver a seção "Atualizações desta Política", que promete manter a data visível.
+  const dataExtenso = meta.updatedAt;
 
   return (
     <div className="legal-page">
@@ -161,7 +170,7 @@ export default function PoliticaPrivacidade() {
       ))}
 
       <section className="card legal-section">
-        <h2>15. Canal de contato</h2>
+        <h2>16. Canal de contato</h2>
         <p>
           Para exercer direitos ou esclarecer dúvidas, envie e-mail para{' '}
           <a href="mailto:contato@agenda0.com.br">contato@agenda0.com.br</a>.
