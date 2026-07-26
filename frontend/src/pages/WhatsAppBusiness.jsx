@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import Modal from '../components/Modal.jsx';
 import { IconChevronRight, IconPhone } from '../components/Icons.jsx';
 import walletStyles from '../components/WhatsAppWalletPanel.module.css';
+import WhatsAppEmbeddedSignup from '../components/estab/WhatsAppEmbeddedSignup.jsx';
 import useBusinessSettings from '../hooks/useBusinessSettings.js';
 
 const m = walletStyles;
@@ -51,6 +52,7 @@ export default function WhatsAppBusiness() {
     billing,
     whatsapp,
     whatsappConnected,
+    refreshWhatsAppConnection,
     walletSummary,
     packages,
     recommendedPackageKey,
@@ -155,6 +157,15 @@ export default function WhatsAppBusiness() {
           </Link>
         </div>
       </section>
+
+      {/* Some sozinho quando o servidor responde available:false (sem config_id na Meta) — então
+          o painel continua exatamente como está hoje até a configuração existir. */}
+      {whatsappConnectEnabled && !whatsappConnected ? (
+        <WhatsAppEmbeddedSignup
+          onConnected={refreshWhatsAppConnection}
+          disabled={whatsapp.loading}
+        />
+      ) : null}
 
       {whatsappConnectEnabled ? (
       <section className="settings-module-card settings-module-card--status">
