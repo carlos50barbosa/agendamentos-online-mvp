@@ -22,6 +22,7 @@ import billingRouter from './routes/billing.js';
 import paymentsRouter from './routes/payments.js';
 import whatsappWebhookRouter from './routes/whatsapp_webhook.js';
 import waConnectRouter from './routes/waConnect.js';
+import metaCallbacksRouter from './routes/meta_callbacks.js';
 import waTenantWebhookRouter from './routes/waWebhook.js';
 import mercadoPagoRouter from './routes/mercadopago.js';
 import asaasWebhookRouter from './routes/webhooks_asaas.js';
@@ -225,7 +226,10 @@ app.use((req, res, next) => {
     path.startsWith('/webhooks/mercadopago/sellers') ||
     path.startsWith('/api/webhooks/mercadopago/sellers') ||
     path.startsWith('/webhook/mercadopago') ||
-    path.startsWith('/api/webhook/mercadopago');
+    path.startsWith('/api/webhook/mercadopago') ||
+    // Callbacks de app da Meta: chegam sem sessão e se autenticam pelo signed_request.
+    path.startsWith('/meta/') ||
+    path.startsWith('/api/meta/');
   const isExcluded =
     method === 'OPTIONS' ||
     path === '/health' ||
@@ -324,6 +328,11 @@ if (BILLING_ROUTES_ENABLED) {
 app.use('/payments', paymentsRouter);
 app.use('/wa', waConnectRouter);
 app.use('/whatsapp', waConnectRouter);
+// A Meta posta os callbacks de app como form (application/x-www-form-urlencoded), não como JSON —
+// sem este parser o `signed_request` chega vazio e todo callback responde 401 sem motivo aparente.
+app.use(['/meta', '/api/meta'], express.urlencoded({ extended: false }));
+app.use('/meta', metaCallbacksRouter);
+app.use('/api/meta', metaCallbacksRouter);
 app.use('/marketplace/mp', mercadoPagoRouter);
 app.use('/mercadopago', mercadoPagoRouter);
 app.use('/webhooks/asaas', asaasWebhookRouter);
