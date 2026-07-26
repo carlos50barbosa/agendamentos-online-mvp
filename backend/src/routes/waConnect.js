@@ -7,6 +7,10 @@ import {
   getTenantWhatsAppAccount,
   validateManualWhatsAppAccount,
 } from '../services/whatsappManualConnectService.js';
+import {
+  completeEmbeddedSignup,
+  getEmbeddedSignupPublicConfig,
+} from '../services/whatsappEmbeddedSignupService.js';
 
 const router = Router();
 const FRONTEND_BASE = (process.env.FRONTEND_BASE_URL || process.env.APP_URL || 'http://localhost:3001').replace(/\/$/, '');
@@ -191,11 +195,13 @@ router.get('/connect/start', auth, isEstabelecimento, async (req, res) => {
   console.info('[wa][connect/start][legacy_redirect]', {
     estabelecimento_id: req.user.id,
   });
+  // Rota antiga, de quando a conexão começava por redirect. Hoje o Embedded Signup roda no
+  // navegador, pelo SDK (ver /embedded-signup/config), então aqui só resta levar ao painel.
   return res.json({
     ok: true,
     deprecated: true,
     url: buildPanelUrl(),
-    message: 'O fluxo Embedded Signup foi aposentado. Use a conexão manual assistida no painel.',
+    message: 'A conexão é feita no painel do WhatsApp Business.',
   });
 });
 
@@ -212,28 +218,66 @@ router.get('/connect/callback', async (_req, res) => {
   );
 });
 
+// ── Embedded Signup ─────────────────────────────────────────────────────────────────────────────
+// Reativado em 26/07/2026. Foi aposentado em 15/03/2026 no mesmo commit que o criou, sem motivo
+// registrado — a causa provável era não ter empresa verificada na Meta, o que é pré-requisito. A
+// verificação saiu em 25/07/2026.
+//
+// A conexão manual CONTINUA existindo e não muda: é a saída para quem já tem WABA própria. O
+// Embedded Signup é o caminho de um clique, para o dono de salão que não vai criar app na Meta.
+
+/**
+ * Dados públicos para o SDK do Facebook montar o FB.login no navegador.
+ *
+ * Sem `config_id` configurado, `getEmbeddedSignupPublicConfig` lança — e aqui isso vira 503 com
+ * `available: false`, não 500. É o estado esperado enquanto a configuração de Facebook Login for
+ * Business não existe: o frontend usa essa resposta para simplesmente não mostrar o botão, em vez
+ * de exibir um caminho que quebra ao ser clicado.
+ */
 router.get('/embedded-signup/config', auth, isEstabelecimento, (_req, res) => {
   if (!isWhatsAppConnectEnabled()) {
     return sendFeatureDisabled(res);
   }
-  return res.status(410).json({
-    ok: false,
-    deprecated: true,
-    error: 'wa_embedded_signup_deprecated',
-    message: 'O Embedded Signup não faz mais parte da experiência principal. Use a conexão manual assistida.',
-  });
+  try {
+    return res.json({ ok: true, available: true, config: getEmbeddedSignupPublicConfig() });
+  } catch (err) {
+    console.warn('[wa][embedded-signup][config]', err?.code || err?.message || err);
+    return res.status(503).json({
+      ok: false,
+      available: false,
+      error: err?.code || 'wa_embedded_signup_not_configured',
+      message: 'Conexão em um clique ainda não disponível. Use a conexão manual.',
+    });
+  }
 });
 
-router.post('/embedded-signup/exchange', auth, isEstabelecimento, (_req, res) => {
+/**
+ * Troca o `code` do Embedded Signup pelo token do tenant, assina o webhook da WABA dele e guarda a
+ * conta. O `session_info` vem do evento `WA_EMBEDDED_SIGNUP` que o SDK publica na janela.
+ */
+router.post('/embedded-signup/exchange', auth, isEstabelecimento, async (req, res) => {
   if (!isWhatsAppConnectEnabled()) {
     return sendFeatureDisabled(res);
   }
-  return res.status(410).json({
-    ok: false,
-    deprecated: true,
-    error: 'wa_embedded_signup_deprecated',
-    message: 'O Embedded Signup não faz mais parte da experiência principal. Use a conexão manual assistida.',
-  });
+  try {
+    const account = await completeEmbeddedSignup({
+      estabelecimentoId: req.user.id,
+      code: req.body?.code,
+      sessionInfo: req.body?.session_info || req.body?.sessionInfo || null,
+    });
+    return res.json({
+      ...buildAccountResponse({ account, connected: true, status: 'connected' }),
+      ...getWhatsAppConnectFeatureState(),
+    });
+  } catch (err) {
+    console.error('[wa][embedded-signup][exchange]', err?.code || err?.message || err);
+    return sendRouteError(
+      res,
+      err,
+      'wa_embedded_signup_failed',
+      'Não foi possível concluir a conexão com o WhatsApp Business.'
+    );
+  }
 });
 
 export default router;
