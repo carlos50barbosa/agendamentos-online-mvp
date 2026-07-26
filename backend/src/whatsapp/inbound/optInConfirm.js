@@ -37,6 +37,7 @@ import {
   CONSENT_AUDIENCE,
 } from '../../lib/whatsapp_consent.js';
 import { normalizePhoneBR } from '../../lib/phone_br.js';
+import { recordWhatsAppInbound } from '../../lib/whatsapp_contacts.js';
 
 /**
  * A palavra tem de ser INEQUÍVOCA e improvável de sair por acaso. "sim" e "ok" estão fora de
@@ -110,13 +111,24 @@ export async function handleInboundOptInConfirm({ phoneNumberId, value, message 
   const e164 = normalizePhoneBR(normalized.fromPhone);
   if (!e164) return { handled: false };
 
+  // A janela de 24h está aberta — ela acabou de escrever. Mas quem GRAVA isso é o fluxo principal
+  // do webhook, e este handler roda antes dele e devolve handled:true, cortando o resto. Sem este
+  // registro, sendWhatsAppSmart lê "última entrada: nunca", conclui que a janela está fechada e cai
+  // para template — e o template padrão pede 3 parâmetros que não temos, então nada era enviado.
+  await recordWhatsAppInbound({ recipientId: e164 }).catch((err) => {
+    console.warn('[wa/optin-confirm] falha ao registrar inbound', err?.message || err);
+  });
+
   const responder = async (texto) => {
     try {
       // Janela de 24h aberta (ela ACABOU de escrever): mensagem de sessão, sem template e sem
       // depender do próprio opt-in que estamos gravando.
+      // `template: null` é deliberado: se por algum motivo a janela não estiver aberta, o certo é
+      // NÃO enviar. Cair no template genérico manda a mensagem errada para quem pediu outra coisa.
       await sendWhatsAppSmart({
         to: e164,
         message: texto,
+        template: null,
         context: { kind: 'optin_confirm', phoneNumberId },
       });
     } catch (err) {

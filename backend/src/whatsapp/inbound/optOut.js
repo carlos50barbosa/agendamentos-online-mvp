@@ -11,6 +11,7 @@
 import { sendWhatsAppSmart } from '../../lib/notifications.js';
 import { normalizeInboundMessage } from './normalize.js';
 import { revokeWhatsAppConsent, OPTIN_SOURCES } from '../../lib/whatsapp_consent.js';
+import { recordWhatsAppInbound } from '../../lib/whatsapp_contacts.js';
 
 const OPT_OUT_CONFIRMATION =
   'Pronto: você não vai mais receber mensagens nossas no WhatsApp. ' +
@@ -136,6 +137,13 @@ export async function handleInboundOptOut({ phoneNumberId, value, message } = {}
     });
   }
 
+  // Mesmo motivo do AUTORIZO: este handler roda antes do fluxo que grava a entrada e devolve
+  // handled:true. Sem registrar aqui, a janela de 24h parece fechada e a confirmação de saída não
+  // sai — justamente a mensagem que a Meta espera que saia.
+  await recordWhatsAppInbound({ recipientId: normalized.fromPhone }).catch((err) => {
+    console.warn('[wa/optout] falha ao registrar inbound', err?.message || err);
+  });
+
   try {
     // Resposta dentro da janela de 24h (a pessoa acabou de escrever): é mensagem de sessão, não
     // precisa de template nem de opt-in — e negar a confirmação a quem pediu para sair seria
@@ -143,9 +151,13 @@ export async function handleInboundOptOut({ phoneNumberId, value, message } = {}
     //
     // UMA mensagem, e ponto. Quem não te conhece não quer conversa: quer sumir. A resposta genérica
     // do bot ("não entendi, escolha uma opção") é o que transforma um incomodado num denunciante.
+    //
+    // `template: null`: se a janela não estiver aberta, melhor não enviar do que disparar o
+    // template padrão de confirmação de agendamento para quem acabou de pedir para sair.
     await sendWhatsAppSmart({
       to: normalized.fromPhone,
       message: pessoaErrada ? WRONG_PERSON_REPLY : OPT_OUT_CONFIRMATION,
+      template: null,
       context: { kind: pessoaErrada ? 'wrong_person' : 'optout_confirm', phoneNumberId },
     });
   } catch (err) {
