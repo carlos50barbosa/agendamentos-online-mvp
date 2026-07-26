@@ -46,19 +46,19 @@ import { recordWhatsAppInbound } from '../../lib/whatsapp_contacts.js';
  */
 const PALAVRAS = new Set(['autorizo', 'autorizar', 'eu autorizo']);
 
-const JA_AUTORIZADO =
+export const JA_AUTORIZADO =
   'Você já estava autorizado — seus avisos no WhatsApp continuam ativos. ' +
   'Para sair a qualquer momento, é só responder PARAR.';
 
-const CONFIRMADO_ESTAB =
+export const CONFIRMADO_ESTAB =
   'Pronto! Seus avisos de agendamento estão ativos aqui no WhatsApp. ' +
   'Pode fechar a página — já está valendo. Para sair a qualquer momento, responda PARAR.';
 
-const CONFIRMADO_CLIENTE =
+export const CONFIRMADO_CLIENTE =
   'Pronto! Você vai receber a confirmação e os lembretes dos seus agendamentos aqui. ' +
   'Para sair a qualquer momento, responda PARAR.';
 
-const NAO_ENCONTRADO =
+export const NAO_ENCONTRADO =
   'Não encontramos este número em nenhum cadastro. Se você quer receber avisos de agendamento, ' +
   'faça o cadastro em agenda0.com.br e autorize por lá.';
 
@@ -100,10 +100,24 @@ async function resolveTitular(e164) {
 
 /**
  * Trata a mensagem se ela for uma confirmação de opt-in.
+ *
+ * `deps` existe para o teste: tudo aqui é I/O (banco e Meta), e o que precisa ser travado é a ORDEM
+ * das chamadas — registrar a entrada antes de responder. Sem essa costura não há como provar isso
+ * sem subir banco e WhatsApp.
+ *
  * @returns {Promise<{handled: boolean}>} handled=true quando o webhook não deve seguir adiante.
  */
-export async function handleInboundOptInConfirm({ phoneNumberId, value, message } = {}) {
-  const normalized = normalizeInboundMessage({ tenantId: 0, phoneNumberId, message, value });
+export async function handleInboundOptInConfirm({ phoneNumberId, value, message, deps = {} } = {}) {
+  const normalizeMessage = deps.normalizeInboundMessage || normalizeInboundMessage;
+  const recordInbound = deps.recordWhatsAppInbound || recordWhatsAppInbound;
+  const sendReply = deps.sendWhatsAppSmart || sendWhatsAppSmart;
+  const readConsent = deps.getWhatsAppConsent || getWhatsAppConsent;
+  const grantConsent = deps.grantWhatsAppConsent || grantWhatsAppConsent;
+  const findTitular = deps.resolveTitular || resolveTitular;
+  const db = deps.pool || pool;
+  const logger = deps.logger || console;
+
+  const normalized = normalizeMessage({ tenantId: 0, phoneNumberId, message, value });
   if (!normalized.fromPhone || !isOptInConfirmText(normalized.text)) {
     return { handled: false };
   }
@@ -115,8 +129,8 @@ export async function handleInboundOptInConfirm({ phoneNumberId, value, message 
   // do webhook, e este handler roda antes dele e devolve handled:true, cortando o resto. Sem este
   // registro, sendWhatsAppSmart lê "última entrada: nunca", conclui que a janela está fechada e cai
   // para template — e o template padrão pede 3 parâmetros que não temos, então nada era enviado.
-  await recordWhatsAppInbound({ recipientId: e164 }).catch((err) => {
-    console.warn('[wa/optin-confirm] falha ao registrar inbound', err?.message || err);
+  await recordInbound({ recipientId: e164 }).catch((err) => {
+    logger.warn('[wa/optin-confirm] falha ao registrar inbound', err?.message || err);
   });
 
   const responder = async (texto) => {
@@ -125,24 +139,24 @@ export async function handleInboundOptInConfirm({ phoneNumberId, value, message 
       // depender do próprio opt-in que estamos gravando.
       // `template: null` é deliberado: se por algum motivo a janela não estiver aberta, o certo é
       // NÃO enviar. Cair no template genérico manda a mensagem errada para quem pediu outra coisa.
-      await sendWhatsAppSmart({
+      await sendReply({
         to: e164,
         message: texto,
         template: null,
         context: { kind: 'optin_confirm', phoneNumberId },
       });
     } catch (err) {
-      console.warn('[wa/optin-confirm] falha ao responder', err?.message || err);
+      logger.warn('[wa/optin-confirm] falha ao responder', err?.message || err);
     }
   };
 
-  const atual = await getWhatsAppConsent(e164).catch(() => null);
+  const atual = await readConsent(e164).catch(() => null);
   if (atual?.evento === 'granted') {
     await responder(JA_AUTORIZADO);
     return { handled: true };
   }
 
-  const titular = await resolveTitular(e164);
+  const titular = await findTitular(e164);
   if (!titular) {
     // Número que não está em cadastro nenhum. NÃO grava consentimento: autorização sem vínculo não
     // serve para nada — não há a quem notificar — e gravá-la só encheria a tabela de prova com
@@ -154,7 +168,7 @@ export async function handleInboundOptInConfirm({ phoneNumberId, value, message 
   const ehEstab = titular.tipo === 'estabelecimento';
 
   try {
-    await grantWhatsAppConsent({
+    await grantConsent({
       phone: e164,
       usuarioId: titular.id,
       origem: OPTIN_SOURCES.WHATSAPP_AUTORIZO,
@@ -170,16 +184,16 @@ export async function handleInboundOptInConfirm({ phoneNumberId, value, message 
   } catch (err) {
     // Não confirma o que não gravou: dizer "pronto, está ativo" sem estar ativo é pior do que
     // não responder.
-    console.error('[wa/optin-confirm] falha ao gravar consentimento', err?.message || err);
+    logger.error('[wa/optin-confirm] falha ao gravar consentimento', err?.message || err);
     return { handled: false };
   }
 
   // Liga a preferência do dono junto — para ele, aceite e preferência são a mesma intenção.
   if (ehEstab) {
     try {
-      await pool.query('UPDATE usuarios SET notify_whatsapp_estab=1 WHERE id=?', [titular.id]);
+      await db.query('UPDATE usuarios SET notify_whatsapp_estab=1 WHERE id=?', [titular.id]);
     } catch (err) {
-      console.warn('[wa/optin-confirm] falha ao ligar notify_whatsapp_estab', err?.message || err);
+      logger.warn('[wa/optin-confirm] falha ao ligar notify_whatsapp_estab', err?.message || err);
     }
   }
 

@@ -13,7 +13,7 @@ import { normalizeInboundMessage } from './normalize.js';
 import { revokeWhatsAppConsent, OPTIN_SOURCES } from '../../lib/whatsapp_consent.js';
 import { recordWhatsAppInbound } from '../../lib/whatsapp_contacts.js';
 
-const OPT_OUT_CONFIRMATION =
+export const OPT_OUT_CONFIRMATION =
   'Pronto: você não vai mais receber mensagens nossas no WhatsApp. ' +
   'Seus agendamentos continuam valendo, e os avisos passam a chegar por e-mail. ' +
   'Se mudar de ideia, é só reativar na hora de agendar.';
@@ -22,7 +22,7 @@ const OPT_OUT_CONFIRMATION =
  * Resposta a quem diz "vocês erraram a pessoa". É outra coisa e pede outro tom: quem não te conhece
  * não quer instrução de descadastro — quer um pedido de desculpas e sumir.
  */
-const WRONG_PERSON_REPLY =
+export const WRONG_PERSON_REPLY =
   'Desculpe pelo incômodo! Alguém cadastrou este número por engano. ' +
   'Já removemos: você não vai receber mais nada da gente.';
 
@@ -106,10 +106,20 @@ export function isWrongPersonText(text) {
 
 /**
  * Trata a mensagem se ela for um pedido de saída.
+ *
+ * `deps` existe para o teste, pelo mesmo motivo do AUTORIZO: o que precisa ficar travado é a ORDEM
+ * (revogar → registrar a entrada → responder), e ordem de I/O não se verifica lendo o código.
+ *
  * @returns {Promise<{handled: boolean}>} handled=true quando o webhook não deve seguir adiante.
  */
-export async function handleInboundOptOut({ phoneNumberId, value, message } = {}) {
-  const normalized = normalizeInboundMessage({ tenantId: 0, phoneNumberId, message, value });
+export async function handleInboundOptOut({ phoneNumberId, value, message, deps = {} } = {}) {
+  const normalizeMessage = deps.normalizeInboundMessage || normalizeInboundMessage;
+  const recordInbound = deps.recordWhatsAppInbound || recordWhatsAppInbound;
+  const sendReply = deps.sendWhatsAppSmart || sendWhatsAppSmart;
+  const revokeConsent = deps.revokeWhatsAppConsent || revokeWhatsAppConsent;
+  const logger = deps.logger || console;
+
+  const normalized = normalizeMessage({ tenantId: 0, phoneNumberId, message, value });
   if (!normalized.fromPhone) return { handled: false };
 
   const pediuParaSair = isOptOutText(normalized.text);
@@ -117,14 +127,14 @@ export async function handleInboundOptOut({ phoneNumberId, value, message } = {}
   if (!pediuParaSair && !pessoaErrada) return { handled: false };
 
   try {
-    await revokeWhatsAppConsent({
+    await revokeConsent({
       phone: normalized.fromPhone,
       origem: OPTIN_SOURCES.WHATSAPP_STOP,
     });
   } catch (err) {
     // Se a revogação falhar, NÃO confirmamos — dizer "pronto, você saiu" sem ter saído é pior do
     // que não responder. O erro sobe para o log e a mensagem segue o fluxo normal.
-    console.error('[wa/optout] falha ao revogar consentimento', err?.message || err);
+    logger.error('[wa/optout] falha ao revogar consentimento', err?.message || err);
     return { handled: false };
   }
 
@@ -132,7 +142,7 @@ export async function handleInboundOptOut({ phoneNumberId, value, message } = {}
     // Vale um log alto: "vocês erraram a pessoa" quase sempre significa que ALGUÉM CADASTROU o
     // número de um terceiro. O número saiu, mas o cadastro que o inseriu continua lá — e vai
     // fazer de novo. Isto é o rastro para achá-lo.
-    console.error('[wa/optout][pessoa-errada] destinatário diz não ter vínculo — investigar o cadastro', {
+    logger.error('[wa/optout][pessoa-errada] destinatário diz não ter vínculo — investigar o cadastro', {
       texto: normalized.text?.slice(0, 120),
     });
   }
@@ -140,8 +150,8 @@ export async function handleInboundOptOut({ phoneNumberId, value, message } = {}
   // Mesmo motivo do AUTORIZO: este handler roda antes do fluxo que grava a entrada e devolve
   // handled:true. Sem registrar aqui, a janela de 24h parece fechada e a confirmação de saída não
   // sai — justamente a mensagem que a Meta espera que saia.
-  await recordWhatsAppInbound({ recipientId: normalized.fromPhone }).catch((err) => {
-    console.warn('[wa/optout] falha ao registrar inbound', err?.message || err);
+  await recordInbound({ recipientId: normalized.fromPhone }).catch((err) => {
+    logger.warn('[wa/optout] falha ao registrar inbound', err?.message || err);
   });
 
   try {
@@ -154,7 +164,7 @@ export async function handleInboundOptOut({ phoneNumberId, value, message } = {}
     //
     // `template: null`: se a janela não estiver aberta, melhor não enviar do que disparar o
     // template padrão de confirmação de agendamento para quem acabou de pedir para sair.
-    await sendWhatsAppSmart({
+    await sendReply({
       to: normalized.fromPhone,
       message: pessoaErrada ? WRONG_PERSON_REPLY : OPT_OUT_CONFIRMATION,
       template: null,
@@ -162,7 +172,7 @@ export async function handleInboundOptOut({ phoneNumberId, value, message } = {}
     });
   } catch (err) {
     // A saída já está registrada; falhar em confirmar não a desfaz.
-    console.warn('[wa/optout] falha ao confirmar saída', err?.message || err);
+    logger.warn('[wa/optout] falha ao confirmar saída', err?.message || err);
   }
 
   return { handled: true };
