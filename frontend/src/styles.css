@@ -4186,13 +4186,6 @@ button.danger:disabled,
   background:var(--surface);
   border:1px solid var(--border);
 }
-.pix-checkout__status-code{
-  font-size:11px;
-  letter-spacing:0.04em;
-  text-transform:uppercase;
-  color:var(--muted);
-  white-space:nowrap;
-}
 .pix-checkout__status--success{
   background:var(--success-bg);
   border-color:var(--success-border);
@@ -4208,11 +4201,6 @@ button.danger:disabled,
   border-color:var(--danger-border);
   color:var(--danger-text);
 }
-.pix-checkout__status--neutral{
-  background:var(--surface-soft);
-  border-color:var(--border);
-  color:var(--text);
-}
 .pix-checkout__status--success .pix-checkout__status-icon{
   background:var(--success-bg);
   border-color:var(--success-border);
@@ -4227,36 +4215,6 @@ button.danger:disabled,
   background:var(--danger-bg);
   border-color:var(--danger-border);
   color:var(--danger-text);
-}
-.pix-checkout__topup-status{
-  display:grid;
-  gap:6px;
-  padding:10px;
-  margin-bottom:10px;
-  text-align:left;
-}
-.pix-checkout__topup-status.is-success{
-  background:var(--success-bg);
-  border-color:var(--success-border);
-}
-.pix-checkout__topup-status.is-pending{
-  background:var(--surface-soft);
-}
-.pix-checkout__topup-icon{
-  width:20px;
-  height:20px;
-  border-radius:999px;
-  display:inline-flex;
-  align-items:center;
-  justify-content:center;
-  font-size:12px;
-  font-weight:700;
-  background:var(--success-bg);
-  color:var(--success-text);
-  border:1px solid var(--success-border);
-}
-.pix-checkout__pack{
-  text-align:left;
 }
 .pix-checkout__amount{
   background:var(--info-bg);
