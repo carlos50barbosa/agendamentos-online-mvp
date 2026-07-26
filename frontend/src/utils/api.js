@@ -435,14 +435,10 @@ export const Api = {
       idempotencyKey: opts?.idempotencyKey,
     }),
 
-  billingWhatsAppPacks: () => req('/billing/whatsapp/packs'),
-
+  // A venda de pacotes de mensagem saiu em 26/07/2026: os Tech Provider Terms da Meta proíbem
+  // cobrar pelo uso da plataforma dela. A CARTEIRA fica — é o medidor da franquia do plano, não
+  // uma loja.
   billingWhatsAppWallet: () => req('/billing/whatsapp/wallet'),
-
-  billingWhatsAppPix: (payload) => req('/billing/whatsapp/pix', { method: 'POST', body: JSON.stringify(payload || {}) }),
-
-  billingWhatsAppPixStatus: (paymentId) =>
-    req(`/billing/whatsapp/pix/status${toQuery({ payment_id: paymentId })}`),
   getPaymentStatus: (paymentId, opts = {}) =>
     req(`/payments/${paymentId}/status`, {
       headers: opts?.depositToken

@@ -4484,12 +4484,6 @@ router.get('/subscription', auth, isEstabelecimento, async (req, res) => {
       console.warn('[billing/subscription][wallet]', err?.message || err)
     }
 
-    let whatsappPacks = []
-    try {
-      whatsappPacks = await listActiveWhatsAppPacks()
-    } catch (err) {
-      console.warn('[billing/subscription][packs]', err?.message || err)
-    }
 
     const events = enrichSubscriptionEvents(
       await listSubscriptionEventsForEstabelecimento(req.user.id, { limit: 30 })
@@ -4525,7 +4519,6 @@ router.get('/subscription', auth, isEstabelecimento, async (req, res) => {
 
     return res.json({
       plan: serializedPlan,
-      whatsapp_packages: (whatsappPacks.length ? whatsappPacks : WHATSAPP_TOPUP_PACKAGES).map(serializeWhatsAppPack).filter(Boolean),
       subscription: effective
         ? {
             ...serializeSubscription(effective),
@@ -5155,21 +5148,15 @@ router.post('/card/recover', auth, isEstabelecimento, async (req, res) => {
   }
 })
 
-router.get('/whatsapp/packs', auth, isEstabelecimento, async (_req, res) => {
-  try {
-    let packs = []
-    try {
-      packs = await listActiveWhatsAppPacks()
-    } catch (err) {
-      console.warn('[billing/whatsapp/packs] fallback to static packages', err?.message || err)
-    }
-    const responsePacks = (packs.length ? packs : WHATSAPP_TOPUP_PACKAGES).map(serializeWhatsAppPack).filter(Boolean)
-    return res.json({ ok: true, packs: responsePacks })
-  } catch (err) {
-    console.error('GET /billing/whatsapp/packs', err)
-    return res.status(500).json({ error: 'packs_fetch_failed' })
-  }
-})
+// A VENDA de pacotes de mensagem saiu em 26/07/2026 (rotas /whatsapp/packs e /whatsapp/pix).
+// Motivo: os Tech Provider Terms da Meta proíbem "charging a fee for your Customers' use of the
+// WhatsApp Business Platform" (§5), e a plataforma vai virar Tech Provider.
+//
+// A CARTEIRA abaixo fica: ela é o medidor da franquia do plano, não uma loja. Cada mensagem pelo
+// número global custa dinheiro com a Meta, e sem limite a exposição seria ilimitada.
+//
+// O caminho que CREDITA um pagamento (whatsapp_wallet.creditWhatsAppTopup e o webhook) continua
+// existindo, dormente, para não criar a possibilidade de dinheiro entrar sem crédito.
 
 // Wallet WhatsApp (saldo de mensagens por estabelecimento)
 router.get('/whatsapp/wallet', auth, isEstabelecimento, async (req, res) => {
@@ -5184,22 +5171,10 @@ router.get('/whatsapp/wallet', auth, isEstabelecimento, async (req, res) => {
     const planContext = await getPlanContext(req.user.id);
     const wallet = await getWhatsAppWalletSnapshot(req.user.id, { planContext });
 
-    let packs = [];
-    try {
-      packs = await listActiveWhatsAppPacks();
-    } catch (err) {
-      console.warn('[billing/whatsapp/wallet][packs]', err?.message || err);
-    }
-
-    const history = await listWhatsAppTopups(req.user.id, { limit: 5 }).catch(() => []);
-
+    // Só o medidor: saldo e franquia. `packages` e `history` de recarga saíram com a loja.
     return res.json({
       ok: true,
       wallet,
-      packages: (packs.length ? packs : WHATSAPP_TOPUP_PACKAGES)
-        .map(serializeWhatsAppPack)
-        .filter(Boolean),
-      history: history.map(serializeTopupHistory).filter(Boolean),
     });
   } catch (err) {
     console.error('GET /billing/whatsapp/wallet', err);
@@ -5207,116 +5182,6 @@ router.get('/whatsapp/wallet', auth, isEstabelecimento, async (req, res) => {
   }
 });
 
-router.get('/whatsapp/pix/status', auth, isEstabelecimento, async (req, res) => {
-  res.set('Cache-Control', 'no-store');
-  try {
-    const estabelecimentoId = req.user.id;
-    const paymentId = String(req.query.payment_id || '').trim();
-    if (!paymentId) {
-      return res.status(400).json({ ok: false, error: 'missing_payment_id' });
-    }
-
-    const [rows] = await pool.query(
-      `SELECT id, created_at
-         FROM whatsapp_wallet_transactions
-        WHERE estabelecimento_id = ?
-          AND payment_id = ?
-          AND kind = 'topup_credit'
-        ORDER BY id DESC
-        LIMIT 1`,
-      [estabelecimentoId, paymentId]
-    );
-
-    const credited = Array.isArray(rows) && rows.length > 0;
-    const creditedAt = credited && rows[0]?.created_at ? new Date(rows[0].created_at).toISOString() : null;
-    return res.json({ ok: true, credited, credited_at: creditedAt });
-  } catch (err) {
-    console.error('GET /billing/whatsapp/pix/status', err);
-    return res.status(500).json({ ok: false, error: 'status_failed' });
-  }
-});
-
-// Checkout PIX para pacote extra de mensagens WhatsApp
-router.post('/whatsapp/pix', auth, isEstabelecimento, async (req, res) => {
-  try {
-    const { messages, pack_code, pack_id, packCode, packId } = req.body || {}
-    const packCodeInput = (pack_code || packCode || '').trim() || null
-    const packIdInput = pack_id ?? packId ?? null
-
-    if (!packCodeInput) {
-      return res.status(400).json({ error: 'pack_required' })
-    }
-
-    let availablePacks = []
-    try {
-      availablePacks = await listActiveWhatsAppPacks()
-    } catch (err) {
-      console.warn('[billing/whatsapp/pix][packs]', err?.message || err)
-    }
-
-    let selectedPack = null
-    if (packIdInput != null || packCodeInput) {
-      selectedPack = await findWhatsAppPack({ id: packIdInput, code: packCodeInput, activeOnly: true })
-      if (!selectedPack) return res.status(404).json({ error: 'pack_not_found' })
-    } else if (messages && availablePacks.length) {
-      selectedPack = availablePacks.find((p) => Number(p.waMessages || 0) === Number(messages || 0)) || null
-    }
-
-    if (!selectedPack && !messages) {
-      return res.status(400).json({ error: 'invalid_pack', message: 'Pacote n\u00e3o informado.' })
-    }
-
-    const topupArgs = {
-      estabelecimento: { id: req.user.id, email: req.user.email },
-      messages: selectedPack?.waMessages ?? messages,
-      planHint: req.user.plan || 'starter',
-      pack: selectedPack,
-      availablePacks: availablePacks.length ? availablePacks : null,
-    }
-    const result = resolveBillingProvider() === 'asaas'
-      ? await createAsaasPixTopupCheckout(topupArgs)
-      : await createMercadoPagoPixTopupCheckout(topupArgs)
-
-    const packResponse =
-      serializeWhatsAppPack(selectedPack) ||
-      (result.package
-        ? {
-            code: result.package.code || null,
-            name: result.package.name || null,
-            price_cents: result.package.priceCents,
-            wa_messages: result.package.messages,
-          }
-        : null)
-
-    console.info('[billing/whatsapp/pix/create]', {
-      user_id: req.user?.id,
-      user_email: req.user?.email,
-      estab_id: req.user?.id,
-      pack_code: selectedPack?.code || packCodeInput || null,
-      pack_id: selectedPack?.id ?? packIdInput ?? null,
-      messages: result?.pix?.messages || messages || selectedPack?.waMessages,
-      payment_id: result?.pix?.payment_id || result?.subscription?.gateway_preference_id || null,
-    })
-
-    return res.json({
-      ok: true,
-      init_point: result.initPoint,
-      subscription: serializeSubscription(result.subscription),
-      pix: result.pix,
-      pack: packResponse,
-      package: result.package ? { messages: result.package.messages, price_cents: result.package.priceCents } : null,
-    })
-  } catch (error) {
-    const responseData = error?.response?.data
-    const cause = error?.cause || responseData || null
-    const detail =
-      (responseData && (responseData.message || responseData.error || responseData.error_message)) ||
-      (Array.isArray(error?.cause) && (error.cause[0]?.description || error.cause[0]?.error)) ||
-      error?.message || 'Falha ao criar cobrança PIX'
-    console.error('POST /billing/whatsapp/pix', detail, cause || error)
-    return res.status(400).json({ error: 'pix_failed', message: detail, cause })
-  }
-})
 
 router.post('/webhook', async (req, res) => {
   const event = req.body || {}

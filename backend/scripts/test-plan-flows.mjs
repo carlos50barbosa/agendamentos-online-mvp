@@ -1367,7 +1367,7 @@ const createServiceGuard = getRouteGuard(servicosRouter, '/', 'post')
 const slotToggleGuard = getRouteGuard(slotsRouter, '/toggle', 'post')
 const relatorioHandler = getRouteHandler(relatoriosRouter, '/estabelecimento', 'get')
 const waWalletHandler = getRouteHandler(billingRouter, '/whatsapp/wallet', 'get')
-const waPacksHandler = getRouteHandler(billingRouter, '/whatsapp/packs', 'get')
+
 
 const results = []
 
@@ -1680,62 +1680,6 @@ assert.equal(waNoBalance.reason, 'insufficient_balance')
 const agNoBalance = state.agendamentos.find((a) => a.id === 901)
 assert.equal(agNoBalance?.wa_messages_sent, 0)
 assert.ok(agNoBalance)
-
-// 18) listar pacotes extras de WhatsApp
-seedScenario()
-const res15 = await callHandler(waPacksHandler, {
-  user: { id: 1, tipo: 'estabelecimento' }
-})
-results.push({ name: 'listar pacotes whatsapp', response: res15 })
-assert.equal(res15.status, 200)
-assert.ok(Array.isArray(res15.body?.packs))
-assert.ok(res15.body.packs.length >= 1)
-assert.equal(res15.body.packs[0]?.code, state.billingAddonPacks[0].code)
-
-// 19) cobranca PIX do pack e credito apos webhook
-seedScenario({
-  user: { plan: 'starter', plan_status: 'active', email: 'pix@teste.com' },
-})
-const targetPack = state.billingAddonPacks[0]
-const beforePixWallet = await getWhatsAppWalletSnapshot(1)
-results.push({ name: 'wallet inicial pix pack', response: { status: 200, body: beforePixWallet } })
-assert.equal(beforePixWallet.extra_balance, 0)
-
-const pixPack = await createMercadoPagoPixTopupCheckout({
-  estabelecimento: { id: 1, email: 'pix@teste.com' },
-  pack: targetPack,
-  planHint: 'starter',
-  availablePacks: state.billingAddonPacks,
-})
-results.push({ name: 'criar cobranca pix pack', response: { status: 200, body: pixPack.pix } })
-assert.ok(pixPack.pix?.payment_id)
-assert.ok(pixPack.pix?.qr_code)
-assert.equal(pixPack.pix?.pack_code, targetPack.code)
-pixPack.payment.status = 'approved'
-
-const syncPixA = await syncMercadoPagoPayment(pixPack.payment.id, { type: 'payment' })
-results.push({ name: 'webhook aprovado pack', response: { status: syncPixA?.ok ? 200 : 400 } })
-assert.equal(syncPixA.ok, true)
-
-const afterPixWallet = await getWhatsAppWalletSnapshot(1)
-assert.equal(afterPixWallet.extra_balance, targetPack.wa_messages)
-const txCount = state.whatsappTransactions.length
-
-const syncPixB = await syncMercadoPagoPayment(pixPack.payment.id, { type: 'payment' })
-results.push({ name: 'webhook idempotente pack', response: { status: syncPixB?.ok ? 200 : 400, body: syncPixB } })
-const afterRepeatWallet = await getWhatsAppWalletSnapshot(1)
-assert.equal(afterRepeatWallet.extra_balance, targetPack.wa_messages)
-assert.equal(state.whatsappTransactions.length, txCount)
-
-const walletRes = await callHandler(waWalletHandler, {
-  user: { id: 1, tipo: 'estabelecimento' }
-})
-results.push({ name: 'wallet com historico', response: walletRes })
-assert.equal(walletRes.status, 200)
-assert.equal(walletRes.body?.wallet?.extra_balance, targetPack.wa_messages)
-assert.ok(Array.isArray(walletRes.body?.history))
-assert.equal(walletRes.body.history?.[0]?.payment_id, pixPack.pix.payment_id)
-assert.equal(walletRes.body.history?.[0]?.pack_code, targetPack.code)
 
 console.log('Testes executados com sucesso:')
 for (const { name, response } of results) {

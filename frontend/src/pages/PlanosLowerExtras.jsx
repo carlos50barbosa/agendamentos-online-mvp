@@ -37,7 +37,7 @@ const FAQ = [
   },
   {
     q: 'E se as mensagens de WhatsApp acabarem no meio do mês?',
-    a: 'Nenhum agendamento deixa de ser confirmado: os avisos continuam por e-mail e no painel. A franquia renova no ciclo seguinte, e dá para comprar um pacote extra por PIX a qualquer momento.',
+    a: 'Nenhum agendamento deixa de ser confirmado: os avisos continuam por e-mail e no painel. A franquia renova no ciclo seguinte.',
   },
   {
     q: 'O sinal cai na minha conta?',

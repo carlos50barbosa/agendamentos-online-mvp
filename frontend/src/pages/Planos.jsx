@@ -95,7 +95,6 @@ const INCLUDED = [
   'Cadastro de clientes com segmentos, quem sumiu e exportação',
   'Agenda no celular, no tablet e no computador',
   'Relatórios do dia a dia e controle de status',
-  'Pacotes extras de WhatsApp por PIX, quando precisar',
 ];
 
 export default function Planos() {
@@ -359,8 +358,7 @@ export default function Planos() {
           {/* Informação que decide a compra não pode morar num tooltip. */}
           <p className="lp-fineprint">
             Cada agendamento usa até 5 mensagens (confirmação + lembretes). A franquia renova
-            todo mês. Se acabar, os avisos continuam por e-mail e no painel — e dá para comprar
-            pacotes extras por PIX.
+            todo mês. Se acabar, os avisos continuam por e-mail e no painel.
           </p>
         </div>
       </section>
