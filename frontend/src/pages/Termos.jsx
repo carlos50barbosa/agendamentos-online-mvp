@@ -89,8 +89,22 @@ const sections = [
     ],
   },
   {
+    id: 'whatsapp',
+    title: '10. Conexão do WhatsApp Business',
+    paragraphs: [
+      'Você conecta a sua própria conta do WhatsApp Business para avisar seus clientes. Ao conectar, aceita os Termos da WhatsApp Business Platform e as proibições abaixo.',
+      'Para enviar por você, a plataforma guarda um acesso à sua conta e passa a receber as mensagens que seus clientes enviam a esse número.',
+      'É expressamente proibido revender o acesso à WhatsApp Business Platform ou cobrar de terceiros pelo uso da sua conexão.',
+      'É expressamente proibido permitir que terceiros, fora desta plataforma, integrem, acessem ou usem o WhatsApp pela sua conexão.',
+      'É expressamente proibido usar nome ou marca da Meta — WhatsApp, Instagram, Facebook — de qualquer forma, inclusive no nome de exibição e no perfil.',
+      'Citar o canal, como "agende pelo WhatsApp", não é uso de marca e continua permitido.',
+      'A Meta pode bloquear a sua conexão a qualquer momento, mesmo sem falta sua. Nesse caso os lembretes saem pelo número da plataforma ou param.',
+      'Perante a Meta, você e a plataforma respondem juntos pelo uso da sua conexão. Dúvidas sobre o WhatsApp são com a plataforma, não com a Meta.',
+    ],
+  },
+  {
     id: 'propriedade',
-    title: '10. Propriedade intelectual',
+    title: '11. Propriedade intelectual',
     paragraphs: [
       'Todos os direitos sobre marca, layout, código, textos, fluxos e demais elementos da plataforma pertencem ao Agendamentos Online.',
       'É vedado copiar, modificar, distribuir ou comercializar qualquer parte da plataforma sem autorização formal.',
@@ -99,7 +113,7 @@ const sections = [
   },
   {
     id: 'dados',
-    title: '11. Privacidade e proteção de dados',
+    title: '12. Privacidade e proteção de dados',
     paragraphs: [
       'O tratamento de dados pessoais segue a Política de Privacidade e a legislação aplicável, em especial a Lei Geral de Proteção de Dados Pessoais (Lei nº 13.709/2018).',
       'Ao aceitar estes Termos, você também concorda com as práticas de tratamento descritas na Política de Privacidade.',
@@ -107,7 +121,7 @@ const sections = [
   },
   {
     id: 'suporte',
-    title: '12. Suporte e canais de contato',
+    title: '13. Suporte e canais de contato',
     paragraphs: [
       'O suporte é prestado por canais oficiais indicados na página de Ajuda e pode variar conforme o plano contratado.',
       'Demandas técnicas ou comerciais serão respondidas em prazo razoável, observando os horários de atendimento publicados.',
@@ -115,7 +129,7 @@ const sections = [
   },
   {
     id: 'suspensao',
-    title: '13. Suspensão e encerramento',
+    title: '14. Suspensão e encerramento',
     paragraphs: [
       'A plataforma pode suspender ou encerrar contas em caso de violação dos Termos, uso irregular, risco a terceiros ou ordem de autoridade competente.',
       'O usuário pode solicitar o encerramento da conta a qualquer momento. Alguns dados poderão ser mantidos para cumprimento de obrigações legais.',
@@ -123,7 +137,7 @@ const sections = [
   },
   {
     id: 'responsabilidade',
-    title: '14. Limitação de responsabilidade',
+    title: '15. Limitação de responsabilidade',
     paragraphs: [
       'A plataforma atua como facilitadora de agendamentos entre estabelecimentos e clientes, não sendo responsável pela execução dos serviços ofertados.',
       'Exceto quando houver dolo ou culpa comprovada, a plataforma não responde por lucros cessantes, danos indiretos ou prejuízos decorrentes de indisponibilidade temporária do sistema.',
@@ -132,7 +146,7 @@ const sections = [
   },
   {
     id: 'atualizacoes',
-    title: '15. Atualizações destes Termos',
+    title: '16. Atualizações destes Termos',
     paragraphs: [
       'Os Termos podem ser atualizados para refletir a evolução da plataforma, exigências legais ou melhorias de processos.',
       'Mudanças relevantes serão comunicadas por e-mail, notificações no aplicativo ou banner informativo. O uso contínuo após a publicação implica concordância.',
@@ -141,7 +155,7 @@ const sections = [
   },
   {
     id: 'lei',
-    title: '16. Lei aplicável e foro',
+    title: '17. Lei aplicável e foro',
     paragraphs: [
       'Estes Termos são regidos pela legislação brasileira.',
       'Quaisquer controvérsias serão submetidas ao foro da comarca de São Paulo, Estado de São Paulo, salvo disposição legal cogente em sentido diverso.',
@@ -176,7 +190,7 @@ export default function Termos() {
       ))}
 
       <section className="card legal-section">
-        <h2>17. Contato</h2>
+        <h2>18. Contato</h2>
         <p>
           Em caso de dúvidas sobre estes Termos, escreva para{' '}
           <a href="mailto:contato@agenda0.com.br">contato@agenda0.com.br</a>.

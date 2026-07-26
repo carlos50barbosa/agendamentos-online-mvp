@@ -2,8 +2,12 @@
 
 export const LEGAL_METADATA = Object.freeze({
   terms: {
-    version: '2025-10-26',
-    updatedAt: '26 de outubro de 2025',
+    // 2026-07-26: nova seção 10 (Conexão do WhatsApp Business). Repassa ao estabelecimento as
+    // proibições que a Meta exige no contrato com o cliente (Tech Provider Terms, §5).
+    // ATENÇÃO: subir a versão NÃO coleta reaceite — `termsVersion` só é enviado no cadastro.
+    // Quem já tem conta segue vinculado ao texto anterior até aceitar em algum fluxo.
+    version: '2026-07-26',
+    updatedAt: '26 de julho de 2026',
     title: 'Termos de Uso',
   },
   privacy: {
