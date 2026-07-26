@@ -16,6 +16,10 @@ const ACCOUNT_FIELDS = [
   'last_sync_at',
   'last_error',
   'metadata_json',
+  // Aceite dos Termos no ato da conexão (Tech Provider Terms, §5).
+  'terms_version',
+  'terms_accepted_at',
+  'terms_accepted_ip',
 ];
 
 const DEFAULT_ACCOUNT_VALUES = Object.freeze({
@@ -34,6 +38,9 @@ const DEFAULT_ACCOUNT_VALUES = Object.freeze({
   last_sync_at: null,
   last_error: null,
   metadata_json: null,
+  terms_version: null,
+  terms_accepted_at: null,
+  terms_accepted_ip: null,
 });
 
 const normalizeId = (value) => {
@@ -167,6 +174,9 @@ export async function upsertWaAccount(estabelecimentoId, payload = {}) {
                 last_sync_at=?,
                 last_error=?,
                 metadata_json=?,
+                terms_version=?,
+                terms_accepted_at=?,
+                terms_accepted_ip=?,
                 updated_at=NOW()
           WHERE estabelecimento_id=?`,
         [
@@ -185,6 +195,9 @@ export async function upsertWaAccount(estabelecimentoId, payload = {}) {
           next.last_sync_at,
           next.last_error,
           metadataJson,
+          next.terms_version,
+          next.terms_accepted_at,
+          next.terms_accepted_ip,
           id,
         ]
       );
@@ -207,9 +220,12 @@ export async function upsertWaAccount(estabelecimentoId, payload = {}) {
           last_sync_at,
           last_error,
           metadata_json,
+          terms_version,
+          terms_accepted_at,
+          terms_accepted_ip,
           created_at,
           updated_at
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NOW(),NOW())`,
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NOW(),NOW())`,
         [
           id,
           next.provider,
@@ -227,6 +243,9 @@ export async function upsertWaAccount(estabelecimentoId, payload = {}) {
           next.last_sync_at,
           next.last_error,
           metadataJson,
+          next.terms_version,
+          next.terms_accepted_at,
+          next.terms_accepted_ip,
         ]
       );
     }

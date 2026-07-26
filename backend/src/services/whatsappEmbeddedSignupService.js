@@ -305,6 +305,8 @@ export async function completeEmbeddedSignup({
   estabelecimentoId,
   code,
   sessionInfo,
+  termsVersion,
+  termsIp,
 }) {
   ensureEmbeddedSignupConfigured();
 
@@ -315,6 +317,19 @@ export async function completeEmbeddedSignup({
   }
   if (!signupCode) {
     throw createHttpError(400, 'wa_embedded_signup_code_missing', 'Código do Embedded Signup ausente.');
+  }
+
+  // O aceite é condição da conexão, não detalhe de interface. A Meta exige que as proibições estejam
+  // no contrato com o cliente (Tech Provider Terms, §5) — conectar sem aceite deixaria a plataforma
+  // em violação já no primeiro estabelecimento. Barrado no servidor: caixa marcada no navegador não
+  // é prova, e sem esta checagem bastaria chamar a rota direto para pular o aceite.
+  const versaoAceita = String(termsVersion || '').trim();
+  if (!versaoAceita) {
+    throw createHttpError(
+      400,
+      'wa_embedded_signup_terms_required',
+      'É preciso aceitar os Termos de Uso, na parte da conexão do WhatsApp, para continuar.'
+    );
   }
 
   const normalizedSession = normalizeEmbeddedSignupSessionInfo(sessionInfo);
@@ -547,6 +562,10 @@ export async function completeEmbeddedSignup({
     business_id: resolvedAssets.businessId,
     access_token_enc: encryptedToken.enc,
     token_last4: encryptedToken.last4,
+    // A prova do aceite fica junto da conexão que ela autoriza.
+    terms_version: versaoAceita,
+    terms_accepted_at: new Date(),
+    terms_accepted_ip: termsIp || null,
     status: 'connected',
     connected_at: new Date(),
     disconnected_at: null,

@@ -14,7 +14,9 @@
 //
 // O listener é registrado ANTES de abrir o popup: registrar depois é uma corrida perdida.
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { Api } from '../../utils/api';
+import { LEGAL_METADATA } from '../../utils/legal.js';
 
 const FB_ORIGINS = ['https://www.facebook.com', 'https://web.facebook.com'];
 const SDK_SCRIPT_ID = 'facebook-jssdk';
@@ -59,6 +61,8 @@ export default function WhatsAppEmbeddedSignup({ onConnected, disabled = false }
   const [carregandoConfig, setCarregandoConfig] = useState(true);
   const [conectando, setConectando] = useState(false);
   const [erro, setErro] = useState('');
+  // Nasce DESMARCADA, pela mesma razão do opt-in de WhatsApp: caixa pré-marcada não é aceite.
+  const [aceitou, setAceitou] = useState(false);
   const sessionInfoRef = useRef(null);
   const montadoRef = useRef(true);
 
@@ -121,6 +125,7 @@ export default function WhatsAppEmbeddedSignup({ onConnected, disabled = false }
       const resp = await Api.waEmbeddedSignupExchange({
         code,
         session_info: sessionInfoRef.current || null,
+        terms_version: LEGAL_METADATA.terms?.version,
       });
       sessionInfoRef.current = null;
       if (typeof onConnected === 'function') await onConnected(resp);
@@ -132,7 +137,7 @@ export default function WhatsAppEmbeddedSignup({ onConnected, disabled = false }
   }, [onConnected]);
 
   const conectar = useCallback(async () => {
-    if (!config || conectando || disabled) return;
+    if (!config || conectando || disabled || !aceitou) return;
     setErro('');
     setConectando(true);
     sessionInfoRef.current = null;
@@ -177,11 +182,30 @@ export default function WhatsAppEmbeddedSignup({ onConnected, disabled = false }
         </p>
       </div>
 
+      {/* O aceite fica ANTES do botão e o desabilita: a Meta exige que as proibições estejam no
+          contrato com o estabelecimento, e subir a versão dos Termos não coleta aceite de quem já
+          tem conta. Aqui é o momento em que a obrigação nasce, então é aqui que se coleta. */}
+      <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 14 }}>
+        <input
+          type="checkbox"
+          checked={aceitou}
+          onChange={(e) => setAceitou(e.target.checked)}
+          style={{ marginTop: 3 }}
+        />
+        <span>
+          Li e aceito as regras de uso do WhatsApp descritas nos{' '}
+          <Link to="/termos#whatsapp" target="_blank" rel="noopener noreferrer">
+            Termos de Uso
+          </Link>
+          {LEGAL_METADATA.terms?.version ? ` (versão ${LEGAL_METADATA.terms.version})` : ''}.
+        </span>
+      </label>
+
       <button
         type="button"
         className="btn btn--primary"
         onClick={conectar}
-        disabled={conectando || disabled}
+        disabled={conectando || disabled || !aceitou}
         style={{ justifySelf: 'start' }}
       >
         {conectando ? <span className="spinner" /> : 'Conectar com Facebook'}

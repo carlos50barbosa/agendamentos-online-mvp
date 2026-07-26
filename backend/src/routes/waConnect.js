@@ -264,6 +264,10 @@ router.post('/embedded-signup/exchange', auth, isEstabelecimento, async (req, re
       estabelecimentoId: req.user.id,
       code: req.body?.code,
       sessionInfo: req.body?.session_info || req.body?.sessionInfo || null,
+      // A versão vem do cliente porque é a que ele viu na tela; o IP vem de nós, porque IP
+      // informado pelo próprio aceitante não prova nada.
+      termsVersion: req.body?.terms_version || req.body?.termsVersion,
+      termsIp: req.ip || null,
     });
     return res.json({
       ...buildAccountResponse({ account, connected: true, status: 'connected' }),
