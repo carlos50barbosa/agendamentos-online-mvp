@@ -7,7 +7,11 @@ import { getSession, saveSession, touchLastInteraction } from '../bot/storage/se
 import { logConversation } from '../bot/logging/conversationLogger.js';
 import { resolveReplyMode } from '../bot/engine/replyPolicy.js';
 import { detectIntent, normalizeIntentText } from '../bot/engine/intents.js';
-import { normalizeInboundMessage, parseWebhookPayload } from '../whatsapp/inbound/normalize.js';
+import {
+  normalizeInboundMessage,
+  parseWebhookPayload,
+  summarizeChangeForLog,
+} from '../whatsapp/inbound/normalize.js';
 import { handleInstitutionalInboundAutoReply } from '../whatsapp/inbound/institutionalAutoReply.js';
 import { handleInboundOptOut } from '../whatsapp/inbound/optOut.js';
 import { handleInboundOptInConfirm } from '../whatsapp/inbound/optInConfirm.js';
@@ -730,6 +734,17 @@ async function processInboundMessage({ account, phoneNumberId, value, message })
 async function processWebhookPayload(payload) {
   const parsed = parseWebhookPayload(payload);
   for (const block of parsed) {
+    // Registra TODO evento antes de qualquer filtro. Sem isto, um `account_update` — que não traz
+    // phone_number_id e por isso cai no `continue` logo abaixo — entrava, era respondido com 200 e
+    // sumia. É por esse canal que chega mudança de status da conta (restrição, banimento, decisão
+    // de análise), então perdê-lo é ficar cego justamente quando importa.
+    const resumo = summarizeChangeForLog({ field: block.field, value: block.value });
+    if (block.field && block.field !== 'messages') {
+      console.warn('[wa/webhook/evento]', JSON.stringify(resumo));
+    } else {
+      console.info('[wa/webhook]', JSON.stringify(resumo));
+    }
+
     const phoneNumberId = String(block.phoneNumberId || '').trim();
     if (!phoneNumberId) continue;
 

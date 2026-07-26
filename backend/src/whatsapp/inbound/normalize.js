@@ -80,6 +80,10 @@ function parseWebhookPayload(payload) {
     const messages = Array.isArray(value?.messages) ? value.messages : [];
     const statuses = Array.isArray(value?.statuses) ? value.statuses : [];
     parsed.push({
+      // `field` diz QUE tipo de evento é ("messages", "account_update", ...). Sem ele, quem consome
+      // só consegue inferir pelo formato do value — e evento de conta não tem phone_number_id,
+      // então era descartado sem deixar rastro. Ver summarizeChangeForLog.
+      field: change?.field ? String(change.field) : null,
       phoneNumberId,
       value,
       messages,
@@ -87,6 +91,34 @@ function parseWebhookPayload(payload) {
     });
   });
   return parsed;
+}
+
+// Campos de `account_update` que interessam e NÃO são dado de terceiro. A lista é branca de
+// propósito: o value de um webhook carrega telefone e corpo de mensagem, e log de produção é lido
+// por muita gente e vai para backup. Só entra aqui o que descreve o estado da CONTA.
+const ACCOUNT_FIELDS = ['event', 'ban_info', 'restriction_info', 'violation_info', 'decision',
+  'disable_info', 'current_limit', 'requested_verified_name', 'rejection_reason'];
+
+/**
+ * Resumo de um change de webhook para ir ao log: tipo do evento, contagens e, quando for evento de
+ * conta, o estado dela. NUNCA inclui corpo de mensagem nem telefone de cliente.
+ *
+ * Existe porque a WABA foi desabilitada em 15/07/2026 e a decisão da apelação chega justamente por
+ * `account_update` — que até então entrava, era respondido com 200 e descartado.
+ */
+function summarizeChangeForLog(change) {
+  const value = change?.value || {};
+  const field = change?.field ? String(change.field) : null;
+  const resumo = {
+    field,
+    phoneNumberId: pickPhoneNumberId(value) || null,
+    messages: Array.isArray(value?.messages) ? value.messages.length : 0,
+    statuses: Array.isArray(value?.statuses) ? value.statuses.length : 0,
+  };
+  for (const key of ACCOUNT_FIELDS) {
+    if (value?.[key] !== undefined) resumo[key] = value[key];
+  }
+  return resumo;
 }
 
 function isTrustedMetaOrigin(origin) {
@@ -107,4 +139,5 @@ export {
   parseWebhookPayload,
   pickPhoneNumberId,
   isTrustedMetaOrigin,
+  summarizeChangeForLog,
 };
