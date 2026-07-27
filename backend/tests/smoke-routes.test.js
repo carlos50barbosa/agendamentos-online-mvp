@@ -226,7 +226,8 @@ const ROTAS_AUTENTICADAS = [
   '/billing/subscription',
   '/billing/config',
   '/billing/plans',
-  '/billing/whatsapp/packs',
+  // '/billing/whatsapp/packs' saiu em 26/07/2026 junto com a venda de pacotes de mensagem
+  // (Tech Provider Terms da Meta, §5). A carteira abaixo fica: é o medidor da franquia.
   '/billing/whatsapp/wallet',
   // Planos de fidelidade (cliente -> estabelecimento). Rotas novas: entram no smoke desde o
   // primeiro dia, e nao depois de quebrarem em producao.
