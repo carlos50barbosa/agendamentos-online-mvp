@@ -116,6 +116,9 @@ export default function Financeiro() {
                     <th style={{ padding: '12px 16px' }}>Cliente</th>
                     <th style={{ padding: '12px 16px' }}>Serviço</th>
                     <th style={{ padding: '12px 16px', textAlign: 'right' }}>Sinal</th>
+                    {/* Sem esta coluna, o dono via "sinal 30,00 / repasse 27,50" e tinha de
+                        descobrir sozinho, subtraindo, que existe uma taxa. */}
+                    <th style={{ padding: '12px 16px', textAlign: 'right' }}>Taxa</th>
                     <th style={{ padding: '12px 16px', textAlign: 'right' }}>Repasse</th>
                     <th style={{ padding: '12px 16px' }}>Status</th>
                   </tr>
@@ -123,7 +126,7 @@ export default function Financeiro() {
                 <tbody>
                   {sinais.length === 0 ? (
                     <tr>
-                      <td colSpan={6} style={{ padding: 24, textAlign: 'center' }} className="muted">
+                      <td colSpan={7} style={{ padding: 24, textAlign: 'center' }} className="muted">
                         Nenhum sinal registrado ainda.
                       </td>
                     </tr>
@@ -134,6 +137,11 @@ export default function Financeiro() {
                         <td style={{ padding: '12px 16px' }}>{s.cliente_nome || '—'}</td>
                         <td style={{ padding: '12px 16px' }}>{s.servico_nome || '—'}</td>
                         <td style={{ padding: '12px 16px', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{centsToBRL(s.amount_centavos)}</td>
+                        <td className="muted" style={{ padding: '12px 16px', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+                          {s.amount_centavos > s.repasse_centavos
+                            ? `− ${centsToBRL(s.amount_centavos - s.repasse_centavos)}`
+                            : '—'}
+                        </td>
                         <td style={{ padding: '12px 16px', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{centsToBRL(s.repasse_centavos)}</td>
                         <td style={{ padding: '12px 16px' }}>
                           <StatusTag status={s.status} />

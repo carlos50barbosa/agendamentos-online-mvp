@@ -140,6 +140,10 @@ export function useBusinessSettings(options = {}) {
     // 'subconta' = a plataforma abriu a conta Asaas pelo dono; 'manual' = ele colou o Wallet
     // ID da conta que já tinha; null = ainda não há carteira.
     walletSource: null,
+    // Taxa descontada de cada sinal, vinda do backend (o .env manda; ver serializeDeposit).
+    feeCents: 0,
+    minSignalCents: 0,
+    splitEnabled: false,
     noticeType: '',
     noticeMessage: '',
   });
@@ -302,6 +306,9 @@ export function useBusinessSettings(options = {}) {
         walletId: depositConfig.wallet_id || '',
         walletVerified: Boolean(depositConfig.wallet_verified),
         walletSource: depositConfig.wallet_source || null,
+        feeCents: Number(depositConfig.fee_cents || 0),
+        minSignalCents: Number(depositConfig.min_signal_cents || 0),
+        splitEnabled: Boolean(depositConfig.split_enabled),
       }));
       return response;
     } catch (error) {
@@ -756,6 +763,9 @@ export function useBusinessSettings(options = {}) {
         walletId: config.wallet_id || '',
         walletVerified: Boolean(config.wallet_verified),
         walletSource: config.wallet_source || null,
+        feeCents: Number(config.fee_cents ?? current.feeCents),
+        minSignalCents: Number(config.min_signal_cents ?? current.minSignalCents),
+        splitEnabled: config.split_enabled != null ? Boolean(config.split_enabled) : current.splitEnabled,
         noticeType: 'success',
         noticeMessage: 'Configuração atualizada com sucesso.',
       }));

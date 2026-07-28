@@ -3,6 +3,9 @@ import { Link } from 'react-router-dom';
 import useBusinessSettings from '../hooks/useBusinessSettings.js';
 import { formatCpfCnpj, formatBRPhone, onlyDigits } from '../utils/masks.js';
 
+const brl = (cents) =>
+  (Number(cents || 0) / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+
 const COMPANY_TYPES = [
   { value: 'MEI', label: 'Microempreendedor individual (MEI)' },
   { value: 'INDIVIDUAL', label: 'Empresário individual' },
@@ -61,6 +64,14 @@ export default function SinalAgendamentos() {
   const isCnpj = onlyDigits(form.cpfCnpj || '').length === 14;
   const receiverReady = Boolean(deposit.walletId);
   const field = (name) => (event) => setSubaccountField(name, event.target.value);
+
+  // Taxa e piso vêm do backend (o .env manda), nunca cravados aqui.
+  const feeCents = Number(deposit.feeCents || 0);
+  const minSignalCents = Number(deposit.minSignalCents || 0) || 500;
+  // Exemplos a partir do piso: mostrar só valores que o dono pode de fato cobrar.
+  const feeExamples = [minSignalCents, 1000, 2000, 3000, 5000].filter(
+    (cents, i, list) => cents >= minSignalCents && list.indexOf(cents) === i,
+  );
 
   return (
     <div className="grid config-page settings-module-page" style={{ gap: 16 }}>
@@ -299,9 +310,50 @@ export default function SinalAgendamentos() {
           <ul className="settings-module-list">
             <li>O cliente gera o PIX durante o agendamento.</li>
             <li>Assim que o pagamento é confirmado, o atendimento fica garantido.</li>
-            <li>O valor cai direto na sua conta de recebimento, via split.</li>
+            <li>
+              {deposit.splitEnabled
+                ? 'O valor cai na sua conta de recebimento, descontada a taxa abaixo.'
+                : 'O repasse automático está temporariamente desativado — combine o acerto com o suporte.'}
+            </li>
             <li>O Asaas pode pedir documentos para liberar o saque — o dinheiro continua entrando enquanto isso.</li>
           </ul>
+
+          {/* Transparência da taxa. Sem isto, o dono só descobria o desconto comparando os
+              números do extrato na mão — e descobrir isso depois de ativar é pior. */}
+          {feeCents > 0 ? (
+            <div className="settings-module-fee">
+              <h4 style={{ margin: '0 0 4px' }}>Quanto você recebe</h4>
+              <p className="muted" style={{ fontSize: 13, margin: '0 0 8px' }}>
+                De cada sinal recebido é descontada uma taxa de processamento de{' '}
+                <strong>{brl(feeCents)}</strong>, independente do valor. O restante é repassado a você.
+              </p>
+              <table className="settings-module-fee__table" style={{ width: '100%', fontSize: 13 }}>
+                <thead>
+                  <tr>
+                    <th style={{ textAlign: 'left', fontWeight: 600 }}>Sinal</th>
+                    <th style={{ textAlign: 'right', fontWeight: 600 }}>Você recebe</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {feeExamples.map((cents) => (
+                    <tr key={cents}>
+                      <td style={{ padding: '2px 0' }}>{brl(cents)}</td>
+                      <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+                        {brl(cents - feeCents)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <p className="muted" style={{ fontSize: 12, marginTop: 8, marginBottom: 0 }}>
+                Como a taxa é fixa, ela pesa mais nos sinais baixos: num sinal de{' '}
+                {brl(minSignalCents)} ela é {Math.round((feeCents / minSignalCents) * 100)}% do valor.
+                Sinais a partir de {brl(2000)} deixam a taxa abaixo de{' '}
+                {Math.ceil((feeCents / 2000) * 100)}%.
+              </p>
+            </div>
+          ) : null}
+
           <div className="settings-module-aside__footer">
             <Link className="btn btn--ghost btn--sm" to="/planos">
               Ver planos elegíveis

@@ -71,6 +71,16 @@ async function fetchDepositSettings(estabelecimentoId) {
 
 function serializeDeposit(settings, allowed) {
   const enabled = Boolean(allowed && settings.deposit_enabled);
+  const isAsaas = resolveDepositProvider() === 'asaas';
+  // Quanto e' descontado de cada sinal antes do repasse (o mesmo que o `computeSplitCents`
+  // subtrai). Vai para a tela para o dono saber o que recebe ANTES de ligar o recurso —
+  // ate aqui ele so' descobria olhando o extrato e comparando os numeros na mao.
+  //
+  // Calculado aqui, e nao cravado no frontend: os dois valores vem do .env e mudam sem
+  // deploy do front. Um numero fixo na tela viraria mentira silenciosa na primeira mudanca.
+  const feeCents = isAsaas
+    ? Number(config.signal.platformFeeCents || 0) + Number(config.signal.asaasPixFeeCents || 0)
+    : 0;
   return {
     enabled,
     percent: settings.deposit_percent,
@@ -89,6 +99,12 @@ function serializeDeposit(settings, allowed) {
     wallet_source: settings.asaas_wallet_id
       ? (settings.asaas_subaccount_created_at ? 'subconta' : 'manual')
       : null,
+    // Transparência da taxa (ver comentário acima).
+    fee_cents: feeCents,
+    min_signal_cents: isAsaas ? Number(config.signal.minCents || 0) : 0,
+    // Com o split desligado nao ha repasse automatico: o sinal fica na conta da plataforma.
+    // A tela precisa saber disso para nao prometer "cai direto na sua conta".
+    split_enabled: isAsaas && !config.signal.splitDisabled,
   };
 }
 
