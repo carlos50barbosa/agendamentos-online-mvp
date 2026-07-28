@@ -6,6 +6,13 @@ import { getPlanContext, planAllowsDeposit } from '../lib/plans.js';
 import { resolveDepositProvider } from '../lib/deposit_provider.js';
 import { config } from '../lib/config.js';
 import { setAudit, diffFields } from '../lib/audit.js';
+import { getClientIp } from '../lib/client_ip.js';
+import {
+  ASAAS_ONBOARDING_TERMS_VERSION,
+  AsaasOnboardingError,
+  buildSubaccountDraft,
+  createEstablishmentSubaccount,
+} from '../lib/asaas_onboarding.js';
 
 const router = Router();
 const DEFAULT_DEPOSIT_HOLD_MINUTES = 15;
@@ -41,7 +48,7 @@ async function fetchDepositSettings(estabelecimentoId) {
     `SELECT deposit_enabled, deposit_percent, deposit_hold_minutes,
             deposit_type, deposit_fixed_centavos, deposit_min_centavos, deposit_max_centavos,
             refund_window_hours, retain_on_no_show,
-            asaas_wallet_id, wallet_verified_at
+            asaas_wallet_id, wallet_verified_at, asaas_subaccount_created_at
        FROM establishment_settings WHERE estabelecimento_id=? LIMIT 1`,
     [estabelecimentoId]
   );
@@ -58,6 +65,7 @@ async function fetchDepositSettings(estabelecimentoId) {
     retain_on_no_show: row?.retain_on_no_show != null ? Boolean(Number(row.retain_on_no_show)) : true,
     asaas_wallet_id: row?.asaas_wallet_id || null,
     wallet_verified_at: row?.wallet_verified_at || null,
+    asaas_subaccount_created_at: row?.asaas_subaccount_created_at || null,
   };
 }
 
@@ -75,6 +83,12 @@ function serializeDeposit(settings, allowed) {
     retain_on_no_show: settings.retain_on_no_show,
     wallet_id: settings.asaas_wallet_id,
     wallet_verified: Boolean(settings.wallet_verified_at),
+    // Como a carteira chegou aqui: 'subconta' = a plataforma abriu a conta pelo dono;
+    // 'manual' = ele colou o Wallet ID da conta Asaas que já tinha. O front mostra telas
+    // diferentes — em 'subconta' não faz sentido oferecer edição do campo.
+    wallet_source: settings.asaas_wallet_id
+      ? (settings.asaas_subaccount_created_at ? 'subconta' : 'manual')
+      : null,
   };
 }
 
@@ -248,6 +262,85 @@ router.put('/settings/deposit', auth, isEstabelecimento, async (req, res) => {
   } catch (err) {
     console.error('PUT /estabelecimento/settings/deposit', err);
     return res.status(500).json({ error: 'settings_save_failed' });
+  }
+});
+
+// ── Subconta Asaas ────────────────────────────────────────────────────────────────────────
+// A plataforma abre a conta de recebimento pelo estabelecimento, para ele não precisar se
+// cadastrar no Asaas nem copiar Wallet ID. Só é possível porque a conta da plataforma é PJ.
+
+router.get('/asaas/subconta', auth, isEstabelecimento, async (req, res) => {
+  try {
+    const estId = Number(req.user?.id);
+    if (!Number.isFinite(estId) || estId <= 0) {
+      return res.status(400).json({ error: 'missing_estabelecimento_id' });
+    }
+    const planContext = await getPlanContext(estId);
+    const allowed = planContext ? planAllowsDeposit(planContext.plan) : false;
+    const status = await buildSubaccountDraft(estId);
+    return res.json({ ...status, allowed, provider: resolveDepositProvider() });
+  } catch (err) {
+    if (err instanceof AsaasOnboardingError) {
+      return res.status(err.status).json({ error: err.code, message: err.message, details: err.details });
+    }
+    console.error('GET /estabelecimento/asaas/subconta', err?.stack || err);
+    return res.status(500).json({ error: 'subaccount_status_failed' });
+  }
+});
+
+router.post('/asaas/subconta', auth, isEstabelecimento, async (req, res) => {
+  try {
+    const estId = Number(req.user?.id);
+    if (!Number.isFinite(estId) || estId <= 0) {
+      return res.status(400).json({ error: 'missing_estabelecimento_id' });
+    }
+    const planContext = await getPlanContext(estId);
+    if (!planContext) {
+      return res.status(404).json({ error: 'estabelecimento_inexistente' });
+    }
+    if (!planAllowsDeposit(planContext.plan)) {
+      return res.status(403).json({
+        error: 'plan_not_allowed',
+        message: 'Disponível apenas para planos Pro ou Premium.',
+      });
+    }
+
+    const body = req.body || {};
+    const result = await createEstablishmentSubaccount({
+      estabelecimentoId: estId,
+      overrides: body.dados || {},
+      consent: {
+        accepted: body.aceite === true,
+        termsVersion: String(body.termsVersion || ASAAS_ONBOARDING_TERMS_VERSION),
+        ip: getClientIp(req) || null,
+      },
+    });
+
+    const settings = await fetchDepositSettings(estId);
+    setAudit(req, {
+      acao: 'config.sinal.subconta',
+      entidade: 'configuracao',
+      entidade_id: estId,
+      estabelecimento_id: estId,
+      dados_antes: null,
+      // O walletId identifica a carteira e não é segredo (vai no split de toda cobrança);
+      // os dados pessoais do cadastro, sim — por isso não entram na trilha.
+      dados_depois: { asaas_wallet_id: result.walletId, asaas_account_id: result.accountId },
+      metadados: { reaproveitada: result.reused, terms_version: ASAAS_ONBOARDING_TERMS_VERSION },
+    });
+
+    return res.json({
+      ok: true,
+      walletId: result.walletId,
+      reused: result.reused,
+      deposit: serializeDeposit(settings, true),
+    });
+  } catch (err) {
+    if (err instanceof AsaasOnboardingError) {
+      return res.status(err.status).json({ error: err.code, message: err.message, details: err.details });
+    }
+    console.error('POST /estabelecimento/asaas/subconta', err?.stack || err);
+    return res.status(500).json({ error: 'subaccount_create_failed' });
   }
 });
 

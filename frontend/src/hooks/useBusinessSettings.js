@@ -137,6 +137,21 @@ export function useBusinessSettings(options = {}) {
     provider: 'mercadopago',
     walletId: '',
     walletVerified: false,
+    // 'subconta' = a plataforma abriu a conta Asaas pelo dono; 'manual' = ele colou o Wallet
+    // ID da conta que já tinha; null = ainda não há carteira.
+    walletSource: null,
+    noticeType: '',
+    noticeMessage: '',
+  });
+  // Onboarding da subconta Asaas: rascunho vindo do cadastro + o que falta preencher.
+  const [subaccount, setSubaccount] = useState({
+    loading: false,
+    creating: false,
+    loaded: false,
+    form: null,
+    missing: [],
+    termsVersion: '',
+    accepted: false,
     noticeType: '',
     noticeMessage: '',
   });
@@ -286,6 +301,7 @@ export function useBusinessSettings(options = {}) {
         provider: response?.provider || 'mercadopago',
         walletId: depositConfig.wallet_id || '',
         walletVerified: Boolean(depositConfig.wallet_verified),
+        walletSource: depositConfig.wallet_source || null,
       }));
       return response;
     } catch (error) {
@@ -739,6 +755,7 @@ export function useBusinessSettings(options = {}) {
         provider: response?.provider || current.provider,
         walletId: config.wallet_id || '',
         walletVerified: Boolean(config.wallet_verified),
+        walletSource: config.wallet_source || null,
         noticeType: 'success',
         noticeMessage: 'Configuração atualizada com sucesso.',
       }));
@@ -753,6 +770,101 @@ export function useBusinessSettings(options = {}) {
       return false;
     }
   }, [deposit.enabled, deposit.percent, deposit.provider, deposit.walletId, isEstablishment]);
+
+  /**
+   * Carrega o rascunho da subconta a partir do cadastro do estabelecimento. O objetivo é pedir
+   * SÓ o que falta: repetir dados que ele já preencheu seria reintroduzir o atrito que esta
+   * tela existe para remover.
+   */
+  const refreshSubaccount = useCallback(async () => {
+    if (!isEstablishment) return null;
+    setSubaccount((current) => ({ ...current, loading: true, noticeType: '', noticeMessage: '' }));
+    try {
+      const response = await Api.getAsaasSubaccount();
+      setSubaccount((current) => ({
+        ...current,
+        loading: false,
+        loaded: true,
+        // Só monta o formulário na 1ª carga: recarregar em cima do que ele está digitando
+        // apagaria o que acabou de preencher.
+        form: current.form || { ...(response?.draft || {}) },
+        missing: Array.isArray(response?.missing) ? response.missing : [],
+        termsVersion: response?.termsVersion || '',
+      }));
+      return response;
+    } catch (error) {
+      setSubaccount((current) => ({
+        ...current,
+        loading: false,
+        loaded: true,
+        noticeType: 'error',
+        noticeMessage: getErrorMessage(error, 'Não foi possível carregar seus dados.'),
+      }));
+      return null;
+    }
+  }, [isEstablishment]);
+
+  const setSubaccountField = useCallback((field, value) => {
+    setSubaccount((current) => ({
+      ...current,
+      form: { ...(current.form || {}), [field]: value },
+      noticeType: '',
+      noticeMessage: '',
+    }));
+  }, []);
+
+  const setSubaccountAccepted = useCallback((value) => {
+    setSubaccount((current) => ({
+      ...current,
+      accepted: Boolean(value),
+      noticeType: '',
+      noticeMessage: '',
+    }));
+  }, []);
+
+  const createSubaccount = useCallback(async () => {
+    if (!isEstablishment) return false;
+    if (!subaccount.accepted) {
+      setSubaccount((current) => ({
+        ...current,
+        noticeType: 'error',
+        noticeMessage: 'Marque a autorização para abrirmos a conta em seu nome.',
+      }));
+      return false;
+    }
+
+    setSubaccount((current) => ({ ...current, creating: true, noticeType: '', noticeMessage: '' }));
+    try {
+      const response = await Api.createAsaasSubaccount({
+        aceite: true,
+        termsVersion: subaccount.termsVersion || undefined,
+        dados: subaccount.form || {},
+      });
+      const config = response?.deposit || {};
+      setDeposit((current) => ({
+        ...current,
+        walletId: config.wallet_id || response?.walletId || '',
+        walletVerified: Boolean(config.wallet_verified),
+        walletSource: config.wallet_source || 'subconta',
+      }));
+      setSubaccount((current) => ({
+        ...current,
+        creating: false,
+        missing: [],
+        noticeType: 'success',
+        noticeMessage: 'Conta criada. O Asaas enviou o acesso para o seu e-mail.',
+      }));
+      return true;
+    } catch (error) {
+      setSubaccount((current) => ({
+        ...current,
+        creating: false,
+        noticeType: 'error',
+        noticeMessage: getErrorMessage(error, 'Não foi possível criar a conta de recebimento.'),
+      }));
+      return false;
+    }
+  }, [isEstablishment, subaccount.accepted, subaccount.form, subaccount.termsVersion]);
 
 
   return {
@@ -787,6 +899,11 @@ export function useBusinessSettings(options = {}) {
     setDepositPercent,
     setDepositWalletId,
     saveDepositSettings,
+    subaccount,
+    refreshSubaccount,
+    setSubaccountField,
+    setSubaccountAccepted,
+    createSubaccount,
     formatLongDate,
   };
 }

@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { pool } from './db.js'
+import { digitsOnly, isValidCpf, isValidCnpj, normalizeBrazilPhone } from './br_documents.js'
 import { createMercadoPagoPixPayment, fetchMercadoPagoPayment } from './billing.js'
 import {
   cancelMercadoPagoCardSubscription,
@@ -127,46 +128,9 @@ export const CLIENT_LOYALTY_CARDHOLDER_NAME_FIELDS = [
   'name',
 ]
 
-function digitsOnly(value) {
-  return normalizeText(value).replace(/\D/g, '')
-}
-
 function isValidEmail(value) {
   const email = normalizeText(value)
   return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)
-}
-
-function isValidCpf(value) {
-  const cpf = digitsOnly(value)
-  if (cpf.length !== 11 || /^(\d)\1{10}$/.test(cpf)) return false
-
-  let sum = 0
-  for (let i = 0; i < 9; i += 1) sum += Number(cpf[i]) * (10 - i)
-  let digit = (sum * 10) % 11
-  if (digit === 10) digit = 0
-  if (digit !== Number(cpf[9])) return false
-
-  sum = 0
-  for (let i = 0; i < 10; i += 1) sum += Number(cpf[i]) * (11 - i)
-  digit = (sum * 10) % 11
-  if (digit === 10) digit = 0
-  return digit === Number(cpf[10])
-}
-
-function isValidCnpj(value) {
-  const cnpj = digitsOnly(value)
-  if (cnpj.length !== 14 || /^(\d)\1{13}$/.test(cnpj)) return false
-
-  const calcDigit = (length) => {
-    const weights = length === 12
-      ? [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]
-      : [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]
-    const sum = weights.reduce((total, weight, index) => total + Number(cnpj[index]) * weight, 0)
-    const remainder = sum % 11
-    return remainder < 2 ? 0 : 11 - remainder
-  }
-
-  return calcDigit(12) === Number(cnpj[12]) && calcDigit(13) === Number(cnpj[13])
 }
 
 export function normalizeClientLoyaltyCardholderName(value) {
@@ -231,12 +195,6 @@ function getClientLoyaltyCardholderNameDebugInfo(input = {}) {
   }
 }
 
-function normalizeBrazilPhone(value) {
-  const digits = digitsOnly(value)
-  if (!digits) return null
-  const normalized = digits.startsWith('55') && digits.length >= 12 ? digits.slice(2) : digits
-  return normalized.length >= 10 && normalized.length <= 11 ? normalized : null
-}
 
 export function validateClientLoyaltyCardPayerData(input = {}) {
   const {

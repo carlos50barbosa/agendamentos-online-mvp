@@ -375,16 +375,22 @@ significa que o caminho nunca rodou em produção — mas ele funciona.)
 (`lib/loyalty_split.js`) reproduz a conta exata, e os testes usam os números medidos: se o
 Asaas mudar a regra, quebra ali, e não em produção com dinheiro de assinante no meio.
 
-❌ **Subconta (white-label) é impossível na conta atual.** O Asaas respondeu:
+✅ **Subconta: destravada em 28/07/2026** (a saída (b) abaixo foi a escolhida). Enquanto a
+conta da plataforma era PF, o Asaas respondia:
 
 > *"Contas de pessoa física (CPF) não podem criar subcontas. Apenas contas de pessoa
 > jurídica (CNPJ) podem acessar essa funcionalidade."*
 
-Ou seja: a plataforma **não consegue abrir a conta Asaas pelo salão**. Cada salão precisa
-abrir a própria conta e colar o **Wallet ID** nas Configurações (fluxo que já existe). Isso é
-atrito real de onboarding — parte dos salões vai empacar aí.
+Com o CNPJ da plataforma aprovado, `POST /v3/accounts` passou a funcionar e a plataforma abre
+a conta de recebimento **pelo salão**: ele confirma os dados em `/configuracoes/sinal`, autoriza,
+e o `walletId` nasce preenchido — ver `lib/asaas_onboarding.js` e `services/asaas/accounts.js`.
+O caminho manual (colar o Wallet ID) **continua existindo** e não é legado: um CPF/CNPJ que já
+tem conta Asaas não pode virar subconta, e para esses é o único caminho.
 
-Saídas, para decidir depois: (a) manter o `ASAAS_SPLIT_DISABLED` como fallback de conta única
+Atenção ao ambiente: a conta **sandbox** é um cadastro separado do de produção. Aprovar o CNPJ
+em produção não muda o sandbox — se ele seguir PF, a mesma mensagem acima volta lá.
+
+Saídas consideradas na época: (a) manter o `ASAAS_SPLIT_DISABLED` como fallback de conta única
 e repassar por fora; (b) tirar um CNPJ (MEI resolve) e abrir o white-label.
 
 ## Riscos e pendências

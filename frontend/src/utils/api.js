@@ -376,6 +376,10 @@ export const Api = {
   onboardingFinish: () => req('/estabelecimento/onboarding/finalizar', { method: 'POST' }),
   updateEstablishmentDepositSettings: (payload) =>
     req('/estabelecimento/settings/deposit', { method: 'PUT', body: JSON.stringify(payload) }),
+  // Subconta Asaas: a plataforma abre a conta de recebimento pelo estabelecimento.
+  getAsaasSubaccount: () => req('/estabelecimento/asaas/subconta'),
+  createAsaasSubaccount: (payload) =>
+    req('/estabelecimento/asaas/subconta', { method: 'POST', body: JSON.stringify(payload) }),
   getSinais: () => req('/estabelecimento/financeiro/sinais'),
   getEstablishmentStats: (id) => req(`/establishments/${id}/stats`),
   listServices: (establishmentId) => req(`/servicos${toQuery({ establishmentId })}`),
