@@ -98,6 +98,33 @@ if [[ "$SKIP_FRONTEND" != "1" ]]; then
   echo "==> Frontend: instalando dependências (npm ci)"
   cd "$FRONT_DIR"
   npm ci
+  # Confere API_URL contra o .env.production ANTES de gastar um build.
+  #
+  # Em 28/07/2026 um deploy passou API_URL com o dominio ANTIGO. `export VITE_API_URL`
+  # sobrepoe o .env.production, entao o bundle inteiro saiu chamando o host errado — que
+  # responde 301 para o dominio novo. O navegador nao segue redirect em preflight de CORS,
+  # entao TODA chamada de API morria como "Failed to fetch", ja no login. O site parecia no
+  # ar (as paginas estaticas carregam) e nada no backend acusava erro.
+  #
+  # O .env.production e' versionado e e' a fonte da verdade. Um override que discorda dele e'
+  # quase sempre comando de deploy velho — abortar aqui custa segundos; nao abortar custou
+  # o app inteiro fora do ar.
+  ENV_PROD_API_URL="$(sed -n 's/^[[:space:]]*VITE_API_URL[[:space:]]*=[[:space:]]*//p' .env.production 2>/dev/null | tail -n1 | tr -d '\r"' )"
+  if [[ -n "$ENV_PROD_API_URL" && "$API_URL" != "$ENV_PROD_API_URL" ]]; then
+    echo "ERRO: API_URL diverge do frontend/.env.production." >&2
+    echo "      API_URL          = $API_URL" >&2
+    echo "      .env.production  = $ENV_PROD_API_URL" >&2
+    echo "" >&2
+    echo "      Buildar assim publica um frontend que chama o host errado (falha de CORS," >&2
+    echo "      'Failed to fetch' em toda chamada de API). Rode sem API_URL para usar o" >&2
+    echo "      valor do .env.production, ou ALLOW_API_URL_OVERRIDE=1 se a divergencia" >&2
+    echo "      for intencional (ex.: deploy de staging)." >&2
+    if [[ "${ALLOW_API_URL_OVERRIDE:-0}" != "1" ]]; then
+      exit 1
+    fi
+    echo "==> ALLOW_API_URL_OVERRIDE=1: seguindo com $API_URL" >&2
+  fi
+
   echo "==> Frontend: build com VITE_API_URL=$API_URL"
   export VITE_API_URL="$API_URL"
   npm run build
