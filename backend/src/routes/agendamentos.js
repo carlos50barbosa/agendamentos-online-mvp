@@ -2139,7 +2139,9 @@ router.put('/:id/reschedule-estab', authRequired, isEstabelecimento, ensureSubsc
     );
 
     const [[cli]] = await conn.query(
-      'SELECT nome, email FROM usuarios WHERE id=?',
+      // `telefone` entrou para a remarcação poder avisar por WhatsApp. Sem ele, o único
+      // evento em que o HORÁRIO muda ficava restrito a e-mail.
+      'SELECT nome, email, telefone FROM usuarios WHERE id=?',
       [ag.cliente_id || 0]
     );
     const [[est]] = await conn.query(
@@ -2158,7 +2160,7 @@ router.put('/:id/reschedule-estab', authRequired, isEstabelecimento, ensureSubsc
     const appointmentLink = `${FRONTEND_BASE}/cliente?agendamento=${ag.id}`;
     const appointmentLinkHtml = `<p><a href="${appointmentLink}">Ver agendamento</a></p>`;
     fireAndForget(async () => {
-      if (!cli?.email) return;
+      // Remarcar para o MESMO horário não é remarcação: não avisa por canal nenhum.
       if (oldInicioIso) {
         const oldMs = new Date(oldInicioIso).getTime();
         const newMs = new Date(updatedInicioIso).getTime();
@@ -2169,11 +2171,45 @@ router.put('/:id/reschedule-estab', authRequired, isEstabelecimento, ensureSubsc
       const estName = est?.nome || 'estabelecimento';
       const oldLabel = oldInicioIso ? brDateTime(oldInicioIso) : '';
       const newLabel = brDateTime(updatedInicioIso);
-      const oldLine = oldLabel ? `Horário anterior: <b>${oldLabel}</b>.<br/>` : '';
-      const html = `<p>Olá, <b>${clientName}</b>!</p>` +
-        `<p>Seu agendamento de <b>${serviceName}</b> no ${estName} foi reagendado.</p>` +
-        `<p>${oldLine}Novo horário: <b>${newLabel}</b>.</p>${appointmentLinkHtml}`;
-      await notifyEmail(cli.email, 'Agendamento reagendado', html);
+
+      if (cli?.email) {
+        const oldLine = oldLabel ? `Horário anterior: <b>${oldLabel}</b>.<br/>` : '';
+        const html = `<p>Olá, <b>${clientName}</b>!</p>` +
+          `<p>Seu agendamento de <b>${serviceName}</b> no ${estName} foi reagendado.</p>` +
+          `<p>${oldLine}Novo horário: <b>${newLabel}</b>.</p>${appointmentLinkHtml}`;
+        await notifyEmail(cli.email, 'Agendamento reagendado', html);
+      }
+
+      // WhatsApp da remarcação. É o único evento em que o HORÁRIO muda — cancelamento,
+      // confirmação e lembrete já tinham template; este não tinha, e ficava só no e-mail.
+      //
+      // Exige WA_TEMPLATE_NAME_RESCHEDULE configurado. Sem a variável, nada é enviado e o
+      // comportamento continua exatamente o de antes: template não aprovado na Meta falha no
+      // envio, então ligar isso por padrão só produziria erro no log.
+      const tplName = String(process.env.WA_TEMPLATE_NAME_RESCHEDULE || '').trim();
+      const telCli = toDigits(cli?.telefone);
+      if (!tplName || !telCli || clientWhatsappDisabled()) return;
+
+      const tplLang = String(
+        process.env.WA_TEMPLATE_LANG_RESCHEDULE || process.env.WA_TEMPLATE_LANG || 'pt_BR'
+      ).trim();
+      // Ordem casada com o corpo do modelo: "Olá, {{1}}! Seu horário foi remarcado para {{2}}
+      // em {{3}}." — nome, novo horário, estabelecimento.
+      const bodyParams = [clientName, newLabel, estName];
+      const waMsg = oldLabel
+        ? `Seu agendamento de ${serviceName} em ${estName} foi remarcado de ${oldLabel} para ${newLabel}.`
+        : `Seu agendamento de ${serviceName} em ${estName} foi remarcado para ${newLabel}.`;
+
+      await sendAppointmentWhatsApp({
+        estabelecimentoId: estId,
+        agendamentoId: ag.id,
+        to: telCli,
+        kind: 'reschedule_cli',
+        // `message` cobre a janela de 24h aberta (texto livre); `template` cobre a janela
+        // fechada, que é o caso normal de uma remarcação feita pelo painel.
+        message: waMsg,
+        template: { name: tplName, lang: tplLang, bodyParams },
+      });
     });
 
     setAudit(req, {
