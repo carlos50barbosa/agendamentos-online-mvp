@@ -14,6 +14,7 @@ import {
   releaseWaPhoneNumberFromAccount,
   upsertWaAccount,
 } from './waTenant.js';
+import { provisionTenantTemplates } from './waTenantTemplates.js';
 
 const APP_ID = String(process.env.WA_APP_ID || '').trim();
 const APP_SECRET = String(process.env.WA_APP_SECRET || '').trim();
@@ -528,6 +529,32 @@ export async function completeEmbeddedSignup({
     );
   }
 
+  // ── Criar os modelos de mensagem na WABA do tenant ────────────────────────────────────────────
+  // Modelo pertence a UMA WABA: os aprovados da plataforma não existem aqui. Sem estes, todo envio
+  // fora da janela de 24h falharia para os clientes deste estabelecimento — em silêncio.
+  //
+  // NÃO é fatal, ao contrário da assinatura do webhook: sem modelo a conta ainda recebe, responde
+  // dentro da janela e cai para e-mail. Derrubar a conexão porque um dos quatro foi recusado
+  // deixaria o dono sem nada em vez de com quase tudo. A aprovação é assíncrona (chega por
+  // `message_template_status_update`), então todos nascem PENDING.
+  let templates = { criados: 0, existentes: 0, falhas: 0 };
+  try {
+    templates = await provisionTenantTemplates({
+      estabelecimentoId: tenantId,
+      wabaId: resolvedAssets.wabaId,
+      accessToken,
+    });
+    console.info('[wa][embedded-signup][templates]', {
+      estabelecimento_id: tenantId,
+      waba_id: resolvedAssets.wabaId,
+      criados: templates.criados,
+      existentes: templates.existentes,
+      falhas: templates.falhas,
+    });
+  } catch (err) {
+    console.warn('[wa][embedded-signup][templates_error]', err?.message || err);
+  }
+
   // ── Registrar o número na Cloud API ───────────────────────────────────────────────────────────
   // NÃO fatal, ao contrário do acima. Número criado pelo próprio Embedded Signup em geral já vem
   // registrado, e um PIN divergente (o tenant já tinha 2FA com outro) não deve derrubar uma conexão
@@ -581,6 +608,9 @@ export async function completeEmbeddedSignup({
       // a olhar quando o dono diz "conectei e não chega nada".
       subscribed_app: true,
       register: registro,
+      // Primeira coisa a olhar quando o dono disser "conectei e o cliente não recebe": se os
+      // modelos ficaram PENDING ou REJECTED, o envio fora da janela não tem o que usar.
+      templates,
       session_info: normalizedSession,
       graph: graphAssets,
       waba: wabaDetails ? { id: wabaDetails.id || resolvedAssets.wabaId, name: wabaDetails.name || null } : null,

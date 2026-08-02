@@ -311,6 +311,35 @@ export async function registerWhatsAppPhoneNumber({ accessToken, phoneNumberId, 
   });
 }
 
+/**
+ * Cria um modelo de mensagem na WABA indicada.
+ *
+ * Modelo pertence a UMA WABA: os aprovados da plataforma não existem na conta do tenant, e sem
+ * modelo próprio todo envio fora da janela de 24h falha para os clientes dele. Ver
+ * lib/wa_template_catalog.js.
+ */
+export async function createWhatsAppTemplate({ accessToken, wabaId, template }) {
+  if (!accessToken || !wabaId) throw new Error('wa_missing_token_or_waba');
+  if (!template?.name || !template?.components?.length) throw new Error('wa_invalid_template');
+  return postGraph(`${wabaId}/message_templates`, accessToken, {
+    name: template.name,
+    language: template.language,
+    category: template.category,
+    components: template.components,
+  });
+}
+
+/**
+ * O erro de nome já usado não é falha: significa que o modelo existe naquela WABA — o caso normal
+ * de uma reconexão. Tratar como erro faria toda reconexão parecer quebrada.
+ */
+export function isDuplicateTemplateError(err) {
+  const error = err?.body?.error;
+  if (!error) return false;
+  const texto = `${error.message || ''} ${error.error_user_msg || ''}`.toLowerCase();
+  return texto.includes('already exists') || texto.includes('ja existe') || texto.includes('já existe');
+}
+
 export async function sendWhatsAppMessage({ accessToken, phoneNumberId, payload }) {
   if (!accessToken || !phoneNumberId) {
     throw new Error('wa_missing_token_or_phone');
