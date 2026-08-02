@@ -81,19 +81,35 @@ export async function applyTenantTemplateStatus(evento, { deps = {} } = {}) {
 }
 
 /**
- * O modelo daquele tipo, na conta daquele estabelecimento.
+ * O modelo daquele tipo, SE a conta própria estiver de fato em uso.
  *
- * Devolve a LINHA mesmo quando não está aprovada, de propósito: quem chama precisa distinguir
- * "este estabelecimento não usa WABA própria" (null) de "usa, mas o modelo ainda não foi liberado"
- * (linha com status != APPROVED). No primeiro caso o envio segue pelo caminho antigo; no segundo
- * ele NÃO pode sair, porque o modelo não existe na conta de onde a mensagem sairia.
+ * Devolve a linha mesmo não aprovada, de propósito: quem chama precisa distinguir "não usa WABA
+ * própria" (null) de "usa, mas o modelo não foi liberado" (status != APPROVED). No primeiro caso o
+ * envio segue pelo caminho antigo; no segundo ele NÃO pode sair, porque o modelo não existe na
+ * conta de onde a mensagem sairia.
+ *
+ * ─── Por que o JOIN com wa_accounts ────────────────────────────────────────────────────────────
+ *
+ * As linhas SOBREVIVEM à desconexão — são histórico. Sem exigir conta `connected`, um
+ * estabelecimento que desconectasse a WABA voltaria ao número global (que TEM modelo aprovado) e
+ * mesmo assim teria todo envio ao cliente bloqueado para sempre, em silêncio, por causa de uma
+ * linha PENDING antiga.
+ *
+ * O `a.waba_id = t.waba_id` cobre o outro caso: reconectar com OUTRA conta. Os modelos da conta
+ * anterior não existem na nova, e usá-los falharia com "template não encontrado".
  */
 export async function getTenantTemplateRow(estabelecimentoId, kind, { deps = {} } = {}) {
   if (!estabelecimentoId || !kind) return null;
   const executar = deps.query || ((sql, params) => pool.query(sql, params));
   const [rows] = await executar(
-    `SELECT kind, name, language, status FROM wa_tenant_templates
-      WHERE estabelecimento_id=? AND kind=? LIMIT 1`,
+    `SELECT t.kind, t.name, t.language, t.status
+       FROM wa_tenant_templates t
+       JOIN wa_accounts a
+         ON a.estabelecimento_id = t.estabelecimento_id
+        AND a.status = 'connected'
+        AND a.waba_id = t.waba_id
+      WHERE t.estabelecimento_id=? AND t.kind=?
+      LIMIT 1`,
     [estabelecimentoId, kind]
   );
   return rows?.[0] || null;
