@@ -239,15 +239,33 @@ export default function WhatsAppEmbeddedSignup({ onConnected, disabled = false }
         </span>
       </label>
 
-      <button
-        type="button"
-        className="btn btn--primary"
-        onClick={conectar}
-        disabled={conectando || disabled || !aceitou}
-        style={{ justifySelf: 'start' }}
-      >
-        {conectando ? <span className="spinner" /> : 'Conectar com Facebook'}
-      </button>
+      <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+        <button
+          type="button"
+          className="btn btn--primary"
+          onClick={conectar}
+          disabled={conectando || disabled || !aceitou}
+          style={{ justifySelf: 'start' }}
+        >
+          {conectando ? <span className="spinner" /> : 'Conectar com Facebook'}
+        </button>
+
+        {/* Saída de emergência. Fechar o popup no X NÃO dispara o CANCEL do postMessage, e o
+            callback do FB.login nunca volta — sem isto a tela fica girando para sempre com o botão
+            desabilitado, e só recarregando a página dá para tentar de novo. */}
+        {conectando ? (
+          <button
+            type="button"
+            onClick={() => { sessionInfoRef.current = null; setConectando(false); setErro(''); }}
+            style={{
+              background: 'none', border: 0, padding: 0, cursor: 'pointer',
+              color: '#2563eb', fontSize: 13, textDecoration: 'underline',
+            }}
+          >
+            Cancelar e tentar de novo
+          </button>
+        ) : null}
+      </div>
 
       {erro ? <div className="notice notice--error">{erro}</div> : null}
 
