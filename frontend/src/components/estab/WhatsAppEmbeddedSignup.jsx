@@ -65,6 +65,9 @@ export default function WhatsAppEmbeddedSignup({ onConnected, disabled = false }
   const [aceitou, setAceitou] = useState(false);
   const sessionInfoRef = useRef(null);
   const montadoRef = useRef(true);
+  // Só recebe valor DEPOIS do nosso FB.init: `window.FB` pode existir com o SDK ainda não
+  // inicializado, e nesse estado o FB.login falha.
+  const sdkRef = useRef(null);
 
   useEffect(() => () => { montadoRef.current = false; }, []);
 
@@ -118,6 +121,21 @@ export default function WhatsAppEmbeddedSignup({ onConnected, disabled = false }
     return () => window.removeEventListener('message', aoReceberMensagem);
   }, []);
 
+  // Pré-carrega o SDK assim que a config chega.
+  //
+  // Não é otimização: `FB.login` PRECISA sair no mesmo gesto do clique. Qualquer espera de rede no
+  // meio faz o navegador deixar de tratar a chamada como iniciada pelo usuário, e o popup é
+  // engolido — sem erro, sem console, sem nada. Carregando antes, o clique só usa o que já está
+  // pronto.
+  useEffect(() => {
+    if (!config) return undefined;
+    let vivo = true;
+    loadFacebookSdk({ appId: config.app_id, apiVersion: config.api_version })
+      .then((FB) => { if (vivo) sdkRef.current = FB; })
+      .catch(() => null);
+    return () => { vivo = false; };
+  }, [config]);
+
   const trocarCodigo = useCallback(async (code) => {
     setConectando(true);
     setErro('');
@@ -136,21 +154,7 @@ export default function WhatsAppEmbeddedSignup({ onConnected, disabled = false }
     }
   }, [onConnected]);
 
-  const conectar = useCallback(async () => {
-    if (!config || conectando || disabled || !aceitou) return;
-    setErro('');
-    setConectando(true);
-    sessionInfoRef.current = null;
-
-    let FB;
-    try {
-      FB = await loadFacebookSdk({ appId: config.app_id, apiVersion: config.api_version });
-    } catch {
-      setConectando(false);
-      setErro('Não foi possível carregar o login do Facebook. Verifique bloqueadores de anúncio e tente de novo.');
-      return;
-    }
-
+  const abrirLogin = useCallback((FB) => {
     FB.login((response) => {
       const code = response?.authResponse?.code;
       if (!code) {
@@ -167,7 +171,36 @@ export default function WhatsAppEmbeddedSignup({ onConnected, disabled = false }
       override_default_response_type: config.override_default_response_type !== false,
       extras: config.extras || {},
     });
-  }, [config, conectando, disabled, trocarCodigo]);
+  }, [config, trocarCodigo]);
+
+  const conectar = useCallback(async () => {
+    if (!config || conectando || disabled || !aceitou) return;
+    setErro('');
+    setConectando(true);
+    sessionInfoRef.current = null;
+
+    // Caminho normal: o SDK já veio no pré-carregamento, então o popup abre dentro do gesto do
+    // clique e não é barrado.
+    if (sdkRef.current) {
+      abrirLogin(sdkRef.current);
+      return;
+    }
+
+    // Só chega aqui se o pré-carregamento falhou. O popup pode ser engolido pelo navegador, mas
+    // tentar e falhar com mensagem é melhor que não fazer nada.
+    let FB;
+    try {
+      FB = await loadFacebookSdk({ appId: config.app_id, apiVersion: config.api_version });
+    } catch {
+      setConectando(false);
+      setErro('Não foi possível carregar o login do Facebook. Verifique bloqueadores de anúncio e tente de novo.');
+      return;
+    }
+    sdkRef.current = FB;
+    abrirLogin(FB);
+    // `aceitou` PRECISA estar aqui: sem ele o callback fica preso ao valor da primeira renderização
+    // (false), o botão habilita mas o clique cai na guarda acima e nada acontece — sem erro nenhum.
+  }, [config, conectando, disabled, aceitou, abrirLogin]);
 
   if (carregandoConfig) return null;
   if (!config) return null;
