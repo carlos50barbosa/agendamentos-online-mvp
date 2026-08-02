@@ -42,6 +42,44 @@ export async function recordTenantTemplate({
   );
 }
 
+/**
+ * Aplica o veredito que chegou pelo webhook. Casa por (waba_id, name) — que é o índice da tabela e
+ * a única chave possível, já que o evento da Meta não traz o nosso `estabelecimento_id`.
+ *
+ * Não achar linha NÃO é erro: pode ser um modelo criado à mão naquela WABA, fora do nosso catálogo.
+ * Mas fica registrado, porque também pode ser sintoma de conta reconectada com outra WABA.
+ *
+ * @returns {Promise<{ atualizado: boolean }>}
+ */
+export async function applyTenantTemplateStatus(evento, { deps = {} } = {}) {
+  if (!evento?.wabaId || !evento?.name || !evento?.status) return { atualizado: false };
+  const executar = deps.query || ((sql, params) => pool.query(sql, params));
+  const logger = deps.logger || console;
+
+  const [r] = await executar(
+    `UPDATE wa_tenant_templates
+        SET status=?,
+            rejected_reason=?,
+            meta_template_id=COALESCE(?, meta_template_id),
+            atualizado_em=NOW(3)
+      WHERE waba_id=? AND name=?`,
+    [evento.status, evento.reason, evento.metaTemplateId, evento.wabaId, evento.name]
+  );
+
+  const atualizado = Number(r?.affectedRows || 0) > 0;
+  if (!atualizado) {
+    logger.warn('[wa/tenant-templates] status sem linha correspondente', {
+      wabaId: evento.wabaId, name: evento.name, status: evento.status,
+    });
+  } else {
+    logger.info('[wa/tenant-templates] status atualizado', {
+      wabaId: evento.wabaId, name: evento.name, status: evento.status,
+      motivo: evento.reason || undefined,
+    });
+  }
+  return { atualizado };
+}
+
 export async function listTenantTemplateRows(estabelecimentoId) {
   const [rows] = await pool.query(
     `SELECT kind, name, language, status, meta_template_id, rejected_reason, atualizado_em

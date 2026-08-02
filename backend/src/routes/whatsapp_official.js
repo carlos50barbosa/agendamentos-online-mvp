@@ -12,6 +12,8 @@ import {
   parseWebhookPayload,
   summarizeChangeForLog,
 } from '../whatsapp/inbound/normalize.js';
+import { parseTemplateStatusEvent } from '../lib/wa_template_status.js';
+import { applyTenantTemplateStatus } from '../services/waTenantTemplates.js';
 import { handleInstitutionalInboundAutoReply } from '../whatsapp/inbound/institutionalAutoReply.js';
 import { handleInboundOptOut } from '../whatsapp/inbound/optOut.js';
 import { handleInboundOptInConfirm } from '../whatsapp/inbound/optInConfirm.js';
@@ -743,6 +745,19 @@ async function processWebhookPayload(payload) {
       console.warn('[wa/webhook/evento]', JSON.stringify(resumo));
     } else {
       console.info('[wa/webhook]', JSON.stringify(resumo));
+    }
+
+    // Veredito de modelo do tenant. Chega de forma assíncrona, um modelo por vez, e é o que tira a
+    // linha de PENDING — sem isto o envio nunca sairia da janela de 24h para aquele tenant.
+    // Fora do `continue` abaixo de propósito: evento de modelo NÃO traz phone_number_id.
+    if (block.field === 'message_template_status_update') {
+      const evento = parseTemplateStatusEvent(block);
+      if (evento) {
+        await applyTenantTemplateStatus(evento).catch((err) => {
+          console.warn('[wa/webhook][template_status] falha ao aplicar', err?.message || err);
+        });
+      }
+      continue;
     }
 
     const phoneNumberId = String(block.phoneNumberId || '').trim();

@@ -65,7 +65,10 @@ function extractChanges(payload) {
   entries.forEach((entry) => {
     const list = Array.isArray(entry?.changes) ? entry.changes : [];
     list.forEach((change) => {
-      changes.push(change);
+      // O id da WABA vive no ENTRY, não no change nem no value. Achatar sem carregá-lo junto
+      // torna impossível saber a qual conta um evento de modelo pertence — e o nome do modelo
+      // só é único DENTRO de uma WABA, então sem isso a atualização de status seria ambígua.
+      changes.push({ ...change, __wabaId: entry?.id ? String(entry.id) : null });
     });
   });
   return changes;
@@ -84,6 +87,7 @@ function parseWebhookPayload(payload) {
       // só consegue inferir pelo formato do value — e evento de conta não tem phone_number_id,
       // então era descartado sem deixar rastro. Ver summarizeChangeForLog.
       field: change?.field ? String(change.field) : null,
+      wabaId: change?.__wabaId || null,
       phoneNumberId,
       value,
       messages,
