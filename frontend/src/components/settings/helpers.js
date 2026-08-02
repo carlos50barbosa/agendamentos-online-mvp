@@ -51,14 +51,31 @@ export function publicLinkFor({ slug, id } = {}) {
 
 export const SLUG_RE = /^([a-z0-9]+(?:-[a-z0-9]+)*)$/;
 
-export function slugify(value) {
+/**
+ * Normalização PARCIAL, para rodar a cada tecla enquanto a pessoa digita.
+ *
+ * A diferença para o `slugify` é uma só, e é a razão deste módulo existir: o hífen do FIM é
+ * preservado. Aplicar a normalização completa no `onChange` tornava impossível digitar um hífen —
+ * no instante em que ele é teclado, ele é o último caractere, então `-+$` o apagava antes da
+ * próxima letra. O placeholder sugeria `studio-e-barber` e a pessoa não conseguia escrever aquilo.
+ *
+ * Hífen no INÍCIO continua sendo removido: não existe momento em que digitá-lo leve a um slug
+ * válido, então tirar na hora é ajuda, não obstáculo.
+ */
+export function slugifyWhileTyping(value) {
   return String(value || '')
     .normalize('NFD')
     .replace(/[̀-ͯ]/g, '')
     .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
+    .replace(/[^a-z0-9-]+/g, '-')
+    .replace(/-{2,}/g, '-')
+    .replace(/^-+/, '')
     .slice(0, 160);
+}
+
+/** Normalização COMPLETA: use ao sair do campo e antes de salvar, nunca a cada tecla. */
+export function slugify(value) {
+  return slugifyWhileTyping(value).replace(/-+$/, '');
 }
 
 // Mensagem amigável a partir do erro do backend do perfil público (details[].code).

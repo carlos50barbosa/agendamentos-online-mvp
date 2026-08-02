@@ -5,7 +5,7 @@
 import React, { useEffect, useState } from 'react';
 import { Api } from '../../utils/api';
 import { getUser, saveUser } from '../../utils/auth';
-import { publicOrigin, SLUG_RE, slugify } from './helpers.js';
+import { publicOrigin, SLUG_RE, slugify, slugifyWhileTyping } from './helpers.js';
 import './settings.css';
 
 export default function PublicLinkSection({ onSaved, compact = false }) {
@@ -37,8 +37,12 @@ export default function PublicLinkSection({ onSaved, compact = false }) {
   }, []);
 
   const host = publicOrigin().replace(/^https?:\/\//, '');
-  const valid = SLUG_RE.test(slug) && slug.length >= 3 && slug.length <= 160;
-  const changed = slug !== original;
+  // Valida o que SERÁ salvo, não o que está na tela: enquanto se digita, o campo pode ter um hífen
+  // solto no fim. Validando o texto cru, "studio-" travava o botão e a pessoa ficava sem saída —
+  // sem entender por que o link que ela está escrevendo não pode ser salvo.
+  const slugFinal = slugify(slug);
+  const valid = SLUG_RE.test(slugFinal) && slugFinal.length >= 3 && slugFinal.length <= 160;
+  const changed = slugFinal !== original;
 
   const onSave = async (e) => {
     e.preventDefault();
@@ -49,8 +53,8 @@ export default function PublicLinkSection({ onSaved, compact = false }) {
     }
     setBusy(true);
     try {
-      const resp = await Api.updateEstablishmentSlug(id, slug);
-      const saved = String(resp?.slug || slug);
+      const resp = await Api.updateEstablishmentSlug(id, slugFinal);
+      const saved = String(resp?.slug || slugFinal);
       setSlug(saved);
       setOriginal(saved);
       const u = getUser();
@@ -88,7 +92,10 @@ export default function PublicLinkSection({ onSaved, compact = false }) {
           <input
             className="input"
             value={slug}
-            onChange={(ev) => setSlug(slugify(ev.target.value))}
+            // Digitando: preserva o hífen do fim (senão não dá para escrever "studio-e-barber").
+            // Ao sair do campo: normaliza de verdade, tirando o hífen solto que tenha sobrado.
+            onChange={(ev) => setSlug(slugifyWhileTyping(ev.target.value))}
+            onBlur={() => setSlug((atual) => slugify(atual))}
             placeholder="studio-e-barber"
             maxLength={160}
             spellCheck={false}
