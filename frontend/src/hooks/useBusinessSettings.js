@@ -617,9 +617,7 @@ export function useBusinessSettings(options = {}) {
     if (!deposit.allowed) {
       setMercadoPago((current) => ({
         ...current,
-        // Sem nome de plano: quem manda é `deposit.allowed`, que vem do backend. Nomear
-        // o plano aqui foi o que deixou 7 textos mentindo quando o Starter ganhou sinal.
-        error: 'O sinal (PIX) não está disponível no seu plano atual.',
+        error: 'Recurso disponível apenas para planos Pro e Premium.',
         notice: '',
       }));
       return;

@@ -104,7 +104,7 @@ export default function SinalAgendamentos() {
 
           {!deposit.allowed ? (
             <div className="notice notice--info">
-              O sinal (PIX) não está disponível no seu plano atual. <Link to="/planos">Conhecer planos</Link>
+              Disponível apenas para planos Pro e Premium. <Link to="/planos">Conhecer planos</Link>
             </div>
           ) : null}
 
@@ -437,7 +437,7 @@ export default function SinalAgendamentos() {
           </div>
         ) : (
           <div className="settings-module-empty-state">
-            <div className="notice notice--info">O sinal (PIX) não está disponível no seu plano atual.</div>
+            <div className="notice notice--info">Recurso disponível apenas para planos Pro e Premium.</div>
             <Link className="btn btn--outline btn--sm" to="/planos">
               Conhecer planos
             </Link>

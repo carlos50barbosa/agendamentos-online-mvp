@@ -142,7 +142,7 @@ router.put('/settings/deposit', auth, isEstabelecimento, async (req, res) => {
     if (!allowed) {
       return res.status(403).json({
         error: 'plan_not_allowed',
-        message: 'O sinal (PIX) não está disponível no seu plano atual.',
+        message: 'Disponível apenas para planos Pro ou Premium.',
       });
     }
 
@@ -317,7 +317,7 @@ router.post('/asaas/subconta', auth, isEstabelecimento, async (req, res) => {
     if (!planAllowsDeposit(planContext.plan)) {
       return res.status(403).json({
         error: 'plan_not_allowed',
-        message: 'O sinal (PIX) não está disponível no seu plano atual.',
+        message: 'Disponível apenas para planos Pro ou Premium.',
       });
     }
 

@@ -152,7 +152,7 @@ async function assertCapabilityAllowed(estabelecimentoId, capability) {
   }
   const allowed = planAllowsDeposit(planContext.plan)
   if (!allowed) {
-    const error = new Error('O sinal (PIX) não está disponível no seu plano atual.')
+    const error = new Error('Disponível apenas para planos Pro ou Premium.')
     error.status = 403
     error.code = 'plan_not_allowed'
     throw error

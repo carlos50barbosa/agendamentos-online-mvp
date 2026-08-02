@@ -89,7 +89,7 @@ export default function Financeiro() {
 
       {allowed === false ? (
         <div className="notice notice--info">
-          O sinal (PIX) não está disponível no seu plano atual. <Link to="/planos?motivo=sinal">Conhecer planos</Link>
+          O sinal é um recurso dos planos Pro e Premium. <Link to="/planos?motivo=sinal">Conhecer planos</Link>
         </div>
       ) : null}
 
