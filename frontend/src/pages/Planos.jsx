@@ -34,7 +34,9 @@ const SUBTITLES = {
 const REASONS = {
   profissionais: 'Você atingiu o limite de profissionais do seu plano.',
   relatorios: 'Os relatórios avançados são do plano Pro.',
-  sinal: 'O sinal via PIX é do plano Pro.',
+  // Sem nome de plano: o sinal deixou de ser exclusivo do Pro em 02/08/2026, e esta string
+  // não acompanhou. Quem decide é o catálogo — a página já mostra em qual plano ele está.
+  sinal: 'O sinal via PIX não está disponível no seu plano atual.',
   galeria: 'Você atingiu o limite de fotos da galeria.',
   whatsapp: 'Sua franquia de mensagens do WhatsApp acabou.',
 };

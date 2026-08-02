@@ -22,7 +22,7 @@ import { handleReminderConfirmation } from '../whatsapp/inbound/reminderConfirma
 import { TEMPLATE_KEYS } from '../bot/templates/templateRegistry.js';
 import { dispatchBotReply } from '../bot/runtime/replyDispatcher.js';
 import { evaluateTenantPolicy, getTenantBotSettings } from '../bot/storage/settingsStore.js';
-import { getActiveHandoff, openHandoff, closeHandoff } from '../bot/storage/handoffStore.js';
+import { getActiveHandoff, openHandoff, closeHandoff, claimHandoffNotice } from '../bot/storage/handoffStore.js';
 import { shouldPauseEngine } from '../bot/runtime/handoffPolicy.js';
 import { checkRateLimit } from '../bot/runtime/rateLimiter.js';
 import { mapEngineResultToMetrics } from '../bot/metrics/metricsMapper.js';
@@ -362,16 +362,28 @@ async function processInboundMessage({ account, phoneNumberId, value, message })
       session = { ...(session || {}), state: 'START', context: nextContext };
       textForEngine = 'menu';
     } else if (pauseDecision.blockEngine) {
-      const sent = await sendBotReply({
-        account,
-        toPhone: normalized.fromPhone,
-        message: pausedMessage(),
-        replyMode,
-        context: {
-          source: 'handoff_pause',
-          handoff_id: activeHandoff?.id || null,
-        },
-      });
+      // A frase de "atendimento humano em andamento" sai UMA vez por handoff. Antes saía a cada
+      // mensagem da cliente: numa conversa de vinte mensagens, vinte interrupções — e no número do
+      // próprio salão, o que faz parecer que o dono está falando por cima de si mesmo.
+      //
+      // Sem handoff identificado (pausa vinda só do contexto da sessão) mantém o comportamento
+      // antigo: não há onde registrar a reivindicação.
+      const podeAvisar = activeHandoff?.id
+        ? await claimHandoffNotice(activeHandoff.id).catch(() => true)
+        : true;
+
+      const sent = podeAvisar
+        ? await sendBotReply({
+            account,
+            toPhone: normalized.fromPhone,
+            message: pausedMessage(),
+            replyMode,
+            context: {
+              source: 'handoff_pause',
+              handoff_id: activeHandoff?.id || null,
+            },
+          })
+        : { ok: true, replyType: 'none', errorCode: null };
       replyType = sent.replyType || 'text';
       errorCode = sent.ok ? null : (sent.errorCode || null);
 

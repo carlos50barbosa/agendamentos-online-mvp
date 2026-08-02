@@ -184,7 +184,8 @@ export default function LandingPublica() {
   );
 
   // Mesma máquina de /planos (goTrial): o cadastro lê ?trial_plan= e /assinatura lê intent_kind.
-  // O trial é do Pro — é o plano que tem o sinal via PIX, que é o argumento de venda.
+  // O trial continua sendo do Pro. Desde 02/08/2026 o sinal também está no Starter, então o
+  // que o teste grátis mostra a mais são relatórios avançados e o limite maior de profissionais.
   const startTrial = useCallback(() => {
     try {
       localStorage.removeItem('intent_plano');
