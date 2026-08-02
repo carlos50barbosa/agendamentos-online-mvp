@@ -117,10 +117,6 @@ export default function ServicosEstabelecimento() {
 
   const [toast, setToast] = useState(null); // {type:'success'|'error'|'info', msg:string}
 
-  const [planLimitOpen, setPlanLimitOpen] = useState(false);
-
-  const [planLimitMessage, setPlanLimitMessage] = useState('');
-
   function showToast(type, msg, ms = 5000) {
 
     setToast({ type, msg });
@@ -512,13 +508,11 @@ export default function ServicosEstabelecimento() {
 
     } catch (err) {
 
-      if (err?.data?.error === 'plan_limit') {
-
-        setPlanLimitMessage(err?.message || 'Seu plano atual não permite adicionar mais serviços. Atualize o plano para continuar.');
-
-        setPlanLimitOpen(true);
-
-      } else if (err?.data?.error === 'missing_professionals') {
+      // NÃO existe limite de serviços: `maxServices` é ilimitado nos três planos (plans.js) e
+      // o backend nunca devolveu o erro 'plan_limit' — só 'plan_limit_agendamentos' e
+      // 'plan_limit_professionals'. O ramo que existia aqui era inalcançável, e foi ele que
+      // manteve viva por meses a frase falsa "Starter permite até 10 serviços".
+      if (err?.data?.error === 'missing_professionals') {
 
         showToast('error', err?.data?.message || 'Selecione pelo menos um profissional.');
 
@@ -1491,41 +1485,9 @@ export default function ServicosEstabelecimento() {
 
       {/* Modal de edicao */}
 
-      {planLimitOpen && (
-
-        <Modal onClose={() => setPlanLimitOpen(false)}>
-
-          <h3>Atualize seu plano</h3>
-
-          <p>
-
-            {planLimitMessage || 'Seu plano atual (Starter) permite cadastrar até 10 serviços. Para adicionar novos serviços, migre para o plano Pro ou Premium.'}
-
-          </p>
-
-          <p className="muted">
-
-            Acesse <strong>Configurações &gt; Planos</strong> ou utilize os botões abaixo para mudar de plano.
-
-          </p>
-
-          <div className="row" style={{ gap: 8, justifyContent: 'flex-end', marginTop: 16 }}>
-
-            <Link className="btn btn--outline" to="/configuracoes" onClick={() => setPlanLimitOpen(false)}>Ir para Configurações</Link>
-
-            <Link className="btn btn--primary" to="/planos?motivo=profissionais" onClick={() => setPlanLimitOpen(false)}>Ver planos</Link>
-
-          </div>
-
-          <div className="row" style={{ justifyContent: 'flex-end', marginTop: 8 }}>
-
-            <button className="btn btn--sm" onClick={() => setPlanLimitOpen(false)}>Fechar</button>
-
-          </div>
-
-        </Modal>
-
-      )}
+      {/* Aqui existia um modal "Atualize seu plano" para limite de serviços. Removido em
+          02/08/2026: serviço nunca teve limite (`maxServices` ilimitado nos três planos) e o
+          backend nunca emitiu o erro que o abria. */}
 
 
 

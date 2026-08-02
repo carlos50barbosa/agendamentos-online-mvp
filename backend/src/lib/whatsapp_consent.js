@@ -85,10 +85,71 @@ export async function getWhatsAppConsent(phone) {
  * vai para o log estruturado, e o bloqueio fica registrado na carteira pelo chamador, então isso
  * não some em silêncio.
  */
-export async function hasWhatsAppConsent(phone) {
+/**
+ * A regra, isolada do banco para poder ser testada: AUTORIZAÇÃO É ESTREITA, REVOGAÇÃO É AMPLA.
+ *
+ * ─── Por que o escopo existe ───────────────────────────────────────────────────────────────────
+ *
+ * Consentimento é sobre QUEM manda. Enquanto tudo saía do número global da plataforma, um estado
+ * por telefone bastava — havia um só remetente. Com cada salão no próprio número, a cliente que
+ * autorizou o número da Ju não autorizou o número da Bia, e um `PARAR` mandado para a Ju não pode
+ * calar a Bia.
+ *
+ * A assimetria é deliberada:
+ *   - `granted` vale só no escopo em que foi dado. Autorização de plataforma NÃO libera o número
+ *     do salão: é remetente novo, e presumir o contrário é o raciocínio que sustenta denúncia.
+ *   - `revoked` na plataforma cala TUDO, inclusive os números dos salões. Quem pediu para sair
+ *     pediu para sair; errar aqui é errar para o lado de não enviar.
+ */
+export function decideConsent({ plataforma = null, salao = null, escopoSalao = false } = {}) {
+  if (plataforma === EVENT_REVOKED) return false;
+  if (!escopoSalao) return plataforma === EVENT_GRANTED;
+  if (salao === EVENT_REVOKED) return false;
+  return salao === EVENT_GRANTED;
+}
+
+/** O último evento deste telefone no escopo do SALÃO (não o da plataforma). */
+async function getConsentDoSalao(e164, estabelecimentoId, executar) {
+  const [rows] = await executar(
+    `SELECT evento FROM whatsapp_optins
+      WHERE telefone_e164 = ? AND estabelecimento_id = ?
+      ORDER BY id DESC LIMIT 1`,
+    [e164, estabelecimentoId]
+  );
+  return rows?.[0]?.evento || null;
+}
+
+/** O último evento deste telefone no escopo da PLATAFORMA (sem estabelecimento). */
+async function getConsentDaPlataforma(e164, executar) {
+  const [rows] = await executar(
+    `SELECT evento FROM whatsapp_optins
+      WHERE telefone_e164 = ? AND estabelecimento_id IS NULL
+      ORDER BY id DESC LIMIT 1`,
+    [e164]
+  );
+  return rows?.[0]?.evento || null;
+}
+
+/**
+ * @param {string} phone
+ * @param {{ estabelecimentoId?: number|null }} opcoes
+ *   `estabelecimentoId` só deve vir preenchido quando a mensagem vai sair do número PRÓPRIO desse
+ *   estabelecimento. Saindo do número global, o escopo é o da plataforma — passar o id aqui
+ *   silenciaria quem já tinha autorizado.
+ */
+export async function hasWhatsAppConsent(phone, { estabelecimentoId = null, deps = {} } = {}) {
   try {
-    const row = await getWhatsAppConsent(phone);
-    return row?.evento === EVENT_GRANTED;
+    const e164 = normalizePhoneBR(phone);
+    if (!e164) return false;
+    const executar = deps.query || ((sql, params) => pool.query(sql, params));
+    const estab = Number(estabelecimentoId) || null;
+
+    const plataforma = await getConsentDaPlataforma(e164, executar);
+    // Revogação de plataforma já cala tudo: nem consulta o escopo do salão.
+    if (plataforma === EVENT_REVOKED) return false;
+
+    const salao = estab ? await getConsentDoSalao(e164, estab, executar) : null;
+    return decideConsent({ plataforma, salao, escopoSalao: Boolean(estab) });
   } catch (err) {
     log.error('wa_optin_check_failed', {
       reason: err?.message || String(err),

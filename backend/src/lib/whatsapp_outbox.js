@@ -4,6 +4,7 @@ import { sendWhatsAppSmart } from './notifications.js';
 import { buildConfirmacaoAgendamentoV2Components, isConfirmacaoAgendamentoV2 } from './whatsapp_templates.js';
 import { mapSendKindToCatalogKind } from './wa_template_catalog.js';
 import { getTenantTemplateRow } from '../services/waTenantTemplates.js';
+import { getWaAccountByEstabelecimentoId } from '../services/waTenant.js';
 import { hasWhatsAppConsent } from './whatsapp_consent.js';
 import { whatsappUnavailable } from './whatsapp_availability.js';
 import { isValidMobileBR } from './phone_br.js';
@@ -207,15 +208,38 @@ export async function sendAppointmentWhatsApp({
     return { ok: true, sent: false, blocked: true, reason: 'invalid_phone' };
   }
 
+  // ── Escopo do consentimento: de QUEM esta mensagem vai chegar ────────────────────────────────
+  //
+  // Consentimento é sobre o remetente. O aviso ao DONO sai do número global da plataforma, então o
+  // escopo é o da plataforma. O aviso ao CLIENTE sai do número do próprio salão quando ele tem
+  // conta conectada — e aí a autorização precisa ser daquele salão, não a que a cliente deu à
+  // plataforma para receber de um número diferente.
+  //
+  // Passar o id no caso errado silenciaria quem já autorizou; não passar deixaria a cliente
+  // receber de um número que ela nunca autorizou. Por isso a checagem é explícita.
+  let escopoEstab = null;
+  if (audience !== WA_AUDIENCE_ESTABLISHMENT) {
+    const contaPropria = await getWaAccountByEstabelecimentoId(estabId).catch(() => null);
+    if (
+      contaPropria
+      && String(contaPropria.status || '').toLowerCase() === 'connected'
+      && contaPropria.phone_number_id
+    ) {
+      escopoEstab = estabId;
+    }
+  }
+
   // Opt-in, para TODO destinatário: sem autorização não se consulta saldo, não se debita, não se
   // envia. É a pergunta mais barata e a única que, respondida errado, tira a plataforma do ar.
-  const consented = await hasWhatsAppConsent(to);
+  const consented = await hasWhatsAppConsent(to, { estabelecimentoId: escopoEstab });
   if (!consented) {
     await recordWhatsAppBlocked({
       estabelecimentoId: estabId,
       agendamentoId: agId,
       reason: 'no_optin',
-      metadata: { kind, audience },
+      // O escopo entra no registro: "sem opt-in" no número do salão e no número global são
+      // situações diferentes, e sem isto viram a mesma linha no relatório.
+      metadata: { kind, audience, escopo: escopoEstab ? 'salao' : 'plataforma' },
     }).catch(() => {});
     return { ok: true, sent: false, blocked: true, reason: 'no_optin' };
   }

@@ -34,8 +34,9 @@ const SUBTITLES = {
 const REASONS = {
   profissionais: 'Você atingiu o limite de profissionais do seu plano.',
   relatorios: 'Os relatórios avançados são do plano Pro.',
-  // Sem nome de plano: o sinal deixou de ser exclusivo do Pro em 02/08/2026, e esta string
-  // não acompanhou. Quem decide é o catálogo — a página já mostra em qual plano ele está.
+  // Sem nome de plano. Em 02/08/2026 o sinal entrou e saiu do Starter no mesmo dia, e uma
+  // string com "é do plano Pro" mente a cada virada. Quem decide é o catálogo — a própria
+  // página já mostra, logo abaixo, em qual plano o recurso está.
   sinal: 'O sinal via PIX não está disponível no seu plano atual.',
   galeria: 'Você atingiu o limite de fotos da galeria.',
   whatsapp: 'Sua franquia de mensagens do WhatsApp acabou.',
@@ -335,10 +336,17 @@ export default function Planos() {
                     ) : (
                       <div className="lp-card__diff">
                         <ul>
+                          {/* O sinal SAI DO CATÁLOGO. Esta linha era um `<li class="is-off">Sem
+                              sinal via PIX</li>` fixo: quando o Starter ganhou o recurso, em
+                              02/08/2026, a página de preços passou a afirmar ao comprador o
+                              contrário do que ele levava. O flag voltou atrás no mesmo dia — e é
+                              exatamente por isso que este `if` existe. */}
+                          {plan.allow_deposit
+                            ? <li>Sinal via PIX — o cliente paga uma parte ao marcar</li>
+                            : <li className="is-off">Sem sinal via PIX</li>}
                           <li>{limitText(plan.max_professionals, 'profissional', 'profissionais')}</li>
                           <li>{plan.whatsapp_included_messages.toLocaleString('pt-BR')} mensagens de WhatsApp por mês</li>
                           <li>{limitText(plan.max_gallery_images, 'foto na galeria', 'fotos na galeria')}</li>
-                          <li className="is-off">Sem sinal via PIX</li>
                         </ul>
                       </div>
                     )}

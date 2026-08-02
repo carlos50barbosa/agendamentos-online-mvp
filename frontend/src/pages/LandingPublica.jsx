@@ -55,7 +55,13 @@ const limite = (valor, singular, plural) => (
  */
 function bulletsDoPlano(plan, anterior) {
   if (!anterior) {
+    // O sinal sai do catálogo AQUI também, não só na diferença entre planos. Enquanto ele for
+    // exclusivo de um plano superior, aparecer como ganho de upgrade basta; no dia em que
+    // entrar no plano de entrada, a diferença vira zero e ele some dos três cards de uma vez —
+    // a landing venderia o sinal na headline sem listá-lo em plano nenhum. Aconteceu em
+    // 02/08/2026, nas duas direções, no mesmo dia: não presuma qual plano tem o quê.
     return [
+      ...(plan.allow_deposit ? ['Sinal no PIX ao agendar — abatido no serviço'] : []),
       'Agendamentos e serviços ilimitados',
       'Link próprio para o cliente marcar sozinho',
       limite(plan.max_professionals, 'profissional', 'profissionais'),
@@ -184,8 +190,8 @@ export default function LandingPublica() {
   );
 
   // Mesma máquina de /planos (goTrial): o cadastro lê ?trial_plan= e /assinatura lê intent_kind.
-  // O trial continua sendo do Pro. Desde 02/08/2026 o sinal também está no Starter, então o
-  // que o teste grátis mostra a mais são relatórios avançados e o limite maior de profissionais.
+  // O trial é do Pro — é o plano que tem o sinal via PIX, que é o argumento de venda. Por isso
+  // a nota do hero diz "grátis no Pro": a headline promete o sinal, e ele não está no Starter.
   const startTrial = useCallback(() => {
     try {
       localStorage.removeItem('intent_plano');
