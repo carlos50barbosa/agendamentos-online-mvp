@@ -27,7 +27,8 @@ const CONFIG_ID = String(
 ).trim();
 const SDK_LOCALE = String(process.env.WA_EMBEDDED_SIGNUP_SDK_LOCALE || 'en_US').trim() || 'en_US';
 const SESSION_INFO_VERSION = String(process.env.WA_EMBEDDED_SIGNUP_SESSION_INFO_VERSION || '3').trim() || '3';
-const FEATURE = String(process.env.WA_EMBEDDED_SIGNUP_FEATURE || 'whatsapp_embedded_signup').trim() || 'whatsapp_embedded_signup';
+// `featureType` — e NÃO `feature`. Ver buildEmbeddedSignupExtras() para o que a troca custou.
+// Vazio é o valor padrão documentado; a env existe só para o caso de a Meta pedir outro.
 const FEATURE_TYPE = String(process.env.WA_EMBEDDED_SIGNUP_FEATURE_TYPE || '').trim();
 const FLOW_VERSION = String(process.env.WA_EMBEDDED_SIGNUP_FLOW_VERSION || '').trim();
 const REDIRECT_URI = String(
@@ -112,13 +113,28 @@ export function normalizeEmbeddedSignupSessionInfo(sessionInfo) {
   };
 }
 
+/**
+ * Os `extras` do FB.login.
+ *
+ * ─── Por que `featureType` e não `feature` ─────────────────────────────────────────────────────
+ *
+ * Mandávamos `feature: 'whatsapp_embedded_signup'`, que é de uma versão antiga do fluxo. A Meta
+ * hoje roteia essa chave para um caminho reservado a BSP/Tech Provider: o popup ABRIA e morria em
+ * "Embedded signup is only available for BSPs or TPs".
+ *
+ * Pior, o sintoma na tela não era esse. Como o `FB.login` com `config_id` consulta o estado de
+ * sessão antes de abrir a janela, quem não estivesse logado no Facebook não via popup NENHUM — nem
+ * erro, nem console, só o botão girando para sempre. Foram necessários três testes lado a lado no
+ * console (sem config_id / com `featureType` / com `feature`) para separar as duas coisas.
+ *
+ * `featureType: ''` é o padrão documentado e é o que faz o fluxo correto abrir.
+ */
 function buildEmbeddedSignupExtras() {
   const extras = {
-    feature: FEATURE,
-    sessionInfoVersion: SESSION_INFO_VERSION,
     setup: {},
+    featureType: FEATURE_TYPE,
+    sessionInfoVersion: SESSION_INFO_VERSION,
   };
-  if (FEATURE_TYPE) extras.featureType = FEATURE_TYPE;
   if (FLOW_VERSION) extras.version = FLOW_VERSION;
   return extras;
 }
