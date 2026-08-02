@@ -194,9 +194,15 @@ export default function Planos() {
   }, [location.hash]);
 
   const ctaFor = (plan) => {
-    // O Pro é o plano do trial: é onde está o sinal, que é o argumento.
-    if (plan.code === 'pro' && trialAvailable) {
-      return { label: `Testar ${trialDays} dias grátis`, action: () => goTrial('pro', cycle), primary: true };
+    // Quem pode ser testado vem do catálogo (`allow_trial`), não de um code cravado aqui.
+    // O Premium fica de fora porque a fidelidade dele cria cobrança recorrente no cartão de
+    // clientes reais, e nada cancela isso quando o teste acaba — ver planAllowsTrial.
+    if (plan.allow_trial && trialAvailable) {
+      return {
+        label: `Testar ${trialDays} dias grátis`,
+        action: () => goTrial(plan.code, cycle),
+        primary: plan.code === 'pro',
+      };
     }
     if (currentPlan?.code === plan.code) {
       return { label: 'Seu plano atual', action: null, primary: false };

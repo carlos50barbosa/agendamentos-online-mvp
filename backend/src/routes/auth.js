@@ -9,7 +9,7 @@ import { notifyEmail } from '../lib/notifications.js';
 import crypto from 'crypto';
 import { consumeLinkToken } from '../lib/wa_store.js';
 import { saveAvatarFromDataUrl, removeAvatarFile } from '../lib/avatar.js';
-import { MAX_TRIAL_DAYS } from '../lib/plans.js';
+import { MAX_TRIAL_DAYS, DEFAULT_TRIAL_PLAN, planAllowsTrial } from '../lib/plans.js';
 import { config } from '../lib/config.js';
 import {
   grantWhatsAppConsent,
@@ -26,7 +26,6 @@ import { normalizePhoneBR } from '../lib/phone_br.js';
 
 const router = Router();
 const DAY_MS = 86400000;
-const TRIAL_PLANS = new Set(['starter', 'pro']);
 
 function fingerprintAuthSubject(value, fallback = 'missing') {
   const normalized = String(value ?? '').trim().toLowerCase();
@@ -220,7 +219,9 @@ router.post('/register', async (req, res) => {
 
     const now = new Date();
     const normalizedRequestedPlan = String(req.body?.trial_plan || req.body?.plan || '').trim().toLowerCase();
-    const planForTrial = TRIAL_PLANS.has(normalizedRequestedPlan) ? normalizedRequestedPlan : 'starter';
+    // Quem pode ser testado sai do catálogo (planAllowsTrial), não de um Set local: a regra
+    // vivia em três cópias — aqui, em Cadastro.jsx e num `=== pro` cravado em Planos.jsx.
+    const planForTrial = planAllowsTrial(normalizedRequestedPlan) ? normalizedRequestedPlan : DEFAULT_TRIAL_PLAN;
     const trialEndsAt =
       tipo === 'estabelecimento' && MAX_TRIAL_DAYS > 0
         ? new Date(now.getTime() + MAX_TRIAL_DAYS * DAY_MS)

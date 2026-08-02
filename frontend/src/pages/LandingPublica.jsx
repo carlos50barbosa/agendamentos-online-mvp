@@ -205,13 +205,14 @@ export default function LandingPublica() {
   // Mesma máquina de /planos (goTrial): o cadastro lê ?trial_plan= e /assinatura lê intent_kind.
   // O trial é do Pro — é o plano que tem o sinal via PIX, que é o argumento de venda. Por isso
   // a nota do hero diz "grátis no Pro": a headline promete o sinal, e ele não está no Starter.
-  const startTrial = useCallback(() => {
+  const startTrial = useCallback((planCode = 'pro') => {
     try {
       localStorage.removeItem('intent_plano');
       localStorage.removeItem('intent_plano_ciclo');
       localStorage.setItem('intent_kind', 'trial');
     } catch {}
-    navigate(`/cadastro?trial_plan=pro&next=${encodeURIComponent('/estab?trial=sucesso')}&tipo=estabelecimento`);
+    const plano = encodeURIComponent(planCode || 'pro');
+    navigate(`/cadastro?trial_plan=${plano}&next=${encodeURIComponent('/estab?trial=sucesso')}&tipo=estabelecimento`);
   }, [navigate]);
 
   const primaryCta = useMemo(() => {
@@ -320,8 +321,15 @@ export default function LandingPublica() {
                       )}
                       {plan.bullets.map((item) => <li key={item}>{item}</li>)}
                     </ul>
-                    {destaque && !user ? (
-                      <button type="button" className="btn btn--primary" onClick={startTrial}>
+                    {/* Quem pode ser testado vem de `allow_trial` (catálogo), não do code do
+                        plano: Starter e Pro têm teste, Premium não. O Pro leva o botão cheio
+                        por ser o destaque; o Starter, a versão de contorno. */}
+                    {plan.allow_trial && !user ? (
+                      <button
+                        type="button"
+                        className={destaque ? 'btn btn--primary' : 'btn btn--outline'}
+                        onClick={() => startTrial(plan.code)}
+                      >
                         Testar {trialDays} dias grátis
                       </button>
                     ) : (

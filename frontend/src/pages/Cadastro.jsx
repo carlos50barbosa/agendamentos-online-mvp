@@ -156,7 +156,11 @@ export default function Cadastro() {
 
     const normalized = String(rawPlan || '').trim().toLowerCase();
 
-    return ['starter', 'pro'].includes(normalized) ? normalized : '';
+    // Só sanidade de formato. QUEM decide se o plano pode ser testado é o backend
+    // (planAllowsTrial, em lib/plans.js), que devolve o padrão quando não pode. Manter a lista
+    // aqui era a terceira cópia da mesma regra — e listas duplicadas foi o que fez a vitrine
+    // divergir do produto duas vezes hoje.
+    return /^[a-z]{3,20}$/.test(normalized) ? normalized : '';
 
   }, [loc.search]);
 

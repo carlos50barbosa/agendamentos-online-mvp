@@ -25,6 +25,7 @@ const PLAN_CONFIG = {
     // prometeria um recurso que o backend nega.
     allowDeposit: false,
     allowLoyalty: false,
+    allowTrial: true,
     whatsappIncludedMessages: 250,
     whatsappMaxMessagesPerAppointment: 5,
   },
@@ -41,6 +42,7 @@ const PLAN_CONFIG = {
     allowAdvancedReports: true,
     allowDeposit: true,
     allowLoyalty: false,
+    allowTrial: true,
     whatsappIncludedMessages: 500,
     whatsappMaxMessagesPerAppointment: 5,
   },
@@ -57,6 +59,7 @@ const PLAN_CONFIG = {
     allowAdvancedReports: true,
     allowDeposit: true,
     allowLoyalty: true,
+    allowTrial: false,
     whatsappIncludedMessages: 1500,
     whatsappMaxMessagesPerAppointment: 5,
   },
@@ -73,6 +76,25 @@ export function planAllowsDeposit(plan) {
 export function planAllowsLoyalty(plan) {
   return Boolean(resolvePlanConfig(plan).allowLoyalty);
 }
+
+/**
+ * Quais planos podem ser testados de graça.
+ *
+ * O Premium fica de fora, e não por preço: a fidelidade (o recurso dele) faz o dono enfileirar
+ * cobranças RECORRENTES no cartão de clientes reais. Nada no código cancela essas assinaturas
+ * quando o plano cai, e elas vivem no Asaas com id próprio — no dia 8 o salão perderia a gestão
+ * e o cliente continuaria pagando. Teste não pode deixar dívida com terceiro para trás.
+ * O sinal não tem esse problema: é por agendamento, acabou o teste não nasce cobrança nova.
+ *
+ * Esta era a terceira cópia da mesma regra (auth.js tinha um Set, Cadastro.jsx um array e
+ * Planos.jsx um `=== 'pro'` cravado). Agora sai do catálogo, como o resto.
+ */
+export function planAllowsTrial(plan) {
+  return Boolean(resolvePlanConfig(plan).allowTrial);
+}
+
+/** Plano padrão do teste quando o pedido não veio ou não pode ser testado. */
+export const DEFAULT_TRIAL_PLAN = 'starter';
 
 // Catálogo para a página pública de planos. Sai daqui, e não de uma cópia hardcoded no
 // frontend — preço e limite que divergem entre a vitrine e o backend viram promessa falsa.
@@ -100,6 +122,7 @@ export function getPublicPlanCatalog() {
         allow_advanced_reports: config.allowAdvancedReports,
         allow_deposit: config.allowDeposit,
         allow_loyalty: config.allowLoyalty,
+        allow_trial: config.allowTrial,
       };
     }),
   };
