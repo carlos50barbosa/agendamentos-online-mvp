@@ -236,20 +236,13 @@ export default function WhatsAppEmbeddedSignup({ onConnected, disabled = false }
   const conectar = useCallback(async () => {
     if (!config || conectando || disabled || !aceitou) return;
 
-    // ─── A ORDEM AQUI É O QUE FAZ O POPUP ABRIR ───────────────────────────────────────────────
+    // `FB.login` antes dos setState por precaução — abrir a janela o mais perto possível do clique
+    // é boa prática quando há popup no meio.
     //
-    // `FB.login` PRIMEIRO, antes de qualquer setState. Invertido, nada abre — sem erro, sem
-    // console, sem callback, só o botão girando para sempre.
-    //
-    // Por quê: `setConectando(true)` desabilita o próprio botão que recebeu o clique, e o React 18
-    // descarrega essa re-renderização de forma síncrona dentro do despacho do evento. Quando o SDK
-    // finalmente chega no `window.open`, o navegador já não trata a chamada como iniciada pelo
-    // usuário e engole a janela. Permissão explícita de popup no Chrome NÃO resolve, porque o SDK
-    // abre por um caminho indireto.
-    //
-    // Provado por experimento: um <button> criado na mão, fora do React, chamando exatamente este
-    // mesmo FB.login com os mesmos argumentos, abre o popup. O nosso, com os setState antes, não.
-    // Mesma aba, mesmo instante, mesmo SDK.
+    // Registro honesto: chegamos a acreditar que ESTA ordem era a causa do popup não abrir. Não
+    // era — inverter não mudou nada. A causa real estava em `abrirLogin`, que usava uma referência
+    // guardada do `window.FB` em vez de lê-lo no clique. Mantido assim mesmo, porque não custa
+    // nada e continua sendo o desenho certo.
     // Ref e console NÃO re-renderizam, então podem vir antes sem custo. Só os setState é que não
     // podem — e limpar o session_info depois de a janela abrir criaria corrida com o postMessage.
     sessionInfoRef.current = null;
