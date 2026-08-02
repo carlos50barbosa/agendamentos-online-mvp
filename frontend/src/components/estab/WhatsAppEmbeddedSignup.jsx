@@ -218,17 +218,35 @@ export default function WhatsAppEmbeddedSignup({ onConnected, disabled = false }
 
   const conectar = useCallback(async () => {
     if (!config || conectando || disabled || !aceitou) return;
-    setErro('');
-    setConectando(true);
+
+    // ─── A ORDEM AQUI É O QUE FAZ O POPUP ABRIR ───────────────────────────────────────────────
+    //
+    // `FB.login` PRIMEIRO, antes de qualquer setState. Invertido, nada abre — sem erro, sem
+    // console, sem callback, só o botão girando para sempre.
+    //
+    // Por quê: `setConectando(true)` desabilita o próprio botão que recebeu o clique, e o React 18
+    // descarrega essa re-renderização de forma síncrona dentro do despacho do evento. Quando o SDK
+    // finalmente chega no `window.open`, o navegador já não trata a chamada como iniciada pelo
+    // usuário e engole a janela. Permissão explícita de popup no Chrome NÃO resolve, porque o SDK
+    // abre por um caminho indireto.
+    //
+    // Provado por experimento: um <button> criado na mão, fora do React, chamando exatamente este
+    // mesmo FB.login com os mesmos argumentos, abre o popup. O nosso, com os setState antes, não.
+    // Mesma aba, mesmo instante, mesmo SDK.
+    // Ref e console NÃO re-renderizam, então podem vir antes sem custo. Só os setState é que não
+    // podem — e limpar o session_info depois de a janela abrir criaria corrida com o postMessage.
     sessionInfoRef.current = null;
 
-    // Caminho normal: o SDK já veio no pré-carregamento, então o popup abre dentro do gesto do
-    // clique e não é barrado.
     if (sdkRef.current) {
       console.info('[wa/embedded-signup] clique: SDK pré-carregado, chamando direto');
       abrirLogin(sdkRef.current);
+      setErro('');
+      setConectando(true);
       return;
     }
+
+    setErro('');
+    setConectando(true);
     console.warn('[wa/embedded-signup] clique: SDK NÃO pré-carregado — vai esperar a rede, o popup pode ser barrado');
 
     // Só chega aqui se o pré-carregamento falhou. O popup pode ser engolido pelo navegador, mas
