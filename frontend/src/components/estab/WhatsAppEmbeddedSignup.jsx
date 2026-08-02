@@ -76,6 +76,7 @@ export default function WhatsAppEmbeddedSignup({ onConnected, disabled = false }
   const [erro, setErro] = useState('');
   // Nasce DESMARCADA, pela mesma razão do opt-in de WhatsApp: caixa pré-marcada não é aceite.
   const [aceitou, setAceitou] = useState(false);
+  const [semSessaoFb, setSemSessaoFb] = useState(false);
   const sessionInfoRef = useRef(null);
   const montadoRef = useRef(true);
   // Só recebe valor DEPOIS do nosso FB.init: `window.FB` pode existir com o SDK ainda não
@@ -134,19 +135,41 @@ export default function WhatsAppEmbeddedSignup({ onConnected, disabled = false }
     return () => window.removeEventListener('message', aoReceberMensagem);
   }, []);
 
-  // Pré-carrega o SDK assim que a config chega.
+  // Pré-carrega o SDK E aquece o estado de sessão assim que a config chega.
   //
-  // Não é otimização: `FB.login` PRECISA sair no mesmo gesto do clique. Qualquer espera de rede no
-  // meio faz o navegador deixar de tratar a chamada como iniciada pelo usuário, e o popup é
-  // engolido — sem erro, sem console, sem nada. Carregando antes, o clique só usa o que já está
-  // pronto.
+  // Nada disso é otimização. `FB.login` precisa sair no mesmo gesto do clique: qualquer espera de
+  // rede no meio faz o navegador deixar de tratar a chamada como iniciada pelo usuário, e o popup
+  // é engolido sem erro, sem console, sem nada.
+  //
+  // Só carregar o SDK não basta — e foi o que custou horas. O `FB.login` com `config_id` consulta
+  // o estado de sessão ANTES de abrir a janela. Se essa consulta ainda não aconteceu, ele a faz
+  // DENTRO do clique, e é essa ida à rede que consome o gesto. Chamando `getLoginStatus` aqui, a
+  // resposta já está em cache e o clique abre a janela na hora.
+  //
+  // De quebra, é o que revela a falta de sessão: deslogado do facebook.com, o `getLoginStatus`
+  // NÃO chama o callback — a resposta volta vazia com `Fb-S: unknown` e o SDK não segue adiante.
+  // O silêncio é o sintoma, então o prazo abaixo é a única forma de detectá-lo.
   useEffect(() => {
     if (!config) return undefined;
     let vivo = true;
+    let respondeu = false;
+
     loadFacebookSdk({ appId: config.app_id, apiVersion: config.api_version })
-      .then((FB) => { if (vivo) sdkRef.current = FB; })
+      .then((FB) => {
+        if (!vivo) return;
+        sdkRef.current = FB;
+        FB.getLoginStatus((r) => {
+          respondeu = true;
+          if (!vivo) return;
+          // `not_authorized` é sessão válida que ainda não autorizou o app — o popup resolve isso.
+          // Só `unknown` (ou silêncio) significa que não há sessão no navegador.
+          setSemSessaoFb(String(r?.status || '') === 'unknown');
+        });
+      })
       .catch(() => null);
-    return () => { vivo = false; };
+
+    const prazo = setTimeout(() => { if (vivo && !respondeu) setSemSessaoFb(true); }, 6000);
+    return () => { vivo = false; clearTimeout(prazo); };
   }, [config]);
 
   const trocarCodigo = useCallback(async (code) => {
@@ -298,6 +321,24 @@ export default function WhatsAppEmbeddedSignup({ onConnected, disabled = false }
           </button>
         ) : null}
       </div>
+
+      {/* Muito dono de salão só usa o Facebook pelo app do celular e nunca fez login no navegador
+          do computador. Sem sessão, o clique não abre nada e não dá erro — avisar antes evita a
+          conclusão de que o produto está quebrado. */}
+      {semSessaoFb && !erro ? (
+        <div className="notice notice--warn">
+          Você não está conectado ao Facebook neste navegador.{' '}
+          <a
+            href="https://www.facebook.com/login"
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ color: '#2563eb', fontWeight: 600, textDecoration: 'underline' }}
+          >
+            Faça login no Facebook
+          </a>{' '}
+          e recarregue esta página antes de conectar.
+        </div>
+      ) : null}
 
       {erro ? <div className="notice notice--error">{erro}</div> : null}
 
