@@ -569,7 +569,7 @@ export default function WhatsAppBusiness() {
         <div className="config-page__wallet-box-head settings-module-wallet-head">
           <div>
             <h4>Mensagens / Créditos</h4>
-            <p>Acompanhe o limite mensal e recarregue pacotes extras via PIX quando necessário.</p>
+            <p>Acompanhe o limite mensal de mensagens incluído no seu plano.</p>
           </div>
           {walletSummary.planBadge ? <span className="settings-module-wallet-badge">{walletSummary.planBadge}</span> : null}
         </div>
