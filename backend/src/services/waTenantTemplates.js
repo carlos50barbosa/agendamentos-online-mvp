@@ -80,6 +80,25 @@ export async function applyTenantTemplateStatus(evento, { deps = {} } = {}) {
   return { atualizado };
 }
 
+/**
+ * O modelo daquele tipo, na conta daquele estabelecimento.
+ *
+ * Devolve a LINHA mesmo quando não está aprovada, de propósito: quem chama precisa distinguir
+ * "este estabelecimento não usa WABA própria" (null) de "usa, mas o modelo ainda não foi liberado"
+ * (linha com status != APPROVED). No primeiro caso o envio segue pelo caminho antigo; no segundo
+ * ele NÃO pode sair, porque o modelo não existe na conta de onde a mensagem sairia.
+ */
+export async function getTenantTemplateRow(estabelecimentoId, kind, { deps = {} } = {}) {
+  if (!estabelecimentoId || !kind) return null;
+  const executar = deps.query || ((sql, params) => pool.query(sql, params));
+  const [rows] = await executar(
+    `SELECT kind, name, language, status FROM wa_tenant_templates
+      WHERE estabelecimento_id=? AND kind=? LIMIT 1`,
+    [estabelecimentoId, kind]
+  );
+  return rows?.[0] || null;
+}
+
 export async function listTenantTemplateRows(estabelecimentoId) {
   const [rows] = await pool.query(
     `SELECT kind, name, language, status, meta_template_id, rejected_reason, atualizado_em

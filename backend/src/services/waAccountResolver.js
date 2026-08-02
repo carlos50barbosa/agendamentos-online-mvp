@@ -41,7 +41,11 @@ export async function resolveWhatsAppTenantConfig(context = {}, deps = {}) {
   const defaultToken = deps.defaultToken ?? process.env.WA_DEFAULT_TOKEN ?? process.env.WA_TOKEN ?? null;
   const defaultPhoneId = deps.defaultPhoneId ?? process.env.WA_PHONE_NUMBER_ID ?? null;
 
-  if (estabelecimentoId) {
+  // `forceGlobal` existe para os avisos ao DONO do salão: ele é cliente da plataforma, não do
+  // próprio estabelecimento. Sem isto, um salão com WABA própria mandaria mensagem de si para si.
+  const forcarGlobal = context?.forceGlobal === true;
+
+  if (estabelecimentoId && !forcarGlobal) {
     try {
       const resolved = accountToConfig(await getAccount(estabelecimentoId), decryptToken);
       if (resolved) return resolved;
@@ -61,7 +65,7 @@ export async function resolveWhatsAppTenantConfig(context = {}, deps = {}) {
   // Hoje isso quase não morde porque só existe a WABA da plataforma. Vira bug real no primeiro
   // tenant conectado por embedded signup, e a confirmação de saída é justamente a mensagem que a
   // Meta espera que saia.
-  if (phoneNumberId) {
+  if (phoneNumberId && !forcarGlobal) {
     try {
       const resolved = accountToConfig(await getAccountByPhoneId(phoneNumberId), decryptToken);
       if (resolved) return resolved;

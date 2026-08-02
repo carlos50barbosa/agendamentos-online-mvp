@@ -106,6 +106,24 @@ const CATALOG = Object.freeze([
   },
 ]);
 
+/**
+ * Do `kind` usado no envio para o `kind` do catálogo.
+ *
+ * Os `_est` estão AUSENTES de propósito: aviso ao dono continua saindo do número global da
+ * plataforma — ele é cliente nosso, não do salão. Devolver null aqui é o que mantém esses envios
+ * no caminho antigo, sem tocar em modelo de tenant.
+ */
+export function mapSendKindToCatalogKind(kind) {
+  switch (String(kind || '')) {
+    case 'confirm_cli': return 'confirm_cli';
+    case 'reminder_cli':
+    case 'reminder_8h': return 'reminder_cli';
+    case 'cancel_cli': return 'cancel_cli';
+    case 'reschedule_cli': return 'reschedule_cli';
+    default: return null;
+  }
+}
+
 export function listTenantTemplates() {
   return CATALOG;
 }

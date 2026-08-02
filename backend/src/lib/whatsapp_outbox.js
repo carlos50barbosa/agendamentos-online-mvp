@@ -2,6 +2,8 @@
 import { pool } from './db.js';
 import { sendWhatsAppSmart } from './notifications.js';
 import { buildConfirmacaoAgendamentoV2Components, isConfirmacaoAgendamentoV2 } from './whatsapp_templates.js';
+import { mapSendKindToCatalogKind } from './wa_template_catalog.js';
+import { getTenantTemplateRow } from '../services/waTenantTemplates.js';
 import { hasWhatsAppConsent } from './whatsapp_consent.js';
 import { whatsappUnavailable } from './whatsapp_availability.js';
 import { isValidMobileBR } from './phone_br.js';
@@ -251,6 +253,44 @@ export async function sendAppointmentWhatsApp({
     return { ok: true, sent: false, blocked: true, reason: 'insufficient_balance', wallet };
   }
 
+  // ── Modelo do tenant ──────────────────────────────────────────────────────────────────────────
+  // Modelo pertence a UMA WABA. Se este estabelecimento conectou a própria conta, os modelos da
+  // plataforma NÃO existem lá: mandar com o nome antigo falharia com "template não encontrado".
+  //
+  // Aviso ao DONO é exceção deliberada: continua saindo do número global da plataforma, então
+  // mantém o modelo da plataforma e nem consulta a tabela do tenant.
+  const catalogKind = audience === WA_AUDIENCE_ESTABLISHMENT
+    ? null
+    : mapSendKindToCatalogKind(kind);
+  let forceGlobal = audience === WA_AUDIENCE_ESTABLISHMENT;
+  let tenantTemplate = null;
+
+  if (catalogKind) {
+    try {
+      tenantTemplate = await getTenantTemplateRow(estabId, catalogKind);
+    } catch (err) {
+      console.warn('[wa][tenant-template] consulta falhou', err?.message || err);
+    }
+    if (tenantTemplate && String(tenantTemplate.status).toUpperCase() !== 'APPROVED') {
+      // Tem WABA própria, mas o modelo ainda não foi liberado. Não dá para cair no número global:
+      // o cliente receberia de um número que não é o do salão que ele conhece. Bloqueia e deixa o
+      // e-mail — que já foi enviado pelo mesmo fluxo — ser o aviso.
+      await recordWhatsAppBlocked({
+        estabelecimentoId: estabId,
+        agendamentoId: agId,
+        reason: 'tenant_template_not_approved',
+        metadata: { kind, catalogKind, status: tenantTemplate.status, name: tenantTemplate.name },
+      }).catch(() => null);
+      return {
+        ok: true,
+        sent: false,
+        blocked: true,
+        reason: 'tenant_template_not_approved',
+        status: tenantTemplate.status,
+      };
+    }
+  }
+
   let resp;
   try {
     let templateToSend = template && template.name ? {
@@ -269,11 +309,20 @@ export async function sendAppointmentWhatsApp({
         estabelecimentoId: estabId,
       });
     }
+    // Troca só NOME e IDIOMA: os parâmetros continuam os mesmos porque os corpos do catálogo do
+    // tenant são cópias dos da plataforma, na mesma ordem. Ver lib/wa_template_catalog.js.
+    if (templateToSend && tenantTemplate) {
+      templateToSend = {
+        ...templateToSend,
+        name: tenantTemplate.name,
+        lang: tenantTemplate.language || templateToSend.lang,
+      };
+    }
     resp = await sendWhatsAppSmart({
       to,
       message: message != null ? String(message) : null,
       template: templateToSend,
-      context: { kind, agendamentoId: agId, estabelecimentoId: estabId },
+      context: { kind, agendamentoId: agId, estabelecimentoId: estabId, forceGlobal },
     });
   } catch (err) {
     const errorCode = err?.code === 'wa_not_connected' ? 'wa_not_connected' : 'send_failed';
