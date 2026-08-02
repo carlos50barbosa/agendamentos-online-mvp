@@ -231,7 +231,7 @@ export default function WhatsAppEmbeddedSignup({ onConnected, disabled = false }
             to="/termos#whatsapp"
             target="_blank"
             rel="noopener noreferrer"
-            style={{ color: 'var(--brand, #6366f1)', fontWeight: 600, textDecoration: 'underline' }}
+            style={{ color: '#2563eb', fontWeight: 600, textDecoration: 'underline' }}
           >
             Termos de Uso
           </Link>
