@@ -258,9 +258,19 @@ export default function WhatsAppEmbeddedSignup({ onConnected, disabled = false }
           className="btn btn--primary"
           onClick={conectar}
           disabled={conectando || disabled || !aceitou}
-          style={{ justifySelf: 'start' }}
+          style={{ justifySelf: 'start', display: 'inline-flex', alignItems: 'center', gap: 8 }}
         >
-          {conectando ? <span className="spinner" /> : 'Conectar com Facebook'}
+          {conectando ? (
+            <>
+              {/* O .spinner global e' preto sobre indigo (borda rgba(0,0,0,.15) + brand no topo):
+                  some dentro do botao primario. Aqui ele vira branco. */}
+              <span
+                className="spinner"
+                style={{ width: 16, height: 16, borderColor: 'rgba(255,255,255,.4)', borderTopColor: '#fff' }}
+              />
+              Conectando…
+            </>
+          ) : 'Conectar com Facebook'}
         </button>
 
         {/* Saída de emergência. Fechar o popup no X NÃO dispara o CANCEL do postMessage, e o
