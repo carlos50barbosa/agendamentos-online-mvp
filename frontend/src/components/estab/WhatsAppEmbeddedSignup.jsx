@@ -21,13 +21,31 @@ import { LEGAL_METADATA } from '../../utils/legal.js';
 const FB_ORIGINS = ['https://www.facebook.com', 'https://web.facebook.com'];
 const SDK_SCRIPT_ID = 'facebook-jssdk';
 
+// A carga em voo, compartilhada por todas as chamadas.
+//
+// Sem isto, a segunda chamada encontrava o <script> já no DOM e anexava ouvintes de `load`/`error`
+// nele — mas se o script JÁ tinha carregado ou falhado, esses eventos nunca mais disparam e a
+// promessa ficava pendente PARA SEMPRE: sem popup, sem erro, spinner eterno. É o que acontece
+// quando um bloqueador de anúncios barra o connect.facebook.net, que é o caso mais comum.
+let cargaEmVoo = null;
+
 /** Carrega o SDK uma vez por página. Resolve na hora se já estiver carregado. */
 function loadFacebookSdk({ appId, apiVersion }) {
   if (typeof window === 'undefined') return Promise.reject(new Error('sem_window'));
   if (window.FB) return Promise.resolve(window.FB);
+  if (cargaEmVoo) return cargaEmVoo;
 
-  return new Promise((resolve, reject) => {
-    const finish = () => {
+  cargaEmVoo = new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.id = SDK_SCRIPT_ID;
+    script.src = 'https://connect.facebook.net/en_US/sdk.js';
+    script.async = true;
+    script.defer = true;
+    script.crossOrigin = 'anonymous';
+    script.onload = () => {
+      // O onload dispara mesmo quando um bloqueador devolve um corpo vazio: sem esta conferência,
+      // o FB.init explodiria com "FB is not defined" em vez de dar a mensagem certa.
+      if (!window.FB) { reject(new Error('sdk_load_failed')); return; }
       try {
         window.FB.init({ appId, cookie: true, xfbml: false, version: apiVersion });
         resolve(window.FB);
@@ -35,25 +53,20 @@ function loadFacebookSdk({ appId, apiVersion }) {
         reject(err);
       }
     };
-
-    const existente = document.getElementById(SDK_SCRIPT_ID);
-    if (existente) {
-      // Script já está no DOM mas o SDK ainda não inicializou: espera o onload dele.
-      existente.addEventListener('load', finish, { once: true });
-      existente.addEventListener('error', () => reject(new Error('sdk_load_failed')), { once: true });
-      return;
-    }
-
-    const script = document.createElement('script');
-    script.id = SDK_SCRIPT_ID;
-    script.src = 'https://connect.facebook.net/en_US/sdk.js';
-    script.async = true;
-    script.defer = true;
-    script.crossOrigin = 'anonymous';
-    script.onload = finish;
     script.onerror = () => reject(new Error('sdk_load_failed'));
+
+    document.getElementById(SDK_SCRIPT_ID)?.remove();
     document.body.appendChild(script);
   });
+
+  // Falhou: esquece a promessa E o script morto, para a próxima tentativa buscar de novo em vez de
+  // herdar a rejeição para sempre.
+  cargaEmVoo.catch(() => {
+    cargaEmVoo = null;
+    document.getElementById(SDK_SCRIPT_ID)?.remove();
+  });
+
+  return cargaEmVoo;
 }
 
 export default function WhatsAppEmbeddedSignup({ onConnected, disabled = false }) {
