@@ -244,6 +244,9 @@ export function useBusinessSettings(options = {}) {
         ...current,
         loading: false,
         account: nextAccount,
+        // Status dos modelos na WABA própria. `null` quando o estabelecimento não tem conta
+        // própria — a tela não mostra nada nesse caso.
+        templates: response?.templates || null,
         editing: current.editing && current.account ? current.editing : !nextAccount,
         form: current.editing ? current.form : createWhatsappManualForm(nextAccount),
       }));

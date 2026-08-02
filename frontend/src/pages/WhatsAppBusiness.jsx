@@ -16,6 +16,22 @@ function statusChipClass(tone) {
   return m.statusChip;
 }
 
+// O dono não pensa em "confirm_cli"; pensa em "confirmação".
+const TEMPLATE_LABELS = {
+  confirm_cli: 'Confirmação de agendamento',
+  reminder_cli: 'Lembrete',
+  cancel_cli: 'Cancelamento',
+  reschedule_cli: 'Remarcação',
+};
+
+const TEMPLATE_STATUS_LABELS = {
+  APPROVED: 'liberado',
+  PENDING: 'em análise',
+  REJECTED: 'recusado',
+  PAUSED: 'pausado',
+  DISABLED: 'desativado',
+};
+
 function formatConnectionDate(value) {
   if (!value) return 'Não disponível';
   const date = new Date(value);
@@ -78,6 +94,7 @@ export default function WhatsAppBusiness() {
   const connectedAtLabel = formatConnectionDate(account?.connected_at);
   const lastSyncLabel = formatConnectionDate(account?.last_sync_at);
   const lastValidatedLabel = formatConnectionDate(account?.token_last_validated_at);
+  const templatesInfo = whatsapp.templates || null;
   const isEditing = Boolean(whatsapp.editing) || !account;
   const manualPreview = whatsapp.preview || null;
   const canSaveConnection = Boolean(whatsapp.validated && manualPreview && !whatsapp.saveLoading);
@@ -177,6 +194,32 @@ export default function WhatsAppBusiness() {
             ) : null}
             {!whatsapp.loading && whatsappConnected ? (
               <div className="notice notice--success">Conectado ao número {phoneLabel}. Os envios deste tenant usam a conta própria antes do fallback global.</div>
+            ) : null}
+
+            {/* Conectado não é o mesmo que pronto: os modelos precisam ser aprovados pela Meta, e
+                até lá o aviso daquele tipo sai por e-mail. Sem dizer isso aqui, o dono vê
+                "Conectado" e conclui que o produto está falhando. */}
+            {!whatsapp.loading && templatesInfo && !templatesInfo.ready ? (
+              <div className={templatesInfo.recusados ? 'notice notice--error' : 'notice notice--warn'}>
+                <strong>
+                  {templatesInfo.recusados
+                    ? 'Alguns modelos de mensagem foram recusados pela Meta'
+                    : 'Seus modelos de mensagem estão em análise na Meta'}
+                </strong>
+                <div style={{ marginTop: 4 }}>
+                  {templatesInfo.aprovados} de {templatesInfo.total} liberados. Enquanto isso, os
+                  avisos que dependem dos modelos pendentes saem por e-mail — nenhum agendamento
+                  deixa de ser confirmado.
+                </div>
+                <ul style={{ margin: '8px 0 0', paddingLeft: 18 }}>
+                  {templatesInfo.detalhes.map((t) => (
+                    <li key={t.kind}>
+                      {TEMPLATE_LABELS[t.kind] || t.kind}: <strong>{TEMPLATE_STATUS_LABELS[t.status] || t.status}</strong>
+                      {t.motivo ? ` — ${t.motivo}` : ''}
+                    </li>
+                  ))}
+                </ul>
+              </div>
             ) : null}
             {!whatsapp.loading && !whatsappConnected ? (
               <div className="notice notice--warn">Nenhuma conta própria conectada. Enquanto isso, o sistema pode continuar usando o número global do `.env`.</div>

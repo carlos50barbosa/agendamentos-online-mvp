@@ -19,6 +19,42 @@ export const TEMPLATE_STATUSES = Object.freeze([
 ]);
 
 /**
+ * Resume as linhas de `wa_tenant_templates` para a tela.
+ *
+ * Puro de propósito: a decisão de "o canal está pronto?" é o que o dono vê depois de conectar, e
+ * errar isso significa ou esconder um problema real ou assustar sem motivo.
+ *
+ * `ready` exige TODOS aprovados — basta um pendente para aquele tipo de aviso sair por e-mail, e o
+ * dono precisa saber disso antes de estranhar.
+ */
+export function summarizeTemplateRows(rows = []) {
+  const lista = Array.isArray(rows) ? rows : [];
+  const porStatus = (s) => lista.filter((r) => String(r?.status || '').toUpperCase() === s);
+
+  const aprovados = porStatus('APPROVED');
+  const recusados = porStatus('REJECTED');
+  const pendentes = lista.filter((r) => {
+    const s = String(r?.status || '').toUpperCase();
+    return s !== 'APPROVED' && s !== 'REJECTED';
+  });
+
+  return {
+    total: lista.length,
+    aprovados: aprovados.length,
+    pendentes: pendentes.length,
+    recusados: recusados.length,
+    // Sem nenhuma linha o estabelecimento não usa WABA própria: nada a avisar.
+    ready: lista.length > 0 && aprovados.length === lista.length,
+    detalhes: lista.map((r) => ({
+      kind: r.kind,
+      name: r.name,
+      status: String(r.status || '').toUpperCase(),
+      motivo: r.rejected_reason || null,
+    })),
+  };
+}
+
+/**
  * @returns {{ wabaId, name, language, status, reason, metaTemplateId } | null}
  *   null quando o change não é de status de modelo ou está sem o mínimo para identificar a linha.
  */

@@ -11,6 +11,8 @@ import {
   completeEmbeddedSignup,
   getEmbeddedSignupPublicConfig,
 } from '../services/whatsappEmbeddedSignupService.js';
+import { listTenantTemplateRows } from '../services/waTenantTemplates.js';
+import { summarizeTemplateRows } from '../lib/wa_template_status.js';
 
 const router = Router();
 const FRONTEND_BASE = (process.env.FRONTEND_BASE_URL || process.env.APP_URL || 'http://localhost:3001').replace(/\/$/, '');
@@ -82,9 +84,21 @@ router.get('/account', auth, isEstabelecimento, async (req, res) => {
   }
   try {
     const result = await getTenantWhatsAppAccount(req.user.id);
+    // Status dos modelos na WABA do tenant. A aprovação é assíncrona: entre conectar e ser
+    // liberado, os avisos daquele tipo saem por e-mail. Sem isto na resposta, o dono vê
+    // "Conectado" e não entende por que o cliente recebeu e-mail em vez de WhatsApp.
+    let templates = null;
+    try {
+      const rows = await listTenantTemplateRows(req.user.id);
+      if (rows.length) templates = summarizeTemplateRows(rows);
+    } catch (err) {
+      // Tabela ausente (migração não aplicada) não pode derrubar a tela de status.
+      console.warn('[wa][account][templates]', err?.message || err);
+    }
     return res.json({
       ...buildAccountResponse(result),
       ...getWhatsAppConnectFeatureState(),
+      templates,
     });
   } catch (err) {
     console.error('[wa][account]', err?.message || err);
