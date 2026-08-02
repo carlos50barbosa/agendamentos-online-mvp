@@ -145,6 +145,39 @@ async function upsertTenantBotSettings({ tenantId, enabled, mode, rolloutPercent
   return { ok: true };
 }
 
+/**
+ * Deixa o atendimento automático DESLIGADO para quem acabou de conectar o próprio número.
+ *
+ * ─── Por que isso existe ───────────────────────────────────────────────────────────────────────
+ *
+ * O padrão global é `enabled: true, rolloutPercent: 100` — e faz sentido no número GLOBAL da
+ * plataforma, onde o cliente entende que está falando com um sistema.
+ *
+ * No número do próprio salão é o contrário. Ali quem conversa é a dona, no aplicativo dela, o dia
+ * inteiro. Sem isto, a cliente manda "oi Ju, me encaixa amanhã?" e recebe, DO NÚMERO DA JU, um
+ * menu numerado — enquanto a Ju digita a resposta de verdade e vê aquilo acontecer no celular.
+ *
+ * `killSwitch` em vez de só `enabled: false` porque desligar não basta: com `enabled: false` a
+ * política ainda devolve `allowAutoReply: true` e `openHandoff: true`, ou seja, a plataforma
+ * continua falando. `killSwitch` é o único estado de silêncio COMPLETO.
+ *
+ * Só insere se não houver linha: reconectar não pode desfazer a escolha de quem já ligou o
+ * atendimento automático de propósito.
+ */
+async function ensureTenantBotSilentByDefault(tenantId, { deps = {} } = {}) {
+  const tenant = Number(tenantId);
+  if (!Number.isFinite(tenant) || tenant <= 0) return { ok: false, error: 'invalid_tenant' };
+  const executar = deps.query || ((sql, params) => pool.query(sql, params));
+  const [r] = await executar(
+    `INSERT INTO wa_bot_settings (tenant_id, enabled, mode, rollout_percent, kill_switch, updated_at)
+     VALUES (?, 0, 'human_only', 0, 1, NOW())
+     ON DUPLICATE KEY UPDATE tenant_id = tenant_id`,
+    [tenant]
+  );
+  // affectedRows 1 = inseriu (primeira conexão); 0 = já existia e foi respeitado.
+  return { ok: true, criado: Number(r?.affectedRows || 0) === 1 };
+}
+
 export {
   DEFAULT_SETTINGS,
   getTenantBotSettings,
@@ -152,4 +185,5 @@ export {
   isInsideRollout,
   evaluateTenantPolicy,
   upsertTenantBotSettings,
+  ensureTenantBotSilentByDefault,
 };

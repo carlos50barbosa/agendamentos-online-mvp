@@ -39,8 +39,10 @@ export default function NotFound() {
         </p>
 
         <div className="row" style={{ gap: 8, justifyContent: 'center', marginTop: 20, flexWrap: 'wrap' }}>
+          {/* Sem "encontrar um estabelecimento": o diretório público foi fechado em
+              02/08/2026 e só se agenda pelo link do próprio estabelecimento. */}
           <Link className="btn btn--primary" to="/">Ir para o início</Link>
-          <Link className="btn btn--outline" to="/novo">Encontrar um estabelecimento</Link>
+          <Link className="btn btn--outline" to="/ajuda">Preciso de ajuda</Link>
         </div>
       </section>
     </div>

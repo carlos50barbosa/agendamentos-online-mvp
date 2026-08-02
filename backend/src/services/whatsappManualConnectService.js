@@ -14,6 +14,7 @@ import {
 } from './waTenant.js';
 import { provisionTenantTemplates } from './waTenantTemplates.js';
 import { notifyTemplatesUnderReview } from './waTemplateNotifier.js';
+import { ensureTenantBotSilentByDefault } from '../bot/storage/settingsStore.js';
 
 const MANUAL_PROVIDER = 'meta_manual_cloud_api';
 const PHONE_FIELDS = 'id,display_phone_number,verified_name,name_status,quality_rating';
@@ -625,6 +626,12 @@ export async function connectManualWhatsAppAccount({ estabelecimentoId, payload 
   //
   // Não fatal, pelo mesmo motivo do outro caminho: sem modelo a conta ainda recebe, responde na
   // janela de 24h e os avisos caem para e-mail. Derrubar a conexão seria pior.
+  // Atendimento automático nasce DESLIGADO no número do próprio salão: ali quem conversa é a dona.
+  // Ver ensureTenantBotSilentByDefault.
+  const silenciar = deps.ensureTenantBotSilentByDefault || ensureTenantBotSilentByDefault;
+  await silenciar(tenantId).catch((err) =>
+    console.warn('[wa][manual][connect:bot_default]', err?.message || err));
+
   const provisionar = deps.provisionTenantTemplates || provisionTenantTemplates;
   const avisar = deps.notifyTemplatesUnderReview || notifyTemplatesUnderReview;
   try {

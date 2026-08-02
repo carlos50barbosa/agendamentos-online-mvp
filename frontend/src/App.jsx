@@ -110,12 +110,16 @@ const Loading = React.lazy(() => import('./pages/Loading.jsx'));
 const AgendaNova = React.lazy(() => import('./pages/AgendaNova.jsx'));
 const BookingNovo = React.lazy(() => import('./pages/BookingNovo.jsx'));
 const BookingPublic = React.lazy(() => import('./pages/BookingPublic.jsx'));
-const BookingDiscovery = React.lazy(() => import('./pages/BookingDiscovery.jsx'));
 
 // Deep-link público de agendamento (/novo?estabelecimento=…&servico=… ou /novo/:slug):
 // redireciona para o fluxo novo (/agendar), mantendo o mesmo padrão visual do redesign.
-// A decisão é congelada no mount: o fluxo autenticado do cliente (/novo sem estabelecimento
-// na URL) segue no componente legado, mesmo quando ele grava ?estabelecimento= depois.
+// A decisão é congelada no mount, para o destino não mudar se a URL for reescrita depois.
+//
+// SEM estabelecimento na URL não há mais o que mostrar. O diretório público foi fechado em
+// 02/08/2026 (ver listEstablishmentsHandler em backend/src/routes/estabelecimentos.js): não
+// existe mais listar nem buscar estabelecimento, nem logado. A descoberta passou a ser só
+// pelo link do próprio estabelecimento (/<slug>). Quem cair aqui solto volta para onde faz
+// sentido — cliente logado na agenda dele, visitante na landing.
 function NovoRoute() {
   const [searchParams] = useSearchParams();
   const { estabelecimentoSlug } = useParams();
@@ -131,26 +135,25 @@ function NovoRoute() {
       const query = qs.toString();
       decisionRef.current = `/agendar/${encodeURIComponent(key)}${query ? `?${query}` : ''}`;
     } else {
-      decisionRef.current = '';
+      decisionRef.current = String(getUser()?.tipo || '').toLowerCase() === 'cliente' ? '/cliente' : '/';
     }
   }
-  // Sem estabelecimento na URL: tela de descoberta no design novo (índigo).
-  return decisionRef.current ? <Navigate to={decisionRef.current} replace /> : <BookingDiscovery />;
+  return <Navigate to={decisionRef.current} replace />;
 }
 
 const APP_ROUTES = [
   { path: '/', element: <LandingPublica /> },
   { path: '/implantacao', element: <LandingImplantacao /> },
-  { path: '/login', element: <Login /> },
+  { path: '/login', element: <Login />, guestOnly: true },
   { path: '/recuperar-senha', element: <RecuperarSenha /> },
 
   { path: '/definir-senha', element: <DefinirSenha /> },
 
   { path: '/link-phone', element: <LinkPhone /> },
 
-  { path: '/login-cliente', element: <LoginCliente /> },
+  { path: '/login-cliente', element: <LoginCliente />, guestOnly: true },
 
-  { path: '/login-estabelecimento', element: <LoginEstabelecimento /> },
+  { path: '/login-estabelecimento', element: <LoginEstabelecimento />, guestOnly: true },
 
   { path: '/cadastro', element: <Cadastro /> },
 
@@ -251,7 +254,35 @@ const DASHBOARD_BY_ROLE = {
 
 
 
-function GuardedRoute({ element, user, requireAuth = false, role = '', onboardingGate }) {
+// Telas de login. Quem já tem sessão não pode cair no formulário — até 02/08/2026 caía,
+// porque GuardedRoute só olhava rotas com auth:true e deixava as públicas passarem sempre.
+//
+// /cadastro NÃO entra aqui de propósito: o checkout de /planos manda cliente logado para
+// /cadastro?next=/assinatura para ele abrir a conta de estabelecimento. Bloquear ali
+// quebraria essa compra.
+const GUEST_ONLY_PATHS = new Set(['/login', '/login-cliente', '/login-estabelecimento']);
+
+/**
+ * Para onde mandar quem já está logado e abriu uma tela de login.
+ * Respeita ?next= (só caminho interno) e nunca devolve para uma tela de login —
+ * senão o redirect entra em laço.
+ */
+function resolveLoggedInTarget(search, userRole) {
+  const fallback = DASHBOARD_BY_ROLE[userRole] || '/';
+  let next = '';
+  try {
+    const params = new URLSearchParams(search || '');
+    next = params.get('next') || params.get('redirect') || '';
+  } catch {
+    next = '';
+  }
+  if (!next.startsWith('/') || next.startsWith('//')) return fallback;
+  const [pathOnly] = next.split('?');
+  if (GUEST_ONLY_PATHS.has(pathOnly)) return fallback;
+  return next;
+}
+
+function GuardedRoute({ element, user, requireAuth = false, role = '', guestOnly = false, onboardingGate }) {
 
   const location = useLocation();
 
@@ -260,6 +291,10 @@ function GuardedRoute({ element, user, requireAuth = false, role = '', onboardin
   const userRole = String(user?.tipo || '').toLowerCase();
 
 
+
+  if (guestOnly && user) {
+    return <Navigate to={resolveLoggedInTarget(location.search, userRole)} replace />;
+  }
 
   if (!requireAuth) return element;
 
@@ -1617,7 +1652,7 @@ const topbarAlert = useMemo(() => {
 
               <Routes>
 
-                {APP_ROUTES.map(({ path, element, auth, role }) => (
+                {APP_ROUTES.map(({ path, element, auth, role, guestOnly }) => (
 
                   <Route
 
@@ -1631,6 +1666,7 @@ const topbarAlert = useMemo(() => {
                         user={currentUser}
                         requireAuth={auth}
                         role={role}
+                        guestOnly={guestOnly}
                         onboardingGate={onboardingGate}
                       />
                     }

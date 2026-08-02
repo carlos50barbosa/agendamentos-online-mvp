@@ -166,12 +166,15 @@ export default function Ajuda() {
         to: '/cliente',
         cta: 'Abrir painel',
       },
+      // Não existe mais busca de estabelecimentos (diretório fechado em 02/08/2026): o
+      // agendamento começa no link que o próprio estabelecimento divulga. Dizer "busque
+      // estabelecimentos" aqui mandaria o cliente para uma tela que não existe.
       {
         key: 'new',
         label: 'Fazer um novo agendamento',
-        description: 'Busque estabelecimentos e finalize o agendamento em poucos passos.',
-        to: '/novo',
-        cta: 'Iniciar agendamento',
+        description: 'Use o link do estabelecimento (ele divulga no Instagram e no WhatsApp). Seus agendamentos anteriores ficam no painel.',
+        to: '/cliente',
+        cta: 'Ver meus agendamentos',
       },
       {
         key: 'plans',

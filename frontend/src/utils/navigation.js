@@ -1,7 +1,6 @@
 import {
   IconUser,
   IconHome,
-  IconPlus,
   IconPhone,
   IconChart,
   IconMoney,
@@ -64,11 +63,10 @@ export function buildNavigation(user) {
       { key: 'finance', label: 'Financeiro', to: '/financeiro', icon: IconMoney, type: 'link', mobilePrimary: true },
       { key: 'promotion', label: 'Meu QR Code', to: '/divulgacao', icon: IconQrCode, type: 'link' },
     )
-  } else {
-    mainItems.push(
-      { key: 'new', label: 'Novo Agendamento', to: '/novo', icon: IconPlus, type: 'link' },
-    )
   }
+  // O cliente NÃO tem mais item "Novo Agendamento": ele apontava para o diretório público,
+  // fechado em 02/08/2026 (backend/src/routes/estabelecimentos.js). Agendar começa no link
+  // do estabelecimento, então um item de menu aqui só levaria de volta a esta mesma página.
 
   const accountItems = [
     { key: 'settings', label: 'Configurações', to: '/configuracoes', icon: IconGear, type: 'link' },

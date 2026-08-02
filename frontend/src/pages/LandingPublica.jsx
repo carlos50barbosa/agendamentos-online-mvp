@@ -1,107 +1,147 @@
+// src/pages/LandingPublica.jsx
+//
+// Landing "/" — página de venda do produto, para o DONO do estabelecimento.
+//
+// Por que ela deixou de ser a busca do consumidor (02/08/2026): quem paga o SaaS é o
+// estabelecimento, e é com ele que todo o material de anúncio fala — os criativos levam
+// agenda0.com.br assinado. Uma "/" que abre com busca de salão manda o dono para o fluxo
+// do consumidor e não vende nada. A busca continua inteira em /novo, alcançável pelo topo
+// e pelo rodapé; ela só deixou de ser o herói.
+//
+// Regras que esta página herda e não deve quebrar:
+//  - PREÇO SEMPRE DO CATÁLOGO (Api.plansCatalog). Um valor hardcoded aqui divergiria da
+//    tabela do backend no dia em que ela mudar — a mesma regra que Planos.jsx segue.
+//  - O trial é do PRO (é onde está o sinal). O caminho do CTA é o mesmo de Planos.jsx.
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import {
-  IconArrowRight,
-  IconCalendar,
-  IconEyebrow,
-  IconGrid,
-  IconMapPin,
-  IconMassage,
-  IconNail,
-  IconSalon,
-  IconScissors,
-  IconSearch,
-  IconChevronRight,
-} from '../components/Icons.jsx';
-import { Api, resolveAssetUrl } from '../utils/api.js';
+import { IconArrowRight, IconScissors } from '../components/Icons.jsx';
+import { Api } from '../utils/api.js';
 import { getUser } from '../utils/auth.js';
 import LogoAO from '../components/LogoAO.jsx';
 import { getLegalEntityLine } from '../utils/legal.js';
 import styles from './LandingPublica.module.css';
 
-const CATEGORIES = [
-  { label: 'Barbearia', query: 'barbearia', icon: IconScissors },
-  { label: 'Salão', query: 'salao', icon: IconSalon },
-  { label: 'Unhas', query: 'unhas', icon: IconNail },
-  { label: 'Sobrancelha', query: 'sobrancelha', icon: IconEyebrow },
-  { label: 'Massagem', query: 'massagem', icon: IconMassage },
-];
+const BRL = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
+const money = (cents) => BRL.format((Number(cents) || 0) / 100);
 
 const STEPS = [
-  { title: 'Escolha o local', text: 'Busque ou toque numa categoria.' },
-  { title: 'Pegue o horário', text: 'Veja o que está livre e selecione.' },
-  { title: 'Confirme', text: 'Pronto — o lembrete chega no WhatsApp.' },
+  {
+    title: 'Cadastre seus serviços',
+    text: 'Nome, duração e preço. Seus horários de atendimento entram junto.',
+  },
+  {
+    title: 'Compartilhe seu link',
+    text: 'No Instagram, no WhatsApp, onde o cliente já procura você.',
+  },
+  {
+    title: 'Receba os agendamentos',
+    text: 'Eles caem direto na sua agenda, com lembrete automático.',
+  },
 ];
 
-const FEATURED_LIMIT = 6;
+// O que o plano de entrada já entrega (backend/src/lib/plans.js). Nada aqui pode
+// prometer recurso de plano superior — o sinal via PIX, por exemplo, é do Pro.
+const INCLUDES = [
+  'Agendamentos e serviços ilimitados',
+  'Link próprio para o cliente marcar sozinho',
+  'Lembretes automáticos',
+];
 
-const fallbackAvatar = (label) => {
-  const name = encodeURIComponent(String(label || 'AO'));
-  return `https://ui-avatars.com/api/?name=${name}&size=128&background=5049E5&color=ffffff&rounded=true`;
-};
+/** Fragmento da tela real de agendamento. Decorativo — a prova de que isto é um app. */
+function AppMock() {
+  return (
+    <div className={styles.mock} aria-hidden="true">
+      <div className={styles.mockScreen}>
+        <div className={styles.mockHead}>
+          <span className={styles.mockAvatar}>SB</span>
+          <div className={styles.mockHeadText}>
+            <strong>Studio Bella</strong>
+            <span>agenda0.com.br/studiobella</span>
+          </div>
+        </div>
 
-const formatAddress = (est) => {
-  const district = est?.bairro ? String(est.bairro) : '';
-  const cityState = [est?.cidade, est?.estado].filter(Boolean).join(' - ');
-  return [district, cityState].filter(Boolean).join(' • ');
-};
+        <div className={styles.mockService}>
+          <span className={styles.mockServiceIcon}>
+            <IconScissors width={16} height={16} />
+          </span>
+          <div className={styles.mockServiceText}>
+            <strong>Escova + hidratação</strong>
+            <span>1h · R$ 120</span>
+          </div>
+        </div>
+
+        <span className={styles.mockLabel}>Escolha o horário</span>
+
+        <div className={styles.mockDays}>
+          {[['qui', '6'], ['sex', '7'], ['sáb', '8'], ['dom', '9']].map(([weekday, day], index) => (
+            <span key={weekday} className={index === 2 ? styles.mockDayOn : styles.mockDay}>
+              <small>{weekday}</small>
+              <strong>{day}</strong>
+            </span>
+          ))}
+        </div>
+
+        <div className={styles.mockSlots}>
+          <span className={styles.mockSlot}>08:00</span>
+          <span className={styles.mockSlotOff}>08:30</span>
+          <span className={styles.mockSlot}>09:00</span>
+          <span className={styles.mockSlotOn}>10:00</span>
+          <span className={styles.mockSlot}>10:30</span>
+          <span className={styles.mockSlotOff}>11:00</span>
+        </div>
+
+        <span className={styles.mockCta}>Confirmar agendamento</span>
+      </div>
+    </div>
+  );
+}
 
 export default function LandingPublica() {
   const navigate = useNavigate();
-  const [featured, setFeatured] = useState([]);
-  const [term, setTerm] = useState('');
+  const [catalog, setCatalog] = useState(null);
+  const user = useMemo(() => getUser(), []);
 
   const year = new Date().getFullYear();
-
-  const goToSearch = useCallback((query) => {
-    const q = String(query || '').trim();
-    navigate(q ? `/novo?q=${encodeURIComponent(q)}` : '/novo');
-  }, [navigate]);
-
-  const handleSearchSubmit = useCallback((event) => {
-    event.preventDefault();
-    goToSearch(term);
-  }, [goToSearch, term]);
-
-  const handlePrimaryCta = useCallback(() => {
-    const user = getUser();
-    const role = String(user?.tipo || '').toLowerCase();
-    if (role === 'estabelecimento') {
-      navigate('/estab');
-      return;
-    }
-    navigate('/novo');
-  }, [navigate]);
+  const role = String(user?.tipo || '').toLowerCase();
+  const isEstab = role === 'estabelecimento';
+  const isCliente = role === 'cliente';
 
   useEffect(() => {
     let active = true;
-    (async () => {
-      try {
-        const response = await Api.listEstablishments({ limit: FEATURED_LIMIT });
-        if (!active) return;
-        const list = Array.isArray(response) ? response : response?.items || [];
-        setFeatured(list.slice(0, FEATURED_LIMIT));
-      } catch {
-        if (!active) return;
-        setFeatured([]);
-      }
-    })();
-    return () => {
-      active = false;
-    };
+    Api.plansCatalog()
+      .then((data) => { if (active) setCatalog(data); })
+      .catch(() => { if (active) setCatalog(null); });
+    return () => { active = false; };
   }, []);
 
-  const featuredCards = useMemo(() => {
-    return featured
-      .filter((item) => item && item.id)
-      .map((est) => {
-        const name = est?.nome || est?.name || `Estabelecimento #${est?.id || ''}`;
-        const address = formatAddress(est);
-        const avatarSource = est?.foto_url || est?.avatar_url || '';
-        const image = avatarSource ? resolveAssetUrl(avatarSource) : fallbackAvatar(name);
-        return { id: est.id, name, address, image };
-      });
-  }, [featured]);
+  const trialDays = catalog?.trial_days ?? 7;
+
+  // Menor preço do catálogo. Sem fallback: se o catálogo não veio, a página não cita preço —
+  // um número escrito à mão aqui é um número que um dia vai mentir.
+  const cheapest = useMemo(() => {
+    const plans = Array.isArray(catalog?.plans) ? catalog.plans : [];
+    if (!plans.length) return null;
+    return plans.reduce((min, plan) => (
+      Number(plan?.price_cents) < Number(min?.price_cents) ? plan : min
+    ), plans[0]);
+  }, [catalog]);
+
+  // Mesma máquina de /planos (goTrial): o cadastro lê ?trial_plan= e /assinatura lê intent_kind.
+  // O trial é do Pro — é o plano que tem o sinal via PIX, que é o argumento de venda.
+  const startTrial = useCallback(() => {
+    try {
+      localStorage.removeItem('intent_plano');
+      localStorage.removeItem('intent_plano_ciclo');
+      localStorage.setItem('intent_kind', 'trial');
+    } catch {}
+    navigate(`/cadastro?trial_plan=pro&next=${encodeURIComponent('/estab?trial=sucesso')}&tipo=estabelecimento`);
+  }, [navigate]);
+
+  const primaryCta = useMemo(() => {
+    if (isEstab) return { label: 'Ir para minha agenda', action: () => navigate('/estab') };
+    if (isCliente) return { label: 'Meus agendamentos', action: () => navigate('/cliente') };
+    return { label: `Testar ${trialDays} dias grátis`, action: startTrial };
+  }, [isEstab, isCliente, navigate, startTrial, trialDays]);
 
   return (
     <div className={styles.page}>
@@ -115,144 +155,97 @@ export default function LandingPublica() {
             </span>
           </Link>
           <div className={styles.headerActions}>
-            <Link to="/login" className="btn btn--outline btn--sm">Entrar</Link>
-            <Link to="/cadastro" className="btn btn--primary btn--sm">Criar conta</Link>
+            {user ? (
+              <button type="button" className="btn btn--primary btn--sm" onClick={primaryCta.action}>
+                {isEstab ? 'Minha agenda' : 'Meus agendamentos'}
+              </button>
+            ) : (
+              <>
+                <Link to="/login" className="btn btn--outline btn--sm">Entrar</Link>
+                <Link to="/cadastro?tipo=estabelecimento" className="btn btn--primary btn--sm">Criar conta</Link>
+              </>
+            )}
           </div>
         </div>
       </header>
 
       <main className={styles.main}>
         <section className={styles.hero}>
-          <h1 className={styles.heroTitle}>
-            Marque seu horário <em>em segundos</em>.
-          </h1>
-          <p className={styles.heroSub}>
-            Busque o local, veja horários livres e confirme. Sem ligação e sem instalar aplicativo.
-          </p>
-          <form className={styles.search} onSubmit={handleSearchSubmit} role="search">
-            <IconSearch className={styles.searchIcon} width={20} height={20} aria-hidden="true" />
-            <input
-              className={styles.searchInput}
-              type="search"
-              value={term}
-              onChange={(event) => setTerm(event.target.value)}
-              placeholder="Buscar por nome, serviço ou cidade"
-              aria-label="Buscar estabelecimentos"
-            />
-            <button type="submit" className={styles.searchGo} aria-label="Buscar">
-              <IconArrowRight width={20} height={20} />
-            </button>
-          </form>
+          <div className={styles.heroText}>
+            <h1 className={styles.heroTitle}>
+              Sua agenda online, <em>aberta 24 horas</em>.
+            </h1>
+            <p className={styles.heroSub}>
+              O cliente escolhe o serviço e o horário sozinho, pelo seu link. Você para de
+              responder mensagem só para marcar.
+            </p>
+            <div className={styles.heroActions}>
+              <button type="button" className="btn btn--primary btn--lg" onClick={primaryCta.action}>
+                {primaryCta.label}
+              </button>
+              <Link to="/planos" className="btn btn--outline btn--lg">Ver planos</Link>
+            </div>
+            {!user && (
+              <p className={styles.heroNote}>
+                Sem cartão de crédito
+                {cheapest ? ` · a partir de ${money(cheapest.price_cents)}/mês` : ''}
+              </p>
+            )}
+          </div>
+          <AppMock />
         </section>
 
         <section className={styles.section}>
-          <div className={styles.sectionHead}>
-            <h2 className={styles.sectionTitle}>O que você precisa hoje?</h2>
-          </div>
-          <div className={styles.cats}>
-            {CATEGORIES.map((category) => {
-              const Icon = category.icon;
-              return (
-                <button
-                  key={category.query}
-                  type="button"
-                  className={styles.cat}
-                  onClick={() => goToSearch(category.query)}
-                >
-                  <span className={styles.catIcon}>
-                    <Icon aria-hidden="true" />
-                  </span>
-                  <span className={styles.catLabel}>{category.label}</span>
-                </button>
-              );
-            })}
-            <button
-              type="button"
-              className={styles.cat}
-              onClick={() => navigate('/novo')}
-            >
-              <span className={styles.catIcon}>
-                <IconGrid aria-hidden="true" />
-              </span>
-              <span className={styles.catLabel}>Ver todas</span>
-            </button>
-          </div>
-        </section>
-
-        {featuredCards.length > 0 && (
-          <section className={styles.section}>
-            <div className={styles.sectionHead}>
-              <h2 className={styles.sectionTitle}>Perto de você</h2>
-              <Link to="/novo" className={styles.sectionLink}>Ver todos</Link>
-            </div>
-            <div className={styles.feat}>
-              {featuredCards.map((est) => (
-                <Link
-                  key={est.id}
-                  to={`/novo?estabelecimentoId=${encodeURIComponent(est.id)}`}
-                  className={styles.card}
-                >
-                  <img
-                    className={styles.cardAvatar}
-                    src={est.image}
-                    alt={`Foto do estabelecimento ${est.name}`}
-                    loading="lazy"
-                    onError={(event) => {
-                      const target = event.currentTarget;
-                      if (!target.dataset.fallback) {
-                        target.dataset.fallback = '1';
-                        target.src = fallbackAvatar(est.name);
-                      }
-                    }}
-                  />
-                  <div className={styles.cardBody}>
-                    <h3 className={styles.cardTitle}>{est.name}</h3>
-                    <div className={styles.cardMeta}>
-                      <IconMapPin width={14} height={14} aria-hidden="true" />
-                      <span>{est.address || 'Endereço não informado'}</span>
-                    </div>
-                  </div>
-                  <span className={styles.cardCta} aria-hidden="true">
-                    <IconChevronRight width={18} height={18} />
-                  </span>
-                </Link>
-              ))}
-            </div>
-          </section>
-        )}
-
-        <section className={styles.section}>
-          <div className={styles.sectionHead}>
-            <h2 className={styles.sectionTitle}>Como funciona</h2>
-          </div>
-          <div className={styles.steps}>
+          <h2 className={styles.sectionTitle}>Como funciona</h2>
+          <ol className={styles.steps}>
             {STEPS.map((step, index) => (
-              <div key={step.title} className={styles.step}>
+              <li key={step.title} className={styles.step}>
                 <span className={styles.stepNum}>{index + 1}</span>
-                <div className={styles.stepBody}>
-                  <strong>{step.title}</strong>
-                  <span>{step.text}</span>
+                <div>
+                  <strong className={styles.stepTitle}>{step.title}</strong>
+                  <p className={styles.stepText}>{step.text}</p>
                 </div>
-              </div>
+              </li>
             ))}
+          </ol>
+        </section>
+
+        <section className={styles.section}>
+          <h2 className={styles.sectionTitle}>Quanto custa</h2>
+          <div className={styles.price}>
+            <div className={styles.priceHead}>
+              {cheapest ? (
+                <p className={styles.priceValue}>
+                  <small>a partir de</small>
+                  <strong>{money(cheapest.price_cents)}</strong>
+                  <span>/mês</span>
+                </p>
+              ) : (
+                <p className={styles.priceValue}>
+                  <strong>Planos mensais</strong>
+                </p>
+              )}
+              <Link to="/planos" className={styles.priceLink}>
+                Comparar planos
+                <IconArrowRight width={16} height={16} aria-hidden="true" />
+              </Link>
+            </div>
+            <ul className={styles.priceList}>
+              {INCLUDES.map((item) => <li key={item}>{item}</li>)}
+            </ul>
           </div>
         </section>
       </main>
 
-      <div className={styles.ctaBar}>
-        <div className={styles.ctaBarInner}>
-          <button type="button" className={styles.cta} onClick={handlePrimaryCta}>
-            <IconCalendar width={20} height={20} aria-hidden="true" />
-            Buscar horários agora
-          </button>
-        </div>
-      </div>
-
+      {/* Sem caminho para o consumidor aqui: o diretório público foi fechado em 02/08/2026
+          (só se agenda pelo link do próprio estabelecimento). Prometer "encontre um
+          estabelecimento" levaria a uma tela que não existe mais. */}
       <footer className={styles.footer}>
         <div className={styles.footerLinks}>
+          <Link to="/planos">Planos</Link>
+          <Link to="/ajuda">Ajuda</Link>
           <Link to="/termos">Termos</Link>
           <Link to="/politica-privacidade">Privacidade</Link>
-          <Link to="/ajuda">Ajuda</Link>
         </div>
         <p className={styles.footerCopy}>© {year} Agendamentos Online</p>
         <p className={styles.footerLegal}>{getLegalEntityLine()}</p>

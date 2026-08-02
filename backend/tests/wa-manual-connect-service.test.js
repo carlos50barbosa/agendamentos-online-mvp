@@ -124,6 +124,7 @@ test('connectManualWhatsAppAccount persists a valid tenant account', async () =>
   let persistedPayload = null;
   let provisionado = null;
   let avisado = null;
+  let silenciado = null;
   const result = await connectManualWhatsAppAccount({
     estabelecimentoId: 22,
     payload: {
@@ -138,8 +139,9 @@ test('connectManualWhatsAppAccount persists a valid tenant account', async () =>
     getWaAccountByPhoneNumberId: async () => null,
     releaseWaPhoneNumberFromAccount: async () => ({ ok: true }),
     encryptAccessToken: () => ({ enc: 'enc-token', last4: '5678' }),
-    // Sem estes dois stubs o teste chama a Graph de verdade (4 requisicoes com token falso) e
-    // tenta escrever no banco real.
+    // Sem estes stubs o teste chama a Graph de verdade (4 requisicoes com token falso) e tenta
+    // escrever no banco real — o de bot ate PENDURA a suite inteira esperando conexao.
+    ensureTenantBotSilentByDefault: async (id) => { silenciado = id; return { ok: true, criado: true }; },
     provisionTenantTemplates: async (args) => {
       provisionado = args;
       return { criados: 4, existentes: 0, falhas: 0, resultados: [] };
@@ -182,6 +184,9 @@ test('connectManualWhatsAppAccount persists a valid tenant account', async () =>
   // ar, entao esta era a versao viva do bug.
   assert.deepEqual(provisionado, { estabelecimentoId: 22, wabaId: 'waba-1', accessToken: 'token-12345678' });
   assert.deepEqual(avisado, { estabelecimentoId: 22 });
+
+  // No numero do proprio salao quem conversa e a dona: o atendimento automatico nasce em silencio.
+  assert.equal(silenciado, 22);
 });
 
 test('disconnectTenantWhatsAppAccount returns the disconnected account state', async () => {

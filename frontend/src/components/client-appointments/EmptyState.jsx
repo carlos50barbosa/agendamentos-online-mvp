@@ -18,10 +18,16 @@ export default function EmptyState({
       </div>
       <h3 className="tw-mt-4 tw-text-lg tw-font-semibold tw-text-ink">{title}</h3>
       <p className="tw-mx-auto tw-mt-2 tw-max-w-md tw-text-sm tw-leading-relaxed" style={{ color: 'var(--muted-ink, #6B7280)' }}>{description}</p>
-      <Button variant="primary" className="tw-mt-6" onClick={onCta}>
-        <IconPlus className="tw-h-4 tw-w-4" aria-hidden="true" />
-        {ctaLabel}
-      </Button>
+      {/* Sem rótulo ou sem handler não há botão. Antes ele era incondicional, e desde que o
+          diretório fechou (02/08/2026) existe um estado sem ação possível: o cliente sem
+          agendamento nenhum, que só pode agendar pelo link do estabelecimento. Renderizar
+          ali um botão vazio com um "+" seria pior que não ter botão. */}
+      {ctaLabel && onCta && (
+        <Button variant="primary" className="tw-mt-6" onClick={onCta}>
+          <IconPlus className="tw-h-4 tw-w-4" aria-hidden="true" />
+          {ctaLabel}
+        </Button>
+      )}
     </div>
   );
 }

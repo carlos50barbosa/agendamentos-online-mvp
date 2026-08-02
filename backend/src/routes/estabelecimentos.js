@@ -1030,42 +1030,48 @@ async function listEstablishmentsHandler(req, res) {
 
   try {
 
-    const queryRaw = String(req.query?.q || '').trim().toLowerCase();
+    // DIRETÓRIO FECHADO (02/08/2026).
+    //
+    // Esta rota é pública (sem token) e antes aceitava ?q= e ?page=, o que a tornava um
+    // dump paginado da base inteira de estabelecimentos — nome, cidade e, até esta data,
+    // e-mail e telefone. Qualquer um com curl levava a carteira de clientes embora.
+    //
+    // Agora ela só resolve IDs que o chamador JÁ conhece (deep-link /novo?estabelecimento=42
+    // e o rebook a partir do histórico do próprio cliente). Sem ?ids= não há resposta:
+    // não existe mais "listar todos" nem "buscar por nome", nem para quem está logado.
+    // Descoberta passa a ser exclusivamente pelo link do estabelecimento (/<slug>).
+    //
+    // Se um dia voltar a existir vitrine pública, ela precisa nascer opt-in: uma coluna
+    // do tipo `listado_publicamente` com padrão 0 e filtro aqui. Reabrir o ?q= sem isso
+    // recria exatamente o vazamento que este bloco fechou.
     const idsRaw = String(req.query?.ids || '').trim();
-    const pageRaw = Number(req.query?.page);
     const limitRaw = Number(req.query?.limit);
 
-    const page = Number.isFinite(pageRaw) && pageRaw > 0 ? Math.floor(pageRaw) : 1;
+    const page = 1;
     const limit = Number.isFinite(limitRaw) && limitRaw > 0
       ? Math.min(Math.floor(limitRaw), MAX_PAGE_SIZE)
       : DEFAULT_PAGE_SIZE;
-    const offset = (page - 1) * limit;
+    const offset = 0;
+
+    const ids = idsRaw
+      ? idsRaw
+        .split(',')
+        .map((id) => Number(id))
+        .filter((id) => Number.isFinite(id))
+        .slice(0, 50)
+      : [];
+
+    // Sem ids não há o que resolver. Devolve vazio (e não 400) de propósito: quem chama sem
+    // ids é uma tela antiga, e uma lista vazia degrada para "nenhum resultado" em vez de erro.
+    if (!ids.length) {
+      return res.json({ items: [], page, limit, has_more: false });
+    }
 
     const where = ["u.tipo = 'estabelecimento'"];
     const params = [];
 
-    if (idsRaw) {
-      const ids = idsRaw
-        .split(',')
-        .map((id) => Number(id))
-        .filter((id) => Number.isFinite(id))
-        .slice(0, 50);
-      if (ids.length) {
-        where.push(`u.id IN (${ids.map(() => '?').join(',')})`);
-        params.push(...ids);
-      }
-    }
-
-    if (queryRaw) {
-      const tokens = queryRaw.split(/\s+/).filter(Boolean).slice(0, 6);
-      tokens.forEach((token) => {
-        const like = `%${token}%`;
-        where.push(
-          '(LOWER(u.nome) LIKE ? OR LOWER(u.bairro) LIKE ? OR LOWER(u.cidade) LIKE ? OR LOWER(u.estado) LIKE ? OR LOWER(u.cep) LIKE ? OR LOWER(u.endereco) LIKE ? OR LOWER(u.numero) LIKE ? OR LOWER(u.email) LIKE ?)'
-        );
-        params.push(like, like, like, like, like, like, like, like);
-      });
-    }
+    where.push(`u.id IN (${ids.map(() => '?').join(',')})`);
+    params.push(...ids);
 
     const whereSql = `WHERE ${where.join(' AND ')}`;
     const sql = `${LIST_SELECT} ${whereSql} ${LIST_ORDER} LIMIT ? OFFSET ?`;
@@ -1081,9 +1087,19 @@ async function listEstablishmentsHandler(req, res) {
     // vencida não aceita agendamento — antes, isso só aparecia no 402 da última etapa.
     // Deriva do mesmo computeSubscriptionState que o middleware usa (nada de heurística paralela),
     // porém sem tocar o banco: loadEffectiveSubscriptionContext faz N queries e ainda escreve.
+    // Esta rota é PÚBLICA (sem token). Tudo que sair daqui é lista de contatos de graça para
+    // quem der um curl — a base inteira de estabelecimentos, paginada. Por isso o retorno é
+    // uma allowlist por omissão: email, telefone e o endereço de rua saem do payload.
+    //
+    // Conferido em 02/08/2026: nenhuma tela consome esses campos daqui. BookingDiscovery usa
+    // id/nome/avatar/rating; NovoAgendamento usa cep/bairro/cidade/estado (e as coordenadas,
+    // que attachCoordinates já calculou ACIMA, a partir das linhas ainda completas).
+    // O painel admin não passa por aqui — ele tem /admin/establishments/overview, com checkAdmin.
     const items = payload.map((row) => {
       const {
-        plan, plan_status, plan_trial_ends_at, plan_active_until, ...rest
+        plan, plan_status, plan_trial_ends_at, plan_active_until,
+        email, telefone, endereco, numero, complemento,
+        ...rest
       } = row;
       const computed = computeSubscriptionState({
         planContext: {

@@ -16,6 +16,7 @@ import {
 } from './waTenant.js';
 import { provisionTenantTemplates } from './waTenantTemplates.js';
 import { notifyTemplatesUnderReview } from './waTemplateNotifier.js';
+import { ensureTenantBotSilentByDefault } from '../bot/storage/settingsStore.js';
 
 const APP_ID = String(process.env.WA_APP_ID || '').trim();
 const APP_SECRET = String(process.env.WA_APP_SECRET || '').trim();
@@ -554,6 +555,11 @@ export async function completeEmbeddedSignup({
   // dentro da janela e cai para e-mail. Derrubar a conexão porque um dos quatro foi recusado
   // deixaria o dono sem nada em vez de com quase tudo. A aprovação é assíncrona (chega por
   // `message_template_status_update`), então todos nascem PENDING.
+  // Atendimento automático nasce DESLIGADO no número do próprio salão: ali quem conversa é o dono,
+  // no aplicativo dele. Ver ensureTenantBotSilentByDefault.
+  await ensureTenantBotSilentByDefault(tenantId).catch((err) =>
+    console.warn('[wa][embedded-signup][bot_default]', err?.message || err));
+
   let templates = { criados: 0, existentes: 0, falhas: 0 };
   try {
     templates = await provisionTenantTemplates({

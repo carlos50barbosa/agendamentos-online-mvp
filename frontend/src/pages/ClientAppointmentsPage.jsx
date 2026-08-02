@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Modal from '../components/Modal.jsx';
-import { IconPlus, IconSearch } from '../components/Icons.jsx';
+import { IconSearch } from '../components/Icons.jsx';
 import { Api } from '../utils/api.js';
 import {
   formatDateTimeBr,
@@ -41,8 +41,6 @@ const DEFAULT_DEPOSIT_MODAL = {
   amountCents: null,
   pix: null,
 };
-
-const NEW_APPOINTMENT_ROUTE = '/novo';
 
 function normalizeText(value) {
   return String(value || '')
@@ -264,10 +262,6 @@ export default function ClientAppointmentsPage() {
 
   const isBaseEmpty = appointments.length === 0;
 
-  const openNewAppointment = useCallback(() => {
-    navigate(NEW_APPOINTMENT_ROUTE);
-  }, [navigate]);
-
   const openDetails = useCallback(async (appointment) => {
     const base = decorateAppointment(appointment);
     setDetailsModal({ open: true, loading: true, item: base, error: '' });
@@ -338,7 +332,11 @@ export default function ClientAppointmentsPage() {
             'error',
             payError?.data?.message || 'Esse agendamento foi cancelado por falta de pagamento.'
           );
-          navigate(NEW_APPOINTMENT_ROUTE);
+          // Antes isto caía no diretório público ("escolha um estabelecimento"), que não existe
+          // mais. O destino certo sempre foi o MESMO estabelecimento — é lá que ele precisa
+          // remarcar. Sem o id no payload, fica só o toast: melhor parado do que numa tela morta.
+          const estabId = appointment?.estabelecimento_id || appointment?.estabelecimentoId || '';
+          if (estabId) navigate(`/agendar/${encodeURIComponent(estabId)}`);
         } else {
           showToast(
             'error',
@@ -448,15 +446,9 @@ export default function ClientAppointmentsPage() {
                 </span>
               </label>
 
-              <Button
-                variant="primary"
-                className="tw-hidden md:tw-inline-flex"
-                onClick={openNewAppointment}
-                aria-label="Criar novo agendamento"
-              >
-                <IconPlus className="tw-h-4 tw-w-4" aria-hidden="true" />
-                Novo agendamento
-              </Button>
+              {/* Sem botão "Novo agendamento": ele abria o diretório público, fechado em
+                  02/08/2026. Agendar começa no link do estabelecimento — um botão aqui
+                  levaria de volta a esta mesma tela. */}
             </div>
           </div>
 
@@ -526,13 +518,15 @@ export default function ClientAppointmentsPage() {
           title={isBaseEmpty ? 'Você ainda não tem agendamentos' : 'Nenhum agendamento encontrado'}
           description={
             isBaseEmpty
-              ? 'Quando você agendar um horário, ele aparecerá aqui com todos os status e ações.'
+              // Sem "agendar agora": não há mais busca de estabelecimentos (diretório fechado
+              // em 02/08/2026). O que o cliente precisa saber é POR ONDE se agenda agora.
+              ? 'Agende pelo link do estabelecimento — ele divulga no Instagram e no WhatsApp. O agendamento aparece aqui, com status e ações.'
               : 'Tente ajustar os filtros ou buscar por outro serviço/estabelecimento.'
           }
-          ctaLabel={isBaseEmpty ? 'Agendar agora' : 'Limpar filtros'}
+          ctaLabel={isBaseEmpty ? '' : 'Limpar filtros'}
           onCta={
             isBaseEmpty
-              ? openNewAppointment
+              ? undefined
               : () => {
                   setSearch('');
                   setStatusFilter('todos');
@@ -692,14 +686,8 @@ export default function ClientAppointmentsPage() {
       )}
       </div>
 
-      <Button
-        variant="fab"
-        className="tw-fixed tw-right-4 tw-bottom-[88px] tw-z-50 md:tw-hidden"
-        onClick={openNewAppointment}
-        aria-label="Novo agendamento"
-      >
-        <IconPlus className="tw-h-6 tw-w-6" aria-hidden="true" />
-      </Button>
+      {/* FAB "novo agendamento" removido junto com o diretório (02/08/2026): não há para
+          onde ele levar. Quem agenda vem pelo link do estabelecimento. */}
 
       {toast && (
         <div

@@ -1,28 +1,25 @@
-/* Landing pública "/" — versão app de agendamentos.
+/* Landing pública "/" — página de venda para o dono do estabelecimento.
    Isolada via CSS Module. Herda os tokens de tema do app (--primary, --text,
-   --surface, --border, --bg...) com fallbacks, então adapta claro/escuro. */
+   --surface, --border, --bg...) com fallbacks. */
 
 .page {
   --lp-brand: var(--primary, #5049E5);
-  --lp-brand-600: var(--primary-600, #423cd6);
-  --lp-ink: var(--text, #14131f);
-  --lp-muted: var(--muted, #5b5872);
+  --lp-ink: var(--text, #1E1B4B);
+  --lp-muted: var(--muted, #6B7280);
   --lp-surface: var(--surface, #ffffff);
-  --lp-line: var(--border, #e9e7f3);
-  --lp-ground: var(--bg, #f6f5fb);
-  --lp-tint: color-mix(in srgb, var(--lp-brand) 12%, var(--lp-surface));
-  --lp-tint-soft: color-mix(in srgb, var(--lp-brand) 6%, var(--lp-surface));
+  --lp-line: var(--border, #E7E5F5);
+  --lp-ground: var(--bg, #F6F5FB);
+  --lp-tint: color-mix(in srgb, var(--lp-brand) 9%, var(--lp-surface));
   --lp-radius: 20px;
-  --lp-shadow-sm: 0 1px 2px rgba(20, 19, 31, .04), 0 4px 14px rgba(80, 73, 229, .06);
-  --lp-shadow-md: 0 10px 30px rgba(80, 73, 229, .16);
-  --lp-star: #f5a524;
+  --lp-shadow: 0 10px 30px rgba(80, 73, 229, .12);
+  --lp-max: 1040px;
 
   width: 100%;
   min-height: 100vh;
   display: flex;
   flex-direction: column;
   background:
-    radial-gradient(1100px 460px at 50% -220px, color-mix(in srgb, var(--lp-brand) 14%, transparent) 0%, transparent 70%),
+    radial-gradient(900px 420px at 50% -240px, color-mix(in srgb, var(--lp-brand) 12%, transparent) 0%, transparent 72%),
     var(--lp-ground);
   color: var(--lp-ink);
 }
@@ -32,13 +29,13 @@
   position: sticky;
   top: 0;
   z-index: 20;
-  background: color-mix(in srgb, var(--lp-surface) 82%, transparent);
+  background: color-mix(in srgb, var(--lp-surface) 84%, transparent);
   backdrop-filter: saturate(1.4) blur(12px);
   -webkit-backdrop-filter: saturate(1.4) blur(12px);
   border-bottom: 1px solid var(--lp-line);
 }
 .headerInner {
-  max-width: 960px;
+  max-width: var(--lp-max);
   margin: 0 auto;
   padding: 12px 18px;
   display: flex;
@@ -63,7 +60,7 @@
   display: block;
   font-size: 11px;
   font-weight: 500;
-  color: color-mix(in srgb, var(--lp-ink) 45%, var(--lp-muted));
+  color: var(--lp-muted);
   letter-spacing: .02em;
 }
 .headerActions {
@@ -71,356 +68,295 @@
   align-items: center;
   gap: 8px;
 }
-
-/* ---------- content shell ---------- */
+/* ---------- layout ---------- */
 .main {
   flex: 1;
   width: 100%;
-  max-width: 960px;
+  max-width: var(--lp-max);
   margin: 0 auto;
-  padding: 0 18px;
+  padding: 28px 18px 8px;
+}
+.section { margin-top: 52px; }
+.sectionTitle {
+  margin: 0 0 16px;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--lp-muted);
 }
 
-/* ---------- hero + search ---------- */
+/* ---------- hero ---------- */
 .hero {
-  padding: 30px 2px 8px;
+  display: grid;
+  gap: 34px;
+  align-items: center;
+  padding-top: 18px;
+}
+@media (min-width: 900px) {
+  .hero { grid-template-columns: 1.05fr .95fr; gap: 48px; padding-top: 34px; }
 }
 .heroTitle {
-  margin: 0 0 8px;
-  font-size: clamp(1.7rem, 6vw, 2.1rem);
-  line-height: 1.12;
-  letter-spacing: -.02em;
+  margin: 0;
+  font-size: clamp(32px, 6vw, 50px);
+  line-height: 1.06;
+  letter-spacing: -.03em;
   font-weight: 800;
-  text-wrap: balance;
 }
 .heroTitle em {
-  color: var(--lp-brand);
   font-style: normal;
+  color: var(--lp-brand);
+  /* Mesmo grifo dos criativos: realce índigo, nunca outra cor. */
+  box-shadow: inset 0 -.14em 0 color-mix(in srgb, var(--lp-brand) 22%, transparent);
 }
 .heroSub {
-  margin: 0 0 18px;
+  margin: 16px 0 0;
   max-width: 46ch;
+  font-size: clamp(15px, 2.2vw, 18px);
+  line-height: 1.55;
   color: var(--lp-muted);
-  font-size: 15px;
-  line-height: 1.5;
 }
-.search {
+.heroActions {
+  margin-top: 24px;
   display: flex;
-  align-items: center;
+  flex-wrap: wrap;
   gap: 10px;
+}
+.heroNote {
+  margin: 14px 0 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--lp-muted);
+}
+
+/* ---------- mock do app ----------
+   Fragmento da tela real de agendamento. É o que faz a página parecer produto
+   em vez de folheto — a mesma aposta dos criativos. */
+.mock {
+  justify-self: center;
+  width: 100%;
+  max-width: 320px;
+  padding: 10px;
+  border-radius: 34px;
+  background: var(--lp-ink);
+  box-shadow: 0 26px 60px rgba(30, 27, 75, .26);
+}
+.mockScreen {
+  border-radius: 26px;
   background: var(--lp-surface);
-  border: 1.5px solid var(--lp-line);
-  border-radius: 999px;
-  padding: 6px 6px 6px 18px;
-  box-shadow: var(--lp-shadow-sm);
-  transition: border-color .15s, box-shadow .15s;
+  padding: 16px 14px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
-.search:focus-within {
-  border-color: var(--lp-brand);
-  box-shadow: 0 0 0 4px color-mix(in srgb, var(--lp-brand) 18%, transparent);
-}
-.searchIcon {
-  color: color-mix(in srgb, var(--lp-ink) 40%, var(--lp-muted));
+.mockHead { display: flex; align-items: center; gap: 10px; }
+.mockAvatar {
   flex: none;
-}
-.searchInput {
-  border: 0;
-  outline: 0;
-  font: inherit;
-  font-size: 15px;
-  flex: 1;
-  min-width: 0;
-  background: transparent;
-  color: var(--lp-ink);
-  padding: 11px 0;
-}
-.searchInput::placeholder {
-  color: color-mix(in srgb, var(--lp-ink) 42%, var(--lp-muted));
-}
-.searchGo {
-  flex: none;
-  width: 46px;
-  height: 46px;
-  border-radius: 999px;
-  border: 0;
+  width: 34px;
+  height: 34px;
+  border-radius: 11px;
   background: var(--lp-brand);
   color: #fff;
-  display: grid;
-  place-items: center;
-  cursor: pointer;
-  box-shadow: var(--lp-shadow-md);
-  transition: transform .12s, background .15s;
-}
-.searchGo:hover {
-  background: var(--lp-brand-600);
-  transform: translateY(-1px);
-}
-
-/* ---------- sections ---------- */
-.section {
-  padding: 26px 2px 4px;
-}
-.sectionHead {
+  font-size: 13px;
+  font-weight: 800;
   display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 16px;
+  align-items: center;
+  justify-content: center;
 }
-.sectionTitle {
-  margin: 0;
-  font-size: 1.1rem;
-  letter-spacing: -.01em;
-  font-weight: 750;
-}
-.sectionLink {
-  color: var(--lp-brand);
-  font-weight: 650;
-  font-size: 13.5px;
-  text-decoration: none;
+.mockHeadText { display: grid; min-width: 0; }
+.mockHeadText strong { font-size: 15px; font-weight: 800; line-height: 1.2; }
+.mockHeadText span {
+  font-size: 11px;
+  color: var(--lp-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
-.sectionLink:hover {
-  text-decoration: underline;
-}
-
-/* ---------- categorias: ícones grandes ---------- */
-.cats {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 12px;
-}
-.cat {
-  appearance: none;
-  border: 1px solid var(--lp-line);
-  background: var(--lp-surface);
-  border-radius: var(--lp-radius);
-  padding: 16px 8px 13px;
+.mockService {
   display: flex;
-  flex-direction: column;
   align-items: center;
   gap: 10px;
-  cursor: pointer;
-  font: inherit;
-  text-decoration: none;
-  color: inherit;
-  transition: transform .14s ease, box-shadow .14s ease, border-color .14s ease;
+  padding: 10px 11px;
+  border: 1px solid var(--lp-line);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--lp-ground) 60%, var(--lp-surface));
 }
-.cat:hover,
-.cat:focus-visible {
-  transform: translateY(-3px);
-  box-shadow: var(--lp-shadow-md);
-  border-color: color-mix(in srgb, var(--lp-brand) 35%, var(--lp-line));
-  outline: none;
-}
-.catIcon {
-  width: 58px;
-  height: 58px;
-  border-radius: 18px;
-  display: grid;
-  place-items: center;
-  background: var(--lp-tint);
-  color: var(--lp-brand);
-}
-.catIcon svg {
+.mockServiceIcon {
+  flex: none;
   width: 30px;
   height: 30px;
-}
-.catLabel {
-  font-size: 13px;
-  font-weight: 650;
-  text-align: center;
-}
-
-/* ---------- perto de você ---------- */
-.feat {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-.card {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  border: 1px solid var(--lp-line);
-  border-radius: 18px;
-  padding: 12px;
-  background: var(--lp-surface);
-  text-decoration: none;
-  color: inherit;
-  transition: box-shadow .14s, transform .14s;
-}
-.card:hover,
-.card:focus-visible {
-  box-shadow: var(--lp-shadow-md);
-  transform: translateY(-2px);
-  outline: none;
-}
-.cardAvatar {
-  width: 60px;
-  height: 60px;
-  border-radius: 15px;
-  flex: none;
-  object-fit: cover;
-  background: var(--lp-tint);
-}
-.cardBody {
-  flex: 1;
-  min-width: 0;
-}
-.cardTitle {
-  margin: 0 0 3px;
-  font-size: 15.5px;
-  font-weight: 700;
-  letter-spacing: -.01em;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.cardMeta {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--lp-muted);
-  font-size: 13px;
-  min-width: 0;
-}
-.cardMeta > span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.cardMeta svg {
-  flex: none;
-  color: color-mix(in srgb, var(--lp-ink) 40%, var(--lp-muted));
-}
-.cardCta {
-  flex: none;
-  width: 40px;
-  height: 40px;
-  border-radius: 999px;
-  border: 0;
+  border-radius: 9px;
   background: var(--lp-tint);
   color: var(--lp-brand);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.mockServiceText { display: grid; min-width: 0; }
+.mockServiceText strong { font-size: 13px; font-weight: 700; line-height: 1.2; }
+.mockServiceText span { font-size: 11px; color: var(--lp-muted); }
+.mockLabel { font-size: 12px; font-weight: 700; color: var(--lp-ink); }
+.mockDays { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.mockDay, .mockDayOn {
   display: grid;
-  place-items: center;
+  justify-items: center;
+  gap: 1px;
+  padding: 7px 0;
+  border: 1px solid var(--lp-line);
+  border-radius: 11px;
+  background: var(--lp-surface);
+}
+.mockDay small, .mockDayOn small { font-size: 9px; font-weight: 700; text-transform: uppercase; opacity: .6; }
+.mockDay strong, .mockDayOn strong { font-size: 14px; font-weight: 800; line-height: 1; }
+.mockDayOn { background: var(--lp-brand); border-color: transparent; color: #fff; }
+.mockDayOn small { opacity: .9; }
+.mockSlots { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.mockSlot, .mockSlotOn, .mockSlotOff {
+  padding: 8px 0;
+  border: 1px solid var(--lp-line);
+  border-radius: 10px;
+  background: var(--lp-surface);
+  font-size: 12px;
+  font-weight: 700;
+  text-align: center;
+}
+.mockSlotOn { background: var(--lp-brand); border-color: transparent; color: #fff; }
+/* Ocupado riscado: é assim que o SlotPicker real renderiza. */
+.mockSlotOff {
+  background: color-mix(in srgb, var(--lp-ground) 70%, var(--lp-surface));
+  color: color-mix(in srgb, var(--lp-muted) 60%, transparent);
+  text-decoration: line-through;
+}
+.mockCta {
+  margin-top: 2px;
+  padding: 11px 0;
+  border-radius: 13px;
+  background: var(--lp-brand);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 800;
+  text-align: center;
 }
 
 /* ---------- como funciona ---------- */
 .steps {
-  display: flex;
-  flex-direction: column;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 12px;
+}
+@media (min-width: 760px) {
+  .steps { grid-template-columns: repeat(3, 1fr); gap: 16px; }
 }
 .step {
   display: flex;
   align-items: flex-start;
-  gap: 14px;
-  padding: 13px 0;
-}
-.step + .step {
-  border-top: 1px solid var(--lp-line);
+  gap: 12px;
+  padding: 18px;
+  border: 1px solid var(--lp-line);
+  border-radius: var(--lp-radius);
+  background: var(--lp-surface);
 }
 .stepNum {
   flex: none;
-  width: 30px;
-  height: 30px;
-  border-radius: 999px;
-  background: var(--lp-ink);
-  color: var(--lp-surface);
-  font-weight: 750;
-  font-size: 13px;
-  display: grid;
-  place-items: center;
-}
-.stepBody strong {
-  display: block;
-  font-size: 15px;
-  margin-bottom: 1px;
-}
-.stepBody span {
-  color: var(--lp-muted);
-  font-size: 13.5px;
-}
-
-/* ---------- ação fixa ---------- */
-.ctaBar {
-  position: sticky;
-  bottom: 0;
-  z-index: 15;
-  margin-top: 22px;
-  padding: 14px 0 calc(14px + env(safe-area-inset-bottom));
-  background: linear-gradient(to top, var(--lp-ground) 62%, transparent);
-}
-.ctaBarInner {
-  max-width: 960px;
-  margin: 0 auto;
-  padding: 0 18px;
-}
-.cta {
-  width: 100%;
-  border: 0;
-  border-radius: 16px;
-  padding: 16px;
-  background: var(--lp-brand);
-  color: #fff;
-  font: inherit;
-  font-weight: 750;
-  font-size: 16px;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--lp-tint);
+  color: var(--lp-brand);
+  font-size: 14px;
+  font-weight: 800;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  cursor: pointer;
-  box-shadow: var(--lp-shadow-md);
-  transition: background .15s, transform .12s;
 }
-.cta:hover {
-  background: var(--lp-brand-600);
-  transform: translateY(-1px);
+.stepTitle { display: block; font-size: 15px; font-weight: 750; }
+.stepText { margin: 4px 0 0; font-size: 14px; line-height: 1.5; color: var(--lp-muted); }
+
+/* ---------- preço ---------- */
+.price {
+  padding: 22px;
+  border: 1px solid var(--lp-line);
+  border-radius: var(--lp-radius);
+  background: var(--lp-surface);
+  box-shadow: var(--lp-shadow);
+}
+.priceHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.priceValue {
+  margin: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.priceValue small { font-size: 13px; font-weight: 600; color: var(--lp-muted); }
+.priceValue strong { font-size: clamp(28px, 5vw, 38px); font-weight: 800; letter-spacing: -.02em; }
+.priceValue span { font-size: 15px; font-weight: 700; color: var(--lp-muted); }
+.priceLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--lp-brand);
+  text-decoration: none;
+}
+.priceLink:hover { text-decoration: underline; }
+.priceList {
+  margin: 18px 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 8px;
+}
+.priceList li {
+  position: relative;
+  padding-left: 26px;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--lp-ink);
+}
+.priceList li::before {
+  content: '';
+  position: absolute;
+  left: 4px;
+  top: .42em;
+  width: 10px;
+  height: 6px;
+  border-left: 2px solid var(--lp-brand);
+  border-bottom: 2px solid var(--lp-brand);
+  transform: rotate(-45deg);
 }
 
-/* ---------- footer ---------- */
+/* ---------- rodapé ---------- */
 .footer {
+  margin-top: 56px;
   padding: 26px 18px 34px;
+  border-top: 1px solid var(--lp-line);
   text-align: center;
-  color: color-mix(in srgb, var(--lp-ink) 40%, var(--lp-muted));
-  font-size: 12.5px;
+  display: grid;
+  gap: 12px;
+  justify-items: center;
 }
 .footerLinks {
   display: flex;
-  gap: 16px;
-  justify-content: center;
   flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px 18px;
 }
 .footerLinks a {
+  font-size: 13px;
+  font-weight: 600;
   color: var(--lp-muted);
   text-decoration: none;
-  font-weight: 600;
 }
-.footerLinks a:hover {
-  color: var(--lp-ink);
-}
-.footerCopy {
-  margin: 10px 0 0;
-}
+.footerLinks a:hover { color: var(--lp-brand); }
+.footerCopy { margin: 0; font-size: 12px; color: var(--lp-muted); }
 /* razão social: exigida pela verificação de empresa da Meta, discreta mas legível */
-.footerLegal {
-  margin: 4px 0 0;
-  font-size: 12px;
-}
-
-/* wider screens: a touch more breathing room, keep the app column feel */
-@media (min-width: 640px) {
-  .cats {
-    grid-template-columns: repeat(6, 1fr);
-  }
-  .heroSub {
-    font-size: 16px;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .cat, .card, .searchGo, .cta {
-    transition: none;
-  }
-}
+.footerLegal { margin: 0; font-size: 11px; color: color-mix(in srgb, var(--lp-muted) 75%, transparent); }
