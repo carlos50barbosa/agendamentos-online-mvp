@@ -227,7 +227,12 @@ export default function WhatsAppEmbeddedSignup({ onConnected, disabled = false }
         />
         <span>
           Li e aceito as regras de uso do WhatsApp descritas nos{' '}
-          <Link to="/termos#whatsapp" target="_blank" rel="noopener noreferrer">
+          <Link
+            to="/termos#whatsapp"
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ color: 'var(--brand, #6366f1)', fontWeight: 600, textDecoration: 'underline' }}
+          >
             Termos de Uso
           </Link>
           {LEGAL_METADATA.terms?.version ? ` (versão ${LEGAL_METADATA.terms.version})` : ''}.
