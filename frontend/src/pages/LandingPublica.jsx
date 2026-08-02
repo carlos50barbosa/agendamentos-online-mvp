@@ -31,21 +31,53 @@ const STEPS = [
   },
   {
     title: 'Compartilhe seu link',
-    text: 'No Instagram, no WhatsApp, onde o cliente já procura você.',
+    text: 'No Instagram, no WhatsApp, onde o cliente já procura você — e pare de marcar por mensagem.',
   },
   {
-    title: 'Receba os agendamentos',
-    text: 'Eles caem direto na sua agenda, com lembrete automático.',
+    title: 'Receba com o sinal pago',
+    text: 'O agendamento cai na sua agenda já com a entrada no PIX, e o lembrete sai sozinho.',
   },
 ];
 
-// O que o plano de entrada já entrega (backend/src/lib/plans.js). Nada aqui pode
-// prometer recurso de plano superior — o sinal via PIX, por exemplo, é do Pro.
-const INCLUDES = [
-  'Agendamentos e serviços ilimitados',
-  'Link próprio para o cliente marcar sozinho',
-  'Lembretes automáticos',
-];
+const limite = (valor, singular, plural) => (
+  valor == null ? `${plural.charAt(0).toUpperCase()}${plural.slice(1)} ilimitados` : `Até ${valor} ${valor === 1 ? singular : plural}`
+);
+
+/**
+ * O que cada plano mostra na vitrine, DERIVADO do catálogo — nunca escrito à mão.
+ * Mesma regra de Planos.jsx: mexer num limite no backend atualiza esta página sozinho;
+ * uma cópia local divergiria da tabela que o backend aplica e a vitrine passaria a
+ * prometer o que o produto nega.
+ *
+ * Não listo franquia de WhatsApp de propósito: o envio depende de opt-in do cliente final,
+ * então "250 mensagens" na vitrine promete um canal que pode não sair. "Lembretes
+ * automáticos" é o que o produto entrega em qualquer cenário.
+ */
+function bulletsDoPlano(plan, anterior) {
+  if (!anterior) {
+    return [
+      'Agendamentos e serviços ilimitados',
+      'Link próprio para o cliente marcar sozinho',
+      limite(plan.max_professionals, 'profissional', 'profissionais'),
+      'Lembretes automáticos',
+    ];
+  }
+  const ganhos = [];
+  // O sinal é o argumento de venda da casa: quando ele entra, entra em primeiro.
+  if (plan.allow_deposit && !anterior.allow_deposit) {
+    ganhos.push('Sinal no PIX ao agendar — abatido no serviço');
+  }
+  if (plan.allow_advanced_reports && !anterior.allow_advanced_reports) {
+    ganhos.push('Relatórios avançados');
+  }
+  if (plan.max_professionals !== anterior.max_professionals) {
+    ganhos.push(limite(plan.max_professionals, 'profissional', 'profissionais'));
+  }
+  if (plan.max_gallery_images == null && anterior.max_gallery_images != null) {
+    ganhos.push('Galeria de fotos ilimitada');
+  }
+  return ganhos;
+}
 
 /** Fragmento da tela real de agendamento. Decorativo — a prova de que isto é um app. */
 function AppMock() {
@@ -90,6 +122,21 @@ function AppMock() {
           <span className={styles.mockSlotOff}>11:00</span>
         </div>
 
+        {/* O sinal aparece como UMA linha do resumo, do tamanho da data — é um item do
+            checkout, não um recebimento. Ampliar isto aqui repete o erro dos criativos
+            antigos, em que o valor virava o herói e a peça lia como comprovante de PIX. */}
+        <div className={styles.mockResumo}>
+          <div className={styles.mockResumoRow}>
+            <span>Sábado, 8 de agosto</span>
+            <strong>10:00</strong>
+          </div>
+          <div className={styles.mockResumoRow}>
+            <span>Sinal (PIX)</span>
+            <strong>R$ 40,00</strong>
+          </div>
+          <span className={styles.mockResumoHint}>Abatido no valor do serviço</span>
+        </div>
+
         <span className={styles.mockCta}>Confirmar agendamento</span>
       </div>
     </div>
@@ -116,15 +163,25 @@ export default function LandingPublica() {
 
   const trialDays = catalog?.trial_days ?? 7;
 
-  // Menor preço do catálogo. Sem fallback: se o catálogo não veio, a página não cita preço —
-  // um número escrito à mão aqui é um número que um dia vai mentir.
-  const cheapest = useMemo(() => {
-    const plans = Array.isArray(catalog?.plans) ? catalog.plans : [];
-    if (!plans.length) return null;
-    return plans.reduce((min, plan) => (
-      Number(plan?.price_cents) < Number(min?.price_cents) ? plan : min
-    ), plans[0]);
+  // Catálogo em ordem de preço, cada plano já com os bullets derivados do anterior.
+  // Sem fallback: se o catálogo não veio, a seção de preço não aparece — um número
+  // escrito à mão aqui é um número que um dia vai mentir.
+  const planos = useMemo(() => {
+    const lista = Array.isArray(catalog?.plans) ? [...catalog.plans] : [];
+    lista.sort((a, b) => Number(a?.price_cents) - Number(b?.price_cents));
+    return lista.map((plan, index) => ({
+      ...plan,
+      anterior: lista[index - 1] || null,
+      bullets: bulletsDoPlano(plan, lista[index - 1] || null),
+    }));
   }, [catalog]);
+
+  const cheapest = planos[0] || null;
+  // O Pro é o plano do trial e o primeiro com sinal — é ele que a vitrine destaca.
+  const planoDoTrial = useMemo(
+    () => planos.find((plan) => plan.code === 'pro') || null,
+    [planos],
+  );
 
   // Mesma máquina de /planos (goTrial): o cadastro lê ?trial_plan= e /assinatura lê intent_kind.
   // O trial é do Pro — é o plano que tem o sinal via PIX, que é o argumento de venda.
@@ -175,9 +232,12 @@ export default function LandingPublica() {
             <h1 className={styles.heroTitle}>
               Sua agenda online, <em>aberta 24 horas</em>.
             </h1>
+            {/* O sinal entra aqui porque é o diferencial da casa — mas subordinado à
+                categoria, nunca antes dela. A ordem "agenda primeiro, sinal depois" é a
+                mesma dos criativos, e é o que evita a leitura de "plataforma que dá PIX". */}
             <p className={styles.heroSub}>
-              O cliente escolhe o serviço e o horário sozinho, pelo seu link. Você para de
-              responder mensagem só para marcar.
+              O cliente escolhe o serviço e o horário sozinho, pelo seu link — e deixa
+              o sinal no PIX ao confirmar. Se furar, o sinal fica com você.
             </p>
             <div className={styles.heroActions}>
               <button type="button" className="btn btn--primary btn--lg" onClick={primaryCta.action}>
@@ -186,9 +246,12 @@ export default function LandingPublica() {
               <Link to="/planos" className="btn btn--outline btn--lg">Ver planos</Link>
             </div>
             {!user && (
+              // Diz QUAL plano é o teste. O sinal está na headline e é recurso do Pro:
+              // sem esta linha, o "a partir de R$ 14,90" ao lado sugeriria que o sinal
+              // vem no plano de entrada — e vem no Pro.
               <p className={styles.heroNote}>
-                Sem cartão de crédito
-                {cheapest ? ` · a partir de ${money(cheapest.price_cents)}/mês` : ''}
+                {trialDays} dias grátis no {planoDoTrial?.label || 'Pro'} · sem cartão de crédito
+                {cheapest ? ` · planos a partir de ${money(cheapest.price_cents)}/mês` : ''}
               </p>
             )}
           </div>
@@ -210,31 +273,52 @@ export default function LandingPublica() {
           </ol>
         </section>
 
-        <section className={styles.section}>
-          <h2 className={styles.sectionTitle}>Quanto custa</h2>
-          <div className={styles.price}>
-            <div className={styles.priceHead}>
-              {cheapest ? (
-                <p className={styles.priceValue}>
-                  <small>a partir de</small>
-                  <strong>{money(cheapest.price_cents)}</strong>
-                  <span>/mês</span>
-                </p>
-              ) : (
-                <p className={styles.priceValue}>
-                  <strong>Planos mensais</strong>
-                </p>
-              )}
-              <Link to="/planos" className={styles.priceLink}>
-                Comparar planos
-                <IconArrowRight width={16} height={16} aria-hidden="true" />
-              </Link>
+        {/* A seção some inteira se o catálogo não veio: melhor não falar de preço do que
+            falar um preço inventado. */}
+        {planos.length > 0 && (
+          <section className={styles.section}>
+            <h2 className={styles.sectionTitle}>Quanto custa</h2>
+            <div className={styles.planos}>
+              {planos.map((plan) => {
+                const destaque = plan.code === 'pro';
+                return (
+                  <article
+                    key={plan.code}
+                    className={destaque ? styles.planoDestaque : styles.plano}
+                  >
+                    <div className={styles.planoTopo}>
+                      <span className={styles.planoNome}>{plan.label}</span>
+                      {destaque && <span className={styles.planoTag}>{trialDays} dias grátis</span>}
+                    </div>
+                    <p className={styles.planoPreco}>
+                      <strong>{money(plan.price_cents)}</strong>
+                      <span>/mês</span>
+                    </p>
+                    <ul className={styles.planoLista}>
+                      {plan.anterior && (
+                        <li className={styles.planoHeranca}>Tudo do {plan.anterior.label}, mais:</li>
+                      )}
+                      {plan.bullets.map((item) => <li key={item}>{item}</li>)}
+                    </ul>
+                    {destaque && !user ? (
+                      <button type="button" className="btn btn--primary" onClick={startTrial}>
+                        Testar {trialDays} dias grátis
+                      </button>
+                    ) : (
+                      <Link to="/planos" className="btn btn--outline">
+                        {user ? 'Ver detalhes' : `Assinar ${plan.label}`}
+                      </Link>
+                    )}
+                  </article>
+                );
+              })}
             </div>
-            <ul className={styles.priceList}>
-              {INCLUDES.map((item) => <li key={item}>{item}</li>)}
-            </ul>
-          </div>
-        </section>
+            <Link to="/planos" className={styles.planosLink}>
+              Comparar todos os recursos
+              <IconArrowRight width={16} height={16} aria-hidden="true" />
+            </Link>
+          </section>
+        )}
       </main>
 
       {/* Sem caminho para o consumidor aqui: o diretório público foi fechado em 02/08/2026

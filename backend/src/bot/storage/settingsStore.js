@@ -178,6 +178,45 @@ async function ensureTenantBotSilentByDefault(tenantId, { deps = {} } = {}) {
   return { ok: true, criado: Number(r?.affectedRows || 0) === 1 };
 }
 
+/**
+ * O interruptor que o DONO controla, na tela dele.
+ *
+ * Um booleano só, porque é isso que ele entende: "o Agenda0 responde minhas clientes" ou não. Os
+ * quatro campos internos existem para o ajuste fino do administrador; expor rollout e modo para
+ * quem tem um salão de uma cadeira seria pedir para configurarem errado.
+ *
+ * Desligado grava o MESMO estado de `ensureTenantBotSilentByDefault` — inclusive o `kill_switch`,
+ * sem o qual a plataforma continua mandando auto-resposta e abrindo handoff.
+ *
+ * Nota: admin e dono escrevem nos mesmos campos, então o último a escrever vence. É o
+ * comportamento que já existia; se um dia o `kill_switch` virar alavanca de emergência de verdade,
+ * ele precisa sair daqui para uma coluna própria.
+ */
+async function setTenantAutoService({ tenantId, ligado }, { deps = {} } = {}) {
+  const tenant = Number(tenantId);
+  if (!Number.isFinite(tenant) || tenant <= 0) return { ok: false, error: 'invalid_tenant' };
+  const executar = deps.query || ((sql, params) => pool.query(sql, params));
+  const on = Boolean(ligado);
+  await executar(
+    `INSERT INTO wa_bot_settings (tenant_id, enabled, mode, rollout_percent, kill_switch, updated_at)
+     VALUES (?,?,?,?,?,NOW())
+     ON DUPLICATE KEY UPDATE
+       enabled=VALUES(enabled),
+       mode=VALUES(mode),
+       rollout_percent=VALUES(rollout_percent),
+       kill_switch=VALUES(kill_switch),
+       updated_at=NOW()`,
+    [tenant, on ? 1 : 0, on ? 'hybrid' : 'human_only', on ? 100 : 0, on ? 0 : 1]
+  );
+  return { ok: true, ligado: on };
+}
+
+/** O mesmo booleano, para a tela mostrar o estado atual. */
+async function getTenantAutoService(tenantId) {
+  const cfg = await getTenantBotSettings(tenantId);
+  return { ligado: Boolean(cfg.enabled) && !cfg.killSwitch, origem: cfg.source };
+}
+
 export {
   DEFAULT_SETTINGS,
   getTenantBotSettings,
@@ -186,4 +225,6 @@ export {
   evaluateTenantPolicy,
   upsertTenantBotSettings,
   ensureTenantBotSilentByDefault,
+  setTenantAutoService,
+  getTenantAutoService,
 };

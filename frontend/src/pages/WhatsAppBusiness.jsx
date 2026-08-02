@@ -5,6 +5,7 @@ import { IconChevronRight, IconPhone } from '../components/Icons.jsx';
 import walletStyles from '../components/WhatsAppWalletPanel.module.css';
 import WhatsAppEmbeddedSignup from '../components/estab/WhatsAppEmbeddedSignup.jsx';
 import useBusinessSettings from '../hooks/useBusinessSettings.js';
+import { Api } from '../utils/api';
 
 const m = walletStyles;
 
@@ -64,6 +65,24 @@ export default function WhatsAppBusiness() {
     cancelWhatsAppManualEdit,
     disconnectWhatsApp,
   } = useBusinessSettings({ loadWhatsApp: true });
+
+  const [autoServiceSaving, setAutoServiceSaving] = React.useState(false);
+  const [autoServiceErro, setAutoServiceErro] = React.useState('');
+
+  const alterarAtendimentoAutomatico = React.useCallback(async (ligado) => {
+    setAutoServiceSaving(true);
+    setAutoServiceErro('');
+    try {
+      await Api.waSetAutoService(ligado);
+      // Recarrega do servidor em vez de assumir: o estado real vem de wa_bot_settings, e mostrar
+      // um interruptor que não corresponde ao que está gravado é pior que não mostrar nada.
+      await refreshWhatsAppConnection();
+    } catch (err) {
+      setAutoServiceErro(err?.message || 'Não foi possível alterar o atendimento automático.');
+    } finally {
+      setAutoServiceSaving(false);
+    }
+  }, [refreshWhatsAppConnection]);
 
   if (!isEstablishment) {
     return <p className="muted">Disponível apenas para contas de estabelecimento.</p>;
@@ -194,6 +213,33 @@ export default function WhatsAppBusiness() {
             ) : null}
             {!whatsapp.loading && whatsappConnected ? (
               <div className="notice notice--success">Conectado ao número {phoneLabel}. Os envios deste tenant usam a conta própria antes do fallback global.</div>
+            ) : null}
+
+            {/* No número do próprio salão quem conversa é o dono, no aplicativo dele. Por isso o
+                atendimento automático nasce DESLIGADO aqui — e por isso precisa existir um lugar
+                para ligar. Até agora só o administrador conseguia mexer nisso. */}
+            {!whatsapp.loading && whatsappConnected && whatsapp.autoService ? (
+              <div className="card" style={{ padding: 12, display: 'grid', gap: 6 }}>
+                <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={Boolean(whatsapp.autoService.ligado)}
+                    disabled={autoServiceSaving}
+                    onChange={(e) => alterarAtendimentoAutomatico(e.target.checked)}
+                    style={{ marginTop: 3 }}
+                  />
+                  <span>
+                    <strong>Responder minhas clientes automaticamente</strong>
+                    <div className="muted" style={{ fontSize: 13, marginTop: 2 }}>
+                      Quando ligado, o Agenda0 responde no seu número para marcar, remarcar e
+                      cancelar. Desligado, ele só envia as confirmações e lembretes — todas as
+                      conversas ficam com você.
+                    </div>
+                  </span>
+                </label>
+                {autoServiceSaving ? <span className="muted" style={{ fontSize: 12 }}>Salvando…</span> : null}
+                {autoServiceErro ? <div className="notice notice--error">{autoServiceErro}</div> : null}
+              </div>
             ) : null}
 
             {/* Conectado não é o mesmo que pronto: os modelos precisam ser aprovados pela Meta, e

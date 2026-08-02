@@ -13,6 +13,7 @@ import {
 } from '../services/whatsappEmbeddedSignupService.js';
 import { listTenantTemplateRows } from '../services/waTenantTemplates.js';
 import { summarizeTemplateRows } from '../lib/wa_template_status.js';
+import { getTenantAutoService, setTenantAutoService } from '../bot/storage/settingsStore.js';
 
 const router = Router();
 const FRONTEND_BASE = (process.env.FRONTEND_BASE_URL || process.env.APP_URL || 'http://localhost:3001').replace(/\/$/, '');
@@ -95,10 +96,20 @@ router.get('/account', auth, isEstabelecimento, async (req, res) => {
       // Tabela ausente (migração não aplicada) não pode derrubar a tela de status.
       console.warn('[wa][account][templates]', err?.message || err);
     }
+    // Estado do atendimento automático. Vai junto porque a tela já busca isto e porque, no número
+    // do próprio salão, ele nasce DESLIGADO — o dono precisa ver isso sem procurar.
+    let autoService = null;
+    try {
+      autoService = await getTenantAutoService(req.user.id);
+    } catch (err) {
+      console.warn('[wa][account][auto-service]', err?.message || err);
+    }
+
     return res.json({
       ...buildAccountResponse(result),
       ...getWhatsAppConnectFeatureState(),
       templates,
+      auto_service: autoService,
     });
   } catch (err) {
     console.error('[wa][account]', err?.message || err);
@@ -107,6 +118,36 @@ router.get('/account', auth, isEstabelecimento, async (req, res) => {
       err,
       'wa_account_status_failed',
       'Falha ao carregar o status do WhatsApp Business.'
+    );
+  }
+});
+
+/**
+ * Liga/desliga o atendimento automático no número do próprio salão.
+ *
+ * Existe porque, com o número do salão, quem conversa é o dono — e até agora não havia como ele
+ * calar a plataforma: `upsertTenantBotSettings` só era chamado pela rota de administrador.
+ */
+router.put('/bot/auto-service', auth, isEstabelecimento, async (req, res) => {
+  const bruto = req.body?.enabled ?? req.body?.ligado;
+  if (typeof bruto !== 'boolean') {
+    return res.status(400).json({
+      error: 'valor_invalido',
+      message: 'Informe enabled como true ou false.',
+    });
+  }
+  try {
+    await setTenantAutoService({ tenantId: req.user.id, ligado: bruto });
+    const atual = await getTenantAutoService(req.user.id);
+    console.info('[wa][auto-service]', { estabelecimento_id: req.user.id, ligado: atual.ligado });
+    return res.json({ ok: true, auto_service: atual });
+  } catch (err) {
+    console.error('[wa][auto-service]', err?.message || err);
+    return sendRouteError(
+      res,
+      err,
+      'wa_auto_service_failed',
+      'Não foi possível alterar o atendimento automático.'
     );
   }
 });

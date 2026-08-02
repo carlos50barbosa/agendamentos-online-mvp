@@ -227,6 +227,27 @@
   color: color-mix(in srgb, var(--lp-muted) 60%, transparent);
   text-decoration: line-through;
 }
+/* Resumo do agendamento: é aqui que o SINAL aparece, com o mesmo peso da data.
+   Se este bloco crescer, a tela vira comprovante de PIX em vez de app de agenda. */
+.mockResumo {
+  border: 1px solid var(--lp-line);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--lp-ground) 60%, var(--lp-surface));
+  padding: 10px 12px;
+  display: grid;
+  gap: 4px;
+}
+.mockResumoRow {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12px;
+}
+.mockResumoRow span { color: var(--lp-muted); font-weight: 600; }
+.mockResumoRow strong { font-weight: 800; }
+.mockResumoHint { font-size: 10.5px; color: var(--lp-muted); }
+
 .mockCta {
   margin-top: 2px;
   padding: 11px 0;
@@ -274,65 +295,99 @@
 .stepTitle { display: block; font-size: 15px; font-weight: 750; }
 .stepText { margin: 4px 0 0; font-size: 14px; line-height: 1.5; color: var(--lp-muted); }
 
-/* ---------- preço ---------- */
-.price {
-  padding: 22px;
+/* ---------- planos ---------- */
+.planos {
+  display: grid;
+  gap: 12px;
+}
+@media (min-width: 820px) {
+  .planos { grid-template-columns: repeat(3, 1fr); gap: 16px; align-items: stretch; }
+}
+.plano, .planoDestaque {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 20px;
   border: 1px solid var(--lp-line);
   border-radius: var(--lp-radius);
   background: var(--lp-surface);
+}
+/* O plano do teste grátis é o que tem o sinal — a borda em índigo é o único destaque.
+   Nada de "mais popular": não temos esse dado, e inventá-lo é prova social falsa. */
+.planoDestaque {
+  border-color: var(--lp-brand);
   box-shadow: var(--lp-shadow);
 }
-.priceHead {
+.planoTopo {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 12px;
+  gap: 10px;
 }
-.priceValue {
+.planoNome { font-size: 15px; font-weight: 800; letter-spacing: -.01em; }
+.planoTag {
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--lp-tint);
+  color: var(--lp-brand);
+  font-size: 11.5px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+.planoPreco {
   margin: 0;
   display: flex;
   align-items: baseline;
-  gap: 8px;
+  gap: 5px;
 }
-.priceValue small { font-size: 13px; font-weight: 600; color: var(--lp-muted); }
-.priceValue strong { font-size: clamp(28px, 5vw, 38px); font-weight: 800; letter-spacing: -.02em; }
-.priceValue span { font-size: 15px; font-weight: 700; color: var(--lp-muted); }
-.priceLink {
+.planoPreco strong { font-size: clamp(26px, 4.5vw, 32px); font-weight: 800; letter-spacing: -.02em; }
+.planoPreco span { font-size: 14px; font-weight: 700; color: var(--lp-muted); }
+.planoLista {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 7px;
+  /* empurra o botão para a base: com 3 cards de alturas diferentes, os CTAs alinham */
+  margin-bottom: auto;
+}
+.planoLista li {
+  position: relative;
+  padding-left: 24px;
+  font-size: 13.5px;
+  line-height: 1.45;
+  color: var(--lp-ink);
+}
+.planoLista li::before {
+  content: '';
+  position: absolute;
+  left: 3px;
+  top: .38em;
+  width: 9px;
+  height: 5px;
+  border-left: 2px solid var(--lp-brand);
+  border-bottom: 2px solid var(--lp-brand);
+  transform: rotate(-45deg);
+}
+/* "Tudo do Starter, mais:" não é um recurso — não leva o check. */
+.planoHeranca {
+  padding-left: 0;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--lp-muted);
+}
+.planoHeranca::before { content: none; }
+.planosLink {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  margin-top: 16px;
   font-size: 14px;
   font-weight: 700;
   color: var(--lp-brand);
   text-decoration: none;
 }
-.priceLink:hover { text-decoration: underline; }
-.priceList {
-  margin: 18px 0 0;
-  padding: 0;
-  list-style: none;
-  display: grid;
-  gap: 8px;
-}
-.priceList li {
-  position: relative;
-  padding-left: 26px;
-  font-size: 14px;
-  line-height: 1.5;
-  color: var(--lp-ink);
-}
-.priceList li::before {
-  content: '';
-  position: absolute;
-  left: 4px;
-  top: .42em;
-  width: 10px;
-  height: 6px;
-  border-left: 2px solid var(--lp-brand);
-  border-bottom: 2px solid var(--lp-brand);
-  transform: rotate(-45deg);
-}
+.planosLink:hover { text-decoration: underline; }
 
 /* ---------- rodapé ---------- */
 .footer {

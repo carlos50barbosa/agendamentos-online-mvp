@@ -23,7 +23,7 @@ const PLAN_CONFIG = {
     // (agendamentos, agendamentos_public, estabelecimento_settings, mercadopago) e não
     // existia aqui. Um plano novo seria esquecido em três deles — e a página de planos
     // prometeria um recurso que o backend nega.
-    allowDeposit: false,
+    allowDeposit: true,
     whatsappIncludedMessages: 250,
     whatsappMaxMessagesPerAppointment: 5,
   },

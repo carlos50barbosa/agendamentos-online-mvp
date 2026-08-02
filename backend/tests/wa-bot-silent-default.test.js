@@ -81,3 +81,29 @@ test('o numero GLOBAL da plataforma segue com o bot ligado — nada muda para os
   assert.equal(p.allowEngine, true);
   assert.equal(p.reason, 'ENABLED');
 });
+
+// ─── o interruptor do dono ────────────────────────────────────────────────────────────────────
+
+test('desligar grava o MESMO estado de silencio do padrao', async () => {
+  const { setTenantAutoService } = await import('../src/bot/storage/settingsStore.js');
+  const e = espiao();
+  await setTenantAutoService({ tenantId: 26, ligado: false }, { deps: { query: e.query } });
+  // enabled=0, mode=human_only, rollout=0, kill_switch=1 — a mesma linha do ensureTenantBotSilent.
+  assert.deepEqual(e.capturado.params, [26, 0, 'human_only', 0, 1]);
+});
+
+test('ligar libera o motor de verdade — inclusive tirando o kill_switch', async () => {
+  // Sem zerar o kill_switch, o interruptor nao faria nada e o dono acharia que esta quebrado.
+  const { setTenantAutoService } = await import('../src/bot/storage/settingsStore.js');
+  const e = espiao();
+  await setTenantAutoService({ tenantId: 26, ligado: true }, { deps: { query: e.query } });
+  assert.deepEqual(e.capturado.params, [26, 1, 'hybrid', 100, 0]);
+});
+
+test('o interruptor recusa valor que nao seja booleano', async () => {
+  const { setTenantAutoService } = await import('../src/bot/storage/settingsStore.js');
+  let tocou = false;
+  const query = async () => { tocou = true; return [{ affectedRows: 1 }]; };
+  assert.equal((await setTenantAutoService({ tenantId: 0, ligado: true }, { deps: { query } })).ok, false);
+  assert.equal(tocou, false);
+});

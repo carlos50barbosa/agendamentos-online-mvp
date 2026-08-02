@@ -573,6 +573,8 @@ export const Api = {
   waEmbeddedSignupExchange: (payload) =>
     req('/whatsapp/embedded-signup/exchange', { method: 'POST', body: JSON.stringify(payload || {}) }),
   waAccount: () => req('/whatsapp/account'),
+  waSetAutoService: (enabled) =>
+    req('/whatsapp/bot/auto-service', { method: 'PUT', body: JSON.stringify({ enabled: Boolean(enabled) }) }),
   waAccountDisconnect: () => req('/whatsapp/account/disconnect', { method: 'POST' }),
   waConnectStart: () => req('/wa/connect/start'),
   waConnectStatus: () => req('/whatsapp/account'),

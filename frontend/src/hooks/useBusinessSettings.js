@@ -247,6 +247,9 @@ export function useBusinessSettings(options = {}) {
         // Status dos modelos na WABA própria. `null` quando o estabelecimento não tem conta
         // própria — a tela não mostra nada nesse caso.
         templates: response?.templates || null,
+        // Atendimento automático. No número do próprio salão ele nasce DESLIGADO, porque ali quem
+        // conversa é o dono — a tela precisa mostrar isso e deixar ligar.
+        autoService: response?.auto_service || null,
         editing: current.editing && current.account ? current.editing : !nextAccount,
         form: current.editing ? current.form : createWhatsappManualForm(nextAccount),
       }));
