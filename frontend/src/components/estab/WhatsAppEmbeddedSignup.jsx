@@ -190,7 +190,24 @@ export default function WhatsAppEmbeddedSignup({ onConnected, disabled = false }
     }
   }, [onConnected]);
 
-  const abrirLogin = useCallback((FB) => {
+  const abrirLogin = useCallback(() => {
+    // SEMPRE `window.FB` na hora, NUNCA uma referência guardada.
+    //
+    // O `sdk.js` instala um objeto provisório em window.FB e só depois carrega a implementação de
+    // verdade (por isso aparecem DUAS entradas de sdk.js na aba Network). Guardar a referência no
+    // pré-carregamento podia capturar o provisório — cujo `login` enfileira e não faz nada. Sem
+    // erro, sem callback, sem popup: o botão girava para sempre.
+    //
+    // O sintoma era indistinguível de bloqueio de popup, e foi isso que nos custou o dia: o mesmo
+    // FB.login, com os mesmos argumentos, abria de um <button> cru (que lê window.FB no clique) e
+    // não abria do nosso (que usava a referência guardada).
+    const FB = typeof window !== 'undefined' ? window.FB : null;
+    if (!FB?.login) {
+      setConectando(false);
+      setErro('O login do Facebook não carregou. Recarregue a página e tente de novo.');
+      return;
+    }
+
     const opcoes = {
       config_id: config.config_id,
       response_type: config.response_type || 'code',
@@ -238,8 +255,11 @@ export default function WhatsAppEmbeddedSignup({ onConnected, disabled = false }
     sessionInfoRef.current = null;
 
     if (sdkRef.current) {
-      console.info('[wa/embedded-signup] clique: SDK pré-carregado, chamando direto');
-      abrirLogin(sdkRef.current);
+      console.info(
+        '[wa/embedded-signup] clique: SDK pronto',
+        'ref === window.FB?', sdkRef.current === window.FB
+      );
+      abrirLogin();
       setErro('');
       setConectando(true);
       return;
@@ -251,16 +271,14 @@ export default function WhatsAppEmbeddedSignup({ onConnected, disabled = false }
 
     // Só chega aqui se o pré-carregamento falhou. O popup pode ser engolido pelo navegador, mas
     // tentar e falhar com mensagem é melhor que não fazer nada.
-    let FB;
     try {
-      FB = await loadFacebookSdk({ appId: config.app_id, apiVersion: config.api_version });
+      sdkRef.current = await loadFacebookSdk({ appId: config.app_id, apiVersion: config.api_version });
     } catch {
       setConectando(false);
       setErro('Não foi possível carregar o login do Facebook. Verifique bloqueadores de anúncio e tente de novo.');
       return;
     }
-    sdkRef.current = FB;
-    abrirLogin(FB);
+    abrirLogin();
     // `aceitou` PRECISA estar aqui: sem ele o callback fica preso ao valor da primeira renderização
     // (false), o botão habilita mas o clique cai na guarda acima e nada acontece — sem erro nenhum.
   }, [config, conectando, disabled, aceitou, abrirLogin]);
