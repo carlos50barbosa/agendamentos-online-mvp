@@ -34,12 +34,11 @@ const SUBTITLES = {
 const REASONS = {
   profissionais: 'Você atingiu o limite de profissionais do seu plano.',
   relatorios: 'Os relatórios avançados são do plano Pro.',
-  // Sem nome de plano. Em 02/08/2026 o sinal entrou e saiu do Starter no mesmo dia, e uma
-  // string com "é do plano Pro" mente a cada virada. Quem decide é o catálogo — a própria
-  // página já mostra, logo abaixo, em qual plano o recurso está.
-  sinal: 'O sinal via PIX não está disponível no seu plano atual.',
-  galeria: 'Você atingiu o limite de fotos da galeria.',
-  whatsapp: 'Sua franquia de mensagens do WhatsApp acabou.',
+  sinal: 'O sinal via PIX é do plano Pro.',
+  fidelidade: 'Os planos de assinatura para os seus clientes são do plano Premium.',
+  // `galeria` e `whatsapp` saíram: nenhuma tela gera esses ?motivo=, então nunca apareciam.
+  // Motivo aqui só se existir o bloqueio que manda para cá — senão é a mesma dívida da frase
+  // "Starter permite até 10 serviços", que sobreviveu meses num ramo inalcançável.
 };
 
 const UNLIMITED = 'ilimitado';
@@ -55,6 +54,9 @@ function planGains(from, to) {
 
   if (!from.allow_deposit && to.allow_deposit) {
     gains.push('Sinal via PIX — o cliente paga uma parte ao marcar');
+  }
+  if (!from.allow_loyalty && to.allow_loyalty) {
+    gains.push('Planos de assinatura — receita recorrente dos seus clientes');
   }
   if (!from.allow_advanced_reports && to.allow_advanced_reports) {
     gains.push('Relatórios avançados, com filtros e comparativo');
@@ -81,9 +83,12 @@ const PROOFS = [
     title: 'O cliente paga um sinal para marcar',
     text: 'Uma parte do valor entra no PIX na hora do agendamento. Se a pessoa não aparecer, o dinheiro fica com você.',
   },
+  // Promessa de ENTREGA no WhatsApp é o erro que o criativo do Starter e a landing evitam: o envio
+  // depende do opt-in do cliente final. Dizer isso aqui sem ressalva contradizia o FAQ desta MESMA
+  // página, que já explica que os avisos continuam por e-mail e no painel.
   {
     title: 'A confirmação sai sem você digitar',
-    text: 'Confirmação e lembrete vão automáticos no WhatsApp. Você para de responder "tem horário?" o dia inteiro.',
+    text: 'Confirmação e lembrete saem sozinhos: no WhatsApp de quem autorizou receber, e sempre por e-mail e no painel. Você para de responder "tem horário?" o dia inteiro.',
   },
   {
     title: 'Você descobre quem sumiu',
@@ -136,6 +141,9 @@ export default function Planos() {
 
   const plans = useMemo(() => (Array.isArray(catalog?.plans) ? catalog.plans : []), [catalog]);
   const trialDays = catalog?.trial_days ?? 7;
+  // O trial é do Pro (goTrial('pro') logo abaixo). O rótulo sai do catálogo para o hero não
+  // depender de "Pro" escrito à mão em mais um lugar.
+  const trialPlan = useMemo(() => plans.find((plan) => plan.code === 'pro') || null, [plans]);
 
   const currentPlanKey = String(billingStatus?.subscription?.plan || '').toLowerCase();
   const currentPlan = plans.find((plan) => plan.code === currentPlanKey) || null;
@@ -243,8 +251,8 @@ export default function Planos() {
           <div className="lp-shell">
             <h1 className="lp-hero__title">Pare de perder dinheiro com quem não aparece.</h1>
             <p className="lp-hero__lead">
-              Cobre um sinal no PIX, mande o lembrete automático no WhatsApp e deixe o cliente
-              marcar sozinho pelo seu link.
+              Cobre um sinal no PIX, mande lembretes automáticos e deixe o cliente marcar
+              sozinho pelo seu link.
             </p>
             <div className="lp-hero__cta">
               <button type="button" className="btn btn--primary btn--lg" onClick={() => goTrial('pro', cycle)}>
@@ -252,9 +260,12 @@ export default function Planos() {
               </button>
               {/* Sem fallback de preço: um valor hardcoded "só enquanto carrega" é um valor
                   que pode mentir no dia em que a tabela mudar. Ou vem do catálogo, ou não vem. */}
+              {/* Diz QUAL plano é o teste. O hero promete o sinal, e o sinal não está no plano de
+                  entrada: sem esta linha, o "a partir de R$ 14,90" ao lado sugere que está.
+                  Mesma redação da landing — as duas vitrines contam a mesma história. */}
               <span className="lp-hero__note">
-                Sem cartão de crédito
-                {plans.length ? ` · a partir de ${money(plans[0].price_cents)}/mês` : ''}
+                {trialDays} dias grátis no {trialPlan?.label || 'Pro'} · sem cartão de crédito
+                {plans.length ? ` · planos a partir de ${money(plans[0].price_cents)}/mês` : ''}
               </span>
             </div>
           </div>
@@ -313,7 +324,13 @@ export default function Planos() {
 
                 return (
                   <div key={plan.code} className={`lp-card ${plan.code === 'pro' ? 'is-featured' : ''} ${isCurrent ? 'is-current' : ''}`}>
-                    {plan.code === 'pro' && <span className="lp-card__flag">Mais escolhido</span>}
+                    {/* Era "Mais escolhido" — prova social sem dado que a sustente (a base tem
+                        11 estabelecimentos com algum agendamento, e um deles responde por 66%).
+                        O selo agora diz o que é verificável: o Pro é o plano do teste grátis.
+                        Some quando o teste já foi usado, para não anunciar o que não se pode dar. */}
+                    {plan.code === 'pro' && trialAvailable && (
+                      <span className="lp-card__flag">{trialDays} dias grátis</span>
+                    )}
                     {isCurrent && <span className="lp-card__flag lp-card__flag--current">Seu plano</span>}
 
                     <h3 className="lp-card__name">{plan.label}</h3>

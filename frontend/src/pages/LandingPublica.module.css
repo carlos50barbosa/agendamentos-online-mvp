@@ -377,6 +377,13 @@
   color: var(--lp-muted);
 }
 .planoHeranca::before { content: none; }
+.planosNota {
+  margin: 14px 0 0;
+  max-width: 68ch;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--lp-muted);
+}
 .planosLink {
   display: inline-flex;
   align-items: center;

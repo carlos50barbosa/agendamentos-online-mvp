@@ -20,6 +20,7 @@ const ROWS = [
   { label: 'Mensagens de WhatsApp por mês', get: (plan) => fmt(plan.whatsapp_included_messages) },
   { label: 'Fotos na galeria pública', get: (plan) => fmt(plan.max_gallery_images) },
   { label: 'Sinal via PIX', get: (plan) => (plan.allow_deposit ? YES : NO) },
+  { label: 'Planos de assinatura para seus clientes', get: (plan) => (plan.allow_loyalty ? YES : NO) },
   { label: 'Relatórios avançados', get: (plan) => (plan.allow_advanced_reports ? YES : NO) },
   { label: 'Cadastro de clientes (CRM)', get: () => YES },
   { label: 'Página pública de agendamento', get: () => YES },
@@ -31,17 +32,25 @@ const FAQ = [
     q: 'Preciso de cartão para testar?',
     a: 'Não. O teste começa no próprio cadastro e não pede cartão. Se você não assinar ao fim do período, nada é cobrado.',
   },
+  // Esta resposta descreve resolveActiveSubscriptionChange (lib/asaas_subscription.js), e só ele.
+  // A versão anterior prometia downgrade self-service ("vale no próximo ciclo") e troca "pelo
+  // painel" para quem está no anual — o código devolve 'downgrade_unsupported' e 'annual_support'
+  // nesses casos, e cancelamento não tem endpoint nenhum. Se um dia o produto passar a suportar,
+  // é esta função que muda primeiro; o texto vem atrás.
   {
     q: 'Posso trocar de plano ou cancelar depois?',
-    a: 'Sim, pelo painel. Upgrades liberam os recursos na hora e o novo valor entra no ciclo seguinte. Downgrades valem no próximo ciclo, desde que você esteja dentro dos limites do plano menor.',
+    a: 'Upgrade você faz pelo painel: os recursos liberam na hora e o novo valor entra na próxima cobrança. Descer de plano, mudar um plano anual ou cancelar passam pelo suporte — é só falar com a gente.',
   },
   {
     q: 'E se as mensagens de WhatsApp acabarem no meio do mês?',
     a: 'Nenhum agendamento deixa de ser confirmado: os avisos continuam por e-mail e no painel. A franquia renova no ciclo seguinte.',
   },
+  // São DUAS taxas (splitCents = total − PLATFORM_FEE_CENTS − ASAAS_PIX_FEE_CENTS), e dizer só
+  // "taxa de processamento" fazia a página de preços ser menos transparente que o próprio produto:
+  // a tela Financeiro já mostra o desconto numa coluna separada.
   {
     q: 'O sinal cai na minha conta?',
-    a: 'Sim. O valor vai para a sua conta no Asaas, descontada a taxa de processamento do pagamento. Se o cliente não aparecer, o sinal fica com você — isso é uma opção nas configurações.',
+    a: 'Sim, direto na sua conta no Asaas — descontadas a taxa do PIX e a taxa da plataforma. O desconto aparece na coluna "Taxa" do Financeiro, sinal por sinal. Se o cliente não aparecer, o valor fica com você: é uma opção nas configurações.',
   },
   {
     q: 'Tenho mais profissionais do que o Premium permite.',

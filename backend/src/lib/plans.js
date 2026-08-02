@@ -24,6 +24,7 @@ const PLAN_CONFIG = {
     // existia aqui. Um plano novo seria esquecido em três deles — e a página de planos
     // prometeria um recurso que o backend nega.
     allowDeposit: false,
+    allowLoyalty: false,
     whatsappIncludedMessages: 250,
     whatsappMaxMessagesPerAppointment: 5,
   },
@@ -39,6 +40,7 @@ const PLAN_CONFIG = {
     allowWhatsApp: true,
     allowAdvancedReports: true,
     allowDeposit: true,
+    allowLoyalty: false,
     whatsappIncludedMessages: 500,
     whatsappMaxMessagesPerAppointment: 5,
   },
@@ -54,6 +56,7 @@ const PLAN_CONFIG = {
     allowWhatsApp: true,
     allowAdvancedReports: true,
     allowDeposit: true,
+    allowLoyalty: true,
     whatsappIncludedMessages: 1500,
     whatsappMaxMessagesPerAppointment: 5,
   },
@@ -62,6 +65,13 @@ const PLAN_CONFIG = {
 // Uma pergunta, uma resposta. Substitui os quatro DEPOSIT_ALLOWED_PLANS espalhados.
 export function planAllowsDeposit(plan) {
   return Boolean(resolvePlanConfig(plan).allowDeposit);
+}
+
+// Planos de fidelidade (o recorrente que o ESTABELECIMENTO vende ao cliente dele) são do
+// Premium. Nasce como pergunta única, e não como Set espalhado pelas rotas — foi assim que o
+// sinal virou quatro cópias que precisaram ser reunidas depois.
+export function planAllowsLoyalty(plan) {
+  return Boolean(resolvePlanConfig(plan).allowLoyalty);
 }
 
 // Catálogo para a página pública de planos. Sai daqui, e não de uma cópia hardcoded no
@@ -89,6 +99,7 @@ export function getPublicPlanCatalog() {
         allow_whatsapp: config.allowWhatsApp,
         allow_advanced_reports: config.allowAdvancedReports,
         allow_deposit: config.allowDeposit,
+        allow_loyalty: config.allowLoyalty,
       };
     }),
   };
@@ -246,12 +257,14 @@ export function serializePlanContext(context) {
       maxGalleryImages: config.maxGalleryImages,
       allowWhatsApp: config.allowWhatsApp,
       allowAdvancedReports: config.allowAdvancedReports,
+      allowLoyalty: config.allowLoyalty,
       whatsappIncludedMessages: config.whatsappIncludedMessages ?? null,
       whatsappMaxMessagesPerAppointment: config.whatsappMaxMessagesPerAppointment ?? 5,
     },
     features: {
       allow_whatsapp: config.allowWhatsApp,
       allow_advanced: config.allowAdvancedReports,
+      allow_loyalty: config.allowLoyalty,
     },
     trial: {
       ends_at: trialEndsAt ? trialEndsAt.toISOString() : null,

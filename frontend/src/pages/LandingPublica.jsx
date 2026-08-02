@@ -43,15 +43,21 @@ const limite = (valor, singular, plural) => (
   valor == null ? `${plural.charAt(0).toUpperCase()}${plural.slice(1)} ilimitados` : `Até ${valor} ${valor === 1 ? singular : plural}`
 );
 
+/** Mesma formatação de /planos: número separado por milhar, para 1.500 não virar "1500". */
+const mensagens = (total) => `${Number(total || 0).toLocaleString('pt-BR')} mensagens de WhatsApp/mês`;
+
 /**
  * O que cada plano mostra na vitrine, DERIVADO do catálogo — nunca escrito à mão.
  * Mesma regra de Planos.jsx: mexer num limite no backend atualiza esta página sozinho;
  * uma cópia local divergiria da tabela que o backend aplica e a vitrine passaria a
  * prometer o que o produto nega.
  *
- * Não listo franquia de WhatsApp de propósito: o envio depende de opt-in do cliente final,
- * então "250 mensagens" na vitrine promete um canal que pode não sair. "Lembretes
- * automáticos" é o que o produto entrega em qualquer cenário.
+ * A franquia de WhatsApp ENTRA (02/08/2026). Ela tinha ficado de fora por confundir duas
+ * coisas: "lembrete no WhatsApp" é promessa de ENTREGA, e essa depende do opt-in do cliente
+ * final — é a regra que o criativo do Starter respeita. Já "250 mensagens por mês" é atributo
+ * do plano, e é verdade. Além disso é a franquia que separa os planos de fato: escondê-la
+ * fazia o Pro parecer mais magro do que é, e contradizia o /planos, que sempre a anunciou.
+ * A nota abaixo dos cards diz o que acontece quando ela acaba — é o que a mantém honesta.
  */
 function bulletsDoPlano(plan, anterior) {
   if (!anterior) {
@@ -62,10 +68,11 @@ function bulletsDoPlano(plan, anterior) {
     // 02/08/2026, nas duas direções, no mesmo dia: não presuma qual plano tem o quê.
     return [
       ...(plan.allow_deposit ? ['Sinal no PIX ao agendar — abatido no serviço'] : []),
+      ...(plan.allow_loyalty ? ['Planos de assinatura para os seus clientes'] : []),
       'Agendamentos e serviços ilimitados',
       'Link próprio para o cliente marcar sozinho',
       limite(plan.max_professionals, 'profissional', 'profissionais'),
-      'Lembretes automáticos',
+      `Lembretes automáticos · ${mensagens(plan.whatsapp_included_messages)}`,
     ];
   }
   const ganhos = [];
@@ -73,11 +80,17 @@ function bulletsDoPlano(plan, anterior) {
   if (plan.allow_deposit && !anterior.allow_deposit) {
     ganhos.push('Sinal no PIX ao agendar — abatido no serviço');
   }
+  if (plan.allow_loyalty && !anterior.allow_loyalty) {
+    ganhos.push('Planos de assinatura para os seus clientes');
+  }
   if (plan.allow_advanced_reports && !anterior.allow_advanced_reports) {
     ganhos.push('Relatórios avançados');
   }
   if (plan.max_professionals !== anterior.max_professionals) {
     ganhos.push(limite(plan.max_professionals, 'profissional', 'profissionais'));
+  }
+  if (Number(plan.whatsapp_included_messages) > Number(anterior.whatsapp_included_messages)) {
+    ganhos.push(mensagens(plan.whatsapp_included_messages));
   }
   if (plan.max_gallery_images == null && anterior.max_gallery_images != null) {
     ganhos.push('Galeria de fotos ilimitada');
@@ -320,6 +333,14 @@ export default function LandingPublica() {
                 );
               })}
             </div>
+            {/* O que acontece quando a franquia acaba. Sem esta linha, "250 mensagens" vira
+                promessa de canal — e o envio depende do opt-in do cliente final. Mesma nota
+                que /planos já traz embaixo dos cards. */}
+            <p className={styles.planosNota}>
+              Cada agendamento usa até {planos[0]?.whatsapp_max_per_appointment || 5} mensagens
+              (confirmação + lembretes). A franquia renova todo mês; se acabar, os avisos continuam
+              por e-mail e no painel.
+            </p>
             <Link to="/planos" className={styles.planosLink}>
               Comparar todos os recursos
               <IconArrowRight width={16} height={16} aria-hidden="true" />

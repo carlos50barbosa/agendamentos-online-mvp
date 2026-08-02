@@ -8,6 +8,7 @@
 import { Router } from 'express';
 import { auth, isEstabelecimento } from '../middleware/auth.js';
 import { config } from '../lib/config.js';
+import { getPlanContext, planAllowsLoyalty } from '../lib/plans.js';
 import { pool } from '../lib/db.js';
 import {
   archiveLoyaltyPlan,
@@ -42,6 +43,28 @@ function ensureLoyaltyEnabled(_req, res, next) {
   next();
 }
 
+/**
+ * Fidelidade é recurso do Premium (`allowLoyalty` em lib/plans.js).
+ *
+ * Só protege o que o DONO faz: criar, editar, arquivar plano e ver assinantes. O que o
+ * CLIENTE já assinou não passa por aqui de propósito — ver, consultar e CANCELAR continuam
+ * abertos mesmo se o salão cair de plano. Prender alguém numa cobrança recorrente porque o
+ * estabelecimento fez downgrade seria cobrar de quem não decidiu nada.
+ */
+async function ensureLoyaltyPlanAllowed(req, res, next) {
+  try {
+    const planContext = await getPlanContext(req.user.id);
+    if (!planContext) return res.status(404).json({ error: 'estabelecimento_inexistente' });
+    if (!planAllowsLoyalty(planContext.plan)) {
+      return res.status(403).json({
+        error: 'plan_not_allowed',
+        message: 'Os planos de assinatura são um recurso do plano Premium.',
+      });
+    }
+    next();
+  } catch (err) { sendError(res, err, 'loyalty_plan_gate'); }
+}
+
 function isCliente(req, res, next) {
   if (req.user?.tipo !== 'cliente') return res.status(403).json({ error: 'forbidden' });
   next();
@@ -74,14 +97,14 @@ function withItems(body = {}) {
 // nenhuma rota as importava desde a remoção do módulo Mercado Pago.
 // ---------------------------------------------------------------------------
 
-router.get('/loyalty/plans', auth, isEstabelecimento, ensureLoyaltyEnabled, async (req, res) => {
+router.get('/loyalty/plans', auth, isEstabelecimento, ensureLoyaltyEnabled, ensureLoyaltyPlanAllowed, async (req, res) => {
   try {
     const plans = await listLoyaltyPlansForEstablishment(req.user.id, { includeArchived: false });
     res.json({ items: plans });
   } catch (err) { sendError(res, err, 'plans_list'); }
 });
 
-router.get('/loyalty/plans/:id', auth, isEstabelecimento, ensureLoyaltyEnabled, async (req, res) => {
+router.get('/loyalty/plans/:id', auth, isEstabelecimento, ensureLoyaltyEnabled, ensureLoyaltyPlanAllowed, async (req, res) => {
   try {
     const plan = await getLoyaltyPlanForEstablishment(req.user.id, req.params.id);
     if (!plan) return res.status(404).json({ error: 'plan_not_found' });
@@ -89,14 +112,14 @@ router.get('/loyalty/plans/:id', auth, isEstabelecimento, ensureLoyaltyEnabled, 
   } catch (err) { sendError(res, err, 'plan_get'); }
 });
 
-router.post('/loyalty/plans', auth, isEstabelecimento, ensureLoyaltyEnabled, async (req, res) => {
+router.post('/loyalty/plans', auth, isEstabelecimento, ensureLoyaltyEnabled, ensureLoyaltyPlanAllowed, async (req, res) => {
   try {
     const plan = await createLoyaltyPlan(req.user.id, withItems(req.body));
     res.status(201).json(plan);
   } catch (err) { sendError(res, err, 'plan_create'); }
 });
 
-router.put('/loyalty/plans/:id', auth, isEstabelecimento, ensureLoyaltyEnabled, async (req, res) => {
+router.put('/loyalty/plans/:id', auth, isEstabelecimento, ensureLoyaltyEnabled, ensureLoyaltyPlanAllowed, async (req, res) => {
   try {
     const plan = await updateLoyaltyPlan(req.user.id, req.params.id, withItems(req.body));
     if (!plan) return res.status(404).json({ error: 'plan_not_found' });
@@ -104,7 +127,7 @@ router.put('/loyalty/plans/:id', auth, isEstabelecimento, ensureLoyaltyEnabled, 
   } catch (err) { sendError(res, err, 'plan_update'); }
 });
 
-router.patch('/loyalty/plans/:id/status', auth, isEstabelecimento, ensureLoyaltyEnabled, async (req, res) => {
+router.patch('/loyalty/plans/:id/status', auth, isEstabelecimento, ensureLoyaltyEnabled, ensureLoyaltyPlanAllowed, async (req, res) => {
   try {
     const plan = await updateLoyaltyPlanStatus(req.user.id, req.params.id, String(req.body?.status || ''));
     if (!plan) return res.status(404).json({ error: 'plan_not_found' });
@@ -112,7 +135,7 @@ router.patch('/loyalty/plans/:id/status', auth, isEstabelecimento, ensureLoyalty
   } catch (err) { sendError(res, err, 'plan_status'); }
 });
 
-router.delete('/loyalty/plans/:id', auth, isEstabelecimento, ensureLoyaltyEnabled, async (req, res) => {
+router.delete('/loyalty/plans/:id', auth, isEstabelecimento, ensureLoyaltyEnabled, ensureLoyaltyPlanAllowed, async (req, res) => {
   try {
     const ok = await archiveLoyaltyPlan(req.user.id, req.params.id);
     if (!ok) return res.status(404).json({ error: 'plan_not_found' });
@@ -120,7 +143,7 @@ router.delete('/loyalty/plans/:id', auth, isEstabelecimento, ensureLoyaltyEnable
   } catch (err) { sendError(res, err, 'plan_archive'); }
 });
 
-router.get('/loyalty/subscribers', auth, isEstabelecimento, ensureLoyaltyEnabled, async (req, res) => {
+router.get('/loyalty/subscribers', auth, isEstabelecimento, ensureLoyaltyEnabled, ensureLoyaltyPlanAllowed, async (req, res) => {
   try {
     const items = await listLoyaltySubscribersForEstablishment(req.user.id, { status: String(req.query?.status || '') });
     res.json({ items });
@@ -132,7 +155,7 @@ router.get('/loyalty/subscribers', auth, isEstabelecimento, ensureLoyaltyEnabled
  * (medido em sandbox — ver lib/loyalty_split.js), então exibir "R$ 80 menos 5%" seria
  * mentira. Aqui sai o número real.
  */
-router.get('/loyalty/split-preview', auth, isEstabelecimento, ensureLoyaltyEnabled, (req, res) => {
+router.get('/loyalty/split-preview', auth, isEstabelecimento, ensureLoyaltyEnabled, ensureLoyaltyPlanAllowed, (req, res) => {
   const priceCents = Math.max(0, Math.round(Number(req.query?.price_cents || 0)));
   const cardFeeCents = Math.round(
     (priceCents * config.loyalty.cardFeePercent) / 100 + config.loyalty.cardFeeFixedCents,
@@ -178,6 +201,11 @@ router.get('/public/estabelecimentos/:idOrSlug/loyalty-plans', async (req, res) 
     );
     const estabId = rows?.[0]?.id;
     if (!estabId) return res.status(404).json({ error: 'not_found' });
+    // Mesmo tratamento do recurso desligado: sem o plano que permite, a vitrine do salão
+    // simplesmente não tem planos. Continuar listando deixaria o cliente assinar um plano
+    // que o dono não pode mais administrar — e o 403 viria só no fim, depois do cartão.
+    const planContext = await getPlanContext(estabId);
+    if (!planAllowsLoyalty(planContext?.plan)) return res.json({ items: [] });
     const plans = await getPublicLoyaltyPlansForEstablishment(estabId);
     res.json({ items: plans });
   } catch (err) { sendError(res, err, 'public_plans'); }
@@ -225,9 +253,19 @@ router.get('/cliente/loyalty/context', auth, isCliente, ensureLoyaltyEnabled, as
  */
 router.post('/cliente/loyalty/subscribe', auth, isCliente, ensureLoyaltyEnabled, async (req, res) => {
   try {
+    const estabelecimentoId = Number(req.body?.estabelecimento_id || req.body?.establishmentId || 0);
+    // Checagem pelo plano do ESTABELECIMENTO, não do cliente. Sem isto, um link antigo de
+    // assinatura continuaria cobrando o cartão de um cliente para um salão que perdeu o recurso.
+    const estabPlan = await getPlanContext(estabelecimentoId);
+    if (!planAllowsLoyalty(estabPlan?.plan)) {
+      return res.status(403).json({
+        error: 'plan_not_allowed',
+        message: 'Este estabelecimento não está com planos de assinatura disponíveis.',
+      });
+    }
     const result = await subscribeClientToPlan({
       clienteId: req.user.id,
-      estabelecimentoId: Number(req.body?.estabelecimento_id || req.body?.establishmentId || 0),
+      estabelecimentoId,
       loyaltyPlanId: req.body?.loyalty_plan_id || req.body?.planId,
       creditCardToken: req.body?.credit_card_token || req.body?.creditCardToken,
       creditCard: req.body?.credit_card || req.body?.creditCard,

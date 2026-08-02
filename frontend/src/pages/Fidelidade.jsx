@@ -2,6 +2,7 @@
 // Ver docs/PLANO-FIDELIDADE-ASAAS.md. O cliente paga no cartão, o Asaas divide na
 // liquidação e o dinheiro cai na conta do salão — nunca na da plataforma.
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { Api } from '../utils/api';
 
 const money = (cents) => ((Number(cents) || 0) / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -21,6 +22,7 @@ export default function Fidelidade() {
   const [assinantes, setAssinantes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [erro, setErro] = useState('');
+  const [bloqueadoPorPlano, setBloqueadoPorPlano] = useState('');
   const [aviso, setAviso] = useState('');
   const [form, setForm] = useState(null); // null = formulário fechado
   const [salvando, setSalvando] = useState(false);
@@ -42,6 +44,11 @@ export default function Fidelidade() {
       // 503 = recurso desligado por flag. Dizer isso é melhor do que uma tela vazia.
       if (e?.data?.error === 'loyalty_disabled') {
         setErro('Os planos de fidelidade ainda não estão habilitados na sua conta.');
+      // 403 = o recurso existe, mas não neste plano. É outra conversa: aqui há o que fazer,
+      // e o texto do backend já diz qual plano tem — repetir o nome aqui criaria a segunda
+      // cópia que um dia diverge.
+      } else if (e?.data?.error === 'plan_not_allowed') {
+        setBloqueadoPorPlano(e?.data?.message || 'Os planos de assinatura não estão disponíveis no seu plano atual.');
       } else {
         setErro('Não foi possível carregar os planos.');
       }
@@ -154,6 +161,15 @@ export default function Fidelidade() {
         </p>
       </header>
 
+      {/* Bloqueio por plano encerra a tela: sem isto o dono veria "nenhum plano cadastrado"
+          e um botão "+ Novo plano" que só falha ao salvar. */}
+      {bloqueadoPorPlano ? (
+        <div className="card" style={{ display: 'grid', gap: 12, justifyItems: 'start' }}>
+          <p style={{ margin: 0 }}>{bloqueadoPorPlano}</p>
+          <Link className="btn btn--primary" to="/planos?motivo=fidelidade">Conhecer planos</Link>
+        </div>
+      ) : (
+        <>
       {erro && <div className="card" role="alert" style={{ borderColor: 'var(--status-cancelado-fg)', marginBottom: 12 }}>{erro}</div>}
       {aviso && <div className="card" style={{ marginBottom: 12 }}>{aviso}</div>}
 
@@ -280,6 +296,8 @@ export default function Fidelidade() {
             <span style={{ fontSize: 13 }}>{a.status}</span>
           </div>
         ))
+      )}
+        </>
       )}
     </div>
   );
