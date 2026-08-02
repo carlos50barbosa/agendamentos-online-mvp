@@ -168,7 +168,19 @@ export default function WhatsAppEmbeddedSignup({ onConnected, disabled = false }
   }, [onConnected]);
 
   const abrirLogin = useCallback((FB) => {
+    const opcoes = {
+      config_id: config.config_id,
+      response_type: config.response_type || 'code',
+      override_default_response_type: config.override_default_response_type !== false,
+      extras: config.extras || {},
+    };
+    // Fica no código de propósito. Quando o popup não abre, NÃO existe erro em lugar nenhum — nem
+    // no console, nem na rede, nem no callback. Sem isto, a única forma de descobrir o que foi
+    // enviado é reproduzir a chamada na mão no console, que foi o que essa tela custou uma vez.
+    console.info('[wa/embedded-signup] FB.login <-', JSON.stringify(opcoes));
+
     FB.login((response) => {
+      console.info('[wa/embedded-signup] callback ->', response?.status || '(sem status)');
       const code = response?.authResponse?.code;
       if (!code) {
         // Sem code não há o que trocar. Pode ser cancelamento (o CANCEL do postMessage já terá
@@ -178,12 +190,7 @@ export default function WhatsAppEmbeddedSignup({ onConnected, disabled = false }
         return;
       }
       trocarCodigo(code);
-    }, {
-      config_id: config.config_id,
-      response_type: config.response_type || 'code',
-      override_default_response_type: config.override_default_response_type !== false,
-      extras: config.extras || {},
-    });
+    }, opcoes);
   }, [config, trocarCodigo]);
 
   const conectar = useCallback(async () => {
@@ -195,9 +202,11 @@ export default function WhatsAppEmbeddedSignup({ onConnected, disabled = false }
     // Caminho normal: o SDK já veio no pré-carregamento, então o popup abre dentro do gesto do
     // clique e não é barrado.
     if (sdkRef.current) {
+      console.info('[wa/embedded-signup] clique: SDK pré-carregado, chamando direto');
       abrirLogin(sdkRef.current);
       return;
     }
+    console.warn('[wa/embedded-signup] clique: SDK NÃO pré-carregado — vai esperar a rede, o popup pode ser barrado');
 
     // Só chega aqui se o pré-carregamento falhou. O popup pode ser engolido pelo navegador, mas
     // tentar e falhar com mensagem é melhor que não fazer nada.
