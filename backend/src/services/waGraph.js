@@ -330,6 +330,42 @@ export async function createWhatsAppTemplate({ accessToken, wabaId, template }) 
 }
 
 /**
+ * Status ATUAL de um modelo já existente na WABA.
+ *
+ * Existe por causa da reconexão. Quando o nome já existe, a criação falha com "already exists" e
+ * antes gravávamos PENDING por não saber mais nada — mas a Meta só manda
+ * `message_template_status_update` quando o veredito MUDA. Um modelo aprovado meses atrás não gera
+ * evento novo, então a linha ficaria PENDING para sempre e todo envio ao cliente seria bloqueado,
+ * em silêncio, num salão que antes funcionava.
+ *
+ * Devolve null quando não dá para saber (rede, permissão, modelo sumido): quem chama continua com
+ * PENDING, que é o palpite seguro — bloqueia, não manda pelo número errado.
+ */
+export async function fetchWhatsAppTemplateStatus({ accessToken, wabaId, name }) {
+  if (!accessToken || !wabaId || !name) return null;
+  try {
+    const resp = await getGraph(`${wabaId}/message_templates`, accessToken, {
+      name: String(name),
+      fields: 'name,status,language,id',
+      limit: 20,
+    });
+    const itens = Array.isArray(resp?.data) ? resp.data : [];
+    // O filtro `name` da Graph casa por PREFIXO, não exato: pedir `lembrete_agendamento_t1`
+    // devolveria também `lembrete_agendamento_t10` se existisse. A conferência abaixo é o que
+    // impede pegar o status do modelo errado.
+    const exato = itens.find((t) => String(t?.name || '') === String(name));
+    if (!exato?.status) return null;
+    return {
+      status: String(exato.status).toUpperCase(),
+      metaTemplateId: exato.id != null ? String(exato.id) : null,
+      language: exato.language || null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
  * O erro de nome já usado não é falha: significa que o modelo existe naquela WABA — o caso normal
  * de uma reconexão. Tratar como erro faria toda reconexão parecer quebrada.
  */

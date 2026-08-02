@@ -122,6 +122,8 @@ test('validateManualWhatsAppAccount returns normalized preview on success', asyn
 
 test('connectManualWhatsAppAccount persists a valid tenant account', async () => {
   let persistedPayload = null;
+  let provisionado = null;
+  let avisado = null;
   const result = await connectManualWhatsAppAccount({
     estabelecimentoId: 22,
     payload: {
@@ -136,6 +138,13 @@ test('connectManualWhatsAppAccount persists a valid tenant account', async () =>
     getWaAccountByPhoneNumberId: async () => null,
     releaseWaPhoneNumberFromAccount: async () => ({ ok: true }),
     encryptAccessToken: () => ({ enc: 'enc-token', last4: '5678' }),
+    // Sem estes dois stubs o teste chama a Graph de verdade (4 requisicoes com token falso) e
+    // tenta escrever no banco real.
+    provisionTenantTemplates: async (args) => {
+      provisionado = args;
+      return { criados: 4, existentes: 0, falhas: 0, resultados: [] };
+    },
+    notifyTemplatesUnderReview: async (args) => { avisado = args; return { enviado: true }; },
     upsertWaAccount: async (_estabelecimentoId, payload) => {
       persistedPayload = payload;
       return {
@@ -166,6 +175,13 @@ test('connectManualWhatsAppAccount persists a valid tenant account', async () =>
   assert.equal(result.connected, true);
   assert.equal(result.account.provider, 'meta_manual_cloud_api');
   assert.equal(result.account.business_account_id, 'biz-1');
+
+  // A conexao manual PRECISA provisionar os modelos. Sem eles nao existe linha em
+  // wa_tenant_templates, e sem linha nada bloqueia: o envio sairia pela WABA do salao usando o nome
+  // do modelo DA PLATAFORMA, que nao existe la. Falha silenciosa — o caminho manual e o que esta no
+  // ar, entao esta era a versao viva do bug.
+  assert.deepEqual(provisionado, { estabelecimentoId: 22, wabaId: 'waba-1', accessToken: 'token-12345678' });
+  assert.deepEqual(avisado, { estabelecimentoId: 22 });
 });
 
 test('disconnectTenantWhatsAppAccount returns the disconnected account state', async () => {

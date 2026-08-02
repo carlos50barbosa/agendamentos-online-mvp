@@ -15,6 +15,7 @@ import {
   upsertWaAccount,
 } from './waTenant.js';
 import { provisionTenantTemplates } from './waTenantTemplates.js';
+import { notifyTemplatesUnderReview } from './waTemplateNotifier.js';
 
 const APP_ID = String(process.env.WA_APP_ID || '').trim();
 const APP_SECRET = String(process.env.WA_APP_SECRET || '').trim();
@@ -551,6 +552,9 @@ export async function completeEmbeddedSignup({
       existentes: templates.existentes,
       falhas: templates.falhas,
     });
+    // Avisa o dono de que os modelos estão em análise. Sem isso ele conecta, testa, não recebe nada
+    // no WhatsApp e conclui que quebrou — a informação só existia num aviso na tela do painel.
+    await notifyTemplatesUnderReview({ estabelecimentoId: tenantId }).catch(() => null);
   } catch (err) {
     console.warn('[wa][embedded-signup][templates_error]', err?.message || err);
   }

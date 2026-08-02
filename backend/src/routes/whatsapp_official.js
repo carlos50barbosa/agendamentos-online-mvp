@@ -14,6 +14,7 @@ import {
 } from '../whatsapp/inbound/normalize.js';
 import { parseTemplateStatusEvent } from '../lib/wa_template_status.js';
 import { applyTenantTemplateStatus } from '../services/waTenantTemplates.js';
+import { maybeNotifyTemplatesReady } from '../services/waTemplateNotifier.js';
 import { handleInstitutionalInboundAutoReply } from '../whatsapp/inbound/institutionalAutoReply.js';
 import { handleInboundOptOut } from '../whatsapp/inbound/optOut.js';
 import { handleInboundOptInConfirm } from '../whatsapp/inbound/optInConfirm.js';
@@ -753,9 +754,16 @@ async function processWebhookPayload(payload) {
     if (block.field === 'message_template_status_update') {
       const evento = parseTemplateStatusEvent(block);
       if (evento) {
-        await applyTenantTemplateStatus(evento).catch((err) => {
+        const aplicado = await applyTenantTemplateStatus(evento).catch((err) => {
           console.warn('[wa/webhook][template_status] falha ao aplicar', err?.message || err);
+          return null;
         });
+        // Só avisa quando ESTE veredito completou os quatro — a checagem e a reivindicação ficam
+        // dentro do notificador, então chamar a cada evento é seguro.
+        if (aplicado?.estabelecimentoId) {
+          await maybeNotifyTemplatesReady({ estabelecimentoId: aplicado.estabelecimentoId })
+            .catch((err) => console.warn('[wa/webhook][template_status] aviso falhou', err?.message || err));
+        }
       }
       continue;
     }

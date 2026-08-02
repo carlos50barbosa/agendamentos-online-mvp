@@ -13,7 +13,7 @@
 // Por isso cada modelo é criado e REGISTRADO isoladamente: um recusado não impede os outros três.
 import { pool } from '../lib/db.js';
 import { listTenantTemplates } from '../lib/wa_template_catalog.js';
-import { createWhatsAppTemplate, isDuplicateTemplateError } from './waGraph.js';
+import { createWhatsAppTemplate, fetchWhatsAppTemplateStatus, isDuplicateTemplateError } from './waGraph.js';
 
 /** Grava (ou atualiza) o estado de um modelo. UNIQUE(estabelecimento_id, kind) torna idempotente. */
 export async function recordTenantTemplate({
@@ -71,13 +71,21 @@ export async function applyTenantTemplateStatus(evento, { deps = {} } = {}) {
     logger.warn('[wa/tenant-templates] status sem linha correspondente', {
       wabaId: evento.wabaId, name: evento.name, status: evento.status,
     });
-  } else {
-    logger.info('[wa/tenant-templates] status atualizado', {
-      wabaId: evento.wabaId, name: evento.name, status: evento.status,
-      motivo: evento.reason || undefined,
-    });
+    return { atualizado: false, estabelecimentoId: null };
   }
-  return { atualizado };
+
+  logger.info('[wa/tenant-templates] status atualizado', {
+    wabaId: evento.wabaId, name: evento.name, status: evento.status,
+    motivo: evento.reason || undefined,
+  });
+
+  // De quem é este modelo. O evento da Meta não traz o nosso id, e quem chama precisa dele para
+  // decidir se este foi o veredito que completou os quatro — e avisar o dono.
+  const [donos] = await executar(
+    'SELECT estabelecimento_id FROM wa_tenant_templates WHERE waba_id=? AND name=? LIMIT 1',
+    [evento.wabaId, evento.name]
+  );
+  return { atualizado: true, estabelecimentoId: donos?.[0]?.estabelecimento_id ?? null };
 }
 
 /**
@@ -138,6 +146,7 @@ export async function provisionTenantTemplates({ estabelecimentoId, wabaId, acce
   const criar = deps.createWhatsAppTemplate || createWhatsAppTemplate;
   const duplicado = deps.isDuplicateTemplateError || isDuplicateTemplateError;
   const registrar = deps.recordTenantTemplate || recordTenantTemplate;
+  const consultarStatus = deps.fetchWhatsAppTemplateStatus || fetchWhatsAppTemplateStatus;
   const logger = deps.logger || console;
 
   const resultados = [];
@@ -162,13 +171,28 @@ export async function provisionTenantTemplates({ estabelecimentoId, wabaId, acce
       resultados.push({ kind: tpl.kind, ok: true, status: resp?.status || 'PENDING' });
     } catch (err) {
       if (duplicado(err)) {
-        // Já existe nessa WABA — reconexão. O status real chega pelo webhook de status.
+        // Já existe nessa WABA — reconexão.
+        //
+        // NÃO dá para assumir PENDING aqui: a Meta só manda `message_template_status_update` quando
+        // o veredito MUDA, e um modelo aprovado meses atrás não gera evento novo. Assumir PENDING
+        // deixaria a linha assim para sempre, bloqueando todo envio ao cliente de um salão que
+        // antes funcionava — e sem sintoma nenhum. Por isso perguntamos o status à Graph.
+        //
+        // Se a consulta falhar, PENDING continua sendo o palpite: bloqueia em vez de mandar por um
+        // número errado, e o webhook ainda pode corrigir.
+        const atual = await consultarStatus({ accessToken, wabaId, name: tpl.name }).catch(() => null);
         await registrar({
           estabelecimentoId, wabaId, kind: tpl.kind, name: tpl.name,
-          language: tpl.language, status: 'PENDING',
+          language: tpl.language,
+          metaTemplateId: atual?.metaTemplateId || null,
+          status: atual?.status || 'PENDING',
         }).catch(() => null);
         existentes += 1;
-        resultados.push({ kind: tpl.kind, ok: true, existente: true });
+        resultados.push({
+          kind: tpl.kind, ok: true, existente: true,
+          status: atual?.status || 'PENDING',
+          status_origem: atual ? 'graph' : 'presumido',
+        });
         continue;
       }
       falhas += 1;

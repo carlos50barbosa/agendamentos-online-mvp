@@ -12,6 +12,8 @@ import {
   releaseWaPhoneNumberFromAccount,
   upsertWaAccount,
 } from './waTenant.js';
+import { provisionTenantTemplates } from './waTenantTemplates.js';
+import { notifyTemplatesUnderReview } from './waTemplateNotifier.js';
 
 const MANUAL_PROVIDER = 'meta_manual_cloud_api';
 const PHONE_FIELDS = 'id,display_phone_number,verified_name,name_status,quality_rating';
@@ -614,6 +616,34 @@ export async function connectManualWhatsAppAccount({ estabelecimentoId, payload 
     phone_number_id: persisted?.phone_number_id || null,
     verified_name: persisted?.verified_name || null,
   });
+
+  // ── Modelos de mensagem na WABA do tenant ─────────────────────────────────────────────────────
+  // Faltava aqui, e só existia no Embedded Signup. Sem isto, uma conexão manual ficava sem NENHUMA
+  // linha em wa_tenant_templates — e, sem linha, nada bloqueia: o envio ia pela WABA do salão
+  // usando o nome do modelo DA PLATAFORMA, que não existe lá. Falha silenciosa, exatamente o que a
+  // tabela foi criada para impedir. Como a conexão manual é a que está no ar, era o caminho vivo.
+  //
+  // Não fatal, pelo mesmo motivo do outro caminho: sem modelo a conta ainda recebe, responde na
+  // janela de 24h e os avisos caem para e-mail. Derrubar a conexão seria pior.
+  const provisionar = deps.provisionTenantTemplates || provisionTenantTemplates;
+  const avisar = deps.notifyTemplatesUnderReview || notifyTemplatesUnderReview;
+  try {
+    const templates = await provisionar({
+      estabelecimentoId: tenantId,
+      wabaId: input.wabaId,
+      accessToken: input.accessToken,
+    });
+    console.info('[wa][manual][connect:templates]', {
+      estabelecimento_id: tenantId,
+      waba_id: input.wabaId,
+      criados: templates.criados,
+      existentes: templates.existentes,
+      falhas: templates.falhas,
+    });
+    await avisar({ estabelecimentoId: tenantId }).catch(() => null);
+  } catch (err) {
+    console.warn('[wa][manual][connect:templates_error]', err?.message || err);
+  }
 
   return serializeAccount(persisted);
 }
