@@ -92,7 +92,7 @@ async function seed() {
 
   await pool.query(
     `INSERT INTO usuarios (id, nome, email, senha_hash, tipo, telefone, plan, plan_status, slug)
-     VALUES (?, 'Salao Smoke', 'estab.smoke@test.local', 'x', 'estabelecimento', '11999990000', 'pro', 'active', 'salao-smoke'),
+     VALUES (?, 'Salao Smoke', 'estab.smoke@test.local', 'x', 'estabelecimento', '11999990000', 'premium', 'active', 'salao-smoke'),
             (?, 'Cliente Smoke', 'cliente.smoke@test.local', 'x', 'cliente', '11988887777', 'starter', 'active', NULL)`,
     [ESTAB_ID, CLIENTE_ID]
   );
@@ -205,6 +205,11 @@ after(async () => {
 // Toda rota GET que roda SQL de leitura pesada. Cada uma DEVE devolver 200 — se devolver
 // 500, ha uma query quebrada contra o schema real; se devolver 4xx, o fixture/param esta
 // errado e a SQL nem chegou a rodar (o teste estaria mentindo).
+//
+// Por isso o fixture e PREMIUM (02/08/2026): a fidelidade passou a exigir esse plano, e num
+// 'pro' as tres rotas /loyalty/* devolviam 403 — verdes de mais nao, mas sem executar uma
+// linha do modulo, que e o oposto do que este arquivo existe para fazer. O fixture precisa ser
+// o plano que ALCANCA todas as rotas; testar o gate por plano e trabalho de plan-loyalty-gate.
 const ROTAS_AUTENTICADAS = [
   // A rota que quebrou em producao. Lista + agregacoes + segmentos, tudo numa SQL so.
   `/establishments/${ESTAB_ID}/clients?page=1&pageSize=10&period=30d&sort=last&dir=desc`,

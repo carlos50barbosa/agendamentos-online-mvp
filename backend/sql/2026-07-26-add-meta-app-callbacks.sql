@@ -6,8 +6,16 @@
 ALTER TABLE wa_accounts
   ADD COLUMN IF NOT EXISTS meta_user_id VARCHAR(64) NULL AFTER business_id;
 
+-- Sem `IF NOT EXISTS`: isso é sintaxe de MariaDB para índice, e a PRODUÇÃO é MariaDB — passou
+-- lá e quebrou no MySQL do ambiente local (erro 1064). Como o setup-test-db aborta o arquivo no
+-- primeiro erro, a CREATE TABLE abaixo nunca rodava e as CINCO migrations seguintes também não:
+-- o banco de teste ficava com schema incompleto sem ninguém perceber.
+--
+-- Idempotência sem sintaxe específica de engine: em banco novo o índice é criado; em banco que já
+-- o tem, o erro 1061 (ER_DUP_KEYNAME) é tolerado pelo setup-test-db. A produção não reexecuta
+-- este arquivo — migrate.mjs é forward-only e já o registrou em schema_migrations.
 ALTER TABLE wa_accounts
-  ADD INDEX IF NOT EXISTS idx_wa_accounts_meta_user (meta_user_id);
+  ADD INDEX idx_wa_accounts_meta_user (meta_user_id);
 
 -- A Meta exige responder com uma URL onde a pessoa acompanhe o pedido, e um código de confirmação.
 -- Guardar é o que permite responder essa consulta depois — e é a prova de que o pedido foi atendido.
