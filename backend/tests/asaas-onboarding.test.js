@@ -182,11 +182,37 @@ test('retry reaproveita subconta ja criada em vez de duplicar', async () => {
   assert.equal(db.writes.length, 1, 'mas grava a carteira que ficou orfa')
 })
 
-test('erro do Asaas chega ao dono com a mensagem do Asaas', async () => {
-  // Caso mais provavel: o CPF/CNPJ ja tem conta Asaas propria e nao pode virar subconta.
+test('documento ja com conta Asaas aponta a saida, nao so o problema', async () => {
+  // Desfecho mais comum entre saloes que ja usavam Asaas. Texto medido em producao
+  // (03/08/2026). Sem apontar o Wallet ID manual, o dono trava num beco sem saida.
   const accounts = fakeAccounts({
     onCreate: () => {
-      throw new AsaasError('Já existe uma conta com este CPF/CNPJ.', { status: 400 })
+      throw new AsaasError('O CNPJ 68068260000132 já está em uso.', { status: 400 })
+    },
+  })
+  const db = fakeDb()
+
+  await assert.rejects(
+    () => createEstablishmentSubaccount({
+      estabelecimentoId: 7,
+      overrides: { incomeValue: 8000 },
+      consent: ACEITE,
+      db,
+      accounts,
+    }),
+    (err) => err instanceof AsaasOnboardingError
+      && err.code === 'document_already_registered'
+      && err.status === 409
+      && /já está em uso/.test(err.message)
+      && /Wallet ID/.test(err.message),
+  )
+  assert.equal(db.writes.length, 0, 'nada gravado quando a criacao falha')
+})
+
+test('erro sem saida conhecida chega ao dono com a mensagem do Asaas', async () => {
+  const accounts = fakeAccounts({
+    onCreate: () => {
+      throw new AsaasError('O telefone informado é inválido.', { status: 400 })
     },
   })
   const db = fakeDb()
@@ -201,9 +227,9 @@ test('erro do Asaas chega ao dono com a mensagem do Asaas', async () => {
     }),
     (err) => err instanceof AsaasOnboardingError
       && err.code === 'asaas_rejected'
-      && /Já existe uma conta/.test(err.message),
+      && /telefone informado/.test(err.message),
   )
-  assert.equal(db.writes.length, 0, 'nada gravado quando a criacao falha')
+  assert.equal(db.writes.length, 0)
 })
 
 test('403 do Asaas nao vira culpa do dono do salao', async () => {

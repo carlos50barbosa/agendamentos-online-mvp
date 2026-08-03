@@ -264,9 +264,23 @@ export async function createEstablishmentSubaccount({
             { status: 503, details: err.body || null },
           );
         }
-        // Nos demais casos a mensagem do Asaas E' acionavel pelo dono ("documento ja
-        // cadastrado", "telefone invalido") — repassar e' melhor que traduzir para um texto
-        // generico, que ja custou caro em diagnostico nos outros fluxos.
+        // Documento ja com conta no Asaas: e' o desfecho MAIS COMUM entre saloes que ja
+        // usavam Asaas antes de entrar aqui — o Asaas nao deixa o mesmo CPF/CNPJ ter duas
+        // contas. Medido em producao (03/08/2026): "O CNPJ 68068260000132 já está em uso."
+        //
+        // A razao do Asaas fica, porque explica o que houve; o que falta nela e' a saida, e
+        // a saida existe e esta na mesma tela. Sem isso o dono trava num beco: mensagem
+        // correta, nenhuma acao possivel.
+        if (/j[áa] est[áa] em uso|j[áa] cadastrad/i.test(err.message || '')) {
+          throw new AsaasOnboardingError(
+            'document_already_registered',
+            `${err.message} Como você já tem conta no Asaas, informe o Wallet ID dela em "Já tenho conta no Asaas".`,
+            { status: 409, details: err.body || null },
+          );
+        }
+        // Nos demais casos a mensagem do Asaas E' acionavel pelo dono ("telefone invalido",
+        // "CEP obrigatorio") — repassar e' melhor que traduzir para um texto generico, que
+        // ja custou caro em diagnostico nos outros fluxos.
         throw new AsaasOnboardingError('asaas_rejected', err.message, { status: 400, details: err.body || null });
       }
       throw err;

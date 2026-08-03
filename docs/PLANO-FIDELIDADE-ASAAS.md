@@ -387,8 +387,17 @@ e o `walletId` nasce preenchido — ver `lib/asaas_onboarding.js` e `services/as
 O caminho manual (colar o Wallet ID) **continua existindo** e não é legado: um CPF/CNPJ que já
 tem conta Asaas não pode virar subconta, e para esses é o único caminho.
 
-Atenção ao ambiente: a conta **sandbox** é um cadastro separado do de produção. Aprovar o CNPJ
-em produção não muda o sandbox — se ele seguir PF, a mesma mensagem acima volta lá.
+Atenção ao ambiente: **o sandbox não cria subconta, e o motivo não é o tipo da conta.** Medido
+em 03/08/2026, com a conta sandbox já `JURIDICA`/MEI e `general`, `commercialInfo`,
+`documentation` e `bankAccountInfo` todos `APPROVED`: `POST /v3/accounts` responde **403** com
+a mesma mensagem de "conta de pessoa física", que ali não descreve nada. Foram descartadas por
+medição as quatro explicações plausíveis — conta PF, análise pendente, documento do payload em
+CPF, e escopo de chave antiga (chave nova, mesmo 403).
+
+Na **produção** o recurso funciona: o mesmo `POST /v3/accounts` responde `400 — O CNPJ ... já
+está em uso` (sonda com o CNPJ da própria conta-mãe, que não pode criar nada). Ou seja, a
+permissão existe lá e o 403 é limitação do ambiente de testes. Consequência prática: o caminho
+feliz da subconta **só dá para exercitar em produção**, com um documento real.
 
 Saídas consideradas na época: (a) manter o `ASAAS_SPLIT_DISABLED` como fallback de conta única
 e repassar por fora; (b) tirar um CNPJ (MEI resolve) e abrir o white-label.
