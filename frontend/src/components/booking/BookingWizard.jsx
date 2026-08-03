@@ -37,6 +37,84 @@ function intersectProfessionals(services) {
   return lists.reduce((acc, list) => acc.filter((p) => list.some((x) => x.id === p.id)), lists[0]);
 }
 
+/**
+ * Rodapé único do fluxo: Voltar + Continuar, na mesma posição em todas as etapas.
+ *
+ * Antes só a primeira etapa tinha barra, porque as etapas 2 a 4 avançavam sozinhas ao tocar na
+ * opção. Isso resolvia o avanço, mas deixava o voltar escondido numa setinha do cabeçalho e
+ * impedia conferir a escolha antes de seguir — tocou no profissional errado, já estava na próxima
+ * tela. Com o rodapé fixo, a pessoa escolhe, confere e decide.
+ *
+ * `Voltar` é secundário de propósito: menor, sem preenchimento e em cinza, para não disputar
+ * atenção com a ação que faz o agendamento andar.
+ */
+function WizardFooter({
+  onBack = null,
+  backHref = null,
+  onContinue = () => {},
+  continueDisabled = false,
+  continueLabel = 'Continuar',
+  continueLoading = false,
+  children = null,
+}) {
+  const rotuloVoltar = (
+    <>
+      <ChevronLeft size={16} strokeWidth={2.4} aria-hidden="true" /> Voltar
+    </>
+  );
+  const estiloVoltar = {
+    minHeight: 38,
+    color: 'var(--muted-ink, #64748b)',
+    background: 'transparent',
+    border: '1px solid rgba(148,163,184,.32)',
+  };
+  const classeVoltar =
+    'tw-inline-flex tw-shrink-0 tw-items-center tw-gap-1 tw-rounded-xl tw-px-3 tw-text-sm tw-font-semibold';
+
+  return (
+    <div
+      className="tw-fixed tw-inset-x-0 tw-bottom-0 tw-mx-auto tw-flex tw-max-w-lg tw-items-center tw-gap-3 tw-p-4"
+      style={{ background: 'linear-gradient(to top, var(--bg-lav, #F6F5FB) 70%, transparent)' }}
+    >
+      {children ? <div className="tw-min-w-0 tw-flex-1">{children}</div> : null}
+
+      <div className={`tw-flex tw-items-center tw-gap-2 ${children ? '' : 'tw-w-full'}`}>
+        {onBack ? (
+          <button type="button" onClick={onBack} className={classeVoltar} style={estiloVoltar}>
+            {rotuloVoltar}
+          </button>
+        ) : backHref ? (
+          <a href={backHref} className={classeVoltar} style={{ ...estiloVoltar, textDecoration: 'none' }}>
+            {rotuloVoltar}
+          </a>
+        ) : null}
+
+        <button
+          type="button"
+          onClick={onContinue}
+          disabled={continueDisabled || continueLoading}
+          className="tw-flex tw-flex-1 tw-items-center tw-justify-center tw-gap-2 tw-rounded-xl tw-px-5 tw-font-semibold tw-text-white"
+          style={{
+            minHeight: 48,
+            background: 'var(--brand)',
+            opacity: continueDisabled || continueLoading ? 0.6 : 1,
+          }}
+        >
+          {continueLoading ? (
+            <>
+              <Loader2 size={20} strokeWidth={2.2} className="tw-animate-spin" aria-hidden="true" /> {continueLabel}
+            </>
+          ) : (
+            <>
+              {continueLabel} <ArrowRight size={20} strokeWidth={2.2} aria-hidden="true" />
+            </>
+          )}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function BookingWizard({
   establishmentName = site.name,
   services = [],
@@ -196,19 +274,18 @@ export default function BookingWizard({
     if (!selectedServices.length) { setError('Selecione ao menos um serviço.'); return; }
     go(showProfessionalStep ? STEP.PROFISSIONAL : STEP.DIA);
   };
+  // Selecionar NÃO avança mais: quem avança é o Continuar do rodapé. Antes, tocar no profissional
+  // errado já pulava para a tela seguinte, e desfazer exigia achar a setinha do cabeçalho.
   const selectProfessional = (p) => {
     setProfessional(p);
     setSlot(null);
-    go(STEP.DIA);
   };
   const selectDate = (d) => {
     setDate(d);
     setSlot(null);
-    go(STEP.HORARIO);
   };
   const selectSlot = (s) => {
     setSlot(s);
-    go(STEP.CONFIRMACAO);
   };
 
   const confirm = async () => {
@@ -290,7 +367,10 @@ export default function BookingWizard({
       </header>
       )}
 
-      <main className="tw-flex-1">
+      {/* pb: o rodapé é fixo, então o conteúdo precisa de folga no fim. As etapas 2 a 4 não tinham
+          barra antes e corriam até o rodapé da tela — sem isto, o último profissional ou o último
+          horário da lista ficariam escondidos atrás dos botões. */}
+      <main className="tw-flex-1 tw-pb-28">
         {step === STEP.SERVICO && (
           <StepShell title={bookingDisabled ? 'Serviços' : 'Escolha os serviços'}>
             <div
@@ -330,30 +410,22 @@ export default function BookingWizard({
               )}
             </div>
 
-            {/* Barra fixa: total + continuar. Sem agendamento, não há total nem para onde ir. */}
+            {/* Barra fixa: total + continuar. Sem agendamento, não há total nem para onde ir.
+                O Voltar aqui sai do fluxo para a página do estabelecimento — só existe quando
+                sabemos para onde voltar (o fluxo mock não tem essa página). */}
             {!bookingDisabled && (
-            <div
-              className="tw-fixed tw-inset-x-0 tw-bottom-0 tw-mx-auto tw-flex tw-max-w-lg tw-items-center tw-justify-between tw-gap-3 tw-p-4"
-              style={{ background: 'linear-gradient(to top, var(--bg-lav, #F6F5FB) 70%, transparent)' }}
-            >
-              <div className="tw-min-w-0">
+              <WizardFooter
+                backHref={establishmentHref}
+                onContinue={goFromServices}
+                continueDisabled={!selectedServices.length}
+              >
                 <p className="tw-m-0 tw-text-xs" style={{ color: 'var(--muted-ink, #6B7280)' }}>
                   {selectedServices.length} selecionado(s){totalDuration ? ` · ${durationLabel({ minutes: totalDuration })}` : ''}
                 </p>
                 <p className="tw-m-0 tw-text-sm tw-font-extrabold" style={{ color: 'var(--brand-deep, #1E1B4B)' }}>
                   {formatBRL(totalPrice)}
                 </p>
-              </div>
-              <button
-                type="button"
-                onClick={goFromServices}
-                disabled={!selectedServices.length}
-                className="tw-flex tw-items-center tw-gap-2 tw-rounded-xl tw-px-5 tw-font-semibold tw-text-white"
-                style={{ minHeight: 48, background: 'var(--brand)', opacity: selectedServices.length ? 1 : 0.6 }}
-              >
-                Continuar <ArrowRight size={20} strokeWidth={2.2} aria-hidden="true" />
-              </button>
-            </div>
+              </WizardFooter>
             )}
           </StepShell>
         )}
@@ -379,6 +451,11 @@ export default function BookingWizard({
                 ))}
               </div>
             )}
+            <WizardFooter
+              onBack={back}
+              onContinue={() => go(STEP.DIA)}
+              continueDisabled={professionalRequired && !professional}
+            />
           </StepShell>
         )}
 
@@ -390,6 +467,7 @@ export default function BookingWizard({
                 {fullDateLabel(date)}
               </p>
             )}
+            <WizardFooter onBack={back} onContinue={() => go(STEP.HORARIO)} continueDisabled={!date} />
           </StepShell>
         )}
 
@@ -402,6 +480,7 @@ export default function BookingWizard({
             ) : (
               <SlotPicker slots={slotsState.list} value={slot?.datetime} onSelect={selectSlot} />
             )}
+            <WizardFooter onBack={back} onContinue={() => go(STEP.CONFIRMACAO)} continueDisabled={!slot} />
           </StepShell>
         )}
 
@@ -449,23 +528,16 @@ export default function BookingWizard({
                 {error}
               </p>
             )}
-            <button
-              type="button"
-              onClick={confirm}
-              disabled={submitting}
-              className="tw-mt-4 tw-flex tw-w-full tw-items-center tw-justify-center tw-gap-2 tw-rounded-xl tw-font-semibold tw-text-white"
-              style={{ minHeight: 48, background: 'var(--brand)', opacity: submitting ? 0.7 : 1 }}
-            >
-              {submitting ? (
-                <>
-                  <Loader2 size={20} strokeWidth={2.2} className="tw-animate-spin" aria-hidden="true" /> Confirmando...
-                </>
-              ) : (
-                <>
-                  Confirmar {collectGuest ? 'agendamento' : 'e pagar sinal'} <ArrowRight size={20} strokeWidth={2.2} aria-hidden="true" />
-                </>
-              )}
-            </button>
+            {/* A ação de confirmar foi para o rodapé, junto do Voltar. Solta no meio do conteúdo
+                ela mudava de lugar conforme o tamanho do resumo e do formulário de convidado. */}
+            <WizardFooter
+              onBack={back}
+              onContinue={confirm}
+              continueLoading={submitting}
+              continueLabel={
+                submitting ? 'Confirmando...' : `Confirmar ${collectGuest ? 'agendamento' : 'e pagar sinal'}`
+              }
+            />
           </StepShell>
         )}
 
