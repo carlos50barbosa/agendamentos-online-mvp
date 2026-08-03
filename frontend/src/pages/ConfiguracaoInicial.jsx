@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { Api } from '../utils/api';
 import { getUser, saveUser } from '../utils/auth';
+import WhatsAppOptInBanner from '../components/estab/WhatsAppOptInBanner.jsx';
 
 const STEPS = [
   { key: 'profissionais', label: 'Profissionais', icon: Users },
@@ -265,6 +266,13 @@ function EtapaProfissionais({ professionals, form, setForm, onCreate, saving }) 
           detail: item.descricao || 'Sem descrição',
         }))}
       />
+
+      {/* O pedido de WhatsApp mora no PRIMEIRO passo porque é o único que todo mundo vê: 68% da
+          base nunca chegou a cadastrar um serviço, e quem termina a configuração encontra o mesmo
+          pedido no painel logo depois. Ele se esconde sozinho quando não cabe — canal fora do ar,
+          sem telefone, ou aceite já registrado — e nunca trava o avanço, porque consentimento
+          arrancado de quem só queria seguir para a próxima etapa não vale como consentimento. */}
+      <WhatsAppOptInBanner variant="onboarding" />
     </div>
   );
 }

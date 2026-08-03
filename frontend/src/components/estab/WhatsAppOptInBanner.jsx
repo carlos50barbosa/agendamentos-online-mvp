@@ -25,13 +25,54 @@ import styles from './WhatsAppOptInBanner.module.css';
 
 const CONSENT_TEXT = buildConsentText({ audience: CONSENT_AUDIENCE.ESTABLISHMENT });
 
+/**
+ * Duas roupagens, uma mecânica só.
+ *
+ * O pedido nasceu no painel, para o dono que já usava o produto e descobriu que o envio estava
+ * bloqueado — daí o tom de aviso ("seus avisos estão pausados"). No ONBOARDING nada está pausado
+ * ainda: a pessoa está montando a agenda e nunca recebeu nada. Repetir o texto do painel ali seria
+ * anunciar uma pane que não existe.
+ *
+ * Por que a variante do onboarding foi para o PRIMEIRO passo, e não no último: medido em
+ * 02/08/2026, quem termina a configuração cai no painel e vê o banner minutos depois de qualquer
+ * jeito — pedir na Revisão alcança justamente quem já seria alcançado. O buraco é antes: 68% da
+ * base nunca cadastrou um serviço sequer, e essa gente some sem nunca ver pedido nenhum. O passo 1
+ * é o único que todo mundo vê.
+ *
+ * O que NÃO muda entre as duas: o texto do aceite (é ele que vira prova), o fato de o consentimento
+ * só nascer com o AUTORIZO saindo do número da pessoa, e a regra de não bloquear nada. No
+ * onboarding isso é ainda mais sensível — um pedido que trave o avanço vira consentimento forçado,
+ * que não vale nem para a Meta nem para a LGPD.
+ */
+const COPY = {
+  painel: {
+    title: 'Seus avisos no WhatsApp estão pausados',
+    lead: (
+      <>
+        A Meta passou a exigir um aceite explícito e registrado antes de qualquer envio — e o seu
+        ainda não existe. Enquanto isso, os avisos continuam chegando por <b>e-mail</b>.
+      </>
+    ),
+  },
+  onboarding: {
+    title: 'Quando alguém marcar, te aviso onde?',
+    lead: (
+      <>
+        Por <b>e-mail</b> já vai, sempre. Para receber também no <b>WhatsApp</b>, a Meta exige um
+        aceite seu — leva 10 segundos e você pode sair quando quiser.
+      </>
+    ),
+  },
+};
+
 // Quanto tempo a tela fica perguntando "já autorizou?" antes de desistir. Sem isto, uma aba deixada
 // aberta por quem clicou em Autorizar e NÃO enviou o AUTORIZO fica batendo no servidor a cada 3s para
 // sempre — o webhook nunca vai confirmar um envio que não aconteceu. Três minutos cobre com folga
 // quem foi mesmo mandar a mensagem; passou disso, é aba esquecida.
 const ESPERA_MAX_MS = 3 * 60 * 1000;
 
-export default function WhatsAppOptInBanner() {
+export default function WhatsAppOptInBanner({ variant = 'painel' }) {
+  const copy = COPY[variant] || COPY.painel;
   const available = useWhatsAppAvailable();
   const { loading, precisaReaceitar, refresh } = useWhatsAppConsent();
   const [busy, setBusy] = useState(false);
@@ -94,13 +135,10 @@ export default function WhatsAppOptInBanner() {
       <MessageCircle size={20} strokeWidth={2.2} aria-hidden="true" className={styles.icon} />
 
       <div className={styles.body}>
-        <p className={styles.title}>Seus avisos no WhatsApp estão pausados</p>
+        <p className={styles.title}>{copy.title}</p>
 
         {/* Só existe o texto do canal NO AR: com ele fora, o componente inteiro já saiu acima. */}
-        <p className={styles.lead}>
-          A Meta passou a exigir um aceite explícito e registrado antes de qualquer envio — e o seu
-          ainda não existe. Enquanto isso, os avisos continuam chegando por <b>e-mail</b>.
-        </p>
+        <p className={styles.lead}>{copy.lead}</p>
 
         {/* O texto do aceite fica À VISTA, e não atrás de um "saiba mais": é ele que o servidor
             grava como prova, e prova de algo que a pessoa não leu não é prova. */}
