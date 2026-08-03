@@ -8578,15 +8578,9 @@ body.planos-no-scrollbar .container--wide::-webkit-scrollbar{
   justify-content:space-between;
   gap:10px;
 }
-.novo-agendamento__flow-footer-back,
 .novo-agendamento__flow-footer-continue{
   min-height:44px;
   border-radius:14px;
-}
-.novo-agendamento__flow-footer-back{
-  min-width:118px;
-}
-.novo-agendamento__flow-footer-continue{
   min-width:148px;
   max-width:188px;
   padding-inline:18px;
@@ -8627,9 +8621,10 @@ body.planos-no-scrollbar .container--wide::-webkit-scrollbar{
   }
   .novo-agendamento__flow-footer-actions{
     display:grid;
-    grid-template-columns:repeat(2, minmax(0, 1fr));
+    /* Voltar ocupa só o que precisa; Continuar fica com o resto. Meio a meio dava à ação
+       secundária o mesmo peso visual da principal, justo na tela onde o espaço é menor. */
+    grid-template-columns:auto minmax(0, 1fr);
   }
-  .novo-agendamento__flow-footer-back,
   .novo-agendamento__flow-footer-continue{
     width:100%;
     min-width:0;
@@ -11294,13 +11289,31 @@ body.planos-no-scrollbar .container--wide::-webkit-scrollbar{
 .novo-agendamento__flow-footer-hint{
   color:#64748b;
 }
-.novo-agendamento__flow-footer-back,
 .novo-agendamento__flow-footer-continue{
   min-height:46px;
   border-radius:16px;
-}
-.novo-agendamento__flow-footer-continue{
   box-shadow:0 16px 28px rgba(36,55,70,.18);
+}
+
+/* Voltar é ação secundária: menor e discreto, para não disputar atenção com Continuar.
+   Sem isto os dois tinham a mesma altura, o mesmo raio e a mesma presença — e o passo seguinte,
+   que é o que a pessoa quer, ficava com o mesmo peso de desfazer o que ela acabou de escolher. */
+.novo-agendamento__flow-footer-back{
+  min-height:38px;
+  min-width:auto;
+  padding-inline:14px;
+  border-radius:12px;
+  font-size:13.5px;
+  font-weight:600;
+  color:#64748b;
+  background:transparent;
+  border:1px solid rgba(148,163,184,.32);
+  box-shadow:none;
+}
+.novo-agendamento__flow-footer-back:hover:not(:disabled){
+  background:rgba(148,163,184,.12);
+  border-color:rgba(148,163,184,.5);
+  color:#334155;
 }
 .appointment-progress-line__connector{
   background:rgba(148,163,184,.34);
@@ -11875,10 +11888,12 @@ body.planos-no-scrollbar .container--wide::-webkit-scrollbar{
 }
 .container--appointment-public .novo-agendamento__flow-footer-actions{
   display:grid;
-  grid-template-columns:minmax(92px, .75fr) minmax(0, 1.25fr);
+  /* Voltar ocupa só o necessário. Antes eram .75fr contra 1.25fr — proporcional, mas ainda dava
+     um terço da barra para a ação de desfazer. */
+  grid-template-columns:auto minmax(0, 1fr);
   gap:8px;
+  align-items:center;
 }
-.container--appointment-public .novo-agendamento__flow-footer-back,
 .container--appointment-public .novo-agendamento__flow-footer-continue{
   width:100%;
   min-width:0;
@@ -11886,6 +11901,15 @@ body.planos-no-scrollbar .container--wide::-webkit-scrollbar{
   min-height:46px;
   border-radius:14px;
   padding-inline:10px;
+}
+/* Esta é a página pública do estabelecimento — o contexto onde o cliente agenda. Sem repetir o
+   discreto aqui, a regra acima devolvia ao Voltar a mesma altura do Continuar. */
+.container--appointment-public .novo-agendamento__flow-footer-back{
+  width:auto;
+  min-width:auto;
+  min-height:38px;
+  padding-inline:14px;
+  border-radius:12px;
 }
 .container--appointment-public .novo-agendamento__flow-bottom-spacer,
 .container--appointment-public .novo-agendamento__services-bottom-spacer{
