@@ -26,6 +26,10 @@ BACK_DIR=${BACK_DIR:-"$PROJECT_DIR/backend"}
 # ja publica no lugar certo. Defina DOCROOT explicitamente so' se o servidor web servir
 # de um diretorio separado (ai o rsync abaixo entra em acao).
 DOCROOT=${DOCROOT:-"$FRONT_DIR/dist"}
+# Precisa ser capturado ANTES do default: e' o que distingue "o operador escolheu esta URL"
+# de "ninguem disse nada". Sem API_URL explicito o .env.production do servidor manda, e ele
+# nao e' versionado — o valor daqui e' so' fallback para quando o arquivo nao existir.
+API_URL_EXPLICIT=$([[ -n "${API_URL:-}" ]] && echo 1 || echo 0)
 API_URL=${API_URL:-https://agenda0.com.br/api}
 PM2_PROCESS=${PM2_PROCESS:-agendamento-api}
 BRANCH=${BRANCH:-}
@@ -98,7 +102,7 @@ if [[ "$SKIP_FRONTEND" != "1" ]]; then
   echo "==> Frontend: instalando dependências (npm ci)"
   cd "$FRONT_DIR"
   npm ci
-  # Confere API_URL contra o .env.production ANTES de gastar um build.
+  # De onde sai a URL da API do bundle.
   #
   # Em 28/07/2026 um deploy passou API_URL com o dominio ANTIGO. `export VITE_API_URL`
   # sobrepoe o .env.production, entao o bundle inteiro saiu chamando o host errado — que
@@ -106,27 +110,34 @@ if [[ "$SKIP_FRONTEND" != "1" ]]; then
   # entao TODA chamada de API morria como "Failed to fetch", ja no login. O site parecia no
   # ar (as paginas estaticas carregam) e nada no backend acusava erro.
   #
-  # O .env.production e' versionado e e' a fonte da verdade. Um override que discorda dele e'
-  # quase sempre comando de deploy velho — abortar aqui custa segundos; nao abortar custou
-  # o app inteiro fora do ar.
+  # A licao NAO foi "validar o override": foi que o export nao devia acontecer sozinho. O
+  # .env.production do servidor usa `/api` — relativo, que resolve contra a origem da propria
+  # pagina e por construcao nunca aponta para o host errado. Sobrepor isso com uma URL
+  # absoluta, por default, e' trocar o valor a prova de falha por um que precisa estar certo.
+  #
+  # Entao: sem API_URL explicito, o .env.production manda. Com API_URL explicito (staging),
+  # exporta e avisa se divergir — ai a divergencia e' escolha de quem rodou, nao acidente.
   ENV_PROD_API_URL="$(sed -n 's/^[[:space:]]*VITE_API_URL[[:space:]]*=[[:space:]]*//p' .env.production 2>/dev/null | tail -n1 | tr -d '\r"' )"
-  if [[ -n "$ENV_PROD_API_URL" && "$API_URL" != "$ENV_PROD_API_URL" ]]; then
-    echo "ERRO: API_URL diverge do frontend/.env.production." >&2
-    echo "      API_URL          = $API_URL" >&2
-    echo "      .env.production  = $ENV_PROD_API_URL" >&2
-    echo "" >&2
-    echo "      Buildar assim publica um frontend que chama o host errado (falha de CORS," >&2
-    echo "      'Failed to fetch' em toda chamada de API). Rode sem API_URL para usar o" >&2
-    echo "      valor do .env.production, ou ALLOW_API_URL_OVERRIDE=1 se a divergencia" >&2
-    echo "      for intencional (ex.: deploy de staging)." >&2
-    if [[ "${ALLOW_API_URL_OVERRIDE:-0}" != "1" ]]; then
-      exit 1
+
+  if [[ "$API_URL_EXPLICIT" != "1" && -n "$ENV_PROD_API_URL" ]]; then
+    echo "==> Frontend: build com VITE_API_URL=$ENV_PROD_API_URL (do .env.production)"
+  else
+    if [[ -n "$ENV_PROD_API_URL" && "$API_URL" != "$ENV_PROD_API_URL" ]]; then
+      echo "AVISO: API_URL informado diverge do frontend/.env.production." >&2
+      echo "       API_URL         = $API_URL" >&2
+      echo "       .env.production = $ENV_PROD_API_URL" >&2
+      echo "       Buildar assim publica um frontend que chama outro host. Se nao for" >&2
+      echo "       intencional, rode sem API_URL. Para seguir mesmo assim:" >&2
+      echo "       ALLOW_API_URL_OVERRIDE=1" >&2
+      if [[ "${ALLOW_API_URL_OVERRIDE:-0}" != "1" ]]; then
+        exit 1
+      fi
+      echo "==> ALLOW_API_URL_OVERRIDE=1: seguindo com $API_URL" >&2
     fi
-    echo "==> ALLOW_API_URL_OVERRIDE=1: seguindo com $API_URL" >&2
+    echo "==> Frontend: build com VITE_API_URL=$API_URL"
+    export VITE_API_URL="$API_URL"
   fi
 
-  echo "==> Frontend: build com VITE_API_URL=$API_URL"
-  export VITE_API_URL="$API_URL"
   npm run build
 
   # Na VPS o nginx aponta o `root` direto para $FRONT_DIR/dist, entao o build ja
