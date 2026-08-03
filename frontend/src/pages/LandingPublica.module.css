@@ -132,8 +132,14 @@
 /* ---------- mock do app ----------
    Fragmento da tela real de agendamento. É o que faz a página parecer produto
    em vez de folheto — a mesma aposta dos criativos. */
-.mock {
+.mockWrap {
   justify-self: center;
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  width: 100%;
+}
+.mock {
   width: 100%;
   max-width: 320px;
   padding: 10px;
@@ -141,14 +147,44 @@
   background: var(--lp-ink);
   box-shadow: 0 26px 60px rgba(30, 27, 75, .26);
 }
+/* Altura fixa: os slides têm conteúdos de tamanhos diferentes e, sem isto, o celular
+   encolhe e cresce a cada troca — o hero inteiro pularia junto. */
 .mockScreen {
+  position: relative;
+  height: 452px;
   border-radius: 26px;
   background: var(--lp-surface);
+  overflow: hidden;
+}
+.mockSlide, .mockSlideOn {
+  position: absolute;
+  inset: 0;
   padding: 16px 14px 14px;
   display: flex;
   flex-direction: column;
   gap: 12px;
+  transition: opacity .5s ease;
 }
+.mockSlide { opacity: 0; pointer-events: none; }
+.mockSlideOn { opacity: 1; }
+@media (prefers-reduced-motion: reduce) {
+  .mockSlide, .mockSlideOn { transition: none; }
+}
+
+/* ---- Controles do carrossel ---- */
+.mockDots { display: flex; gap: 7px; }
+.mockDot, .mockDotOn {
+  width: 7px;
+  height: 7px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--lp-ink) 22%, transparent);
+  cursor: pointer;
+  transition: width .25s ease, background .25s ease;
+}
+.mockDotOn { width: 20px; background: var(--lp-brand); }
+.mockCaption { font-size: 12.5px; font-weight: 650; color: var(--lp-muted); }
 .mockHead { display: flex; align-items: center; gap: 10px; }
 .mockAvatar {
   flex: none;
@@ -248,8 +284,10 @@
 .mockResumoRow strong { font-weight: 800; }
 .mockResumoHint { font-size: 10.5px; color: var(--lp-muted); }
 
+/* `margin-top:auto` gruda o botão na base do slide, qualquer que seja o conteúdo acima —
+   é o que mantém os quatro slides parecendo a mesma tela. */
 .mockCta {
-  margin-top: 2px;
+  margin-top: auto;
   padding: 11px 0;
   border-radius: 13px;
   background: var(--lp-brand);
@@ -258,6 +296,109 @@
   font-weight: 800;
   text-align: center;
 }
+
+/* ---- Peças compartilhadas pelos slides 2, 3 e 4 ---- */
+.mockEyebrow {
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--lp-brand);
+}
+.mockTitle { font-size: 17px; font-weight: 800; line-height: 1.15; margin-top: -6px; }
+.mockRow { display: flex; gap: 8px; }
+.mockChipGhost {
+  flex: 1;
+  padding: 9px 0;
+  border: 1px solid var(--lp-line);
+  border-radius: 11px;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--lp-ink);
+  text-align: center;
+}
+
+/* ---- Slide 2: QR ---- */
+.mockQrCard {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  padding: 16px 12px;
+  border: 1px solid var(--lp-line);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--lp-ground) 55%, var(--lp-surface));
+}
+.mockQr { width: 118px; height: 118px; color: var(--lp-ink); display: block; }
+.mockQrLink { font-size: 12px; font-weight: 800; color: var(--lp-brand); }
+.mockQrHint { font-size: 11px; color: var(--lp-muted); }
+
+/* ---- Slide 3: relatórios ---- */
+.mockKpis { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.mockKpi {
+  display: grid;
+  gap: 2px;
+  padding: 10px;
+  border: 1px solid var(--lp-line);
+  border-radius: 13px;
+  background: var(--lp-surface);
+}
+/* Rótulo e número em tinta, nunca na cor da série: a cor identifica a marca do gráfico,
+   o texto se lê sozinho. */
+.mockKpi small { font-size: 9.5px; font-weight: 700; color: var(--lp-muted); line-height: 1.2; }
+.mockKpi strong { font-size: 16px; font-weight: 800; letter-spacing: -.02em; }
+/* Série única, um só hue. Barras finas, extremidade arredondada só no topo e ancorada na
+   linha de base; 4px de respiro entre elas. Sem eixo nem grade: a esta largura seriam ruído. */
+.mockChart {
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  height: 62px;
+  padding-top: 4px;
+  border-bottom: 1px solid var(--lp-line);
+}
+.mockBar {
+  flex: 1;
+  border-radius: 4px 4px 0 0;
+  background: var(--lp-brand);
+  min-height: 6px;
+}
+.mockChartLegend { font-size: 10.5px; color: var(--lp-muted); margin-top: -6px; }
+
+/* ---- Slide 4: página pública ---- */
+.mockCover {
+  height: 62px;
+  border-radius: 14px;
+  background: linear-gradient(120deg, var(--lp-brand), color-mix(in srgb, var(--lp-brand) 55%, #fff));
+  display: flex;
+  align-items: flex-end;
+  padding-left: 12px;
+  margin-bottom: 14px;
+}
+.mockCoverAvatar {
+  width: 42px;
+  height: 42px;
+  transform: translateY(50%);
+  border-radius: 13px;
+  border: 2px solid var(--lp-surface);
+  background: var(--lp-ink);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.mockPageMeta { font-size: 11px; color: var(--lp-muted); margin-top: -8px; }
+.mockPageItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 11px;
+  border: 1px solid var(--lp-line);
+  border-radius: 13px;
+}
+.mockPagePrice { font-size: 12.5px; font-weight: 800; white-space: nowrap; }
 
 /* ---------- como funciona ---------- */
 .steps {

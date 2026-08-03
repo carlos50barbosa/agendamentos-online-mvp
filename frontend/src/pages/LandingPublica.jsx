@@ -98,11 +98,10 @@ function bulletsDoPlano(plan, anterior) {
   return ganhos;
 }
 
-/** Fragmento da tela real de agendamento. Decorativo — a prova de que isto é um app. */
-function AppMock() {
+/** Slide 1 — a tela de agendamento que o cliente do salão vê. */
+function SlideAgenda() {
   return (
-    <div className={styles.mock} aria-hidden="true">
-      <div className={styles.mockScreen}>
+    <>
         <div className={styles.mockHead}>
           <span className={styles.mockAvatar}>SB</span>
           <div className={styles.mockHeadText}>
@@ -157,7 +156,218 @@ function AppMock() {
         </div>
 
         <span className={styles.mockCta}>Confirmar agendamento</span>
+    </>
+  );
+}
+
+/** Slide 2 — /divulgacao: o link curto e o QR para imprimir e colar no balcão. */
+function SlideDivulgacao() {
+  return (
+    <>
+      <span className={styles.mockEyebrow}>Divulgação</span>
+      <strong className={styles.mockTitle}>Meu QR Code</strong>
+
+      <div className={styles.mockQrCard}>
+        <QrArt />
+        <span className={styles.mockQrLink}>agenda0.com.br/studiobella</span>
+        <span className={styles.mockQrHint}>Aponte a câmera para agendar</span>
       </div>
+
+      <div className={styles.mockRow}>
+        <span className={styles.mockChipGhost}>Copiar link</span>
+        <span className={styles.mockChipGhost}>Compartilhar</span>
+      </div>
+
+      <span className={styles.mockCta}>Baixar cartão em PNG</span>
+    </>
+  );
+}
+
+/**
+ * Slide 3 — /relatorios. Os quatro rótulos são os do produto (routes/relatorios.js).
+ *
+ * A forma é KPI + uma série só, não um gráfico cheio: a ~330px de largura, o trabalho do
+ * bloco é dizer "existe relatório aqui", e número grande faz isso melhor que eixo. As barras
+ * entram como textura de histórico — série única, então sem legenda (o título já a nomeia) e
+ * sem rótulo em cada barra. Sem tooltip de propósito: o mock é decorativo e aria-hidden, e
+ * prometer interação que não existe é pior que não prometer nada.
+ */
+function SlideRelatorios() {
+  // Série única: um só hue (o índigo da marca), então não há paleta categórica a validar —
+  // separação por CVD só é questão quando cores distinguem entidades diferentes.
+  const barras = [38, 52, 44, 68, 59, 81, 72];
+  const maior = Math.max(...barras);
+  return (
+    <>
+      <span className={styles.mockEyebrow}>Relatórios</span>
+      <strong className={styles.mockTitle}>Últimos 30 dias</strong>
+
+      <div className={styles.mockKpis}>
+        <span className={styles.mockKpi}>
+          <small>Receita realizada</small>
+          <strong>R$ 4.280</strong>
+        </span>
+        <span className={styles.mockKpi}>
+          <small>Agendamentos</small>
+          <strong>61</strong>
+        </span>
+        <span className={styles.mockKpi}>
+          <small>Comparecimento</small>
+          <strong>92%</strong>
+        </span>
+        <span className={styles.mockKpi}>
+          <small>Ticket médio</small>
+          <strong>R$ 70</strong>
+        </span>
+      </div>
+
+      <div className={styles.mockChart}>
+        {barras.map((valor, i) => (
+          <span
+            key={i}
+            className={styles.mockBar}
+            style={{ height: `${Math.round((valor / maior) * 100)}%` }}
+          />
+        ))}
+      </div>
+      <span className={styles.mockChartLegend}>Receita por semana</span>
+
+      {/* Exportação existe de verdade (/relatorios/estabelecimento/export.csv) — sem esta
+          linha o slide era o único sem ação na base, e destoava dos outros três. */}
+      <span className={styles.mockCta}>Exportar CSV</span>
+    </>
+  );
+}
+
+/** Slide 4 — a página pública do estabelecimento, que é o que o link abre. */
+function SlidePagina() {
+  return (
+    <>
+      <div className={styles.mockCover}>
+        <span className={styles.mockCoverAvatar}>SB</span>
+      </div>
+      <strong className={styles.mockTitle}>Studio Bella</strong>
+      <span className={styles.mockPageMeta}>Pinheiros · São Paulo — SP</span>
+
+      <span className={styles.mockLabel}>Serviços</span>
+      {[
+        ['Escova + hidratação', '1h', 'R$ 120'],
+        ['Manicure', '45min', 'R$ 45'],
+        ['Design de sobrancelha', '30min', 'R$ 60'],
+      ].map(([nome, tempo, preco]) => (
+        <div key={nome} className={styles.mockPageItem}>
+          <div className={styles.mockServiceText}>
+            <strong>{nome}</strong>
+            <span>{tempo}</span>
+          </div>
+          <span className={styles.mockPagePrice}>{preco}</span>
+        </div>
+      ))}
+
+      <span className={styles.mockCta}>Agendar</span>
+    </>
+  );
+}
+
+/**
+ * QR decorativo. Padrão FIXO (não aleatório): um Math.random aqui mudaria o desenho a cada
+ * render e piscaria durante o carrossel. Os três quadrados de canto são o que faz o olho
+ * reconhecer "isso é um QR" — o resto é textura.
+ */
+function QrArt() {
+  const modulos = [];
+  // LCG com semente fixa: determinístico entre renders e entre sessões.
+  let seed = 20260802;
+  const proximo = () => {
+    seed = (seed * 1103515245 + 12345) % 2147483648;
+    return seed / 2147483648;
+  };
+  for (let y = 0; y < 21; y += 1) {
+    for (let x = 0; x < 21; x += 1) {
+      const emCanto =
+        (x < 7 && y < 7) || (x > 13 && y < 7) || (x < 7 && y > 13);
+      if (emCanto) continue;
+      if (proximo() > 0.55) modulos.push(`${x},${y}`);
+    }
+  }
+  const canto = (cx, cy) => (
+    <g key={`c${cx}${cy}`}>
+      <rect x={cx} y={cy} width="7" height="7" rx="1.4" fill="currentColor" />
+      <rect x={cx + 1} y={cy + 1} width="5" height="5" rx="1" fill="#fff" />
+      <rect x={cx + 2} y={cy + 2} width="3" height="3" rx="0.6" fill="currentColor" />
+    </g>
+  );
+  return (
+    <svg className={styles.mockQr} viewBox="0 0 21 21" role="presentation">
+      {canto(0, 0)}
+      {canto(14, 0)}
+      {canto(0, 14)}
+      {modulos.map((m) => {
+        const [x, y] = m.split(',');
+        return <rect key={m} x={x} y={y} width="1" height="1" fill="currentColor" />;
+      })}
+    </svg>
+  );
+}
+
+const SLIDES = [
+  { key: 'agenda', legenda: 'Página de agendamento', render: () => <SlideAgenda /> },
+  { key: 'divulgacao', legenda: 'Seu link e QR Code', render: () => <SlideDivulgacao /> },
+  { key: 'relatorios', legenda: 'Relatórios', render: () => <SlideRelatorios /> },
+  { key: 'pagina', legenda: 'Sua página pública', render: () => <SlidePagina /> },
+];
+
+const TROCA_MS = 4500;
+
+/**
+ * O celular do hero, agora com slides. Decorativo (aria-hidden) — quem usa leitor de tela
+ * não perde nada: tudo que os slides mostram está dito em texto na página.
+ *
+ * O auto-avanço para quando a pessoa pede menos movimento (prefers-reduced-motion) e quando
+ * ela toca num ponto — a partir daí quem manda é ela, não o relógio.
+ */
+function AppMock() {
+  const [ativo, setAtivo] = useState(0);
+  const [manual, setManual] = useState(false);
+
+  useEffect(() => {
+    if (manual) return undefined;
+    const reduzido = typeof window !== 'undefined'
+      && window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
+    if (reduzido) return undefined;
+    const id = setInterval(() => setAtivo((i) => (i + 1) % SLIDES.length), TROCA_MS);
+    return () => clearInterval(id);
+  }, [manual]);
+
+  return (
+    <div className={styles.mockWrap}>
+      <div className={styles.mock} aria-hidden="true">
+        <div className={styles.mockScreen}>
+          {SLIDES.map((slide, i) => (
+            <div
+              key={slide.key}
+              className={i === ativo ? styles.mockSlideOn : styles.mockSlide}
+            >
+              {slide.render()}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className={styles.mockDots} role="tablist" aria-label="Telas do aplicativo">
+        {SLIDES.map((slide, i) => (
+          <button
+            key={slide.key}
+            type="button"
+            role="tab"
+            aria-selected={i === ativo}
+            aria-label={slide.legenda}
+            className={i === ativo ? styles.mockDotOn : styles.mockDot}
+            onClick={() => { setAtivo(i); setManual(true); }}
+          />
+        ))}
+      </div>
+      <span className={styles.mockCaption}>{SLIDES[ativo].legenda}</span>
     </div>
   );
 }
