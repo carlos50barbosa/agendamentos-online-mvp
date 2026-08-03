@@ -144,6 +144,9 @@ export function useBusinessSettings(options = {}) {
     feeCents: 0,
     minSignalCents: 0,
     splitEnabled: false,
+    // Por que o sinal parou de sair (conta Asaas sem chave PIX, tipicamente) e se o dono
+    // Preenchido quando uma cobrança falha por causa estrutural.
+    blockReason: '',
     noticeType: '',
     noticeMessage: '',
   });
@@ -325,6 +328,7 @@ export function useBusinessSettings(options = {}) {
         feeCents: Number(depositConfig.fee_cents || 0),
         minSignalCents: Number(depositConfig.min_signal_cents || 0),
         splitEnabled: Boolean(depositConfig.split_enabled),
+        blockReason: depositConfig.block_reason || '',
       }));
       return response;
     } catch (error) {
@@ -782,6 +786,7 @@ export function useBusinessSettings(options = {}) {
         feeCents: Number(config.fee_cents ?? current.feeCents),
         minSignalCents: Number(config.min_signal_cents ?? current.minSignalCents),
         splitEnabled: config.split_enabled != null ? Boolean(config.split_enabled) : current.splitEnabled,
+        blockReason: config.block_reason ?? current.blockReason,
         noticeType: 'success',
         noticeMessage: 'Configuração atualizada com sucesso.',
       }));

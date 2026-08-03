@@ -108,6 +108,30 @@ export default function SinalAgendamentos() {
             </div>
           ) : null}
 
+          {/* O aviso que faltava. Sem ele o dono só descobria que a conta não estava liberada
+              quando os agendamentos começavam a falhar — e nem assim, porque o erro só aparecia
+              para o cliente. Enquanto isto estiver na tela, o link dele não fecha agendamento. */}
+          {deposit.allowed && deposit.blockReason ? (
+            <div className="notice notice--error" style={{ display: 'grid', gap: 6 }}>
+              <strong>Seus clientes não estão conseguindo agendar.</strong>
+              <span>{deposit.blockReason}</span>
+              <span>
+                Com o sinal ligado, todo agendamento pelo seu link é recusado até a conta ser
+                liberada. Conclua o cadastro no Asaas (senha + envio de documentos) usando o
+                e-mail que você recebeu deles — ou desligue o sinal por enquanto.
+              </span>
+            </div>
+          ) : null}
+
+          {/* Expectativa antes do problema: enquanto não há carteira, dizer o que vem pela frente. */}
+          {deposit.allowed && !walletConfigured && !deposit.blockReason ? (
+            <div className="notice notice--info">
+              Depois de criar a conta, o Asaas envia um e-mail para você definir a senha e enviar
+              seus documentos. <strong>O sinal só pode ser cobrado depois dessa validação</strong> —
+              e, com o sinal ligado antes disso, seus clientes não conseguem agendar.
+            </div>
+          ) : null}
+
           {deposit.loading ? (
             <div className="row" style={{ gap: 8, alignItems: 'center' }}>
               <span className="spinner" aria-hidden="true" />

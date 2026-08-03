@@ -124,6 +124,46 @@ function resolveBillingWebhookUrl(apiBase) {
   return `${base}/api/billing/webhook`;
 }
 
+/**
+ * A falha é estrutural (a conta não consegue receber) ou passageira (rede, instabilidade)?
+ *
+ * O Asaas devolve isto como TEXTO — não há código para casar (`AsaasError.code` só é preenchido
+ * em erro de config e de rede). Casar por trecho de mensagem é frágil, e é por isso que o
+ * classificador é conservador: na dúvida devolve null e o comportamento antigo vale. Um falso
+ * negativo custa uma mensagem genérica; um falso positivo diria ao cliente que o salão está
+ * indisponível quando foi só um soluço de rede.
+ */
+function classifyDepositFailure(err) {
+  const msg = String(err?.message || '').toLowerCase();
+  if (msg.includes('chave pix')) return 'Conta Asaas sem chave PIX: falta concluir a validação de documentos.';
+  if (msg.includes('não está habilitada') || msg.includes('nao esta habilitada')) return 'Conta Asaas ainda não habilitada para receber.';
+  if (msg.includes('walletid') || msg.includes('wallet id')) return 'Carteira de recebimento inválida ou não configurada.';
+  return null;
+}
+
+async function registrarBloqueioDeposito(estabelecimentoId, motivo) {
+  try {
+    await pool.query(
+      'UPDATE establishment_settings SET deposit_block_reason=?, deposit_blocked_at=CURRENT_TIMESTAMP WHERE estabelecimento_id=?',
+      [String(motivo).slice(0, 255), estabelecimentoId],
+    );
+  } catch (e) {
+    console.error('[deposit][bloqueio] falha ao registrar', e?.message || e);
+  }
+}
+
+/** Uma cobrança que passa prova que a conta voltou a receber: o aviso some sozinho. */
+async function limparBloqueioDeposito(estabelecimentoId) {
+  try {
+    await pool.query(
+      'UPDATE establishment_settings SET deposit_block_reason=NULL, deposit_blocked_at=NULL WHERE estabelecimento_id=? AND deposit_blocked_at IS NOT NULL',
+      [estabelecimentoId],
+    );
+  } catch {
+    /* limpar aviso nunca pode derrubar um agendamento que deu certo */
+  }
+}
+
 async function resolveDepositConfig(estabelecimentoId, planContext) {
   const allowed = planAllowsDeposit(planContext?.plan);
   if (!allowed) {
@@ -1324,6 +1364,7 @@ router.post('/', ensureSubscriptionOperationalAccess({
             'UPDATE appointment_payments SET provider=?, provider_payment_id=?, provider_reference=?, split_centavos=?, platform_fee_centavos=?, raw_payload=? WHERE id=?',
             ['asaas', providerPaymentId, externalReference, splitCents, splitDisabled ? null : platformFeeCents, safeJson(payment), depositPaymentId]
           );
+          await limparBloqueioDeposito(estabelecimento_id);
           const depositToken = buildPublicDepositToken({
             agendamentoId: appointmentId,
             clienteId: userId,
@@ -1361,9 +1402,19 @@ router.post('/', ensureSubscriptionOperationalAccess({
             ['failed', payload, depositPaymentId]
           );
           await cancelPendingPaymentAppointmentTx(appointmentId, { db: pool });
+
+          // Falha ESTRUTURAL (conta não liberada) é diferente de instabilidade: pedir "tente
+          // novamente" ao cliente é mandá-lo bater numa porta que não abre. Registra no
+          // estabelecimento para o painel avisar o dono — é a única forma de ele saber, já que
+          // não temos a API key da subconta para perguntar o status ao Asaas.
+          const motivo = classifyDepositFailure(err);
+          if (motivo) await registrarBloqueioDeposito(estabelecimento_id, motivo);
+
           return res.status(502).json({
-            error: 'payment_create_failed',
-            message: 'Não foi possível gerar o PIX do sinal. Tente novamente.',
+            error: motivo ? 'deposit_receiver_unavailable' : 'payment_create_failed',
+            message: motivo
+              ? 'Este estabelecimento está com o recebimento do sinal indisponível. Entre em contato com ele para agendar.'
+              : 'Não foi possível gerar o PIX do sinal. Tente novamente.',
           });
         }
       }

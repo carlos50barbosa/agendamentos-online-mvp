@@ -48,7 +48,8 @@ async function fetchDepositSettings(estabelecimentoId) {
     `SELECT deposit_enabled, deposit_percent, deposit_hold_minutes,
             deposit_type, deposit_fixed_centavos, deposit_min_centavos, deposit_max_centavos,
             refund_window_hours, retain_on_no_show,
-            asaas_wallet_id, wallet_verified_at, asaas_subaccount_created_at
+            asaas_wallet_id, wallet_verified_at, asaas_subaccount_created_at,
+            deposit_block_reason, deposit_blocked_at
        FROM establishment_settings WHERE estabelecimento_id=? LIMIT 1`,
     [estabelecimentoId]
   );
@@ -92,6 +93,11 @@ function serializeDeposit(settings, allowed) {
     refund_window_hours: settings.refund_window_hours,
     retain_on_no_show: settings.retain_on_no_show,
     wallet_id: settings.asaas_wallet_id,
+    // Por que o sinal parou de sair. Preenchido quando uma cobranca falha por causa estrutural
+    // (conta Asaas sem chave PIX, tipicamente). E o unico caminho para o dono saber: nao temos
+    // a API key da subconta para perguntar o status ao Asaas.
+    block_reason: settings.deposit_block_reason || null,
+    blocked_at: settings.deposit_blocked_at || null,
     wallet_verified: Boolean(settings.wallet_verified_at),
     // Como a carteira chegou aqui: 'subconta' = a plataforma abriu a conta pelo dono;
     // 'manual' = ele colou o Wallet ID da conta Asaas que já tinha. O front mostra telas
