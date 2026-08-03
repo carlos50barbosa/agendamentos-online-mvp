@@ -337,11 +337,15 @@ export const Api = {
 
     req(`/establishments/${id}/review`, { method: 'PUT', body: JSON.stringify(payload) }),
 
+  // Resposta e denuncia sao do DONO do estabelecimento (backend exige isEstabelecimento
+  // e confere que a avaliacao pertence a ele).
+  replyEstablishmentReview: (id, reviewId, payload) =>
+    req(`/establishments/${id}/reviews/${reviewId}/reply`, { method: 'PUT', body: JSON.stringify(payload || {}) }),
+  reportEstablishmentReview: (id, reviewId, payload) =>
+    req(`/establishments/${id}/reviews/${reviewId}/report`, { method: 'POST', body: JSON.stringify(payload || {}) }),
   deleteEstablishmentReview: (id) => req(`/establishments/${id}/review`, { method: 'DELETE' }),
 
-  favoriteEstablishment: (id) => req(`/establishments/${id}/favorite`, { method: 'POST' }),
 
-  unfavoriteEstablishment: (id) => req(`/establishments/${id}/favorite`, { method: 'DELETE' }),
 
   listEstablishmentImages: (id) => req(`/establishments/${id}/images`),
 

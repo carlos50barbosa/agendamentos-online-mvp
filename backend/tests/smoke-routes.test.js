@@ -550,3 +550,117 @@ test('agendamento do cliente logado com whatsapp_optin NAO grava consentimento',
   const [rows] = await pool.query('SELECT id FROM whatsapp_optins WHERE telefone_e164=?', [e164]);
   assert.equal(rows.length, 0, 'um clique num agendamento nao pode virar consentimento — nem logado');
 });
+
+// ---------------------------------------------------------------------------
+// Avaliacao so de quem foi atendido (02/08/2026).
+//
+// Antes bastava ser 'cliente' logado: qualquer conta avaliava qualquer salao sem nunca ter
+// pisado la — dava para um concorrente afundar a nota da cidade, ou para o proprio dono se
+// dar cinco estrelas com contas de graca. Agora o contato informado precisa casar com um
+// agendamento DAQUELE estabelecimento.
+//
+// Estes testes batem no HTTP de proposito: a regra vale pouco se o gate estiver na tela.
+// ---------------------------------------------------------------------------
+async function put(pathname, payload) {
+  const res = await fetch(`${baseUrl}${pathname}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  return { status: res.status, body: await res.text() };
+}
+
+test('avaliar SEM contato conhecido e recusado — mesmo com nome plausivel', { skip }, async () => {
+  const { status, body } = await put(`/establishments/${ESTAB_ID}/review`, {
+    nota: 1,
+    comentario: 'nunca vim aqui',
+    nome: 'Concorrente Silva',
+    telefone: '11900000000',
+  });
+  assert.equal(status, 403, `deveria recusar quem nao tem atendimento. corpo: ${body.slice(0, 200)}`);
+  assert.match(body, /sem_atendimento/);
+
+  const [rows] = await pool.query(
+    'SELECT COUNT(*) AS total FROM estabelecimento_reviews WHERE estabelecimento_id=?',
+    [ESTAB_ID],
+  );
+  assert.equal(Number(rows[0].total), 0, 'nenhuma avaliacao pode ter sido gravada');
+});
+
+test('avaliar COM o telefone usado no agendamento e aceito', { skip }, async () => {
+  const { status, body } = await put(`/establishments/${ESTAB_ID}/review`, {
+    nota: 5,
+    comentario: 'atendimento otimo',
+    nome: 'Cliente Smoke',
+    telefone: '11988887777',
+  });
+  assert.equal(status, 200, `status ${status}: ${body.slice(0, 300)}`);
+
+  const [rows] = await pool.query(
+    'SELECT cliente_id, nota FROM estabelecimento_reviews WHERE estabelecimento_id=?',
+    [ESTAB_ID],
+  );
+  assert.equal(rows.length, 1);
+  // Amarrada ao cliente REAL, e nao a um nome digitado: e o que faz a chave unica
+  // (estabelecimento, cliente) continuar significando "uma avaliacao por pessoa".
+  assert.equal(Number(rows[0].cliente_id), CLIENTE_ID);
+  assert.equal(Number(rows[0].nota), 5);
+});
+
+test('o e-mail do agendamento tambem serve como prova', { skip }, async () => {
+  const { status } = await put(`/establishments/${ESTAB_ID}/review`, {
+    nota: 4,
+    nome: 'Cliente Smoke',
+    email: 'CLIENTE.SMOKE@test.local', // maiusculas: a comparacao e case-insensitive
+  });
+  assert.equal(status, 200);
+  const [rows] = await pool.query(
+    'SELECT COUNT(*) AS total FROM estabelecimento_reviews WHERE estabelecimento_id=?',
+    [ESTAB_ID],
+  );
+  assert.equal(Number(rows[0].total), 1, 'reavaliar atualiza a linha, nao cria outra');
+});
+
+test('a rota publica de avaliacoes nao devolve o id do autor', { skip }, async () => {
+  const { status, body } = await get(`/establishments/${ESTAB_ID}/reviews`);
+  assert.equal(status, 200);
+  const data = JSON.parse(body);
+  assert.ok(data.items.length >= 1);
+  assert.equal(data.items[0].author.id, undefined, 'id interno de usuario nao sai em rota sem auth');
+  assert.ok(data.items[0].author.name, 'o nome continua saindo — e ele que identifica na tela');
+});
+
+test('so o dono responde e denuncia; a denuncia nao aparece em publico', { skip }, async () => {
+  const [[review]] = await pool.query(
+    'SELECT id FROM estabelecimento_reviews WHERE estabelecimento_id=? LIMIT 1',
+    [ESTAB_ID],
+  );
+
+  const semToken = await fetch(`${baseUrl}/establishments/${ESTAB_ID}/reviews/${review.id}/reply`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ resposta: 'obrigado!' }),
+  });
+  assert.equal(semToken.status, 401, 'responder exige o dono autenticado');
+
+  const res = await fetch(`${baseUrl}/establishments/${ESTAB_ID}/reviews/${review.id}/reply`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${estabToken}` },
+    body: JSON.stringify({ resposta: 'Obrigado pela visita!' }),
+  });
+  assert.equal(res.status, 200, await res.text());
+
+  const rep = await fetch(`${baseUrl}/establishments/${ESTAB_ID}/reviews/${review.id}/report`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${estabToken}` },
+    body: JSON.stringify({ motivo: 'cliente nunca esteve aqui' }),
+  });
+  assert.equal(rep.status, 200, await rep.text());
+
+  const { body } = await get(`/establishments/${ESTAB_ID}/reviews`);
+  const item = JSON.parse(body).items[0];
+  assert.equal(item.resposta, 'Obrigado pela visita!', 'a resposta do dono e publica');
+  // Exibir "esta avaliacao foi denunciada" viraria arma para desacreditar avaliacao verdadeira.
+  assert.equal(item.denunciado_em, undefined);
+  assert.equal(item.denuncia_motivo, undefined);
+});

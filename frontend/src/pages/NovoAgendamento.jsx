@@ -6934,6 +6934,16 @@ useEffect(() => {
 
     if (!selectedEstablishment || !selectedEstablishmentId) return;
 
+    // Favoritar saiu do produto em 02/08/2026: dava para marcar, mas nunca existiu tela nem
+    // endpoint que listasse os favoritos de um cliente — a pessoa guardava algo que jamais
+    // conseguia recuperar. Com o diretório fechado (só se chega a um salão pelo link), a
+    // feature perdeu o último resquício de função. Esta página é o fluxo LEGADO e está órfã
+    // (nenhuma tela liga para /novo-agendamento); o resto do estado de favorito continua aqui
+    // porque arrancá-lo de um arquivo de 4 mil linhas seria risco sem retorno.
+    showToast('info', 'Favoritar não está mais disponível.');
+    return;
+
+    /* eslint-disable no-unreachable */
     if (!user || user.tipo !== 'cliente') {
 
       showToast('info', 'Faça login como cliente para favoritar.');
@@ -7011,6 +7021,7 @@ useEffect(() => {
       showToast('error', msg);
 
     }
+    /* eslint-enable no-unreachable */
 
   };
 

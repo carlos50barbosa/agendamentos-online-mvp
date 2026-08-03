@@ -5,6 +5,7 @@ import { Router } from "express";
 import jwt from "jsonwebtoken";
 
 import { pool } from "../lib/db.js";
+import { normalizePhoneBR } from "../lib/phone_br.js";
 
 import { resolveEstablishmentCoordinates } from "../lib/geocode.js";
 import {
@@ -940,19 +941,6 @@ async function fetchUserReview(estabelecimentoId, clienteId) {
 
 
 
-async function isFavoriteFor(estabelecimentoId, clienteId) {
-
-  const [rows] = await pool.query(
-
-    "SELECT 1 FROM cliente_favoritos WHERE estabelecimento_id=? AND cliente_id=? LIMIT 1",
-
-    [estabelecimentoId, clienteId]
-
-  );
-
-  return Boolean(rows && rows.length);
-
-}
 
 
 
@@ -1221,23 +1209,13 @@ router.get('/:idOrSlug', async (req, res) => {
 
     let userReview = null;
 
-    let isFavorite = false;
-
-
+    // Favoritar saiu do produto em 02/08/2026: nunca existiu tela nem endpoint que listasse os
+    // favoritos de um cliente, então a pessoa marcava algo que jamais recuperava. Some com ele
+    // uma consulta por carregamento de página pública.
 
     if (viewer?.tipo === 'cliente') {
 
-      const [review, favorite] = await Promise.all([
-
-        fetchUserReview(est.id, viewer.id),
-
-        isFavoriteFor(est.id, viewer.id),
-
-      ]);
-
-      userReview = review;
-
-      isFavorite = favorite;
+      userReview = await fetchUserReview(est.id, viewer.id);
 
     }
 
@@ -1282,8 +1260,6 @@ router.get('/:idOrSlug', async (req, res) => {
       rating,
 
       user_review: userReview,
-
-      is_favorite: isFavorite,
 
       gallery: galleryImages,
 
@@ -1361,7 +1337,7 @@ router.get('/:id/reviews', async (req, res) => {
 
     const [rows] = await pool.query(
       `SELECT r.id, r.nota, r.comentario, r.created_at, r.updated_at,
-              r.cliente_id, u.nome AS cliente_nome, u.avatar_url
+              r.resposta, r.resposta_em, u.nome AS cliente_nome, u.avatar_url
          FROM estabelecimento_reviews r
          JOIN usuarios u ON u.id = r.cliente_id
         WHERE r.estabelecimento_id=?
@@ -1380,8 +1356,14 @@ router.get('/:id/reviews', async (req, res) => {
         comentario: comment,
         created_at: toISODate(row.created_at),
         updated_at: toISODate(row.updated_at),
+        // A resposta do dono é pública por natureza: é a réplica dele, embaixo da avaliação.
+        resposta: typeof row.resposta === 'string' && row.resposta.trim() ? row.resposta.trim() : null,
+        resposta_em: toISODate(row.resposta_em),
+        // `denunciado`/`denuncia_motivo` NÃO saem daqui: exibir "esta avaliação foi denunciada"
+        // publicamente vira arma para desacreditar avaliação verdadeira. É dado de suporte.
         author: {
-          id: row.cliente_id,
+          // Sem `id`: é identificador interno de usuário numa rota SEM autenticação. O nome já
+          // identifica o autor na tela, e o id só serviria para correlacionar contas de fora.
           name: reviewerDisplayName(row.cliente_nome),
           full_name: String(row.cliente_nome || '').trim() || null,
           initials: reviewerInitials(row.cliente_nome),
@@ -2965,7 +2947,64 @@ router.put('/:id/plan', auth, isEstabelecimento, async (req, res) => {
 
 
 
-router.put('/:id/review', auth, isCliente, async (req, res) => {
+/**
+ * Quem, de fato, foi atendido ali.
+ *
+ * A avaliação era `auth + isCliente` e mais nada: qualquer conta de cliente avaliava qualquer
+ * salão sem nunca ter pisado lá. Dava para um concorrente afundar a nota da cidade inteira, ou
+ * para o próprio dono se dar cinco estrelas com contas criadas de graça.
+ *
+ * O casamento é por CONTATO e não por sessão porque a maior parte dos clientes agenda como
+ * convidado, pelo link — não tem conta e nunca vai ter. O agendamento público já grava uma
+ * linha em `usuarios` (com e-mail placeholder por telefone quando não informam), então o
+ * contato do agendamento é chave suficiente e a review continua amarrada a um cliente_id real:
+ * a chave única (estabelecimento, cliente) segue valendo "uma avaliação por pessoa".
+ *
+ * Aceita telefone OU e-mail. Não exige agendamento concluído de propósito: salão que esquece de
+ * dar baixa no status é comum, e excluir quem foi atendido de verdade seria pior que o abuso
+ * que estamos fechando.
+ *
+ * @returns {{id:number}|null} o cliente encontrado, ou null se aquele contato não tem
+ *          atendimento neste estabelecimento.
+ */
+async function findClienteComAtendimento(estabelecimentoId, { telefone, email }) {
+  // `usuarios.telefone` NÃO tem formato único: linhas gravadas em épocas diferentes têm o
+  // número local (11988887777), o E.164 (5511988887777) e versões com máscara. Comparar por
+  // igualdade contra normalizePhoneBR() — que devolve E.164 — não casa com a maior parte da
+  // base. Por isso o critério é o FIM do número: DDD + número, que é o que não muda entre os
+  // formatos. A coluna é limpa dos caracteres de máscara antes da comparação.
+  const e164 = normalizePhoneBR(telefone);
+  const digitosLocais = e164 ? e164.slice(2) : String(telefone || '').replace(/\D/g, '');
+  const telOk = digitosLocais.length >= 10;
+  const emailNorm = String(email || '').trim().toLowerCase();
+  if (!telOk && !emailNorm) return null;
+
+  const criterios = [];
+  const params = [estabelecimentoId];
+  if (telOk) {
+    criterios.push(
+      "REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(u.telefone,'+',''),'-',''),' ',''),'(',''),')','') LIKE CONCAT('%', ?)",
+    );
+    params.push(digitosLocais);
+  }
+  if (emailNorm) { criterios.push('LOWER(u.email) = ?'); params.push(emailNorm); }
+
+  // O JOIN com agendamentos é o que prova o atendimento. DISTINCT porque um cliente costuma
+  // ter vários agendamentos no mesmo salão e aqui só interessa a existência.
+  const [rows] = await pool.query(
+    `SELECT DISTINCT u.id
+       FROM usuarios u
+       JOIN agendamentos a ON a.cliente_id = u.id AND a.estabelecimento_id = ?
+      WHERE u.tipo = 'cliente' AND (${criterios.join(' OR ')})
+      LIMIT 1`,
+    params,
+  );
+  return rows.length ? rows[0] : null;
+}
+
+// Rota PÚBLICA: quem agendou como convidado não tem login e precisa poder avaliar. A prova de
+// que a pessoa esteve ali é o contato bater com um agendamento, não a existência de sessão.
+router.put('/:id/review', async (req, res) => {
 
   try {
 
@@ -2980,6 +3019,25 @@ router.put('/:id/review', auth, isCliente, async (req, res) => {
     const est = await ensureEstabelecimento(estabelecimentoId);
 
     if (!est) return res.status(404).json({ error: 'not_found' });
+
+    const nome = String(req.body?.nome || '').trim();
+    if (nome.length < 2) {
+      return res.status(400).json({ error: 'nome_obrigatorio', message: 'Informe seu nome.' });
+    }
+
+    const cliente = await findClienteComAtendimento(estabelecimentoId, {
+      telefone: req.body?.telefone,
+      email: req.body?.email,
+    });
+    if (!cliente) {
+      // A mensagem diz o que fazer. Ela revela que aquele contato não tem atendimento aqui —
+      // é o preço de ser acionável, e o que se descobre com ela ("fulano não é cliente deste
+      // salão") é bem menos do que a alternativa: avaliação de quem nunca foi atendido.
+      return res.status(403).json({
+        error: 'sem_atendimento',
+        message: 'Não encontramos um atendimento neste estabelecimento com esse contato. Use o telefone ou e-mail que você informou ao agendar.',
+      });
+    }
 
 
 
@@ -3021,7 +3079,7 @@ router.put('/:id/review', auth, isCliente, async (req, res) => {
 
       "INSERT INTO estabelecimento_reviews (estabelecimento_id, cliente_id, nota, comentario) VALUES (?,?,?,?) ON DUPLICATE KEY UPDATE nota=VALUES(nota), comentario=VALUES(comentario), updated_at=CURRENT_TIMESTAMP",
 
-      [estabelecimentoId, req.user.id, nota, comentario]
+      [estabelecimentoId, cliente.id, nota, comentario]
 
     );
 
@@ -3031,7 +3089,7 @@ router.put('/:id/review', auth, isCliente, async (req, res) => {
 
       getRatingSummary(estabelecimentoId),
 
-      fetchUserReview(estabelecimentoId, req.user.id),
+      fetchUserReview(estabelecimentoId, cliente.id),
 
     ]);
 
@@ -3050,6 +3108,85 @@ router.put('/:id/review', auth, isCliente, async (req, res) => {
 });
 
 
+
+/**
+ * Carrega uma avaliação garantindo que ela pertence ao estabelecimento de QUEM está pedindo.
+ * Sem isto, `:id` e `:reviewId` viriam da URL sem relação nenhuma entre si e um dono
+ * responderia na avaliação de outro salão.
+ */
+async function fetchReviewDoDono(estabelecimentoId, reviewId, donoId) {
+  if (Number(estabelecimentoId) !== Number(donoId)) return null;
+  const [rows] = await pool.query(
+    'SELECT id, estabelecimento_id FROM estabelecimento_reviews WHERE id=? AND estabelecimento_id=? LIMIT 1',
+    [reviewId, estabelecimentoId],
+  );
+  return rows.length ? rows[0] : null;
+}
+
+// Resposta do dono. Pública por natureza — é a réplica dele, e aparece embaixo da avaliação.
+router.put('/:id/reviews/:reviewId/reply', auth, isEstabelecimento, async (req, res) => {
+  try {
+    const estabelecimentoId = Number(req.params.id);
+    const reviewId = Number(req.params.reviewId);
+    if (!Number.isFinite(estabelecimentoId) || !Number.isFinite(reviewId)) {
+      return res.status(400).json({ error: 'invalid_request' });
+    }
+    const review = await fetchReviewDoDono(estabelecimentoId, reviewId, req.user.id);
+    if (!review) return res.status(404).json({ error: 'not_found' });
+
+    let resposta = req.body?.resposta;
+    resposta = resposta == null ? '' : String(resposta).trim();
+    // Vazio APAGA a resposta: é como o dono desfaz o que escreveu, sem rota separada de delete.
+    if (!resposta) {
+      await pool.query(
+        'UPDATE estabelecimento_reviews SET resposta=NULL, resposta_em=NULL WHERE id=?',
+        [reviewId],
+      );
+      return res.json({ ok: true, resposta: null, resposta_em: null });
+    }
+    if (resposta.length > 600) resposta = resposta.slice(0, 600);
+    await pool.query(
+      'UPDATE estabelecimento_reviews SET resposta=?, resposta_em=CURRENT_TIMESTAMP WHERE id=?',
+      [resposta, reviewId],
+    );
+    const [[row]] = await pool.query(
+      'SELECT resposta, resposta_em FROM estabelecimento_reviews WHERE id=? LIMIT 1',
+      [reviewId],
+    );
+    return res.json({ ok: true, resposta: row?.resposta || null, resposta_em: row?.resposta_em || null });
+  } catch (err) {
+    console.error('PUT /establishments/:id/reviews/:reviewId/reply', err);
+    return res.status(500).json({ error: 'reply_save_failed' });
+  }
+});
+
+// Denúncia do dono. NÃO esconde a avaliação: registra para o suporte olhar. Sumir com avaliação
+// verdadeira por reclamação do avaliado seria exatamente o abuso que este campo evita.
+router.post('/:id/reviews/:reviewId/report', auth, isEstabelecimento, async (req, res) => {
+  try {
+    const estabelecimentoId = Number(req.params.id);
+    const reviewId = Number(req.params.reviewId);
+    if (!Number.isFinite(estabelecimentoId) || !Number.isFinite(reviewId)) {
+      return res.status(400).json({ error: 'invalid_request' });
+    }
+    const review = await fetchReviewDoDono(estabelecimentoId, reviewId, req.user.id);
+    if (!review) return res.status(404).json({ error: 'not_found' });
+
+    let motivo = String(req.body?.motivo || '').trim();
+    if (!motivo) {
+      return res.status(400).json({ error: 'motivo_obrigatorio', message: 'Diga o que há de errado com esta avaliação.' });
+    }
+    if (motivo.length > 255) motivo = motivo.slice(0, 255);
+    await pool.query(
+      'UPDATE estabelecimento_reviews SET denuncia_motivo=?, denunciado_em=CURRENT_TIMESTAMP WHERE id=?',
+      [motivo, reviewId],
+    );
+    return res.json({ ok: true, denunciado: true });
+  } catch (err) {
+    console.error('POST /establishments/:id/reviews/:reviewId/report', err);
+    return res.status(500).json({ error: 'report_failed' });
+  }
+});
 
 router.delete('/:id/review', auth, isCliente, async (req, res) => {
 
@@ -3095,87 +3232,9 @@ router.delete('/:id/review', auth, isCliente, async (req, res) => {
 
 
 
-router.post('/:id/favorite', auth, isCliente, async (req, res) => {
-
-  try {
-
-    const estabelecimentoId = Number(req.params.id);
-
-    if (!Number.isFinite(estabelecimentoId)) {
-
-      return res.status(400).json({ error: 'invalid_estabelecimento', message: 'Identificador inválido.' });
-
-    }
-
-    const est = await ensureEstabelecimento(estabelecimentoId);
-
-    if (!est) return res.status(404).json({ error: 'not_found' });
 
 
 
-    await pool.query(
-
-      "INSERT IGNORE INTO cliente_favoritos (cliente_id, estabelecimento_id) VALUES (?, ?)",
-
-      [req.user.id, estabelecimentoId]
-
-    );
-
-
-
-    return res.json({ ok: true, is_favorite: true });
-
-  } catch (err) {
-
-    console.error('POST /establishments/:id/favorite', err);
-
-    return res.status(500).json({ error: 'favorite_failed' });
-
-  }
-
-});
-
-
-
-router.delete('/:id/favorite', auth, isCliente, async (req, res) => {
-
-  try {
-
-    const estabelecimentoId = Number(req.params.id);
-
-    if (!Number.isFinite(estabelecimentoId)) {
-
-      return res.status(400).json({ error: 'invalid_estabelecimento', message: 'Identificador inválido.' });
-
-    }
-
-    const est = await ensureEstabelecimento(estabelecimentoId);
-
-    if (!est) return res.status(404).json({ error: 'not_found' });
-
-
-
-    await pool.query(
-
-      "DELETE FROM cliente_favoritos WHERE cliente_id=? AND estabelecimento_id=?",
-
-      [req.user.id, estabelecimentoId]
-
-    );
-
-
-
-    return res.json({ ok: true, is_favorite: false });
-
-  } catch (err) {
-
-    console.error('DELETE /establishments/:id/favorite', err);
-
-    return res.status(500).json({ error: 'favorite_failed' });
-
-  }
-
-});
 
 
 

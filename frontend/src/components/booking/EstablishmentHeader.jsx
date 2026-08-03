@@ -8,7 +8,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
-  ChevronLeft, ChevronRight, MapPin, Star, Images, Info, Heart, X,
+  ChevronLeft, ChevronRight, MapPin, Star, Images, Info, MessageSquare, Flag, X,
   Clock, Phone, AtSign, Globe, MessageCircle, Check, Loader2, MapPinned,
 } from 'lucide-react';
 import { Api, resolveAssetUrl } from '../../utils/api.js';
@@ -148,9 +148,9 @@ export default function EstablishmentHeader({ establishment, onBack, showBack = 
   const viewer = getUser();
   const isCliente = viewer?.tipo === 'cliente';
 
-  const [favorite, setFavorite] = useState(Boolean(est.is_favorite));
-  const [favBusy, setFavBusy] = useState(false);
-  useEffect(() => { setFavorite(Boolean(est.is_favorite)); }, [est.is_favorite]);
+  // Favoritar saiu em 02/08/2026: dava para marcar, mas nunca existiu tela nem endpoint que
+  // listasse os favoritos — a pessoa guardava algo que jamais recuperava. E, com o diretório
+  // fechado, chega-se a um salão só pelo link: quem tem o link não precisa do favorito.
 
   const [myReview, setMyReview] = useState(est.user_review || null);
   useEffect(() => { setMyReview(est.user_review || null); }, [est.user_review]);
@@ -166,26 +166,10 @@ export default function EstablishmentHeader({ establishment, onBack, showBack = 
     return navigate('/');
   }, [onBack, navigate]);
 
-  const toggleFavorite = useCallback(async () => {
-    if (!isCliente) return goLogin();
-    if (!est.id || favBusy) return;
-    const nextVal = !favorite;
-    setFavBusy(true);
-    setFavorite(nextVal); // otimista
-    try {
-      if (nextVal) await Api.favoriteEstablishment(est.id);
-      else await Api.unfavoriteEstablishment(est.id);
-    } catch {
-      setFavorite(!nextVal); // reverte em caso de falha
-    } finally {
-      setFavBusy(false);
-    }
-  }, [isCliente, est.id, favorite, favBusy, goLogin]);
-
-  const openRating = useCallback(() => {
-    if (!isCliente) return goLogin();
-    setModal('rating');
-  }, [isCliente, goLogin]);
+  // Avaliar NÃO exige mais login: a prova de que a pessoa esteve ali é o contato bater com um
+  // agendamento (backend: findClienteComAtendimento). Exigir sessão excluiria justamente quem
+  // agenda como convidado pelo link — que é a maior parte dos clientes de um salão.
+  const openRating = useCallback(() => setModal('rating'), []);
 
   return (
     <>
@@ -314,7 +298,7 @@ export default function EstablishmentHeader({ establishment, onBack, showBack = 
           <div className="tw-mt-4 tw-flex tw-w-full tw-items-stretch tw-gap-2">
             <ActionChip icon={Images} label="Galeria" muted={!gallery.length} onClick={() => gallery.length && setModal('gallery')} />
             <ActionChip icon={Info} label="Detalhes" onClick={() => setModal('details')} />
-            <ActionChip icon={Heart} label={favorite ? 'Favorito' : 'Favoritar'} active={favorite} busy={favBusy} onClick={toggleFavorite} />
+            <ActionChip icon={MessageSquare} label="Avaliações" onClick={() => setModal('reviews')} />
             <ActionChip icon={Star} label="Avaliar" onClick={openRating} />
           </div>
         </div>
@@ -324,6 +308,7 @@ export default function EstablishmentHeader({ establishment, onBack, showBack = 
       {modal === 'details' && (
         <DetailsModal est={est} profile={profile} status={status} address={address} onClose={() => setModal(null)} />
       )}
+      {modal === 'reviews' && <ReviewsModal est={est} onClose={() => setModal(null)} />}
       {modal === 'rating' && (
         <RatingModal
           est={est}
@@ -664,6 +649,163 @@ function SectionTitle({ icon: Icon, children }) {
 }
 
 // ---------------------------------------------------------------------------
+// Lista de avaliações.
+//
+// Ela não existia: dava para avaliar, a média aparecia no payload, e ninguém conseguia LER as
+// avaliações no fluxo atual (só o /novo-agendamento legado, que está órfão). Sem lista, o dono
+// também não teria onde responder.
+//
+// Responder e denunciar aparecem só para o dono DESTE estabelecimento. A denúncia não esconde
+// nada: registra para o suporte olhar — sumir com avaliação verdadeira por reclamação do
+// avaliado é o abuso que o campo precisa evitar.
+// ---------------------------------------------------------------------------
+function ReviewsModal({ est, onClose }) {
+  const viewer = getUser();
+  const isDono = viewer?.tipo === 'estabelecimento' && Number(viewer?.id) === Number(est.id);
+
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [erro, setErro] = useState('');
+
+  useEffect(() => {
+    let vivo = true;
+    Api.getEstablishmentReviews(est.id, { page: 1, limit: 20 })
+      .then((data) => { if (vivo) setItems(Array.isArray(data?.items) ? data.items : []); })
+      .catch(() => { if (vivo) setErro('Não foi possível carregar as avaliações.'); })
+      .finally(() => { if (vivo) setLoading(false); });
+    return () => { vivo = false; };
+  }, [est.id]);
+
+  const aplicar = (id, patch) => {
+    setItems((atual) => atual.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+  };
+
+  return (
+    <ModalShell onClose={onClose} maxWidth={520}>
+      <ModalHeader title="Avaliações" onClose={onClose} />
+      <div className="tw-flex tw-flex-col tw-gap-3 tw-p-4">
+        {loading && <p className="tw-m-0 tw-text-sm" style={{ color: 'var(--muted-ink, #6B7280)' }}>Carregando…</p>}
+        {erro && <p className="tw-m-0 tw-text-sm" style={{ color: 'var(--status-cancelado-fg, #B4232A)' }}>{erro}</p>}
+        {!loading && !erro && !items.length && (
+          <p className="tw-m-0 tw-text-sm" style={{ color: 'var(--muted-ink, #6B7280)' }}>
+            Este estabelecimento ainda não recebeu avaliações.
+          </p>
+        )}
+        {items.map((review) => (
+          <ReviewItem key={review.id} est={est} review={review} isDono={isDono} onPatch={aplicar} />
+        ))}
+      </div>
+    </ModalShell>
+  );
+}
+
+function ReviewItem({ est, review, isDono, onPatch }) {
+  const [respondendo, setRespondendo] = useState(false);
+  const [texto, setTexto] = useState(review.resposta || '');
+  const [busy, setBusy] = useState(false);
+
+  const salvarResposta = async () => {
+    setBusy(true);
+    try {
+      const r = await Api.replyEstablishmentReview(est.id, review.id, { resposta: texto.trim() });
+      onPatch(review.id, { resposta: r?.resposta ?? null, resposta_em: r?.resposta_em ?? null });
+      setRespondendo(false);
+    } catch {
+      /* mantém o editor aberto: o texto do dono não pode se perder num erro de rede */
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const denunciar = async () => {
+    const motivo = typeof window !== 'undefined'
+      ? window.prompt('O que há de errado com esta avaliação?')
+      : '';
+    if (!motivo || !motivo.trim()) return;
+    setBusy(true);
+    try {
+      await Api.reportEstablishmentReview(est.id, review.id, { motivo: motivo.trim() });
+      onPatch(review.id, { denunciada: true });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="tw-rounded-2xl tw-p-3" style={{ border: '1px solid var(--brand-border, #E7E5F5)' }}>
+      <div className="tw-flex tw-items-center tw-gap-2">
+        <strong className="tw-text-sm" style={{ color: 'var(--ink, #1E1B4B)' }}>{review.author?.name || 'Cliente'}</strong>
+        <span className="tw-inline-flex tw-items-center tw-gap-1 tw-text-sm" style={{ color: '#f5a524' }}>
+          <Star size={14} strokeWidth={0} fill="currentColor" aria-hidden="true" />
+          {review.nota}
+        </span>
+        {isDono && (
+          <button
+            type="button"
+            onClick={denunciar}
+            disabled={busy || review.denunciada}
+            title={review.denunciada ? 'Já denunciada' : 'Denunciar avaliação'}
+            aria-label={review.denunciada ? 'Avaliação já denunciada' : 'Denunciar avaliação'}
+            className="tw-ml-auto tw-inline-flex tw-items-center tw-border-0 tw-bg-transparent"
+            style={{ cursor: busy || review.denunciada ? 'default' : 'pointer', padding: 4 }}
+          >
+            <Flag
+              size={15}
+              strokeWidth={2}
+              aria-hidden="true"
+              style={{ color: review.denunciada ? 'var(--status-cancelado-fg, #B4232A)' : 'var(--muted-ink, #6B7280)' }}
+            />
+          </button>
+        )}
+      </div>
+
+      {review.comentario && (
+        <p className="tw-m-0 tw-mt-2 tw-text-sm" style={{ color: 'var(--ink, #1E1B4B)' }}>{review.comentario}</p>
+      )}
+
+      {review.resposta && !respondendo && (
+        <div className="tw-mt-3 tw-rounded-xl tw-p-3" style={{ background: 'var(--surface-soft, #FBFBFE)' }}>
+          <span className="tw-text-xs tw-font-bold" style={{ color: 'var(--brand, #5049E5)' }}>Resposta do estabelecimento</span>
+          <p className="tw-m-0 tw-mt-1 tw-text-sm" style={{ color: 'var(--ink, #1E1B4B)' }}>{review.resposta}</p>
+        </div>
+      )}
+
+      {isDono && !respondendo && (
+        <button
+          type="button"
+          onClick={() => { setTexto(review.resposta || ''); setRespondendo(true); }}
+          className="tw-mt-2 tw-border-0 tw-bg-transparent tw-p-0 tw-text-xs tw-font-bold"
+          style={{ color: 'var(--brand, #5049E5)', cursor: 'pointer' }}
+        >
+          {review.resposta ? 'Editar resposta' : 'Responder'}
+        </button>
+      )}
+
+      {isDono && respondendo && (
+        <div className="tw-mt-2 tw-flex tw-flex-col tw-gap-2">
+          <textarea
+            value={texto}
+            onChange={(e) => setTexto(e.target.value)}
+            rows={3}
+            placeholder="Sua resposta aparece publicamente embaixo da avaliação"
+            className="tw-w-full tw-rounded-xl tw-p-3 tw-text-sm"
+            style={{ background: 'var(--surface, #fff)', border: '1px solid var(--brand-border, #E7E5F5)', color: 'var(--ink, #1E1B4B)', resize: 'vertical' }}
+          />
+          <div className="tw-flex tw-gap-2">
+            <button type="button" className="btn btn--primary btn--sm" onClick={salvarResposta} disabled={busy}>
+              {review.resposta && !texto.trim() ? 'Remover resposta' : 'Salvar resposta'}
+            </button>
+            <button type="button" className="btn btn--outline btn--sm" onClick={() => setRespondendo(false)} disabled={busy}>
+              Cancelar
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Avaliar (seleção de estrelas + comentário)
 // ---------------------------------------------------------------------------
 function RatingModal({ est, myReview, onClose, onSaved }) {
@@ -672,13 +814,30 @@ function RatingModal({ est, myReview, onClose, onSaved }) {
   const [comentario, setComentario] = useState(myReview?.comentario || '');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  // Pré-preenche para quem está logado; quem agendou como convidado digita o mesmo contato que
+  // usou ao marcar — é o que o servidor confere contra os agendamentos deste salão.
+  const viewer = getUser();
+  const [nome, setNome] = useState(viewer?.nome || '');
+  const [contato, setContato] = useState(viewer?.email || '');
 
   const submit = async () => {
     if (!nota) { setError('Escolha de 1 a 5 estrelas.'); return; }
+    if (nome.trim().length < 2) { setError('Informe seu nome.'); return; }
+    const contatoTrim = contato.trim();
+    if (!contatoTrim) { setError('Informe o telefone ou e-mail que você usou ao agendar.'); return; }
     setSaving(true);
     setError('');
+    // O servidor normaliza telefone e compara e-mail em minúsculas; aqui só escolhemos o campo
+    // pelo '@' — adivinhar formato no cliente criaria uma segunda regra para divergir da dele.
+    const pareceEmail = contatoTrim.includes('@');
     try {
-      await Api.saveEstablishmentReview(est.id, { nota, comentario: comentario.trim() || null });
+      await Api.saveEstablishmentReview(est.id, {
+        nota,
+        comentario: comentario.trim() || null,
+        nome: nome.trim(),
+        email: pareceEmail ? contatoTrim : undefined,
+        telefone: pareceEmail ? undefined : contatoTrim,
+      });
       onSaved({ nota, comentario: comentario.trim() || null, updated_at: null });
     } catch (e) {
       setError(e?.data?.message || 'Não foi possível salvar sua avaliação. Tente novamente.');
@@ -731,6 +890,28 @@ function RatingModal({ est, myReview, onClose, onSaved }) {
           className="tw-w-full tw-rounded-xl tw-p-3 tw-text-sm"
           style={{ background: 'var(--surface, #fff)', border: '1px solid var(--brand-border, #E7E5F5)', color: 'var(--ink, #1E1B4B)', resize: 'vertical' }}
         />
+
+        {/* A identificação é o que separa avaliação de quem foi atendido de avaliação de
+            qualquer um: o servidor procura um agendamento neste salão com este contato. */}
+        <div className="tw-flex tw-flex-col tw-gap-2">
+          <input
+            value={nome}
+            onChange={(e) => setNome(e.target.value)}
+            placeholder="Seu nome"
+            className="tw-w-full tw-rounded-xl tw-p-3 tw-text-sm"
+            style={{ background: 'var(--surface, #fff)', border: '1px solid var(--brand-border, #E7E5F5)', color: 'var(--ink, #1E1B4B)' }}
+          />
+          <input
+            value={contato}
+            onChange={(e) => setContato(e.target.value)}
+            placeholder="Telefone ou e-mail do agendamento"
+            className="tw-w-full tw-rounded-xl tw-p-3 tw-text-sm"
+            style={{ background: 'var(--surface, #fff)', border: '1px solid var(--brand-border, #E7E5F5)', color: 'var(--ink, #1E1B4B)' }}
+          />
+          <p className="tw-m-0 tw-text-xs" style={{ color: 'var(--muted-ink, #6B7280)' }}>
+            Só quem já foi atendido aqui pode avaliar. Use o mesmo contato que informou ao agendar.
+          </p>
+        </div>
 
         {error && <p className="tw-m-0 tw-text-sm" style={{ color: 'var(--status-cancelado-fg, #B4232A)' }}>{error}</p>}
 
