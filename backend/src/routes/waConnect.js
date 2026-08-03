@@ -1,6 +1,10 @@
 import { Router } from 'express';
 import { auth, isEstabelecimento } from '../middleware/auth.js';
-import { getWhatsAppConnectFeatureState, isWhatsAppConnectEnabled } from '../lib/featureFlags.js';
+import {
+  getWhatsAppConnectFeatureState,
+  isWhatsAppConnectEnabled,
+  isWhatsAppConnectFeatureOn,
+} from '../lib/featureFlags.js';
 import {
   connectManualWhatsAppAccount,
   disconnectTenantWhatsAppAccount,
@@ -61,27 +65,29 @@ function sendRouteError(res, err, fallbackCode, fallbackMessage) {
   return res.status(status).json(body);
 }
 
-function buildFeatureDisabledResponse() {
+// O id vem por parâmetro, e não de um `req` capturado: a liberação é POR estabelecimento desde
+// que existe a lista de permitidos, e estas duas funções são chamadas de rotas diferentes.
+function buildFeatureDisabledResponse(estabelecimentoId = null) {
   return {
     ok: true,
     connected: false,
     status: 'coming_soon',
     account: null,
-    ...getWhatsAppConnectFeatureState(),
+    ...getWhatsAppConnectFeatureState(estabelecimentoId),
   };
 }
 
-function sendFeatureDisabled(res) {
+function sendFeatureDisabled(res, estabelecimentoId = null) {
   return res.status(403).json({
     ok: false,
     error: 'wa_connect_disabled',
-    ...getWhatsAppConnectFeatureState(),
+    ...getWhatsAppConnectFeatureState(estabelecimentoId),
   });
 }
 
 router.get('/account', auth, isEstabelecimento, async (req, res) => {
-  if (!isWhatsAppConnectEnabled()) {
-    return res.json(buildFeatureDisabledResponse());
+  if (!isWhatsAppConnectEnabled(req.user?.id)) {
+    return res.json(buildFeatureDisabledResponse(req.user?.id));
   }
   try {
     const result = await getTenantWhatsAppAccount(req.user.id);
@@ -107,7 +113,7 @@ router.get('/account', auth, isEstabelecimento, async (req, res) => {
 
     return res.json({
       ...buildAccountResponse(result),
-      ...getWhatsAppConnectFeatureState(),
+      ...getWhatsAppConnectFeatureState(req.user?.id),
       templates,
       auto_service: autoService,
     });
@@ -153,8 +159,8 @@ router.put('/bot/auto-service', auth, isEstabelecimento, async (req, res) => {
 });
 
 router.post('/manual/validate', auth, isEstabelecimento, async (req, res) => {
-  if (!isWhatsAppConnectEnabled()) {
-    return sendFeatureDisabled(res);
+  if (!isWhatsAppConnectEnabled(req.user?.id)) {
+    return sendFeatureDisabled(res, req.user?.id);
   }
   try {
     const result = await validateManualWhatsAppAccount({
@@ -178,8 +184,8 @@ router.post('/manual/validate', auth, isEstabelecimento, async (req, res) => {
 });
 
 router.post('/manual/connect', auth, isEstabelecimento, async (req, res) => {
-  if (!isWhatsAppConnectEnabled()) {
-    return sendFeatureDisabled(res);
+  if (!isWhatsAppConnectEnabled(req.user?.id)) {
+    return sendFeatureDisabled(res, req.user?.id);
   }
   try {
     const result = await connectManualWhatsAppAccount({
@@ -199,8 +205,8 @@ router.post('/manual/connect', auth, isEstabelecimento, async (req, res) => {
 });
 
 async function handleDisconnect(req, res) {
-  if (!isWhatsAppConnectEnabled()) {
-    return sendFeatureDisabled(res);
+  if (!isWhatsAppConnectEnabled(req.user?.id)) {
+    return sendFeatureDisabled(res, req.user?.id);
   }
   try {
     const result = await disconnectTenantWhatsAppAccount(req.user.id);
@@ -221,14 +227,14 @@ router.delete('/account/disconnect', auth, isEstabelecimento, handleDisconnect);
 
 // Compatibilidade temporaria para consumidores antigos.
 router.get('/connect/status', auth, isEstabelecimento, async (req, res) => {
-  if (!isWhatsAppConnectEnabled()) {
-    return res.json(buildFeatureDisabledResponse());
+  if (!isWhatsAppConnectEnabled(req.user?.id)) {
+    return res.json(buildFeatureDisabledResponse(req.user?.id));
   }
   try {
     const result = await getTenantWhatsAppAccount(req.user.id);
     return res.json({
       ...buildAccountResponse(result),
-      ...getWhatsAppConnectFeatureState(),
+      ...getWhatsAppConnectFeatureState(req.user?.id),
     });
   } catch (err) {
     console.error('[wa][connect/status]', err?.message || err);
@@ -239,12 +245,12 @@ router.get('/connect/status', auth, isEstabelecimento, async (req, res) => {
 router.post('/connect/disconnect', auth, isEstabelecimento, handleDisconnect);
 
 router.get('/connect/start', auth, isEstabelecimento, async (req, res) => {
-  if (!isWhatsAppConnectEnabled()) {
+  if (!isWhatsAppConnectEnabled(req.user?.id)) {
     return res.json({
       ok: true,
       deprecated: true,
       url: buildPanelUrl(),
-      ...getWhatsAppConnectFeatureState(),
+      ...getWhatsAppConnectFeatureState(req.user?.id),
     });
   }
   console.info('[wa][connect/start][legacy_redirect]', {
@@ -261,7 +267,9 @@ router.get('/connect/start', auth, isEstabelecimento, async (req, res) => {
 });
 
 router.get('/connect/callback', async (_req, res) => {
-  if (!isWhatsAppConnectEnabled()) {
+  // Sem autenticacao aqui: nao ha estabelecimento para consultar na lista. Esta rota so redireciona
+  // ao painel, entao a pergunta e sobre a feature em geral.
+  if (!isWhatsAppConnectFeatureOn()) {
     return res.redirect(302, buildPanelUrl());
   }
   return res.redirect(
@@ -290,8 +298,8 @@ router.get('/connect/callback', async (_req, res) => {
  * de exibir um caminho que quebra ao ser clicado.
  */
 router.get('/embedded-signup/config', auth, isEstabelecimento, (_req, res) => {
-  if (!isWhatsAppConnectEnabled()) {
-    return sendFeatureDisabled(res);
+  if (!isWhatsAppConnectEnabled(req.user?.id)) {
+    return sendFeatureDisabled(res, req.user?.id);
   }
   try {
     return res.json({ ok: true, available: true, config: getEmbeddedSignupPublicConfig() });
@@ -311,8 +319,8 @@ router.get('/embedded-signup/config', auth, isEstabelecimento, (_req, res) => {
  * conta. O `session_info` vem do evento `WA_EMBEDDED_SIGNUP` que o SDK publica na janela.
  */
 router.post('/embedded-signup/exchange', auth, isEstabelecimento, async (req, res) => {
-  if (!isWhatsAppConnectEnabled()) {
-    return sendFeatureDisabled(res);
+  if (!isWhatsAppConnectEnabled(req.user?.id)) {
+    return sendFeatureDisabled(res, req.user?.id);
   }
   try {
     const account = await completeEmbeddedSignup({
@@ -326,7 +334,7 @@ router.post('/embedded-signup/exchange', auth, isEstabelecimento, async (req, re
     });
     return res.json({
       ...buildAccountResponse({ account, connected: true, status: 'connected' }),
-      ...getWhatsAppConnectFeatureState(),
+      ...getWhatsAppConnectFeatureState(req.user?.id),
     });
   } catch (err) {
     console.error('[wa][embedded-signup][exchange]', err?.code || err?.message || err);

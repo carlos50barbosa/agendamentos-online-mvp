@@ -240,10 +240,20 @@ export function useBusinessSettings(options = {}) {
     try {
       const response = await Api.waAccount();
       const nextAccount = response?.account || response || null;
+      // O SERVIDOR manda sobre a liberação, não a flag assada no bundle.
+      //
+      // A flag de build é global — ligada, todo estabelecimento veria a tela. O backend tem uma
+      // lista de permitidos (WHATSAPP_CONNECT_ALLOWLIST) e responde `feature_enabled: false` para
+      // quem está fora. Sem obedecer a isso aqui, a tela mostraria o botão de conectar para
+      // alguém que receberia 403 ao clicar — e hoje conectar significa migrar o número.
+      const liberadoPeloServidor = response?.feature_enabled !== false;
       setWhatsapp((current) => ({
         ...current,
         loading: false,
-        account: nextAccount,
+        featureEnabled: liberadoPeloServidor,
+        mode: response?.mode || current.mode,
+        message: response?.message || current.message,
+        account: liberadoPeloServidor ? nextAccount : null,
         // Status dos modelos na WABA própria. `null` quando o estabelecimento não tem conta
         // própria — a tela não mostra nada nesse caso.
         templates: response?.templates || null,
@@ -887,7 +897,10 @@ export function useBusinessSettings(options = {}) {
     user,
     isEstablishment,
     establishmentId,
-    whatsappConnectEnabled,
+    // A TELA obedece ao servidor. A flag de build só diz se a feature existe no bundle; quem
+    // decide se ESTE estabelecimento a enxerga é o backend, pela lista de permitidos. Internamente
+    // a flag de build continua sendo o portão que evita chamadas inúteis à API.
+    whatsappConnectEnabled: whatsappConnectEnabled && whatsapp.featureEnabled !== false,
     planInfo,
     billing,
     whatsapp,
