@@ -9,7 +9,7 @@ import { notifyEmail } from '../lib/notifications.js';
 import crypto from 'crypto';
 import { consumeLinkToken } from '../lib/wa_store.js';
 import { saveAvatarFromDataUrl, removeAvatarFile } from '../lib/avatar.js';
-import { MAX_TRIAL_DAYS, DEFAULT_TRIAL_PLAN, planAllowsTrial } from '../lib/plans.js';
+import { MAX_TRIAL_DAYS, DEFAULT_TRIAL_PLAN, planAllowsTrial, isKnownPlan } from '../lib/plans.js';
 import { config } from '../lib/config.js';
 import {
   grantWhatsAppConsent,
@@ -221,15 +221,30 @@ router.post('/register', async (req, res) => {
     const normalizedRequestedPlan = String(req.body?.trial_plan || req.body?.plan || '').trim().toLowerCase();
     // Quem pode ser testado sai do catálogo (planAllowsTrial), não de um Set local: a regra
     // vivia em três cópias — aqui, em Cadastro.jsx e num `=== pro` cravado em Planos.jsx.
-    const planForTrial = planAllowsTrial(normalizedRequestedPlan) ? normalizedRequestedPlan : DEFAULT_TRIAL_PLAN;
+    //
+    // `isKnownPlan` vem PRIMEIRO, e não é redundância. O Set que existia aqui antes barrava o `''`
+    // por não ser membro; `planAllowsTrial` sozinho não barra, porque resolve plano desconhecido
+    // como starter e responde pela capacidade DELE. O `''` passou, virou `SET plan=''` e o ENUM
+    // recusou — levando o UPDATE inteiro, e o prazo do teste, junto (cadastro 191, 02/08/2026).
+    const planForTrial =
+      isKnownPlan(normalizedRequestedPlan) && planAllowsTrial(normalizedRequestedPlan)
+        ? normalizedRequestedPlan
+        : DEFAULT_TRIAL_PLAN;
     const trialEndsAt =
       tipo === 'estabelecimento' && MAX_TRIAL_DAYS > 0
         ? new Date(now.getTime() + MAX_TRIAL_DAYS * DAY_MS)
         : null;
 
+    // O plano e o prazo do teste entram no INSERT, e não num UPDATE logo depois.
+    //
+    // Eram duas escritas, e a segunda vinha embrulhada num try/catch que só logava: quando ela
+    // falhava, o cadastro seguia devolvendo 200 com um estabelecimento pela metade — existente,
+    // cobrável, e sem data de fim de teste. Foi assim que a conta 191 nasceu com trial infinito e
+    // ninguém ficou sabendo até alguém ir ler o log. Numa escrita só não existe esse meio-termo:
+    // ou o usuário nasce inteiro, ou não nasce e o cadastro falha alto, que é o que se pode ver.
     const hash = await bcrypt.hash(String(senha), 10);
     const [r] = await pool.query(
-      'INSERT INTO usuarios (nome, email, telefone, data_nascimento, cpf_cnpj, cep, endereco, numero, complemento, bairro, cidade, estado, avatar_url, senha_hash, tipo) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+      'INSERT INTO usuarios (nome, email, telefone, data_nascimento, cpf_cnpj, cep, endereco, numero, complemento, bairro, cidade, estado, avatar_url, senha_hash, tipo, plan, plan_status, plan_trial_ends_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
       [
         nomeTrim,
         emailTrim,
@@ -246,19 +261,11 @@ router.post('/register', async (req, res) => {
         null,
         hash,
         tipo,
+        planForTrial,
+        'trialing',
+        trialEndsAt,
       ]
     );
-
-    if (trialEndsAt) {
-      try {
-        await pool.query(
-          'UPDATE usuarios SET plan=?, plan_status=?, plan_trial_ends_at=? WHERE id=?',
-          [planForTrial, 'trialing', trialEndsAt, r.insertId]
-        );
-      } catch (err) {
-        console.error('[auth/register] failed to set trial end', err);
-      }
-    }
 
     const secret = process.env.JWT_SECRET;
     if (!secret) return res.status(500).json({ error: 'server_config', message: 'JWT_SECRET ausente.' });

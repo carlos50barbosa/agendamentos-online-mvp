@@ -93,6 +93,25 @@ export function planAllowsTrial(plan) {
   return Boolean(resolvePlanConfig(plan).allowTrial);
 }
 
+/**
+ * Este plano EXISTE no catálogo?
+ *
+ * Pergunta separada de "pode ser testado" de propósito. `planAllowsTrial` responde pelo
+ * `resolvePlanConfig`, que cai no starter para chave desconhecida — então `planAllowsTrial('')` e
+ * `planAllowsTrial('xyz')` respondem `true`, porque o starter permite teste. Ótimo para LER
+ * capacidade de um plano já validado; péssimo como porteiro de entrada.
+ *
+ * Foi assim que o cadastro 191 quebrou em 02/08/2026: o `''` do corpo da requisição passou pelo
+ * guard, chegou ao `UPDATE ... SET plan=''` e o ENUM da coluna recusou (1265, "Data truncated for
+ * column 'plan'"). O UPDATE inteiro morreu junto e o estabelecimento ficou sem
+ * `plan_trial_ends_at` — teste que nunca vence, aviso de fim que nunca dispara.
+ *
+ * Validação é pertinência, não capacidade. Quem valida entrada usa esta função ANTES da outra.
+ */
+export function isKnownPlan(plan) {
+  return PLAN_TIERS.includes(String(plan ?? '').trim().toLowerCase());
+}
+
 /** Plano padrão do teste quando o pedido não veio ou não pode ser testado. */
 export const DEFAULT_TRIAL_PLAN = 'starter';
 
