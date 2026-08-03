@@ -35,7 +35,7 @@ import estabelecimentoSettingsRouter from './routes/estabelecimento_settings.js'
 import onboardingRouter from './routes/onboarding.js';
 import { pool } from './lib/db.js';
 import { config, getOperationalHardeningWarnings } from './lib/config.js';
-import { buildRateLimitClientKey, consumeRateLimit, getRateLimitMaintenanceInfo, initializeRateLimitStore, setRateLimitHeaders, startRateLimitStoreMaintenance } from './lib/request_rate_limit.js';
+import { buildRateLimitClientKey, buildRateLimitBody, consumeRateLimit, getRateLimitMaintenanceInfo, initializeRateLimitStore, setRateLimitHeaders, startRateLimitStoreMaintenance } from './lib/request_rate_limit.js';
 import { startMaintenance, startPublicPendingCleanup, startAppointmentPaymentCleanup } from './lib/maintenance.js';
 import { mountWebhooks } from './routes/webhooks.js';
 import { startBillingMonitor } from './lib/billing_monitor.js';
@@ -268,7 +268,7 @@ app.use((req, res, next) => {
       retry_after_sec: result.retryAfterSec,
       store_driver: result.storeDriver || null,
     }, { level: 'warn' });
-    return res.status(429).json({ error: 'rate_limited', request_id: req.requestId || null });
+    return res.status(429).json(buildRateLimitBody(result, { request_id: req.requestId || null }));
   }).catch(next);
 });
 

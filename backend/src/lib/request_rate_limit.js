@@ -710,6 +710,44 @@ export async function consumeRateLimit(input) {
   return result;
 }
 
+/**
+ * "Tente de novo em quanto tempo?" em português de gente.
+ *
+ * Arredonda para CIMA e nunca promete precisão de segundo: a janela é deslizante, e "aguarde 6
+ * minutos" que na verdade eram 6m01s vira uma segunda tentativa recusada — exatamente a
+ * experiência que a mensagem existe para evitar.
+ */
+export function describeRetryAfter(seconds) {
+  const s = Number(seconds);
+  if (!Number.isFinite(s) || s <= 0) return 'alguns instantes';
+  if (s < 60) return 'menos de 1 minuto';
+  const minutos = Math.ceil(s / 60);
+  return minutos === 1 ? '1 minuto' : `${minutos} minutos`;
+}
+
+/**
+ * O corpo de um 429, com `message` — e não só o código.
+ *
+ * O corpo era `{ error: 'rate_limited' }`. O `api.js` do front monta a mensagem do erro a partir de
+ * `data.message || data.error`, e a tela imprime isso direto: a pessoa lia a string **`rate_limited`**
+ * em vermelho, sem tradução, sem prazo e sem saída.
+ *
+ * Em 02/08/2026 uma dona de salão vinda de anúncio pago levou esse texto no login e tentou entrar
+ * 29 vezes em 10 minutos — ela ainda não tinha conta, e nada na tela dizia isso nem dizia para
+ * esperar. O custo de um código sem tradução não é estético: é o lead que se pagou para trazer.
+ *
+ * `retry_after_sec` vai junto para que a tela possa, um dia, mostrar contagem regressiva sem
+ * precisar reparsear a frase.
+ */
+export function buildRateLimitBody(result, extra = {}) {
+  return {
+    error: 'rate_limited',
+    message: `Muitas tentativas seguidas. Aguarde ${describeRetryAfter(result?.retryAfterSec)} e tente novamente.`,
+    retry_after_sec: result?.retryAfterSec ?? null,
+    ...extra,
+  };
+}
+
 export function setRateLimitHeaders(res, result) {
   if (!res || !result) return;
   if (result.limit != null) res.set('X-RateLimit-Limit', String(result.limit));
@@ -724,7 +762,9 @@ export function createRateLimitMiddleware({
   windowMs,
   keyResolver = (req) => buildRateLimitClientKey(req),
   responseStatus = 429,
-  responseBody = { error: 'rate_limited' },
+  // `null` = deixa o corpo ser montado a partir do resultado, com mensagem legível e prazo.
+  // Quem passa um corpo próprio (billing.js tem vários) continua mandando no seu.
+  responseBody = null,
 } = {}) {
   return (req, res, next) => {
     Promise.resolve().then(async () => {
@@ -744,7 +784,7 @@ export function createRateLimitMiddleware({
         window_ms: resolvedWindowMs,
         store_driver: getRateLimitStoreInfo().driver,
       });
-      return res.status(responseStatus).json(responseBody);
+      return res.status(responseStatus).json(responseBody || buildRateLimitBody(result));
     }).catch(next);
   };
 }

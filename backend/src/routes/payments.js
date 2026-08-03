@@ -9,7 +9,7 @@ import { resolveMpAccessToken } from '../services/mpAccounts.js';
 import { tryAuthenticateRequest } from '../middleware/auth.js';
 import { verifyPublicDepositToken } from '../lib/public_deposit_token.js';
 import { canAccessPaymentStatus, serializePaymentStatusResponse } from '../lib/payment_status_access.js';
-import { buildRateLimitClientKey, consumeRateLimit, observeAbuseFlood, setRateLimitHeaders } from '../lib/request_rate_limit.js';
+import { buildRateLimitClientKey, buildRateLimitBody, consumeRateLimit, observeAbuseFlood, setRateLimitHeaders } from '../lib/request_rate_limit.js';
 import { logBlockedRouteAccess, logSecurityEvent } from '../lib/route_access.js';
 import { cancelPendingPaymentAppointmentTx } from '../lib/appointment_loyalty.js';
 
@@ -244,7 +244,7 @@ async function enforcePublicPaymentStatusRateLimit(req, res, { paymentId, authRe
     retry_after_sec: result.retryAfterSec,
     store_driver: result.storeDriver || null,
   }, { level: 'warn' });
-  res.status(429).json({ error: 'rate_limited' });
+  res.status(429).json(buildRateLimitBody(result));
   return true;
 }
 

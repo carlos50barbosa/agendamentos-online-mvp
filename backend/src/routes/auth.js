@@ -19,7 +19,7 @@ import {
   CONSENT_AUDIENCE,
   buildConsentText,
 } from '../lib/whatsapp_consent.js';
-import { buildRateLimitClientKey, consumeRateLimit, setRateLimitHeaders } from '../lib/request_rate_limit.js';
+import { buildRateLimitClientKey, buildRateLimitBody, consumeRateLimit, setRateLimitHeaders } from '../lib/request_rate_limit.js';
 import { logSecurityEvent } from '../lib/route_access.js';
 import { setAudit } from '../lib/audit.js';
 import { normalizePhoneBR } from '../lib/phone_br.js';
@@ -79,7 +79,7 @@ async function enforceAuthRateLimit(req, res, {
       store_driver: result.storeDriver || null,
       ...check.extraDetails,
     }, { level: 'warn' });
-    res.status(429).json({ error: 'rate_limited' });
+    res.status(429).json(buildRateLimitBody(result));
     return true;
   }
 
