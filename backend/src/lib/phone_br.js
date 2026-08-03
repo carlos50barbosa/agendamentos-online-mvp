@@ -38,6 +38,48 @@ export function isValidPhoneBR(value) {
 }
 
 /**
+ * As duas formas pelas quais o MESMO celular brasileiro aparece: com e sem o nono dígito.
+ *
+ * ─── Por que isto precisa existir ───────────────────────────────────────────────────────────────
+ *
+ * O nono dígito é do número de verdade — todo celular brasileiro tem, e é ele que a pessoa disca.
+ * Mas o WhatsApp identifica número brasileiro pelo formato ANTERIOR à migração de 2013 quando o DDD
+ * é 31 ou maior: o webhook entrega `553189524375` para quem, no cadastro, é `5531989524375`.
+ * Medido na própria base em 02/08/2026 — DDD 11/12 chegam com 13 dígitos, DDD 31/63/71/91 com 12.
+ *
+ * Não é outro telefone: é apelido interno da Meta. Comparar os dois com `=` foi o que fez uma dona
+ * de salão mandar AUTORIZO e ouvir "não encontramos este número em nenhum cadastro" — e o mesmo
+ * desencontro cala o envio depois, porque o portão consulta o aceite pelo número do cadastro
+ * enquanto o aceite foi gravado sob o apelido.
+ *
+ * Serve para LER (procurar as duas), nunca para escrever: quem grava consentimento grava a string
+ * exata que chegou, porque `whatsapp_optins` é trilha de prova para a Meta.
+ *
+ * Fixo não tem variante — 10 dígitos locais é o que ele é.
+ */
+export function phoneVariantsBR(value) {
+  const e164 = normalizePhoneBR(value);
+  if (!e164) return [];
+
+  const pais = e164.slice(0, 2);
+  const ddd = e164.slice(2, 4);
+  const numero = e164.slice(4);
+
+  // 13 dígitos com nono dígito 9 → a forma curta é o mesmo celular sem ele.
+  if (numero.length === 9 && numero[0] === '9') {
+    return [e164, `${pais}${ddd}${numero.slice(1)}`];
+  }
+
+  // 12 dígitos começando em 6..9 → celular no formato antigo; a forma longa acrescenta o 9.
+  // Começando em 2..5 é fixo: não ganha nono dígito nenhum.
+  if (numero.length === 8 && numero[0] >= '6' && numero[0] <= '9') {
+    return [e164, `${pais}${ddd}9${numero}`];
+  }
+
+  return [e164];
+}
+
+/**
  * Os 67 DDDs que existem. Não é 11..99: 20, 23, 25, 26, 29, 30, 36, 39, 40, 50, 52, 56-60, 70, 72,
  * 76, 78, 80 e 90 nunca foram atribuídos.
  */

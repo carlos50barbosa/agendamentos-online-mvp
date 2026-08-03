@@ -70,7 +70,12 @@ test('com estabelecimento consulta os DOIS escopos', async () => {
   assert.equal(await hasWhatsAppConsent('11999990000', { estabelecimentoId: 26, deps: { query: b.query } }), true);
   assert.equal(b.chamadas.length, 2);
   // normalizePhoneBR devolve sem o "+" — conferido contra o comportamento real, nao presumido.
-  assert.deepEqual(b.chamadas[1].params, ['5511999990000', 26]);
+  //
+  // Duas formas do MESMO celular: a Meta identifica numero brasileiro pelo formato anterior a
+  // 2013 (sem o nono digito), entao o aceite pode ter sido gravado sob qualquer uma das duas.
+  // Ler so uma deixava aceite valido invisivel para o envio — e, pior, PARAR gravado numa forma
+  // sem calar a outra. O id do estabelecimento vem por ultimo. Ver wa-phone-nono-digito.test.js.
+  assert.deepEqual(b.chamadas[1].params, ['5511999990000', '551199990000', 26]);
 });
 
 test('revogacao de plataforma nem consulta o salao — ja esta decidido', async () => {

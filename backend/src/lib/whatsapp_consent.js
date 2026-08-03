@@ -21,7 +21,7 @@
 //      essa que vai para o banco. Se o texto viesse do corpo da requisição, a "prova" seria só o
 //      que o cliente HTTP disse ter mostrado — e aí não é prova, é declaração.
 import { pool } from './db.js';
-import { normalizePhoneBR } from './phone_br.js';
+import { normalizePhoneBR, phoneVariantsBR } from './phone_br.js';
 import { log } from './logger.js';
 import { CONSENT_VERSION, CONSENT_AUDIENCE, buildConsentText } from './whatsapp_consent_text.js';
 
@@ -63,16 +63,16 @@ export function requestFingerprint(req) {
  * Devolve a linha inteira porque é ela que vira a prova (quando, com que texto, de onde).
  */
 export async function getWhatsAppConsent(phone) {
-  const e164 = normalizePhoneBR(phone);
-  if (!e164) return null;
+  const variantes = phoneVariantsBR(phone);
+  if (!variantes.length) return null;
   const [rows] = await pool.query(
     `SELECT id, telefone_e164, evento, usuario_id, estabelecimento_id, origem,
             texto_versao, texto, ip, user_agent, criado_em
        FROM whatsapp_optins
-      WHERE telefone_e164 = ?
+      WHERE telefone_e164 IN (${variantes.map(() => '?').join(',')})
       ORDER BY id DESC
       LIMIT 1`,
-    [e164]
+    variantes
   );
   return rows?.[0] || null;
 }
@@ -108,24 +108,42 @@ export function decideConsent({ plataforma = null, salao = null, escopoSalao = f
   return salao === EVENT_GRANTED;
 }
 
+/**
+ * As duas formas do mesmo celular (com e sem o nono dígito) contam como a MESMA pessoa aqui.
+ *
+ * O aceite é gravado com a string que chegou — pelo AUTORIZO, é o apelido que a Meta usa; pela
+ * tela, é o número do cadastro. São o mesmo telefone, e ler só uma das formas produzia os dois
+ * erros opostos: aceite existente que o envio não enxerga (mensagem legítima bloqueada) e, pior,
+ * `PARAR` gravado numa forma que não silencia a outra — alguém pedindo para sair e continuando a
+ * receber, que é a denúncia que derruba a WABA. Ver `phoneVariantsBR`.
+ */
+const listaDeVariantes = (e164) => {
+  const variantes = phoneVariantsBR(e164);
+  return { variantes, placeholders: variantes.map(() => '?').join(',') };
+};
+
 /** O último evento deste telefone no escopo do SALÃO (não o da plataforma). */
 async function getConsentDoSalao(e164, estabelecimentoId, executar) {
+  const { variantes, placeholders } = listaDeVariantes(e164);
+  if (!variantes.length) return null;
   const [rows] = await executar(
     `SELECT evento FROM whatsapp_optins
-      WHERE telefone_e164 = ? AND estabelecimento_id = ?
+      WHERE telefone_e164 IN (${placeholders}) AND estabelecimento_id = ?
       ORDER BY id DESC LIMIT 1`,
-    [e164, estabelecimentoId]
+    [...variantes, estabelecimentoId]
   );
   return rows?.[0]?.evento || null;
 }
 
 /** O último evento deste telefone no escopo da PLATAFORMA (sem estabelecimento). */
 async function getConsentDaPlataforma(e164, executar) {
+  const { variantes, placeholders } = listaDeVariantes(e164);
+  if (!variantes.length) return null;
   const [rows] = await executar(
     `SELECT evento FROM whatsapp_optins
-      WHERE telefone_e164 = ? AND estabelecimento_id IS NULL
+      WHERE telefone_e164 IN (${placeholders}) AND estabelecimento_id IS NULL
       ORDER BY id DESC LIMIT 1`,
-    [e164]
+    variantes
   );
   return rows?.[0]?.evento || null;
 }

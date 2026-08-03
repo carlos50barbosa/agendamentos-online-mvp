@@ -36,7 +36,7 @@ import {
   OPTIN_SOURCES,
   CONSENT_AUDIENCE,
 } from '../../lib/whatsapp_consent.js';
-import { normalizePhoneBR } from '../../lib/phone_br.js';
+import { normalizePhoneBR, phoneVariantsBR } from '../../lib/phone_br.js';
 import { recordWhatsAppInbound } from '../../lib/whatsapp_contacts.js';
 
 /**
@@ -86,14 +86,21 @@ export function isOptInConfirmText(text) {
  *
  * Estabelecimento tem precedência: se o mesmo número aparece nos dois papéis, o que ele mais
  * recebe é aviso de agenda.
+ *
+ * Procura pelas DUAS formas do número (com e sem o nono dígito) porque o `from` do webhook e o
+ * cadastro não usam a mesma: a Meta identifica celular de DDD ≥ 31 pelo formato antigo. Com
+ * igualdade exata, quem é de Belo Horizonte mandava AUTORIZO e ouvia "não encontramos este número"
+ * — autorização legítima, recusada por desencontro de formato. Ver `phoneVariantsBR`.
  */
 async function resolveTitular(e164) {
+  const variantes = phoneVariantsBR(e164);
+  if (!variantes.length) return null;
   const [rows] = await pool.query(
     `SELECT id, nome, tipo FROM usuarios
-      WHERE telefone = ?
+      WHERE telefone IN (${variantes.map(() => '?').join(',')})
       ORDER BY (tipo = 'estabelecimento') DESC, id ASC
       LIMIT 1`,
-    [e164]
+    variantes
   );
   return rows?.[0] || null;
 }
