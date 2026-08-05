@@ -63,7 +63,6 @@ const ServicosEstabelecimento = React.lazy(() => import('./pages/ServicosEstabel
 
 const ProfissionaisEstabelecimento = React.lazy(() => import('./pages/ProfissionaisEstabelecimento.jsx'));
 
-const NovoAgendamento = React.lazy(() => import('./pages/NovoAgendamento.jsx'));
 
 const Configuracoes = React.lazy(() => import('./pages/Configuracoes.jsx'));
 const ConfiguracaoInicial = React.lazy(() => import('./pages/ConfiguracaoInicial.jsx'));
@@ -171,7 +170,15 @@ const APP_ROUTES = [
 
   { path: '/novo', element: <NovoRoute /> },
 
-  { path: '/novo-agendamento', element: <NovoAgendamento /> },
+  // Fluxo LEGADO, aposentado em 04/08/2026. Nenhuma tela linkava para cá desde o redesign, mas
+  // o bingbot ainda tinha a URL indexada e voltou para rastreá-la — e o que ele (e qualquer
+  // pessoa vinda da busca) encontrava era a página tentando listar estabelecimentos e recebendo
+  // lista vazia, porque o diretório foi fechado. Tela quebrada com a nossa marca.
+  //
+  // Redirect e não remoção: a página segue no repositório, e tirar 4.400 linhas costuradas em
+  // cache, filtro e estado é risco sem retorno. Sem rota, ela vira código morto de verdade e
+  // pode sair depois, com calma.
+  { path: '/novo-agendamento', element: <Navigate to="/" replace /> },
 
   { path: '/configuracao-inicial', element: <ConfiguracaoInicial />, auth: true, role: 'estabelecimento' },
 
@@ -913,9 +920,7 @@ export default function App() {
     isLoginRoute ||
     pathname.startsWith('/cadastro') ||
     pathname.startsWith('/recuperar-senha');
-  const isAppointmentFlow =
-    pathname.startsWith('/novo') ||
-    pathname.startsWith('/novo-agendamento');
+  const isAppointmentFlow = pathname.startsWith('/novo');
   const isPublicAppointmentPage = /^\/novo\/[^/]+/.test(pathname);
   // Perfil público do estabelecimento (/agendar[/:id]): página guest, escopada a um
   // estabelecimento — standalone, sem sidebar/topbar. O /novo (descoberta, autenticado)
