@@ -394,6 +394,46 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+/* Visão Semana: a lane é o DIA. Bloqueio de UM profissional não fecha o salão, então
+   não pode ocupar a lane inteira (seria lido como "fechado") — desce para a tira de 16px
+   que o JS reserva embaixo dos cards (BLK_STRIP), mais baixa e mais clara, e o texto diz
+   de quem é. A diferença de ALTURA é o sinal que sobrevive no celular, sem hover:
+   faixa cheia = salão fechado, tira baixa = um profissional parado. */
+.blkPartial {
+  top: auto;
+  height: 16px;
+  border-radius: 6px;
+  padding: 0 6px;
+  /* Fill bem mais fraco que o da faixa cheia, mas não transparente: a tira precisa ser
+     um objeto, não um rabisco. A cor do texto continua a do .blk — nome de gente em
+     10px não é lugar para economizar contraste. */
+  background-color: rgba(51, 65, 85, 0.05);
+  background-image: repeating-linear-gradient(45deg, transparent 0 5px, rgba(51, 65, 85, 0.09) 5px 10px);
+  border-color: rgba(51, 65, 85, 0.28);
+}
+.blkPartial:hover { border-color: rgba(51, 65, 85, 0.5); }
+.blkPartial .blkLabel { font-size: 10px; font-weight: 650; }
+
+/* Aviso de bloqueios não carregados: fica na toolbar da agenda, acima da grade, sem
+   escondê-la — os agendamentos vieram bem e continuam operáveis. */
+.blkWarn {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin: 2px 2px 0;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(133, 79, 11, 0.28);
+  background: var(--c-warn-soft);
+  color: var(--c-warn);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+.blkWarn svg { width: 13px; height: 13px; flex: none; margin-top: 2px; }
+.blkWarn b { font-weight: 750; }
+
 /* Botão "Bloquear horário" do cabeçalho da linha do tempo: existe SÓ abaixo de 781px
    (o gêmeo em .topActions cobre o desktop). O corte único vive no @media do fim. */
 .blkHdBtn { height: 34px; padding: 0 12px; font-size: 12.5px; }

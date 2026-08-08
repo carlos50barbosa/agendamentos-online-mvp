@@ -34,6 +34,10 @@ const pad2 = (n) => String(n).padStart(2, '0')
 // Altura de cada "linha" (row) de empilhamento dentro de uma lane da timeline (px).
 const ROW_STEP = 46
 
+// Visão Semana: altura reservada embaixo dos cards para CADA tira de bloqueio de um
+// profissional só (16px de tira + 3px de respiro). Ver .blkPartial no CSS.
+const BLK_STRIP = 19
+
 const parseDate = (value) => {
   if (!value) return null
   const d = new Date(value)
@@ -246,6 +250,17 @@ const blockLabel = (blk) => blk.motivo || 'Bloqueado'
 const blockScopeLabel = (blk) =>
   blk.profissionalId == null ? 'Todos os profissionais' : (blk.profissionalNome || 'Profissional')
 
+// Rótulo escrito DENTRO da faixa. Na visão Dia a lane já é o profissional, então o
+// motivo basta. Na Semana a lane é o DIA: se o texto não disser o escopo, um bloqueio
+// só da Ana fica idêntico a "salão fechado" — e no celular não há hover para o title
+// desfazer o engano a tempo de não recusar um cliente do Carlos.
+const blockTrackLabel = (blk, laneKind) => {
+  if (laneKind !== 'day') return blockLabel(blk)
+  if (blk.profissionalId == null) return blk.motivo ? `Fechado · ${blk.motivo}` : 'Fechado'
+  const quem = firstName(blk.profissionalNome) || 'profissional'
+  return blk.motivo ? `Só ${quem} · ${blk.motivo}` : `Só ${quem}`
+}
+
 const hhmm = (d) => `${pad2(d.getHours())}:${pad2(d.getMinutes())}`
 
 const roundUpHalfHour = (d) => {
@@ -354,6 +369,9 @@ export default function CockpitOverview({ establishmentId, currentUser, professi
   // Bloqueios de agenda: linhas cruas do backend + versão (força re-sync após criar/remover).
   const [bloqueios, setBloqueios] = useState([])
   const [blocksVersion, setBlocksVersion] = useState(0)
+  // Falha ao carregar os bloqueios (402 de assinatura em atraso, 500, queda de rede).
+  // Sem esta flag a grade vazia mentiria: "não há bloqueio" ficaria igual a "não consegui saber".
+  const [blocksErro, setBlocksErro] = useState(false)
   // Modal de criação de bloqueio.
   const [blkOpen, setBlkOpen] = useState(false)
   const [blkForm, setBlkForm] = useState(EMPTY_BLOCK_FORM)
@@ -472,6 +490,7 @@ export default function CockpitOverview({ establishmentId, currentUser, professi
   useEffect(() => {
     if (!establishmentId) {
       setBloqueios([])
+      setBlocksErro(false)
       return undefined
     }
     let mounted = true
@@ -479,8 +498,16 @@ export default function CockpitOverview({ establishmentId, currentUser, professi
       .then((data) => {
         if (!mounted) return
         setBloqueios(Array.isArray(data?.bloqueios) ? data.bloqueios : (Array.isArray(data) ? data : []))
+        setBlocksErro(false)
       })
-      .catch(() => { if (mounted) setBloqueios([]) })
+      .catch(() => {
+        if (!mounted) return
+        // Zera a lista (a anterior era de OUTRO período, mostrá-la aqui seria pior) e
+        // ACENDE o aviso: a agenda não pode se passar por "sem bloqueio nenhum" quando
+        // o que houve foi um 402/500 — o dono ofereceria um horário que o público recusa.
+        setBloqueios([])
+        setBlocksErro(true)
+      })
     return () => { mounted = false }
   }, [establishmentId, refreshSignal, blockRange.from, blockRange.to, blocksVersion])
 
@@ -677,10 +704,26 @@ export default function CockpitOverview({ establishmentId, currentUser, professi
         return { id: `d${i}`, kind: 'day', date: d, name: `${WEEKDAY_SHORT[i]} ${pad2(d.getDate())}`, isToday: isSameLocalDay(d, now), events: [], blockSegs: [] }
       })
       items.forEach((ev) => { lanes[weekIndex(ev.start)].events.push(ev) })
-      // Na semana a lane é o DIA: todo bloqueio daquele dia aparece nela (o escopo por
-      // profissional vira rótulo, não filtro — senão sumiria da visão do salão).
+      // Na semana a lane é o DIA: todo bloqueio daquele dia aparece nela (não há filtro
+      // por profissional aqui — o bloqueio do salão sumiria). Mas os dois escopos não
+      // podem desenhar IGUAL: só o bloqueio geral cobre a lane; o de um profissional vira
+      // uma tira estreita (`strip`) embaixo dos cards, com o nome dele. Sem isso, "só a
+      // Ana às 14h" é lido como "salão fechado às 14h" e o dono recusa um cliente do
+      // Carlos que o backend aceitaria.
       lanes.forEach((lane) => {
         lane.blockSegs = periodBlocks.map((blk) => clipBlockToDay(blk, lane.date)).filter(Boolean)
+        // Ana e Carlos bloqueados na MESMA faixa são duas tiras: empilha, senão uma
+        // cobriria a outra e o dono leria só um nome. (blockSegs já vem ordenado por
+        // início — recortar ao dia preserva a ordem.)
+        const stripEnds = []
+        lane.blockSegs.forEach((seg) => {
+          if (seg.blk.profissionalId == null) return
+          let row = stripEnds.findIndex((end) => end <= seg.startMin)
+          if (row === -1) { row = stripEnds.length; stripEnds.push(seg.endMin) }
+          else stripEnds[row] = seg.endMin
+          seg.strip = row
+        })
+        lane.stripCount = stripEnds.length
       })
     } else {
       const dayStart = startOfDayD(refDate)
@@ -1048,6 +1091,20 @@ export default function CockpitOverview({ establishmentId, currentUser, professi
             </div>
           </div>
 
+          {/* Aviso, não interdição: os agendamentos vieram e continuam válidos, só a lista
+              de bloqueios falhou. Vira uma linha discreta na toolbar da agenda (nunca um
+              modal ou um estado de erro que esconda a grade) para o dono não ler os
+              horários vazios como livres. */}
+          {blocksErro && (
+            <div role="status" className={styles.blkWarn}>
+              <Icon path={ICONS.lock} width={13} strokeWidth={2} />
+              <span>
+                <b>Não foi possível carregar os bloqueios.</b>{' '}
+                A grade pode estar mostrando como livre um horário já fechado.
+              </span>
+            </div>
+          )}
+
           {timeline.mode === 'mes' ? (
             <div className={styles.month}>
               <div className={styles.monthHead}>
@@ -1122,28 +1179,39 @@ export default function CockpitOverview({ establishmentId, currentUser, professi
                             </>
                           )}
                         </div>
-                        <div className={styles.track} style={{ height: lane.rowCount * ROW_STEP }}>
+                        {/* A altura reserva, ABAIXO das rows de cards, uma faixa por tira de
+                            bloqueio parcial da semana — assim nenhuma tira nasce escondida
+                            atrás de um card. */}
+                        <div className={styles.track} style={{ height: lane.rowCount * ROW_STEP + (lane.stripCount || 0) * BLK_STRIP }}>
                           {/* Bloqueios: faixa hachurada ATRÁS dos cards (z-index 0), sem
                               cliente/valor/avatar — ninguém deve confundir com atendimento.
                               Ocupa a altura toda da lane em vez de uma row: não é uma
-                              agenda concorrente, é a lane fechada. */}
+                              agenda concorrente, é a lane fechada. Exceção: na semana, o
+                              bloqueio de um profissional só vira tira estreita (.blkPartial),
+                              porque a lane (o dia) segue aberta para os outros. */}
                           {lane.blockSegs.map((seg) => {
                             const left = clampPct(((seg.startMin - timeline.lo) / timeline.span) * 100)
                             const right = clampPct(((seg.endMin - timeline.lo) / timeline.span) * 100)
                             const width = right - left
                             if (width <= 0) return null
                             const quando = seg.coversDay ? 'dia inteiro' : blockRangeText(seg.blk)
+                            // `strip` só é atribuído na visão Semana, e só a bloqueio com
+                            // profissional: é ele que desce para a faixa reservada.
+                            const parcial = seg.strip != null
+                            const pos = parcial
+                              ? { left: `${left}%`, width: `${width}%`, bottom: 3 + seg.strip * BLK_STRIP }
+                              : { left: `${left}%`, width: `${width}%` }
                             return (
                               <button
                                 type="button"
                                 key={`${lane.id}-${seg.blk.key}`}
-                                className={styles.blk}
-                                style={{ left: `${left}%`, width: `${width}%` }}
+                                className={`${styles.blk} ${parcial ? styles.blkPartial : ''}`}
+                                style={pos}
                                 onClick={() => { setSelectedEvent(null); setBlkDetailError(''); setSelectedBlock(seg.blk) }}
                                 title={`Bloqueado · ${blockLabel(seg.blk)} · ${quando} · ${blockScopeLabel(seg.blk)}`}
                                 aria-label={`Bloqueio: ${blockLabel(seg.blk)}, ${quando}, ${blockScopeLabel(seg.blk)}. Abrir para remover.`}
                               >
-                                <span className={styles.blkLabel}>{blockLabel(seg.blk)}</span>
+                                <span className={styles.blkLabel}>{blockTrackLabel(seg.blk, lane.kind)}</span>
                               </button>
                             )
                           })}
