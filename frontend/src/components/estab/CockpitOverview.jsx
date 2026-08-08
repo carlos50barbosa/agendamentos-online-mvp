@@ -970,7 +970,7 @@ export default function CockpitOverview({ establishmentId, currentUser, professi
         <div className={styles.topActions}>
           <button
             type="button"
-            className={styles.btnGhostTop}
+            className={`${styles.btnGhostTop} ${styles.btnBlockTop}`}
             onClick={openBlockModal}
           >
             <Icon path={ICONS.lock} width={16} strokeWidth={2} />
@@ -1075,7 +1075,7 @@ export default function CockpitOverview({ establishmentId, currentUser, professi
                 então nunca há dois "Bloquear horário" na tela. */}
             <button
               type="button"
-              className={`${styles.btnGhostTop} ${styles.blkHdBtn}`}
+              className={`${styles.btnGhostTop} ${styles.btnBlockTop} ${styles.blkHdBtn}`}
               onClick={openBlockModal}
             >
               <Icon path={ICONS.lock} width={15} strokeWidth={2} />

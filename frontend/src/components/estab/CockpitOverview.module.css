@@ -439,6 +439,23 @@
 .blkHdBtn { height: 34px; padding: 0 12px; font-size: 12.5px; }
 .blkHdBtn svg { width: 15px; height: 15px; }
 
+/* Modificador de .btnGhostTop para o "Bloquear horário" (as duas cópias, desktop e mobile).
+   Duas razões para ele não ser gêmeo do "Novo agendamento":
+
+   1. CONTRASTE. O .btnGhostTop base usa borda --c-line (#E7E5F5), que contra o branco dá
+      1,24:1 — a WCAG 1.4.11 pede 3:1 para contorno de componente, então o botão praticamente
+      não tinha silhueta e lia como texto solto. Aqui a borda vai a #64748B (4,8:1) e o texto
+      a --c-done (#334155, 10,4:1 no branco).
+   2. SEMÂNTICA. Ardósia é a cor com que o bloqueio aparece na grade (.blk usa --c-done).
+      Repetir o índigo da marca colocaria "fechar a agenda" com o mesmo peso visual de
+      "Novo agendamento", que é a ação que gera receita — e o índigo continua sendo dela. */
+.btnBlockTop {
+  color: var(--c-done);
+  border-color: #64748B;
+}
+.btnBlockTop:hover { background: var(--c-done-soft); }
+.btnBlockTop:focus-visible { outline-color: var(--c-done); }
+
 /* Linha "AGORA" única e contínua, cruzando todas as lanes (offset = coluna de nomes). */
 .nowOverlay {
   position: absolute;
