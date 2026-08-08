@@ -122,6 +122,9 @@ export default function BookingWizard({
   buildSlots,
   onConfirm,
   days: daysProp,
+  // Frase que explica o fim da lista de dias quando o estabelecimento limita o horizonte
+  // de agendamento. Vazia para quem não usa o recurso (a maioria).
+  janelaAviso = '',
   collectGuest = false,
   pollStatus,
   preselectedServiceIds = [],
@@ -462,6 +465,13 @@ export default function BookingWizard({
         {step === STEP.DIA && (
           <StepShell title="Escolha o dia">
             <DayChips days={days} selectedDate={date} onSelect={selectDate} />
+            {/* Por que a lista de dias acaba onde acaba. Sem esta frase, o cliente que chega
+                no fim da janela vê poucos dias e conclui que a agenda está lotada. */}
+            {janelaAviso && (
+              <p className="tw-mt-3 tw-text-sm" style={{ color: 'var(--muted-ink, #6B7280)' }}>
+                {janelaAviso}
+              </p>
+            )}
             {date && (
               <p className="tw-mt-3 tw-text-sm tw-capitalize" style={{ color: 'var(--muted-ink, #6B7280)' }}>
                 {fullDateLabel(date)}

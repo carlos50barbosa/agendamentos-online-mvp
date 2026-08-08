@@ -19,10 +19,16 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 export const JANELA_MODO_LIVRE = 'livre';
 export const JANELA_MODO_SEMANAL = 'semanal';
+// Horizonte deslizante: limite = inicio de hoje + N dias. E o OPOSTO do 'semanal' — anda um
+// dia por dia em vez de ficar parado e pular uma semana de uma vez.
+export const JANELA_MODO_DIAS = 'dias';
 
 // Teto de 12 semanas: acima disso a janela deixa de restringir qualquer coisa na pratica e
 // so serviria para esconder um valor digitado errado.
 const MAX_SEMANAS = 12;
+// 365 dias: um ano a frente e o limite util. Acima disso o problema deixa de ser horizonte
+// e vira lista de dias impossivel de navegar.
+const MAX_DIAS = 365;
 
 const clampInt = (value, min, max, fallback) => {
   const num = Number(value);
@@ -38,12 +44,17 @@ const clampInt = (value, min, max, fallback) => {
  */
 export function normalizeJanelaConfig(row) {
   const modoRaw = String(row?.janela_modo ?? row?.modo ?? JANELA_MODO_LIVRE).trim().toLowerCase();
+  const modo = modoRaw === JANELA_MODO_SEMANAL || modoRaw === JANELA_MODO_DIAS
+    ? modoRaw
+    : JANELA_MODO_LIVRE;
   return {
-    modo: modoRaw === JANELA_MODO_SEMANAL ? JANELA_MODO_SEMANAL : JANELA_MODO_LIVRE,
+    modo,
     // 0=domingo ... 6=sabado — o mesmo indice de Date#getUTCDay e de weekDayIndexInTZ.
     abreDia: clampInt(row?.janela_abre_dia ?? row?.abreDia, 0, 6, 0),
     abreHora: clampInt(row?.janela_abre_hora ?? row?.abreHora, 0, 23, 0),
     semanas: clampInt(row?.janela_semanas ?? row?.semanas, 1, MAX_SEMANAS, 1),
+    // 14 e o teto que o wizard publico ja aplicava antes de existir configuracao.
+    dias: clampInt(row?.janela_dias ?? row?.dias, 1, MAX_DIAS, 14),
   };
 }
 
@@ -54,15 +65,34 @@ export function normalizeJanelaConfig(row) {
 export function computeJanela({ config, now = new Date(), tzOffsetMin = EST_TZ_OFFSET_MIN } = {}) {
   const cfg = config?.modo ? config : normalizeJanelaConfig(config);
   const nowMs = now instanceof Date ? now.getTime() : Number(now);
+  const vazio = {
+    modo: JANELA_MODO_LIVRE, limiteUtc: null, abreEmUtc: null, semanas: cfg.semanas, dias: cfg.dias,
+  };
 
-  if (cfg.modo !== JANELA_MODO_SEMANAL || !Number.isFinite(nowMs)) {
-    return { modo: JANELA_MODO_LIVRE, limiteUtc: null, abreEmUtc: null, semanas: cfg.semanas };
-  }
+  if (cfg.modo === JANELA_MODO_LIVRE || !Number.isFinite(nowMs)) return vazio;
 
   // Deslocar e ler pelos getters UTC da o horario de PAREDE local — mesmo truque do resto
   // do backend (slots.js, datetime_tz.js). O Brasil nao tem mais horario de verao e o
-  // projeto usa offset fixo, entao somar 7*DAY_MS adiante e exato.
+  // projeto usa offset fixo, entao somar dias adiante e exato.
   const local = new Date(nowMs + tzOffsetMin * 60_000);
+
+  if (cfg.modo === JANELA_MODO_DIAS) {
+    // Ancora no INICIO DE HOJE (local), nao em "agora": senao o limite andaria de minuto em
+    // minuto e o ultimo dia da lista mudaria de tamanho ao longo do dia. Com meia-noite como
+    // ancora, "90 dias" sao sempre 90 dias de calendario inteiros.
+    const inicioDeHoje = makeUtcFromLocalYMDHM(
+      local.getUTCFullYear(), local.getUTCMonth() + 1, local.getUTCDate(), 0, 0, tzOffsetMin
+    );
+    return {
+      modo: cfg.modo,
+      // Nao ha portao: o limite desliza sozinho, entao nao existe "proxima leva".
+      abreEmUtc: null,
+      limiteUtc: new Date(inicioDeHoje.getTime() + cfg.dias * DAY_MS),
+      semanas: cfg.semanas,
+      dias: cfg.dias,
+    };
+  }
+
   const diasAteAbertura = (cfg.abreDia - local.getUTCDay() + 7) % 7;
   const alvo = new Date(local.getTime() + diasAteAbertura * DAY_MS);
 
@@ -87,6 +117,7 @@ export function computeJanela({ config, now = new Date(), tzOffsetMin = EST_TZ_O
     abreEmUtc,
     limiteUtc: new Date(abreEmUtc.getTime() + (cfg.semanas - 1) * 7 * DAY_MS),
     semanas: cfg.semanas,
+    dias: cfg.dias,
   };
 }
 
@@ -104,7 +135,7 @@ export function isDentroDaJanela(dateUtc, janela) {
 /** Le a config do estabelecimento. Sem linha em establishment_settings = modo livre. */
 export async function fetchJanelaConfig(db, estabelecimentoId) {
   const [rows] = await db.query(
-    `SELECT janela_modo, janela_abre_dia, janela_abre_hora, janela_semanas
+    `SELECT janela_modo, janela_abre_dia, janela_abre_hora, janela_semanas, janela_dias
        FROM establishment_settings
       WHERE estabelecimento_id=? LIMIT 1`,
     [estabelecimentoId]
@@ -126,7 +157,9 @@ export function serializeJanela(janela) {
   return {
     modo: janela?.modo || JANELA_MODO_LIVRE,
     limite: janela?.limiteUtc ? janela.limiteUtc.toISOString() : null,
+    // null no modo 'dias': o horizonte desliza sozinho, nao ha "proxima leva" para anunciar.
     abre_em: janela?.abreEmUtc ? janela.abreEmUtc.toISOString() : null,
     semanas: janela?.semanas ?? 1,
+    dias: janela?.dias ?? 14,
   };
 }

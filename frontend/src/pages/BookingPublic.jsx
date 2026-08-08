@@ -10,7 +10,7 @@ import BookingWizard from '../components/booking/BookingWizard.jsx';
 import LoyaltyPlans from '../components/booking/LoyaltyPlans.jsx';
 import { Api } from '../utils/api.js';
 import { getUser } from '../utils/auth.js';
-import { isSameDay } from '../utils/agendaDates.js';
+import { buildDayRange, isSameDay } from '../utils/agendaDates.js';
 import { buildPublicThemeStyle, resolvePublicAccent } from '../utils/publicTheme.js';
 import NotFound from './NotFound.jsx';
 
@@ -67,6 +67,9 @@ export default function BookingPublic() {
     [servicoParam],
   );
   const [state, setState] = useState({ loading: true, error: '', establishment: null, services: [] });
+  // { modo, limite, abre_em, semanas } vindo do GET /slots. null = ainda não sabemos;
+  // modo 'livre' = sem horizonte, que é o default de todo estabelecimento.
+  const [janela, setJanela] = useState(null);
 
   useEffect(() => {
     let alive = true;
@@ -83,6 +86,14 @@ export default function BookingPublic() {
           establishment: est,
           services: Array.isArray(services) ? services : [],
         });
+        // A janela também chega junto de cada busca de slots, mas isso só acontece depois
+        // que o cliente escolhe um dia — tarde demais para cortar a lista de dias, que é
+        // exibida antes. Por isso a leitura aqui, no carregamento da página.
+        // Falha em silêncio: sem janela a lista fica no padrão de 14 dias, que é o
+        // comportamento de quem não usa o recurso.
+        Api.getSlots(est.id, ymd(new Date()))
+          .then((resp) => { if (alive) setJanela(resp?.janela || null); })
+          .catch(() => {});
       } catch (e) {
         if (!alive) return;
         const notFound = e?.data?.error === 'not_found' || e?.message === 'not_found';
@@ -154,11 +165,49 @@ export default function BookingPublic() {
       serviceIds: serviceIds && serviceIds.length ? serviceIds : undefined,
       professionalId: professionalId || undefined,
     });
+    // Até onde este estabelecimento aceita agendamento. Vem junto dos slots porque só o
+    // backend conhece a config; é o que permite cortar a lista de dias abaixo.
+    setJanela(resp?.janela || null);
     const all = resp?.slots || [];
     return all
       .filter((s) => isSameDay(s.datetime, date))
       .map((s) => ({ datetime: s.datetime, available: s.status === 'free' }));
   }, [establishmentId]);
+
+  // Lista de dias do wizard. O padrão são 14 dias corridos a partir de hoje; com janela
+  // ligada, corta no limite. Cortar aqui e não só pintar os horários como indisponíveis
+  // importa: os chips de dia são desenhados ANTES de qualquer busca de slots, então sem
+  // este corte o cliente via duas semanas de dias que, ao clicar, não tinham horário nenhum.
+  const dias = useMemo(() => {
+    const hoje = new Date();
+    // Sem janela configurada, seguem os 14 dias históricos — é o que o wizard sempre fez.
+    const PADRAO = 14;
+    // Teto de segurança da RENDERIZAÇÃO, não de regra: o backend aceita até 365 dias, e
+    // desenhar 365 chips num scroller horizontal é inutilizável. Quem precisar de mais
+    // precisa de um seletor de mês, não de uma lista maior.
+    const MAX_CHIPS = 90;
+    const limiteIso = janela?.limite;
+    if (!limiteIso) return buildDayRange(hoje, PADRAO);
+    const limite = new Date(limiteIso);
+    if (Number.isNaN(limite.getTime())) return buildDayRange(hoje, PADRAO);
+    const inicioDeHoje = new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate());
+    // `limite` é EXCLUSIVO (o instante em que a próxima leva abre), então a divisão já dá
+    // a contagem certa de dias: limite amanhã 00:00 => 1 dia (só hoje).
+    const cabem = Math.ceil((limite.getTime() - inicioDeHoje.getTime()) / 86_400_000);
+    // O `min` é com MAX_CHIPS e NÃO com PADRAO: limitar pelo padrão era o bug que prendia
+    // o horizonte em 14 dias mesmo com uma janela longa configurada.
+    return buildDayRange(hoje, Math.max(1, Math.min(MAX_CHIPS, cabem)));
+  }, [janela]);
+
+  // Só o modo 'semanal' tem o que anunciar: existe um portão com hora marcada. No 'dias' o
+  // horizonte desliza sozinho e não há "próxima leva" — dizer algo ali seria ruído.
+  const janelaAviso = useMemo(() => {
+    if (!janela?.limite || janela.modo !== 'semanal') return '';
+    const abertura = janela.abre_em ? new Date(janela.abre_em) : null;
+    if (!abertura || Number.isNaN(abertura.getTime())) return '';
+    const quando = abertura.toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: '2-digit' });
+    return `Os próximos horários abrem ${quando} às ${String(abertura.getHours()).padStart(2, '0')}h.`;
+  }, [janela]);
 
   const onConfirm = useCallback(async ({ services, professional, date, slot, guest, wantsNotify }) => {
     const cpfDigits = (guest?.cpf || '').replace(/\D/g, '');
@@ -250,6 +299,8 @@ export default function BookingPublic() {
         establishment={state.establishment}
         establishmentHref={`/agendar/${encodeURIComponent(resolveKey)}`}
         services={wizardServices}
+        days={dias}
+        janelaAviso={janelaAviso}
         buildSlots={buildSlots}
         onConfirm={onConfirm}
         pollStatus={pollStatus}

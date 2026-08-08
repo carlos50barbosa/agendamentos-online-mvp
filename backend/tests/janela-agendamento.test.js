@@ -27,6 +27,7 @@ process.env.DB_NAME ||= 'test';
 const { pool } = await import('../src/lib/db.js');
 const slotsRouter = (await import('../src/routes/slots.js')).default;
 const {
+  JANELA_MODO_DIAS,
   JANELA_MODO_LIVRE,
   JANELA_MODO_SEMANAL,
   computeJanela,
@@ -70,7 +71,7 @@ test('config ausente, corrompida ou fora de faixa cai no default DESLIGADO', () 
   const cfg = normalizeJanelaConfig({
     janela_modo: 'semanal', janela_abre_dia: 99, janela_abre_hora: -4, janela_semanas: 999,
   });
-  assert.deepEqual(cfg, { modo: JANELA_MODO_SEMANAL, abreDia: 0, abreHora: 0, semanas: 1 });
+  assert.deepEqual(cfg, { modo: JANELA_MODO_SEMANAL, abreDia: 0, abreHora: 0, semanas: 1, dias: 14 });
 });
 
 test('no meio da semana o limite e o proximo domingo 00:00 LOCAL', () => {
@@ -230,4 +231,64 @@ test('modo livre deixa a grade de 2099 intacta (nada muda para quem nao ligou)',
   } finally {
     restore();
   }
+});
+
+// ---------------------------------------------------------------------------------------
+// 3. Modo 'dias' — horizonte DESLIZANTE (o oposto do portao semanal)
+//
+// Nasceu do pedido inverso: cliente que precisa deixar marcar meses a frente. O que impedia
+// isso nao era a janela — era o `buildDayRange(new Date(), 14)` cravado no wizard publico.
+// ---------------------------------------------------------------------------------------
+
+const porDias = (dias) => normalizeJanelaConfig({ janela_modo: 'dias', janela_dias: dias });
+
+test("modo 'dias': limite e o inicio de hoje + N dias", () => {
+  // Quarta 2099-01-07, 15h local. 90 dias a frente.
+  const janela = computeJanela({ config: porDias(90), now: localDate(2099, 1, 7, 15) });
+  assert.equal(janela.modo, JANELA_MODO_DIAS);
+  assert.equal(janela.limiteUtc.getTime(), localDate(2099, 4, 7, 0).getTime());
+  // Sem portao: nao ha "proxima leva" para anunciar.
+  assert.equal(janela.abreEmUtc, null);
+});
+
+test("modo 'dias': a ancora e MEIA-NOITE, nao 'agora'", () => {
+  // Se ancorasse em `now`, o limite andaria de minuto em minuto e o ultimo dia da lista
+  // encolheria ao longo do dia. Duas horas diferentes do MESMO dia tem de dar o mesmo limite.
+  const cedo = computeJanela({ config: porDias(30), now: localDate(2099, 1, 7, 0, 1) });
+  const tarde = computeJanela({ config: porDias(30), now: localDate(2099, 1, 7, 23, 59) });
+  assert.equal(cedo.limiteUtc.getTime(), tarde.limiteUtc.getTime());
+  assert.equal(cedo.limiteUtc.getTime(), localDate(2099, 2, 6, 0).getTime());
+});
+
+test("modo 'dias': desliza um dia por dia (o oposto do portao)", () => {
+  const hoje = computeJanela({ config: porDias(30), now: localDate(2099, 1, 7, 10) });
+  const amanha = computeJanela({ config: porDias(30), now: localDate(2099, 1, 8, 10) });
+  const delta = amanha.limiteUtc.getTime() - hoje.limiteUtc.getTime();
+  assert.equal(delta, 24 * 60 * 60 * 1000, 'o limite anda exatamente 1 dia');
+});
+
+test("modo 'dias': o limite e exclusivo, igual ao semanal", () => {
+  const janela = computeJanela({ config: porDias(1), now: localDate(2099, 1, 7, 10) });
+  // 1 dia = so hoje: 07/01 23:59 cabe, 08/01 00:00 nao.
+  assert.equal(isDentroDaJanela(localDate(2099, 1, 7, 23, 59), janela), true);
+  assert.equal(isDentroDaJanela(localDate(2099, 1, 8, 0), janela), false);
+});
+
+test("modo 'dias': valor fora de faixa cai no default de 14 (o teto historico)", () => {
+  assert.equal(normalizeJanelaConfig({ janela_modo: 'dias', janela_dias: 0 }).dias, 14);
+  assert.equal(normalizeJanelaConfig({ janela_modo: 'dias', janela_dias: 9999 }).dias, 14);
+  assert.equal(normalizeJanelaConfig({ janela_modo: 'dias', janela_dias: 'abc' }).dias, 14);
+  // Mas o modo continua valido — um dia invalido nao derruba a configuracao inteira.
+  assert.equal(normalizeJanelaConfig({ janela_modo: 'dias', janela_dias: 0 }).modo, JANELA_MODO_DIAS);
+});
+
+test("modo 'dias' e 'semanal' nao se confundem no mesmo registro", () => {
+  // Uma linha guarda os parametros dos DOIS modos; so o modo ativo pode influenciar o limite.
+  const row = {
+    janela_modo: 'dias', janela_dias: 10,
+    janela_abre_dia: 3, janela_abre_hora: 17, janela_semanas: 5,
+  };
+  const janela = computeJanela({ config: normalizeJanelaConfig(row), now: localDate(2099, 1, 7, 10) });
+  assert.equal(janela.limiteUtc.getTime(), localDate(2099, 1, 17, 0).getTime(), 'usou dias, ignorou o portao');
+  assert.equal(janela.abreEmUtc, null);
 });

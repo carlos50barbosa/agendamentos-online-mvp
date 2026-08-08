@@ -15,6 +15,7 @@ import {
 } from '../lib/asaas_onboarding.js';
 
 import {
+  JANELA_MODO_DIAS,
   JANELA_MODO_LIVRE,
   JANELA_MODO_SEMANAL,
   computeJanela,
@@ -26,6 +27,7 @@ const DEFAULT_DEPOSIT_HOLD_MINUTES = 15;
 // Teto igual ao da lib. Aqui a violação vira 400 em vez de cair no default: no PUT vindo da
 // tela, clampar em silêncio transformaria um dedo errado em "domingo, 1 semana" sem avisar.
 const JANELA_MAX_SEMANAS = 12;
+const JANELA_MAX_DIAS = 365;
 // Aceita UUID genérico (walletIds do Asaas podem não ser v4 estrito).
 const WALLET_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -136,6 +138,7 @@ function serializeJanelaSettings(config, now = new Date()) {
     abre_dia: config.abreDia,
     abre_hora: config.abreHora,
     semanas: config.semanas,
+    dias: config.dias,
     limite: janela.limiteUtc ? janela.limiteUtc.toISOString() : null,
     abre_em: janela.abreEmUtc ? janela.abreEmUtc.toISOString() : null,
   };
@@ -340,10 +343,11 @@ router.put('/settings/janela', auth, isEstabelecimento, async (req, res) => {
     const body = req.body || {};
     const has = (key) => Object.prototype.hasOwnProperty.call(body, key);
 
+    const MODOS = [JANELA_MODO_LIVRE, JANELA_MODO_SEMANAL, JANELA_MODO_DIAS];
     let modo = current.modo;
     if (has('modo')) {
       modo = String(body.modo || '').trim().toLowerCase();
-      if (modo !== JANELA_MODO_LIVRE && modo !== JANELA_MODO_SEMANAL) {
+      if (!MODOS.includes(modo)) {
         return res.status(400).json({ error: 'invalid_modo', message: 'Modo inválido.' });
       }
     }
@@ -379,20 +383,29 @@ router.put('/settings/janela', auth, isEstabelecimento, async (req, res) => {
       }
     }
 
+    let dias = current.dias;
+    if (has('dias')) {
+      dias = parseRange(body.dias, 1, JANELA_MAX_DIAS);
+      if (dias === null) {
+        return res.status(400).json({ error: 'invalid_dias', message: `Informe de 1 a ${JANELA_MAX_DIAS} dias.` });
+      }
+    }
+
     await pool.query(
       `INSERT INTO establishment_settings
-         (estabelecimento_id, janela_modo, janela_abre_dia, janela_abre_hora, janela_semanas)
-       VALUES (?,?,?,?,?)
+         (estabelecimento_id, janela_modo, janela_abre_dia, janela_abre_hora, janela_semanas, janela_dias)
+       VALUES (?,?,?,?,?,?)
        ON DUPLICATE KEY UPDATE
          janela_modo=VALUES(janela_modo),
          janela_abre_dia=VALUES(janela_abre_dia),
          janela_abre_hora=VALUES(janela_abre_hora),
-         janela_semanas=VALUES(janela_semanas)`,
-      [estId, modo, abreDia, abreHora, semanas]
+         janela_semanas=VALUES(janela_semanas),
+         janela_dias=VALUES(janela_dias)`,
+      [estId, modo, abreDia, abreHora, semanas, dias]
     );
 
     const saved = await fetchJanelaConfig(pool, estId);
-    const diff = diffFields(current, saved, ['modo', 'abreDia', 'abreHora', 'semanas']);
+    const diff = diffFields(current, saved, ['modo', 'abreDia', 'abreHora', 'semanas', 'dias']);
     setAudit(req, {
       acao: 'config.janela_agendamento',
       entidade: 'configuracao',
