@@ -333,6 +333,100 @@ test('normalizeBlockInput: profissional_id lixo e profissional_invalido; ausente
   assert.equal(informado.profissionalId, 77);
 });
 
+test('normalizeBlockInput: data pura "YYYY-MM-DD" e o DIA DO CALENDARIO local, nao meia-noite UTC', () => {
+  // O defeito que este teste segura: `new Date('2099-03-10')` e MEIA-NOITE UTC, que em UTC-3
+  // e 21:00 do DIA 9. O dono pedia "fechado dia 10" e o sistema fechava o dia 9 e deixava o
+  // 10 ABERTO — o pior desfecho possivel aqui, porque a falha e silenciosa: nada dava erro,
+  // o bloqueio existia, e o cliente continuava marcando no dia que o dono achou que fechou.
+  const result = normalizeBlockInput({ inicio: '2099-03-10', fim: '2099-03-10', dia_inteiro: 1 });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.inicioDate.getTime(), localDate(2099, 3, 10, 0, 0).getTime());
+  assert.equal(result.fimDate.getTime(), localDate(2099, 3, 11, 0, 0).getTime());
+});
+
+test('normalizeBlockInput: data pura SEM dia_inteiro tambem ancora em 00:00 local', () => {
+  // Sem dia_inteiro nao ha expansao para o dia local que disfarce o erro: o instante gravado
+  // seria literalmente 21:00 do dia anterior.
+  const result = normalizeBlockInput({ inicio: '2099-03-10', fim: '2099-03-11' });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.diaInteiro, false);
+  assert.equal(result.inicioDate.getTime(), localDate(2099, 3, 10, 0, 0).getTime());
+  assert.equal(result.fimDate.getTime(), localDate(2099, 3, 11, 0, 0).getTime());
+});
+
+test('normalizeBlockInput: data pura de intervalo de dias fecha do primeiro ao ultimo dia local', () => {
+  const result = normalizeBlockInput({ inicio: '2099-12-30', fim: '2099-12-31', dia_inteiro: true });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.inicioDate.getTime(), localDate(2099, 12, 30, 0, 0).getTime());
+  // Virada de ano: o fim exclusivo cai em 01/01 do ano seguinte.
+  assert.equal(result.fimDate.getTime(), localDate(2100, 1, 1, 0, 0).getTime());
+});
+
+test('normalizeBlockInput: data pura impossivel e recusada, nao "normalizada" para outro dia', () => {
+  // `Date.UTC(2099, 12, 32)` nao falha, ele escorrega para outra data. Aceitar isso seria
+  // fechar um dia que o dono nunca digitou.
+  for (const ruim of ['2099-13-01', '2099-02-31', '2099-00-10', '2099-03-32']) {
+    const result = normalizeBlockInput({ inicio: ruim, fim: '2099-03-12' });
+    assert.equal(result.ok, false, `"${ruim}" deveria ser recusada`);
+    assert.equal(result.error, 'inicio_invalido');
+
+    const noFim = normalizeBlockInput({ inicio: '2099-03-10', fim: ruim });
+    assert.equal(noFim.ok, false, `"${ruim}" deveria ser recusada no fim`);
+    assert.equal(noFim.error, 'fim_invalido');
+  }
+});
+
+test('normalizeBlockInput: string COM fuso continua sendo um instante, sem reinterpretacao', () => {
+  // A correcao da data pura vale SO para o formato sem fuso. Quem manda '...Z' ou '-03:00' ja
+  // escolheu o instante — reancorar isso em 00:00 local seria trocar um bug por outro.
+  const comOffset = normalizeBlockInput({
+    inicio: '2099-03-10T14:00:00-03:00',
+    fim: '2099-03-10T15:00:00-03:00',
+  });
+  assert.equal(comOffset.ok, true);
+  assert.equal(comOffset.inicioDate.getTime(), localDate(2099, 3, 10, 14, 0).getTime());
+  assert.equal(comOffset.fimDate.getTime(), localDate(2099, 3, 10, 15, 0).getTime());
+
+  const comZ = normalizeBlockInput({
+    inicio: '2099-03-10T00:00:00.000Z',
+    fim: '2099-03-10T01:00:00.000Z',
+  });
+  assert.equal(comZ.ok, true);
+  assert.equal(comZ.inicioDate.toISOString(), '2099-03-10T00:00:00.000Z');
+  assert.equal(comZ.fimDate.toISOString(), '2099-03-10T01:00:00.000Z');
+
+  // Objeto Date tambem passa intacto.
+  const inicio = localDate(2099, 3, 10, 9, 0);
+  const fim = localDate(2099, 3, 10, 10, 0);
+  const comDate = normalizeBlockInput({ inicio, fim });
+  assert.equal(comDate.ok, true);
+  assert.equal(comDate.inicioDate.getTime(), inicio.getTime());
+  assert.equal(comDate.fimDate.getTime(), fim.getTime());
+});
+
+test('normalizeBlockInput: profissional_id que nao e numero nem string numerica e recusado', () => {
+  // `Number(true)` e 1 e `Number([5])` e 5. Num salao com profissional id=1, um payload com
+  // `true` criava um bloqueio restrito a essa pessoa enquanto o dono achava que tinha fechado
+  // o salao inteiro — e o escopo errado aqui deixa a AGENDA ABERTA, nao fechada.
+  const base = {
+    inicio: localDate(2099, 3, 10, 12, 0).toISOString(),
+    fim: localDate(2099, 3, 10, 14, 0).toISOString(),
+  };
+
+  for (const ruim of [true, false, [5], [77], {}, { id: 77 }]) {
+    const result = normalizeBlockInput({ ...base, profissional_id: ruim });
+    assert.equal(result.ok, false, `profissional_id ${JSON.stringify(ruim)} deveria ser recusado`);
+    assert.equal(result.error, 'profissional_invalido');
+  }
+
+  // O que e id de verdade continua passando, como numero ou como string.
+  assert.equal(normalizeBlockInput({ ...base, profissional_id: PRO_A }).profissionalId, PRO_A);
+  assert.equal(normalizeBlockInput({ ...base, profissional_id: ` ${PRO_A} ` }).profissionalId, PRO_A);
+});
+
 // =======================================================================================
 // 2) findBlocksOverlappingTx / checkBlockConflictTx — a REGRA CENTRAL
 // =======================================================================================
@@ -702,6 +796,11 @@ function installGridPoolMock({ blocks = [], professionals = [] } = {}) {
       return [[], []];
     }
     if (/from\s+estabelecimento_perfis/i.test(statement)) {
+      return [[], []];
+    }
+    // Janela de agendamento: linha ausente = modo 'livre' = sem horizonte. Aqui o assunto e
+    // o escopo do BLOQUEIO; o horizonte tem cobertura em tests/janela-agendamento.test.js.
+    if (/from\s+establishment_settings/i.test(statement)) {
       return [[], []];
     }
 

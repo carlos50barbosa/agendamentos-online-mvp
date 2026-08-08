@@ -15,9 +15,49 @@ const MOTIVO_MAX_LEN = 180;
 // (2026 -> 2036) e apagaria a agenda inteira sem que o dono percebesse.
 export const MAX_BLOCK_DAYS = 366;
 
+// 'YYYY-MM-DD' sem hora nem fuso.
+const DATE_ONLY_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
+
+// Y/M/D de uma data PURA de calendario, com os componentes validados a mao.
+// A validacao existe porque `Date.UTC(2026, 12, 32)` nao falha: ele "normaliza" sozinho para
+// 01/02/2027. Um dia que nao existe tem de ser recusado, nao adivinhado — o dono revisa a
+// mensagem de erro, mas nunca revisa um bloqueio que caiu num dia que ele nao digitou.
+const parseLocalYmd = (raw) => {
+  const match = DATE_ONLY_RE.exec(raw);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const check = new Date(Date.UTC(year, month - 1, day));
+  if (
+    !Number.isFinite(check.getTime()) ||
+    check.getUTCFullYear() !== year ||
+    check.getUTCMonth() + 1 !== month ||
+    check.getUTCDate() !== day
+  ) {
+    return null;
+  }
+  return { year, month, day };
+};
+
 const toDate = (value) => {
   if (value instanceof Date) return Number.isFinite(value.getTime()) ? value : null;
   if (value === null || value === undefined || String(value).trim() === '') return null;
+
+  // Data PURA ('2026-08-10') nao carrega fuso: semanticamente ela e uma data de CALENDARIO, e
+  // o calendario deste sistema e o de Sao Paulo (UTC-3 fixo). Deixar o `new Date()` decidir a
+  // parseia como MEIA-NOITE UTC, que aqui e 21:00 do DIA ANTERIOR: o dono pedia "fechado dia
+  // 10" e o sistema fechava o dia 9, deixando o 10 aberto. Por isso ancoramos em 00:00 LOCAL.
+  const raw = String(value).trim();
+  if (DATE_ONLY_RE.test(raw)) {
+    const ymd = parseLocalYmd(raw);
+    if (!ymd) return null;
+    return makeUtcFromLocalYMDHM(ymd.year, ymd.month, ymd.day, 0, 0, EST_TZ_OFFSET_MIN);
+  }
+
+  // Qualquer outra coisa (ISO com fuso, '...Z', timestamp numerico) ja e um INSTANTE bem
+  // definido: quem mandou escolheu o fuso, nao cabe a nos reinterpretar. Passa `value` cru
+  // de proposito — `new Date('1767225600000')` e invalida, `new Date(1767225600000)` nao.
   const parsed = new Date(value);
   return Number.isFinite(parsed.getTime()) ? parsed : null;
 };
@@ -41,7 +81,13 @@ const normalizeMotivo = (value) => {
 
 const normalizeProfissionalId = (value) => {
   if (value === null || value === undefined || String(value).trim() === '') return null;
-  const parsed = Number(value);
+  // So numero ou string numerica viram id. `Number()` cru aceitava o que nao e id — Number(true)
+  // e 1, Number([5]) e 5 — e num salao que tenha o profissional 1 um payload com `true` criaria
+  // um bloqueio restrito a essa pessoa achando que fechou o salao inteiro. Escopo errado AQUI
+  // significa AGENDA ABERTA: o dono acha que fechou e o cliente continua conseguindo marcar.
+  let parsed = NaN;
+  if (typeof value === 'number') parsed = value;
+  else if (typeof value === 'string') parsed = Number(value.trim());
   if (!Number.isFinite(parsed) || parsed <= 0 || !Number.isInteger(parsed)) return NaN;
   return parsed;
 };
