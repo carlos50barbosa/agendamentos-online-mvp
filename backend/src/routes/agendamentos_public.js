@@ -893,15 +893,22 @@ router.post('/', ensureSubscriptionOperationalAccess({
     let depositHoldMinutes = DEFAULT_DEPOSIT_HOLD_MINUTES;
     let depositExpiresAt = null;
     let mpAccessToken = null;
-    if (depositEnabled) {
-      if (!Number.isFinite(totalCentavos) || totalCentavos <= 0) {
-        console.warn('[deposit] invalid_total', {
-          estabelecimento_id,
-          total_centavos: totalCentavos,
-          percent: depositPercent,
-        });
-        return res.status(400).json({ error: 'invalid_total', message: 'Serviço sem preço configurado' });
-      }
+    // Total 0 = serviço de cortesia. Não cobra sinal e segue o fluxo normal: `depositEnabled`
+    // é a config do estabelecimento, não uma promessa de que TODO agendamento tem valor.
+    //
+    // Até liberarmos preço 0 no cadastro, total 0 só podia ser erro ("Serviço sem preço
+    // configurado"), e era por isso que este ramo devolvia 400. Agora zero é uma escolha do
+    // dono, e recusar aqui deixaria o serviço grátis impossível de agendar — visível na
+    // grade, quebrando na confirmação. Total NEGATIVO segue sendo erro de verdade.
+    if (!Number.isFinite(totalCentavos) || totalCentavos < 0) {
+      console.warn('[deposit] invalid_total', {
+        estabelecimento_id,
+        total_centavos: totalCentavos,
+        percent: depositPercent,
+      });
+      return res.status(400).json({ error: 'invalid_total', message: 'Valor do serviço inválido.' });
+    }
+    if (depositEnabled && totalCentavos > 0) {
       depositCentavos = computeSignalTotalCents({
         servicePriceCents: totalCentavos,
         config: depositConfig.signalConfig,
@@ -914,7 +921,12 @@ router.post('/', ensureSubscriptionOperationalAccess({
           percent: depositPercent,
           deposit_centavos: depositCentavos,
         });
-        return res.status(400).json({ error: 'invalid_total', message: 'Serviço sem preço configurado' });
+        // Aqui o serviço TEM preço (o ramo só roda com totalCentavos > 0) e mesmo assim o
+        // sinal calculou zero — é configuração de sinal furada, não serviço sem preço.
+        return res.status(400).json({
+          error: 'deposit_config_invalid',
+          message: 'A configuração do sinal deste estabelecimento não gera um valor válido.',
+        });
       }
       depositHoldMinutes = Number(depositConfig.holdMinutes || DEFAULT_DEPOSIT_HOLD_MINUTES) || DEFAULT_DEPOSIT_HOLD_MINUTES;
       depositExpiresAt = new Date(Date.now() + depositHoldMinutes * 60_000);
@@ -1278,12 +1290,10 @@ router.post('/', ensureSubscriptionOperationalAccess({
     console.info('[public/agendamento][total]', { appointmentId, totalCentavosFinal });
     if (
       !Number.isFinite(totalCentavosFinal) ||
-      totalCentavosFinal < 0 ||
-      (
-        totalCentavosFinal === 0 &&
-        !loyaltyApplication?.loyalty_credit_applied &&
-        loyaltyApplication?.loyalty_discount_percent == null
-      )
+      // A excecao para fidelidade caiu: zero deixou de ser sintoma de servico mal cadastrado
+      // e virou uma escolha (servico de cortesia), entao nao ha mais como — nem por que —
+      // distinguir "zero legitimo" de "zero por engano" pelo total. Negativo continua erro.
+      totalCentavosFinal < 0
     ) {
       if (txStarted && conn) {
         await conn.rollback();
@@ -1292,7 +1302,7 @@ router.post('/', ensureSubscriptionOperationalAccess({
       if (conn) conn.release();
       return res.status(400).json({
         error: 'invalid_total',
-        message: 'Serviço sem preço configurado',
+        message: 'Valor do serviço inválido.',
       });
     }
 

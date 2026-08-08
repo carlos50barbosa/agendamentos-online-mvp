@@ -1016,12 +1016,10 @@ router.post('/', authRequired, isCliente, ensureSubscriptionOperationalAccess({
     console.info('[agendamentos][total]', { appointmentId, totalCentavosFinal });
     if (
       !Number.isFinite(totalCentavosFinal) ||
-      totalCentavosFinal < 0 ||
-      (
-        totalCentavosFinal === 0 &&
-        !loyaltyApplication?.loyalty_credit_applied &&
-        loyaltyApplication?.loyalty_discount_percent == null
-      )
+      // A excecao para fidelidade caiu: com preco 0 liberado no cadastro, zero virou uma
+      // escolha do dono (servico de cortesia) e nao ha mais como distinguir pelo total o
+      // "zero legitimo" do "zero por engano". Negativo continua erro.
+      totalCentavosFinal < 0
     ) {
       if (txStarted && conn) {
         await conn.rollback();
@@ -1033,7 +1031,7 @@ router.post('/', authRequired, isCliente, ensureSubscriptionOperationalAccess({
       }
       return res.status(400).json({
         error: 'invalid_total',
-        message: 'Serviço sem preço configurado',
+        message: 'Valor do serviço inválido.',
       });
     }
 
@@ -1824,19 +1822,15 @@ router.post('/estabelecimento', authRequired, isEstabelecimento, ensureSubscript
     const totalCentavosFinal = Number(totalRow?.total_centavos || 0);
     if (
       !Number.isFinite(totalCentavosFinal) ||
-      totalCentavosFinal < 0 ||
-      (
-        totalCentavosFinal === 0 &&
-        !loyaltyApplication?.loyalty_credit_applied &&
-        loyaltyApplication?.loyalty_discount_percent == null
-      )
+      // Ver o guard equivalente na criacao acima: zero e servico de cortesia, nao erro.
+      totalCentavosFinal < 0
     ) {
       if (txStarted && conn) {
         await conn.rollback();
       }
       txStarted = false;
       if (conn) conn.release();
-      return res.status(400).json({ error: 'invalid_total', message: 'Serviço sem preço configurado.' });
+      return res.status(400).json({ error: 'invalid_total', message: 'Valor do serviço inválido.' });
     }
     await conn.query('UPDATE agendamentos SET total_centavos=? WHERE id=?', [totalCentavosFinal, ins.insertId]);
 

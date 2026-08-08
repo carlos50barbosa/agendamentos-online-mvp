@@ -438,7 +438,10 @@ export default function ServicosEstabelecimento() {
 
     form.duracao_min <= 0 ||
 
-    form.preco_centavos <= 0 ||
+    // Preço 0 é VÁLIDO: serviço de cortesia (avaliação, retorno, brinde de campanha).
+    // Só negativo ou não-numérico barra. Duração continua exigindo > 0 — serviço sem
+    // duração não ocupa slot nenhum e quebraria a grade.
+    !(Number(form.preco_centavos) >= 0) ||
 
     Number(form.capacidade_por_horario || 0) < 1 ||
 
@@ -464,7 +467,7 @@ export default function ServicosEstabelecimento() {
 
       } else {
 
-        showToast("error", "Preencha nome, duração, preço e selecione pelo menos um profissional.");
+        showToast("error", "Preencha nome e duração, e selecione pelo menos um profissional.");
 
       }
 
@@ -600,7 +603,9 @@ export default function ServicosEstabelecimento() {
 
     !editForm.duracao_min ||
 
-    !editForm.preco_centavos ||
+    // Ver formMissingFields: 0 é preço válido (cortesia). `!editForm.preco_centavos`
+    // barrava o zero porque 0 é falsy — não porque o valor fosse inválido.
+    !(Number(editForm.preco_centavos) >= 0) ||
 
     Number(editForm.capacidade_por_horario || 0) < 1 ||
 
@@ -630,7 +635,7 @@ export default function ServicosEstabelecimento() {
 
       !editForm.duracao_min ||
 
-      !editForm.preco_centavos ||
+      !(Number(editForm.preco_centavos) >= 0) ||
 
       Number(editForm.capacidade_por_horario || 0) < 1 ||
 
@@ -640,7 +645,7 @@ export default function ServicosEstabelecimento() {
 
     ){
 
-      showToast('error', 'Preencha nome, duração, preço e selecione pelo menos um profissional.');
+      showToast('error', 'Preencha nome e duração, e selecione pelo menos um profissional.');
 
       return;
 

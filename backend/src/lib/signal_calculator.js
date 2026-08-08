@@ -45,8 +45,14 @@ export function computeSignalTotalCents({ servicePriceCents, config, systemMinCe
   const sysMin = systemMinCents != null ? Math.max(0, toIntCents(systemMinCents)) : 0;
   if (sysMin > 0) total = Math.max(total, sysMin);
 
-  // O sinal nunca excede o preço do serviço.
-  if (price > 0) total = Math.min(total, price);
+  // O sinal nunca excede o preço do serviço — inclusive quando o preço é ZERO.
+  //
+  // O `if (price > 0)` que existia aqui abria uma exceção justamente no caso mais perigoso:
+  // com preço 0 o clamp não rodava, e um piso do sistema (ou um sinal FIXED) atravessava,
+  // produzindo cobrança de PIX para um serviço de cortesia. A exceção fazia sentido quando
+  // preço 0 só podia significar "não configurado"; agora é uma escolha do dono, e serviço
+  // grátis não cobra sinal — o clamp vale sempre.
+  total = Math.min(total, price);
 
   return Math.max(0, total);
 }

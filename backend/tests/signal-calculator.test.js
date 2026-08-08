@@ -98,3 +98,41 @@ test('computeSignal devolve total, split e fee coerentes (100% ao estabeleciment
   })
   assert.deepEqual(r, { totalCents: 3000, splitCents: 2890, platformFeeCents: 0 })
 })
+
+// ---------------------------------------------------------------------------------------
+// Serviço de cortesia (preço 0). Nasceu de liberar preço 0 no cadastro de serviços: até
+// então `computeSignalTotalCents` tinha um `if (price > 0)` em volta do clamp final, e a
+// exceção mordia justamente no caso perigoso — com preço 0 o clamp não rodava e o piso do
+// sistema (ou um sinal FIXED) atravessava, gerando PIX para um serviço grátis.
+test('preço 0: sinal é 0 mesmo com percentual configurado', () => {
+  assert.equal(computeSignalTotalCents({ servicePriceCents: 0, config: { type: 'PERCENT', percent: 50 } }), 0)
+})
+
+test('preço 0: sinal FIXED não atravessa', () => {
+  assert.equal(computeSignalTotalCents({ servicePriceCents: 0, config: { type: 'FIXED', fixedCents: 5000 } }), 0)
+})
+
+test('preço 0: piso do TENANT não atravessa', () => {
+  assert.equal(
+    computeSignalTotalCents({ servicePriceCents: 0, config: { type: 'PERCENT', percent: 30, minCents: 2000 } }),
+    0
+  )
+})
+
+test('preço 0: piso do SISTEMA (Asaas) não atravessa — era o vazamento real', () => {
+  assert.equal(
+    computeSignalTotalCents({ servicePriceCents: 0, config: { type: 'PERCENT', percent: 30 }, systemMinCents: 500 }),
+    0
+  )
+})
+
+test('serviço pago segue clampado pelo preço (o clamp não afrouxou)', () => {
+  assert.equal(
+    computeSignalTotalCents({ servicePriceCents: 1000, config: { type: 'FIXED', fixedCents: 5000 } }),
+    1000
+  )
+})
+
+test('split de um sinal 0 continua rejeitado (nunca vai ao Asaas)', () => {
+  assert.throws(() => computeSplitCents({ totalCents: 0, platformFeeCents: 100 }), SignalTooLowError)
+})
