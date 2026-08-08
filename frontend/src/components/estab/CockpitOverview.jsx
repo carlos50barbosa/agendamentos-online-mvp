@@ -136,6 +136,7 @@ const ICONS = {
   wa: <path d="M21 11.5a8.5 8.5 0 0 1-12.7 7.4L3 20l1.2-5.1A8.5 8.5 0 1 1 21 11.5Z" />,
   plus: <path d="M12 5v14M5 12h14" />,
   check: <path d="M20 6 9 17l-5-5" />,
+  lock: <><rect x="4" y="10.5" width="16" height="9.5" rx="2" /><path d="M8 10.5V7a4 4 0 0 1 8 0v3.5" /></>,
 }
 
 const Icon = ({ path, width = 16, strokeWidth = 1.8 }) => (
@@ -193,8 +194,110 @@ function normalizeItems(itens) {
   return Array.from(byKey.values()).sort((a, b) => a.start - b.start)
 }
 
+/* ---- Bloqueios de agenda ------------------------------------------------- */
+
+// Normaliza as linhas de GET /slots/bloqueios. `key` é namespaced porque o id de
+// bloqueio e o de agendamento vêm de tabelas diferentes e podem colidir no React.
+function normalizeBlocks(rows) {
+  const byId = new Map()
+  ;(rows || []).forEach((row) => {
+    const id = row?.id
+    if (id == null) return
+    const start = parseDate(row?.inicio)
+    const end = parseDate(row?.fim)
+    if (!start || !end || end <= start) return
+    byId.set(String(id), {
+      id,
+      key: `blk-${id}`,
+      start,
+      end,
+      profissionalId: row?.profissional_id ?? null,
+      profissionalNome: row?.profissional_nome || null,
+      motivo: String(row?.motivo || '').trim(),
+      diaInteiro: Boolean(Number(row?.dia_inteiro) || row?.dia_inteiro === true),
+    })
+  })
+  return Array.from(byId.values()).sort((a, b) => a.start - b.start)
+}
+
+// Espelho da regra do backend: bloqueio SEM profissional trava o estabelecimento
+// inteiro; com profissional, trava só a lane dele (a lane genérica "sem-id", que
+// agrupa agendamentos sem profissional, NÃO é atingida por bloqueio específico).
+const blockHitsLane = (blk, laneId) =>
+  blk.profissionalId == null || String(blk.profissionalId) === String(laneId)
+
+// Férias atravessam vários dias; cada lane desenha só o pedaço do bloqueio que cai
+// no dia dela — sem o recorte, a faixa teria centenas de horas de largura.
+function clipBlockToDay(blk, dayStart) {
+  const dayEnd = addDaysD(dayStart, 1)
+  if (blk.end <= dayStart || blk.start >= dayEnd) return null
+  const s = blk.start > dayStart ? blk.start : dayStart
+  const e = blk.end < dayEnd ? blk.end : dayEnd
+  return {
+    blk,
+    startMin: Math.round((s - dayStart) / 60000),
+    endMin: Math.round((e - dayStart) / 60000),
+    // Cobre o dia inteiro: o rótulo não repete horário (seria "00:00–00:00").
+    coversDay: s <= dayStart && e >= dayEnd,
+  }
+}
+
+const blockLabel = (blk) => blk.motivo || 'Bloqueado'
+const blockScopeLabel = (blk) =>
+  blk.profissionalId == null ? 'Todos os profissionais' : (blk.profissionalNome || 'Profissional')
+
+const hhmm = (d) => `${pad2(d.getHours())}:${pad2(d.getMinutes())}`
+
+const roundUpHalfHour = (d) => {
+  const x = new Date(d.getTime())
+  x.setSeconds(0, 0)
+  const rest = x.getMinutes() % 30
+  if (rest !== 0) x.setMinutes(x.getMinutes() + (30 - rest))
+  return x
+}
+
+const EMPTY_BLOCK_FORM = {
+  dataInicio: '', horaInicio: '', dataFim: '', horaFim: '',
+  diaInteiro: false, profissionalId: '', motivo: '',
+}
+
+// Pré-preenche com o dia que está na tela: hoje começa no próximo meia-hora cheia,
+// outro dia começa às 09:00. Fim = +1h (o dia do fim vem do próprio instante, então
+// um bloqueio das 23:30 cai corretamente no dia seguinte).
+function makeBlockForm(dayDate, nowDate) {
+  const day = startOfDayD(dayDate)
+  const start = isSameLocalDay(day, nowDate)
+    ? roundUpHalfHour(nowDate)
+    : new Date(day.getFullYear(), day.getMonth(), day.getDate(), 9, 0, 0, 0)
+  const end = new Date(start.getTime() + 60 * 60000)
+  return {
+    ...EMPTY_BLOCK_FORM,
+    dataInicio: ymdKey(start), horaInicio: hhmm(start),
+    dataFim: ymdKey(end), horaFim: hhmm(end),
+  }
+}
+
+// Códigos que o backend devolve em 400 (normalizeBlockInput) — o `message` cru dele
+// é técnico demais para o dono.
+const BLOCK_ERROR_MSG = {
+  inicio_invalido: 'Data/hora de início inválida.',
+  fim_invalido: 'Data/hora de fim inválida.',
+  intervalo_invalido: 'O fim precisa ser depois do início.',
+  intervalo_muito_longo: 'Bloqueio longo demais (o limite é de 366 dias).',
+  profissional_invalido: 'Profissional inválido para este estabelecimento.',
+  nao_encontrado: 'Este bloqueio já não existe.',
+}
+
+const blockErrorMessage = (err, fallback) =>
+  BLOCK_ERROR_MSG[err?.data?.error] || err?.data?.message || err?.message || fallback
+
+const fmtBlockMoment = (d) =>
+  `${d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })} ${hhmm(d)}`
+
+const blockRangeText = (blk) => `${fmtBlockMoment(blk.start)} até ${fmtBlockMoment(blk.end)}`
+
 // Grade do mês (6 semanas x 7 dias) com agregados por dia.
-function buildMonthGrid(items, refDate, now) {
+function buildMonthGrid(items, refDate, now, blocks = []) {
   const first = startOfMonthD(refDate)
   const gridStart = addDaysD(first, -weekIndex(first))
   const byDay = new Map()
@@ -207,10 +310,14 @@ function buildMonthGrid(items, refDate, now) {
     const d = addDaysD(gridStart, i)
     const dayItems = byDay.get(ymdKey(d)) || []
     const active = dayItems.filter((e) => e.norm !== 'cancelado')
+    const dayEnd = addDaysD(d, 1)
     return {
       key: ymdKey(d), date: d, day: d.getDate(),
       inMonth: d.getMonth() === refDate.getMonth(),
       isToday: isSameLocalDay(d, now),
+      // O mês não tem régua de horas: o bloqueio vira um selo no canto da célula,
+      // senão um dia inteiro bloqueado ficaria idêntico a um dia livre.
+      blocked: (blocks || []).some((b) => b.start < dayEnd && b.end > d),
       activeCount: active.length,
       confirmados: active.filter((e) => e.norm === 'confirmado').length,
       pendentes: active.filter((e) => e.norm === 'pendente' || e.norm === 'aguardando_sinal').length,
@@ -244,6 +351,20 @@ export default function CockpitOverview({ establishmentId, currentUser, professi
   const [rescheduleTime, setRescheduleTime] = useState('')
   const [modalSaving, setModalSaving] = useState(false)
   const [modalError, setModalError] = useState('')
+  // Bloqueios de agenda: linhas cruas do backend + versão (força re-sync após criar/remover).
+  const [bloqueios, setBloqueios] = useState([])
+  const [blocksVersion, setBlocksVersion] = useState(0)
+  // Modal de criação de bloqueio.
+  const [blkOpen, setBlkOpen] = useState(false)
+  const [blkForm, setBlkForm] = useState(EMPTY_BLOCK_FORM)
+  const [blkSaving, setBlkSaving] = useState(false)
+  const [blkError, setBlkError] = useState('')
+  // Lista devolvida pelo 409 conflito_agendamentos (null = ainda não houve conflito).
+  const [blkConflicts, setBlkConflicts] = useState(null)
+  // Modal de detalhe do bloqueio (clique na faixa) — remover.
+  const [selectedBlock, setSelectedBlock] = useState(null)
+  const [blkRemoving, setBlkRemoving] = useState(false)
+  const [blkDetailError, setBlkDetailError] = useState('')
 
   // Fecha o modal de detalhes com Esc.
   useEffect(() => {
@@ -326,6 +447,163 @@ export default function CockpitOverview({ establishmentId, currentUser, professi
     return () => { mounted = false }
   }, [establishmentId, refreshSignal])
 
+  // Janela de bloqueios pedida ao backend (datas LOCAIS). Deps por STRING: refDate é
+  // `anchor || now` e muda a cada tick de 60s — com Date nas deps o fetch dispararia
+  // uma vez por minuto. O dia pede ±1 para não perder a faixa que cruza a meia-noite.
+  const refDateKey = ymdKey(refDate)
+  const blockRange = useMemo(() => {
+    const base = anchor || new Date()
+    if (view === 'mes') {
+      const first = startOfMonthD(base)
+      const gridStart = addDaysD(first, -weekIndex(first))
+      return { from: ymdKey(gridStart), to: ymdKey(addDaysD(gridStart, 41)) }
+    }
+    if (view === 'semana') {
+      const ws = startOfWeekMon(base)
+      return { from: ymdKey(ws), to: ymdKey(addDaysD(ws, 6)) }
+    }
+    const d = startOfDayD(base)
+    return { from: ymdKey(addDaysD(d, -1)), to: ymdKey(addDaysD(d, 1)) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, anchor, refDateKey])
+
+  // Bloqueios em fetch próprio: NÃO entra no `loading` da tela — atrasar o esqueleto
+  // esconderia a barra de ações (e o próprio botão "Bloquear horário") por mais tempo.
+  useEffect(() => {
+    if (!establishmentId) {
+      setBloqueios([])
+      return undefined
+    }
+    let mounted = true
+    Api.listarBloqueios({ from: blockRange.from, to: blockRange.to })
+      .then((data) => {
+        if (!mounted) return
+        setBloqueios(Array.isArray(data?.bloqueios) ? data.bloqueios : (Array.isArray(data) ? data : []))
+      })
+      .catch(() => { if (mounted) setBloqueios([]) })
+    return () => { mounted = false }
+  }, [establishmentId, refreshSignal, blockRange.from, blockRange.to, blocksVersion])
+
+  const blocks = useMemo(() => normalizeBlocks(bloqueios), [bloqueios])
+
+  const closeBlockModal = () => {
+    if (blkSaving) return
+    setBlkOpen(false)
+    setBlkError('')
+    setBlkConflicts(null)
+  }
+
+  // Modal não empilha (o focus-trap de dois diálogos brigaria pelo focusin), então
+  // abrir o de bloqueio fecha o de agendamento.
+  const openBlockModal = () => {
+    setSelectedEvent(null)
+    setSelectedBlock(null)
+    setBlkForm(makeBlockForm(refDate, now))
+    setBlkError('')
+    setBlkConflicts(null)
+    setBlkSaving(false)
+    setBlkOpen(true)
+  }
+
+  const patchBlockForm = (patch) => {
+    setBlkForm((prev) => ({ ...prev, ...patch }))
+    setBlkError('')
+    // Trocar qualquer campo invalida a lista de conflitos: ela era de OUTRA faixa.
+    setBlkConflicts(null)
+  }
+
+  // `force` só existe para a 2ª tentativa (botão "Bloquear mesmo assim"): a primeira
+  // SEMPRE vai sem ele, para o backend poder recusar por conflito com agendamento.
+  const submitBlock = async (force = false) => {
+    if (blkSaving) return
+    const f = blkForm
+    if (!f.dataInicio || !f.dataFim) { setBlkError('Informe a data de início e a de fim.'); return }
+    let inicio
+    let fim
+    if (f.diaInteiro) {
+      // O backend só olha o DIA (fuso de São Paulo) e expande para 00:00→00:00 do dia
+      // seguinte. Ancorar ao MEIO-DIA local, e não à meia-noite, impede que um device
+      // com fuso torto empurre o bloqueio para o dia anterior.
+      inicio = new Date(`${f.dataInicio}T12:00:00`)
+      fim = new Date(`${f.dataFim}T12:00:00`)
+      if (!Number.isFinite(inicio.getTime()) || !Number.isFinite(fim.getTime())) { setBlkError('Data inválida.'); return }
+      if (fim < inicio) { setBlkError('O último dia não pode ser antes do primeiro.'); return }
+    } else {
+      if (!f.horaInicio || !f.horaFim) { setBlkError('Informe o horário de início e o de fim.'); return }
+      inicio = new Date(`${f.dataInicio}T${f.horaInicio}:00`)
+      fim = new Date(`${f.dataFim}T${f.horaFim}:00`)
+      if (!Number.isFinite(inicio.getTime()) || !Number.isFinite(fim.getTime())) { setBlkError('Data/hora inválida.'); return }
+      if (fim <= inicio) { setBlkError('O fim precisa ser depois do início.'); return }
+    }
+    const motivo = String(f.motivo || '').trim().slice(0, 180)
+    const payload = {
+      inicio: inicio.toISOString(),
+      fim: fim.toISOString(),
+      dia_inteiro: f.diaInteiro ? 1 : 0,
+      profissional_id: f.profissionalId ? Number(f.profissionalId) : null,
+      motivo: motivo || null,
+    }
+    if (force) payload.force = true
+    try {
+      setBlkSaving(true)
+      setBlkError('')
+      const data = await Api.criarBloqueio(payload)
+      const created = data?.bloqueio || data
+      if (created?.id != null) {
+        setBloqueios((prev) => [...prev.filter((b) => String(b?.id) !== String(created.id)), created])
+      }
+      setBlocksVersion((v) => v + 1)
+      setBlkConflicts(null)
+      setBlkOpen(false)
+    } catch (err) {
+      if (err?.status === 409 && err?.data?.error === 'conflito_agendamentos') {
+        setBlkConflicts(Array.isArray(err.data.agendamentos) ? err.data.agendamentos : [])
+        setBlkError('')
+        return
+      }
+      setBlkConflicts(null)
+      setBlkError(blockErrorMessage(err, 'Não foi possível bloquear este horário.'))
+    } finally {
+      setBlkSaving(false)
+    }
+  }
+
+  const handleRemoveBlock = async (blk) => {
+    if (!blk || blkRemoving) return
+    try {
+      setBlkRemoving(true)
+      setBlkDetailError('')
+      await Api.removerBloqueio(blk.id)
+      setBloqueios((prev) => prev.filter((b) => String(b?.id) !== String(blk.id)))
+      setBlocksVersion((v) => v + 1)
+      setSelectedBlock(null)
+    } catch (err) {
+      // Já removido em outra aba: tirar da grade é o desfecho certo, não um erro parado.
+      if (err?.status === 404 || err?.data?.error === 'nao_encontrado') {
+        setBloqueios((prev) => prev.filter((b) => String(b?.id) !== String(blk.id)))
+        setSelectedBlock(null)
+        return
+      }
+      setBlkDetailError(blockErrorMessage(err, 'Não foi possível remover o bloqueio.'))
+    } finally {
+      setBlkRemoving(false)
+    }
+  }
+
+  // Esc fecha os diálogos de bloqueio (o Modal cuida de foco/aria, não do Esc).
+  useEffect(() => {
+    if (!blkOpen && !selectedBlock) return undefined
+    const onKey = (e) => {
+      if (e.key !== 'Escape') return
+      if (blkSaving || blkRemoving) return
+      if (blkOpen) closeBlockModal()
+      else setSelectedBlock(null)
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [blkOpen, selectedBlock, blkSaving, blkRemoving])
+
   // Cores/nome por profissional (id -> {name, palette, avatar}).
   const memberMeta = useMemo(() => {
     const map = new Map()
@@ -378,7 +656,7 @@ export default function CockpitOverview({ establishmentId, currentUser, professi
   // mês (grade do calendário). Usa dedupedAll + refDate (âncora navegável).
   const timeline = useMemo(() => {
     if (view === 'mes') {
-      return { mode: 'mes', ...buildMonthGrid(dedupedAll, refDate, now) }
+      return { mode: 'mes', ...buildMonthGrid(dedupedAll, refDate, now, blocks) }
     }
 
     const weekStart = startOfWeekMon(refDate)
@@ -386,29 +664,68 @@ export default function CockpitOverview({ establishmentId, currentUser, professi
       ? dedupedAll.filter((ev) => ev.start >= weekStart && ev.start < addDaysD(weekStart, 7))
       : dedupedAll.filter((ev) => isSameLocalDay(ev.start, refDate))
 
+    // Bloqueios que tocam o período exibido (podem ter começado antes dele — férias).
+    const periodStart = view === 'semana' ? weekStart : startOfDayD(refDate)
+    const periodEnd = addDaysD(periodStart, view === 'semana' ? 7 : 1)
+    const periodBlocks = blocks.filter((b) => b.start < periodEnd && b.end > periodStart)
+
     // Lanes por dia (semana) ou por profissional (dia).
     let lanes
     if (view === 'semana') {
       lanes = Array.from({ length: 7 }, (_, i) => {
         const d = addDaysD(weekStart, i)
-        return { id: `d${i}`, kind: 'day', date: d, name: `${WEEKDAY_SHORT[i]} ${pad2(d.getDate())}`, isToday: isSameLocalDay(d, now), events: [] }
+        return { id: `d${i}`, kind: 'day', date: d, name: `${WEEKDAY_SHORT[i]} ${pad2(d.getDate())}`, isToday: isSameLocalDay(d, now), events: [], blockSegs: [] }
       })
       items.forEach((ev) => { lanes[weekIndex(ev.start)].events.push(ev) })
+      // Na semana a lane é o DIA: todo bloqueio daquele dia aparece nela (o escopo por
+      // profissional vira rótulo, não filtro — senão sumiria da visão do salão).
+      lanes.forEach((lane) => {
+        lane.blockSegs = periodBlocks.map((blk) => clipBlockToDay(blk, lane.date)).filter(Boolean)
+      })
     } else {
+      const dayStart = startOfDayD(refDate)
       const laneMap = new Map()
-      memberMeta.forEach((meta, id) => { laneMap.set(id, { id, kind: 'pro', name: meta.name, events: [] }) })
+      memberMeta.forEach((meta, id) => { laneMap.set(id, { id, kind: 'pro', name: meta.name, events: [], blockSegs: [] }) })
       items.forEach((ev) => {
         const key = String(ev.resourceId)
-        if (!laneMap.has(key)) laneMap.set(key, { id: key, kind: 'pro', name: ev.resourceName, events: [] })
+        if (!laneMap.has(key)) laneMap.set(key, { id: key, kind: 'pro', name: ev.resourceName, events: [], blockSegs: [] })
         laneMap.get(key).events.push(ev)
       })
+      // "Fechei a agenda da Ana amanhã" precisa de lane mesmo sem nenhum agendamento.
+      periodBlocks.forEach((blk) => {
+        if (blk.profissionalId == null) return
+        const key = String(blk.profissionalId)
+        if (!laneMap.has(key)) {
+          laneMap.set(key, { id: key, kind: 'pro', name: blk.profissionalNome || 'Profissional', events: [], blockSegs: [] })
+        }
+      })
+      laneMap.forEach((lane) => {
+        lane.blockSegs = periodBlocks
+          .filter((blk) => blockHitsLane(blk, lane.id))
+          .map((blk) => clipBlockToDay(blk, dayStart))
+          .filter(Boolean)
+      })
       lanes = Array.from(laneMap.values())
-        .filter((lane) => lane.events.length > 0)
+        .filter((lane) => lane.events.length > 0 || lane.blockSegs.length > 0)
         .sort((a, b) => {
           const ga = String(a.id) === 'sem-id' ? 1 : 0
           const gb = String(b.id) === 'sem-id' ? 1 : 0
           return ga - gb || a.name.localeCompare(b.name)
         })
+      // Dia SEM nenhum atendimento (feriado, folga): repetir o bloqueio geral em cada
+      // profissional viraria N faixas idênticas dizendo a mesma coisa — e um
+      // estabelecimento sem profissional cadastrado não teria lane nenhuma. Nos dois
+      // casos o bloqueio do salão inteiro aparece uma vez só, na lane genérica.
+      const segsGerais = periodBlocks
+        .filter((blk) => blk.profissionalId == null)
+        .map((blk) => clipBlockToDay(blk, dayStart))
+        .filter(Boolean)
+      if (segsGerais.length && lanes.every((lane) => lane.events.length === 0)) {
+        lanes = lanes
+          .map((lane) => ({ ...lane, blockSegs: lane.blockSegs.filter((seg) => seg.blk.profissionalId != null) }))
+          .filter((lane) => lane.blockSegs.length > 0)
+        lanes.push({ id: 'sem-id', kind: 'pro', name: 'Atendimentos', events: [], blockSegs: segsGerais })
+      }
     }
 
     // Janela de horas (comum a dia/semana).
@@ -419,6 +736,16 @@ export default function CockpitOverview({ establishmentId, currentUser, professi
       const e = s + Math.max(1, Math.round((ev.end - ev.start) / 60000))
       lo = Math.min(lo, s)
       hi = Math.max(hi, e)
+    })
+    // Bloqueio CURTO (faixa de horas) puxa a janela: um "fechado das 7h às 8h" fora do
+    // 9–19 padrão ficaria invisível. Dia inteiro/férias não puxam — virariam uma régua
+    // 00–24 que espreme todos os atendimentos num canto.
+    lanes.forEach((lane) => {
+      lane.blockSegs.forEach((seg) => {
+        if (seg.endMin - seg.startMin > 12 * 60) return
+        lo = Math.min(lo, seg.startMin)
+        hi = Math.max(hi, seg.endMin)
+      })
     })
     lo = Math.floor(lo / 60) * 60
     hi = Math.ceil(hi / 60) * 60
@@ -451,8 +778,10 @@ export default function CockpitOverview({ establishmentId, currentUser, professi
     const nowM = minutesOfDay(now)
     const nowLeft = includesToday && nowM >= lo && nowM <= hi ? clampPct(((nowM - lo) / span) * 100) : null
 
-    return { mode: view, lo, hi, span, hours, lanes, nowLeft }
-  }, [dedupedAll, memberMeta, now, view, refDate])
+    const hasBlocks = lanes.some((lane) => lane.blockSegs.length > 0)
+
+    return { mode: view, lo, hi, span, hours, lanes, nowLeft, hasBlocks }
+  }, [dedupedAll, blocks, memberMeta, now, view, refDate])
 
   // Centraliza a linha do tempo no "agora" ao entrar no cockpit e ao trocar de
   // visão. Não re-centraliza a cada tick do relógio (a cada minuto) para não
@@ -594,6 +923,14 @@ export default function CockpitOverview({ establishmentId, currentUser, professi
           <button
             type="button"
             className={styles.btnGhostTop}
+            onClick={openBlockModal}
+          >
+            <Icon path={ICONS.lock} width={16} strokeWidth={2} />
+            Bloquear horário
+          </button>
+          <button
+            type="button"
+            className={styles.btnGhostTop}
             onClick={() => { if (onNewAppointment) onNewAppointment() }}
           >
             <Icon path={ICONS.plus} width={17} strokeWidth={2.2} />
@@ -685,6 +1022,17 @@ export default function CockpitOverview({ establishmentId, currentUser, professi
                 )}
               </div>
             </div>
+            {/* Gêmeo mobile do CTA do topbar: .topActions não existe abaixo de 781px e o
+                FAB é single-action. O corte é único (o CSS esconde este acima de 781px),
+                então nunca há dois "Bloquear horário" na tela. */}
+            <button
+              type="button"
+              className={`${styles.btnGhostTop} ${styles.blkHdBtn}`}
+              onClick={openBlockModal}
+            >
+              <Icon path={ICONS.lock} width={15} strokeWidth={2} />
+              Bloquear horário
+            </button>
             <div className={styles.seg} role="group" aria-label="Visão da linha do tempo">
               {[['dia', 'Dia'], ['semana', 'Semana'], ['mes', 'Mês']].map(([v, label]) => (
                 <button
@@ -712,9 +1060,10 @@ export default function CockpitOverview({ establishmentId, currentUser, professi
                     key={c.key}
                     className={`${styles.monthCell} ${c.inMonth ? '' : styles.monthCellOut} ${c.isToday ? styles.monthCellToday : ''}`}
                     onClick={() => { setAnchor(startOfDayD(c.date)); setView('dia') }}
-                    title={`${c.day} — ${c.activeCount} atendimento(s)`}
+                    title={`${c.day} — ${c.activeCount} atendimento(s)${c.blocked ? ' · há bloqueio' : ''}`}
                   >
                     <span className={styles.monthDay}>{c.day}</span>
+                    {c.blocked && <span className={styles.monthBlk} aria-hidden="true" />}
                     {c.activeCount > 0 && (
                       <>
                         <span className={styles.monthCount}>{c.activeCount}</span>
@@ -729,7 +1078,7 @@ export default function CockpitOverview({ establishmentId, currentUser, professi
                 ))}
               </div>
             </div>
-          ) : timeline.lanes.every((l) => l.events.length === 0) ? (
+          ) : (timeline.lanes.every((l) => l.events.length === 0) && !timeline.hasBlocks) ? (
             <div className={styles.tlEmpty}>
               Nenhum atendimento {view === 'semana' ? 'nesta semana' : 'neste dia'}.
             </div>
@@ -774,6 +1123,30 @@ export default function CockpitOverview({ establishmentId, currentUser, professi
                           )}
                         </div>
                         <div className={styles.track} style={{ height: lane.rowCount * ROW_STEP }}>
+                          {/* Bloqueios: faixa hachurada ATRÁS dos cards (z-index 0), sem
+                              cliente/valor/avatar — ninguém deve confundir com atendimento.
+                              Ocupa a altura toda da lane em vez de uma row: não é uma
+                              agenda concorrente, é a lane fechada. */}
+                          {lane.blockSegs.map((seg) => {
+                            const left = clampPct(((seg.startMin - timeline.lo) / timeline.span) * 100)
+                            const right = clampPct(((seg.endMin - timeline.lo) / timeline.span) * 100)
+                            const width = right - left
+                            if (width <= 0) return null
+                            const quando = seg.coversDay ? 'dia inteiro' : blockRangeText(seg.blk)
+                            return (
+                              <button
+                                type="button"
+                                key={`${lane.id}-${seg.blk.key}`}
+                                className={styles.blk}
+                                style={{ left: `${left}%`, width: `${width}%` }}
+                                onClick={() => { setSelectedEvent(null); setBlkDetailError(''); setSelectedBlock(seg.blk) }}
+                                title={`Bloqueado · ${blockLabel(seg.blk)} · ${quando} · ${blockScopeLabel(seg.blk)}`}
+                                aria-label={`Bloqueio: ${blockLabel(seg.blk)}, ${quando}, ${blockScopeLabel(seg.blk)}. Abrir para remover.`}
+                              >
+                                <span className={styles.blkLabel}>{blockLabel(seg.blk)}</span>
+                              </button>
+                            )
+                          })}
                           {lane.events.map((ev) => {
                             const startM = minutesOfDay(ev.start)
                             const durMin = Math.max(1, Math.round((ev.end - ev.start) / 60000))
@@ -1094,6 +1467,210 @@ export default function CockpitOverview({ establishmentId, currentUser, professi
           </Modal>
         )
       })()}
+
+      {/* Criar bloqueio. O Modal já entrega role="dialog", aria-modal, foco inicial e
+          focus-trap; o Esc vive no effect acima. */}
+      {blkOpen && (
+        <Modal
+          title="Bloquear horário"
+          closeButton
+          onClose={closeBlockModal}
+          disableOutsideClick={blkSaving}
+        >
+          <div className={styles.blkForm}>
+            <p className={styles.blkHint}>
+              Ninguém consegue agendar na faixa bloqueada — nem pelo link público, nem pelo WhatsApp.
+            </p>
+
+            <label className={styles.blkCheck}>
+              <input
+                type="checkbox"
+                checked={blkForm.diaInteiro}
+                onChange={(e) => patchBlockForm({ diaInteiro: e.target.checked })}
+                disabled={blkSaving}
+              />
+              <span>Dia inteiro</span>
+            </label>
+
+            <div className={styles.modalFields}>
+              <label className={styles.modalField}>
+                <span>{blkForm.diaInteiro ? 'Primeiro dia' : 'Data de início'}</span>
+                <input
+                  type="date"
+                  value={blkForm.dataInicio}
+                  onChange={(e) => patchBlockForm({ dataInicio: e.target.value })}
+                  disabled={blkSaving}
+                />
+              </label>
+              {!blkForm.diaInteiro && (
+                <label className={styles.modalField}>
+                  <span>Hora de início</span>
+                  <input
+                    type="time"
+                    value={blkForm.horaInicio}
+                    onChange={(e) => patchBlockForm({ horaInicio: e.target.value })}
+                    disabled={blkSaving}
+                  />
+                </label>
+              )}
+            </div>
+
+            <div className={styles.modalFields}>
+              <label className={styles.modalField}>
+                <span>{blkForm.diaInteiro ? 'Último dia' : 'Data de fim'}</span>
+                <input
+                  type="date"
+                  value={blkForm.dataFim}
+                  onChange={(e) => patchBlockForm({ dataFim: e.target.value })}
+                  disabled={blkSaving}
+                />
+              </label>
+              {!blkForm.diaInteiro && (
+                <label className={styles.modalField}>
+                  <span>Hora de fim</span>
+                  <input
+                    type="time"
+                    value={blkForm.horaFim}
+                    onChange={(e) => patchBlockForm({ horaFim: e.target.value })}
+                    disabled={blkSaving}
+                  />
+                </label>
+              )}
+            </div>
+
+            <div className={styles.modalFields}>
+              <label className={styles.modalField}>
+                <span>Profissional</span>
+                <select
+                  value={blkForm.profissionalId}
+                  onChange={(e) => patchBlockForm({ profissionalId: e.target.value })}
+                  disabled={blkSaving}
+                >
+                  <option value="">Todos os profissionais</option>
+                  {(professionals || []).map((prof) => {
+                    const id = prof?.id ?? prof?.profissional_id ?? prof?.professional_id
+                    if (id == null) return null
+                    return (
+                      <option key={String(id)} value={String(id)}>
+                        {prof?.nome || prof?.name || 'Profissional'}
+                      </option>
+                    )
+                  })}
+                </select>
+              </label>
+            </div>
+
+            {/* Envolto em .modalFields como os demais: .modalField é flex:1, que só se
+                comporta dentro de uma linha flex. */}
+            <div className={styles.modalFields}>
+              <label className={styles.modalField}>
+                <span>Motivo (opcional)</span>
+                <input
+                  type="text"
+                  maxLength={180}
+                  value={blkForm.motivo}
+                  placeholder="Ex.: dentista, viagem, manutenção"
+                  onChange={(e) => patchBlockForm({ motivo: e.target.value })}
+                  disabled={blkSaving}
+                />
+              </label>
+            </div>
+            {/* O motivo é nota interna: o backend nunca o mostra a quem tenta agendar. */}
+            <p className={styles.blkHint}>Só você vê o motivo. O cliente só vê o horário indisponível.</p>
+
+            {blkError && <div role="alert" className={styles.modalErr}>{blkError}</div>}
+
+            {blkConflicts && (
+              <div role="alert" className={styles.blkConflict}>
+                <b>
+                  {blkConflicts.length === 0
+                    ? 'Há agendamento nesta faixa.'
+                    : `${blkConflicts.length} ${blkConflicts.length === 1 ? 'agendamento já marcado' : 'agendamentos já marcados'} nesta faixa:`}
+                </b>
+                {blkConflicts.length > 0 && (
+                  <ul className={styles.blkConflictList}>
+                    {blkConflicts.map((c) => {
+                      const ini = parseDate(c?.inicio)
+                      const fim = parseDate(c?.fim)
+                      return (
+                        <li key={`cf-${c?.id}`}>
+                          <span>{ini ? fmtBlockMoment(ini) : '—'}{fim ? `–${hhmm(fim)}` : ''}</span>
+                          {c?.cliente_nome || 'Cliente'}
+                        </li>
+                      )
+                    })}
+                  </ul>
+                )}
+                <small>
+                  Bloquear não cancela ninguém: os agendamentos acima continuam de pé e você resolve com cada cliente.
+                </small>
+              </div>
+            )}
+
+            <div className={styles.modalManageBtns}>
+              <button
+                type="button"
+                className={`${styles.modalBtn} ${styles.modalBtnGhost}`}
+                onClick={closeBlockModal}
+                disabled={blkSaving}
+              >
+                Cancelar
+              </button>
+              {blkConflicts ? (
+                <button
+                  type="button"
+                  className={`${styles.modalBtn} ${styles.modalBtnDanger}`}
+                  onClick={() => submitBlock(true)}
+                  disabled={blkSaving}
+                >
+                  {blkSaving ? 'Bloqueando…' : 'Bloquear mesmo assim'}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className={`${styles.modalBtn} ${styles.modalBtnBrand}`}
+                  onClick={() => submitBlock(false)}
+                  disabled={blkSaving}
+                >
+                  {blkSaving ? 'Bloqueando…' : 'Bloquear'}
+                </button>
+              )}
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* Detalhe do bloqueio (clique na faixa) — a única ação é remover. */}
+      {selectedBlock && (
+        <Modal
+          title="Horário bloqueado"
+          closeButton
+          onClose={() => { if (!blkRemoving) setSelectedBlock(null) }}
+          disableOutsideClick={blkRemoving}
+        >
+          <div className={styles.modalDetail}>
+            <dl className={styles.modalRows}>
+              <div><dt>Motivo</dt><dd>{blockLabel(selectedBlock)}</dd></div>
+              <div><dt>Profissional</dt><dd>{blockScopeLabel(selectedBlock)}</dd></div>
+              <div><dt>Início</dt><dd>{fmtBlockMoment(selectedBlock.start)}</dd></div>
+              <div><dt>Fim</dt><dd>{fmtBlockMoment(selectedBlock.end)}</dd></div>
+            </dl>
+            <div className={styles.modalManage}>
+              {blkDetailError && <div role="alert" className={styles.modalErr}>{blkDetailError}</div>}
+              <div className={styles.modalManageBtns}>
+                <button
+                  type="button"
+                  className={`${styles.modalBtn} ${styles.modalBtnDanger}`}
+                  onClick={() => handleRemoveBlock(selectedBlock)}
+                  disabled={blkRemoving}
+                >
+                  {blkRemoving ? 'Removendo…' : 'Remover bloqueio'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </Modal>
+      )}
     </div>
   )
 }

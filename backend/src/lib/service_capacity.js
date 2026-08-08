@@ -1,3 +1,5 @@
+import { checkBlockConflictTx } from './bloqueios.js';
+
 export function normalizeServiceSlotCapacity(value) {
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed < 1) return 1;
@@ -40,6 +42,41 @@ export async function checkAppointmentSlotCapacityTx({
   const professionalParam = profissionalId == null ? null : Number(profissionalId);
   const sameStartWindow = minuteWindow(inicioDate);
   let capacity = 1;
+
+  // Bloqueio vem ANTES de tudo, por dois motivos.
+  //
+  // (1) Enforcement: esta funcao e o unico gargalo dos 4 caminhos de criacao/remarcacao, entao
+  // checar aqui fecha todos de uma vez — antes disso o bloqueio era so cosmetico (escondia o
+  // slot na grade, mas um POST direto gravava por cima).
+  //
+  // (2) Corrida com POST /slots/bloqueios: la o bloqueio e INSERIDO antes do guard, entao a
+  // linha nova ja esta com lock de registro quando este SELECT ... FOR UPDATE varre a faixa.
+  // Ler `bloqueios` aqui, antes de qualquer lock em `agendamentos`, e o que garante que a
+  // transacao perdedora pare com as maos vazias — ela ainda nao segura nada que o outro lado
+  // queira, entao nao ha ciclo. Se esta leitura fosse depois do INSERT em `agendamentos`, as
+  // duas transacoes ficariam se esperando e o InnoDB mataria uma (500 para quem agenda).
+  // Nota: o caminho de REMARCAR ja trava a linha do agendamento antes de chegar aqui, entao
+  // la o ciclo continua possivel — por isso POST /slots/bloqueios roda com retry de deadlock.
+  //
+  // NAO depende de requiresProfessional: o bloqueio vale mesmo quando o servico nao exige
+  // profissional. E nao entra na excecao de capacidade abaixo — servico com capacidade > 1
+  // nao fura bloqueio.
+  const blockCheck = await checkBlockConflictTx({
+    db,
+    estabelecimentoId,
+    profissionalId: professionalParam,
+    inicioDate,
+    fimDate,
+  });
+  if (!blockCheck.ok) {
+    return {
+      ok: false,
+      error: blockCheck.error,
+      message: blockCheck.message,
+      capacity: 1,
+      remaining: 0,
+    };
+  }
 
   if (canUseServiceCapacity && serviceId > 0) {
     const [[serviceRow]] = await db.query(

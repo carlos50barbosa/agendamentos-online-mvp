@@ -60,6 +60,15 @@ function summarizeError(data, fallback) {
   return data?.message || fallback;
 }
 
+// Os dois motivos pelos quais o horario escolhido nao serve mais: alguem chegou antes
+// ('slot_ocupado') ou o dono bloqueou a faixa ('slot_bloqueado'). Nos dois casos a saida e a
+// mesma — reofertar os horarios. Sem 'slot_bloqueado' aqui o cliente recebe uma mensagem
+// generica e fica preso no estado de confirmacao, sem lista nova para escolher.
+const SLOT_CONFLICT_ERRORS = new Set(['slot_ocupado', 'slot_bloqueado']);
+
+const isSlotConflict = (data) =>
+  SLOT_CONFLICT_ERRORS.has(String(data?.error || '').toLowerCase());
+
 function pagedList(items, page, pageSize) {
   const total = Array.isArray(items) ? items.length : 0;
   const safeSize = Math.max(1, Number(pageSize || 1));
@@ -491,7 +500,7 @@ class BotEngine {
               action = 'CREATE_OK';
               endpointCalled = create.endpoint;
               endpointResult = { status: create.status, latency_ms: create.elapsedMs || null };
-            } else if (create.status === 409 && String(create.data?.error || '').toLowerCase() === 'slot_ocupado') {
+            } else if (create.status === 409 && isSlotConflict(create.data)) {
               ctx.hourPage = 0;
               await use(STATES.AGENDAR_HORA, await this.showHours(tenantId, ctx), 'CONFLICT');
             } else {
@@ -579,7 +588,7 @@ class BotEngine {
             action = 'REMARCAR_OK';
             endpointCalled = result.endpoint;
             endpointResult = { status: result.status, latency_ms: result.elapsedMs || null };
-          } else if (result.status === 409 && String(result.data?.error || '').toLowerCase() === 'slot_ocupado') {
+          } else if (result.status === 409 && isSlotConflict(result.data)) {
             ctx.hourPage = 0;
             await use(STATES.REMARCAR_ESCOLHER_HORA, await this.showHours(tenantId, ctx), 'CONFLICT');
           } else {

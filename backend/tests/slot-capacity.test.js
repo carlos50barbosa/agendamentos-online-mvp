@@ -76,7 +76,10 @@ function installSlotsPoolMock({
       return [rows, []];
     }
 
-    if (statement.startsWith('SELECT inicio, fim FROM bloqueios')) {
+    // Sem prefixo fixo: a lista de colunas da consulta de bloqueios cresceu (profissional_id)
+    // e voltaria a estourar "Unexpected SQL" a cada ajuste. Aqui nao ha bloqueio nenhum —
+    // o escopo por profissional tem cobertura propria em tests/agenda-bloqueios.test.js.
+    if (statement.includes('FROM bloqueios')) {
       return [[], []];
     }
 
@@ -259,6 +262,12 @@ function createCapacityDb({ blockingRows = [], sameSlotRows = [], capacity = 2 }
     async query(sql, params = []) {
       const statement = normalizeSql(sql);
       sqlLog.push({ statement, params });
+
+      // A checagem de bloqueio roda dentro da mesma transacao; sem bloqueio, ela nao muda
+      // nada do que estes testes medem (capacidade e sobreposicao de agendamento).
+      if (statement.includes('FROM bloqueios')) {
+        return [[], []];
+      }
 
       if (statement.startsWith('SELECT capacidade_por_horario FROM servicos')) {
         return [[{ capacidade_por_horario: capacity }], []];

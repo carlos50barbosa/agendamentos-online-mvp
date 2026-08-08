@@ -301,13 +301,21 @@ CREATE TABLE IF NOT EXISTS agendamento_itens (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 -- Bloqueios de horarios (slots indisponiveis)
+-- profissional_id NULL = bloqueia o estabelecimento inteiro; preenchido = bloqueia somente
+-- agendamentos daquele profissional. `motivo` e nota interna do dono, nunca exposta a quem agenda.
 CREATE TABLE IF NOT EXISTS bloqueios (
   id                 INT AUTO_INCREMENT PRIMARY KEY,
   estabelecimento_id INT          NOT NULL,
+  profissional_id    INT          NULL,
   inicio             DATETIME     NOT NULL,
   fim                DATETIME     NOT NULL,
+  motivo             VARCHAR(180) NULL,
+  dia_inteiro        TINYINT(1)   NOT NULL DEFAULT 0,
+  criado_em          DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT fk_blk_estab FOREIGN KEY (estabelecimento_id) REFERENCES usuarios(id) ON DELETE CASCADE,
-  INDEX idx_blk_estab_inicio (estabelecimento_id, inicio)
+  CONSTRAINT fk_blk_profissional FOREIGN KEY (profissional_id) REFERENCES profissionais(id) ON DELETE CASCADE,
+  INDEX idx_blk_estab_inicio (estabelecimento_id, inicio),
+  INDEX idx_blk_estab_range (estabelecimento_id, inicio, fim)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 CREATE TABLE IF NOT EXISTS email_change_tokens (

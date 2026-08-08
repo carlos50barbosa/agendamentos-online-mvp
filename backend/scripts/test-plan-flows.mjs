@@ -168,8 +168,12 @@ function seedScenario({ user = {}, services = null, professionals = [], serviceP
   state.bloqueios = bloqueios.map((item, index) => ({
     id: item.id ?? index + 1,
     estabelecimento_id: item.estabelecimento_id ?? 1,
+    // profissional_id null = bloqueia o estabelecimento inteiro (REGRA CENTRAL).
+    profissional_id: item.profissional_id ?? null,
     inicio: new Date(item.inicio),
-    fim: new Date(item.fim)
+    fim: new Date(item.fim),
+    motivo: item.motivo ?? null,
+    dia_inteiro: item.dia_inteiro ? 1 : 0
   }))
 
   const agendamentoItens = []
@@ -864,6 +868,36 @@ pool.query = async (sql, params = []) => {
     return [Array.from(set).map((id) => ({ profissional_id: id })), []]
   }
 
+  // findBlocksOverlappingTx (lib/bloqueios.js) — sobreposicao + REGRA CENTRAL de escopo.
+  // Cuidado com a ordem dos params: o overlap e `inicio < ? AND fim > ?`, entao vem
+  // [estabelecimento, FIM, INICIO] — o fim ANTES do inicio.
+  if (norm.startsWith('SELECT id, inicio, fim, profissional_id, motivo, dia_inteiro FROM bloqueios')) {
+    const [estId, fim, inicio, ...rest] = params
+    const inicioMs = new Date(inicio).getTime()
+    const fimMs = new Date(fim).getTime()
+    // Sem profissional na query o SQL traz so `profissional_id IS NULL`; com profissional,
+    // traz os do estabelecimento inteiro MAIS os dele. Um agendamento sem profissional nunca
+    // e atingido por bloqueio de profissional especifico.
+    const escopoProf = norm.includes('(profissional_id IS NULL OR profissional_id=?)') ? Number(rest.shift()) : null
+    const excludeId = norm.includes('AND id<>?') ? rest.shift() : null
+    const rows = state.bloqueios.filter((b) => {
+      if (Number(b.estabelecimento_id) !== Number(estId)) return false
+      if (!(b.inicio.getTime() < fimMs && b.fim.getTime() > inicioMs)) return false
+      if (excludeId != null && Number(b.id) === Number(excludeId)) return false
+      const bp = b.profissional_id ?? null
+      if (bp == null) return true
+      return escopoProf != null && bp === escopoProf
+    })
+    return [rows.map((b) => ({
+      id: b.id,
+      inicio: b.inicio,
+      fim: b.fim,
+      profissional_id: b.profissional_id ?? null,
+      motivo: b.motivo ?? null,
+      dia_inteiro: b.dia_inteiro ?? 0
+    })), []]
+  }
+
   if (norm.startsWith("SELECT id FROM bloqueios")) {
     const [estId, inicio, fim] = params
     const match = state.bloqueios.find((b) => b.estabelecimento_id === estId && b.inicio.getTime() === new Date(inicio).getTime() && b.fim.getTime() === new Date(fim).getTime())
@@ -878,13 +912,23 @@ pool.query = async (sql, params = []) => {
   }
 
   if (norm.startsWith("INSERT INTO bloqueios")) {
-    const [estId, inicio, fim] = params
+    // Duas formas convivem: o POST /slots/toggle legado grava (estabelecimento, inicio, fim) e
+    // o POST /slots/bloqueios grava (estabelecimento, profissional, inicio, fim, motivo,
+    // dia_inteiro). Ler por indice fixo faria a rota nova gravar o profissional na coluna
+    // `inicio` em silencio, entao o desempate e pela propria lista de colunas.
+    const comProfissional = norm.includes('(estabelecimento_id, profissional_id, inicio, fim, motivo, dia_inteiro)')
+    const [estId, profId, inicio, fim, motivo, diaInteiro] = comProfissional
+      ? params
+      : [params[0], null, params[1], params[2], null, 0]
     const nextId = state.bloqueios.reduce((max, item) => Math.max(max, item.id), 0) + 1
     state.bloqueios.push({
       id: nextId,
       estabelecimento_id: estId,
+      profissional_id: profId ?? null,
       inicio: new Date(inicio),
-      fim: new Date(fim)
+      fim: new Date(fim),
+      motivo: motivo ?? null,
+      dia_inteiro: diaInteiro ? 1 : 0
     })
     return [{ insertId: nextId, affectedRows: 1 }, []]
   }

@@ -17,7 +17,7 @@ function createMemorySessionStore() {
   };
 }
 
-function buildRemarcarActions({ conflict = false } = {}) {
+function buildRemarcarActions({ conflict = false, conflictError = 'slot_ocupado' } = {}) {
   const day = '2026-02-25';
   const slot = '2026-02-25T14:00:00.000Z';
   return {
@@ -62,7 +62,7 @@ function buildRemarcarActions({ conflict = false } = {}) {
     },
     async remarcarAgendamento() {
       if (conflict) {
-        return { ok: false, status: 409, endpoint: '/api/agendamentos/701/reschedule-estab', data: { error: 'slot_ocupado' } };
+        return { ok: false, status: 409, endpoint: '/api/agendamentos/701/reschedule-estab', data: { error: conflictError } };
       }
       return { ok: true, status: 200, endpoint: '/api/agendamentos/701/reschedule-estab', data: { ok: true } };
     },
@@ -101,6 +101,27 @@ test('remarcar flow handles slot conflict (409)', async () => {
   });
   const tenantId = 27;
   const fromPhone = '5511888877777';
+
+  await engine.handleInbound({ tenantId, fromPhone, text: 'remarcar' });
+  await engine.handleInbound({ tenantId, fromPhone, text: '1' });
+  await engine.handleInbound({ tenantId, fromPhone, text: '1' });
+  await engine.handleInbound({ tenantId, fromPhone, text: '1' });
+  const result = await engine.handleInbound({ tenantId, fromPhone, text: '1' });
+
+  assert.equal(result.nextState, 'REMARCAR_ESCOLHER_HORA');
+  assert.equal(result.action, 'CONFLICT');
+});
+
+// Desde o enforcement de bloqueios, o 409 do backend tambem pode vir com 'slot_bloqueado'
+// (o dono fechou a faixa). Tem de cair no MESMO ramo de conflito: se cair no ramo de erro
+// generico, o cliente fica preso em REMARCAR_CONFIRMAR sem lista nova de horarios.
+test('remarcar flow trata slot_bloqueado como conflito e reoferta horarios', async () => {
+  const engine = new BotEngine({
+    actions: buildRemarcarActions({ conflict: true, conflictError: 'slot_bloqueado' }),
+    sessionStore: createMemorySessionStore(),
+  });
+  const tenantId = 27;
+  const fromPhone = '5511888866666';
 
   await engine.handleInbound({ tenantId, fromPhone, text: 'remarcar' });
   await engine.handleInbound({ tenantId, fromPhone, text: '1' });

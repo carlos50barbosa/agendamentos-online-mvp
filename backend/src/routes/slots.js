@@ -1,11 +1,12 @@
 // src/routes/slots.js
 import { Router } from 'express';
-import { pool } from '../lib/db.js';
+import { pool, withTransactionRetry } from '../lib/db.js';
 import { EST_TZ_OFFSET_MIN, makeUtcFromLocalYMDHM, weekDayIndexInTZ } from '../lib/datetime_tz.js';
 import { buildWorkingRules, resolveExpedienteForDay } from '../lib/expediente.js';
 import { auth, isEstabelecimento } from '../middleware/auth.js';
 import { ensureSubscriptionOperationalAccess } from '../middleware/billing.js';
 import { activeAppointmentStatusWhere, normalizeServiceSlotCapacity } from '../lib/service_capacity.js';
+import { normalizeBlockInput } from '../lib/bloqueios.js';
 
 const router = Router();
 
@@ -28,6 +29,11 @@ const MIN_LEAD_MIN = (() => {
 })();
 const DAY_MS = 24 * 60 * 60 * 1000;
 const DAY_MINUTES = 24 * 60;
+// Teto da janela de listagem de bloqueios (~6 meses). A agenda do painel pede no máximo um
+// mês por vez; o teto existe só para um `from`/`to` digitado errado não varrer anos de tabela.
+const MAX_BLOCK_LIST_DAYS = 186;
+// Mesma frase do POST /toggle: ajustar a agenda é operação de plano ativo.
+const BLOCK_SUBSCRIPTION_GUARD = { message: 'Regularize a assinatura para ajustar a agenda.' };
 
 // Helpers
 const parseLocalYmd = (value) => {
@@ -117,6 +123,25 @@ const extractProfessionalId = (query) => {
   const parsed = Number(raw);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : NaN;
 };
+
+// Segunda-feira da semana local corrente. A agenda do painel abre sempre na semana atual, e
+// segunda é o início de semana usado pelo frontend (DateHelpers.weekStartISO).
+const currentLocalWeekStart = () => {
+  const local = new Date(Date.now() + EST_TZ_OFFSET_MIN * 60_000);
+  const backToMonday = (local.getUTCDay() + 6) % 7; // getUTCDay: 0=domingo
+  return addDaysLocal(local.getUTCFullYear(), local.getUTCMonth() + 1, local.getUTCDate(), -backToMonday);
+};
+
+// Instantes vão para o cliente em ISO-8601 UTC, o mesmo formato do GET /slots.
+const serializeBloqueio = (row) => ({
+  id: Number(row.id),
+  inicio: new Date(row.inicio).toISOString(),
+  fim: new Date(row.fim).toISOString(),
+  profissional_id: row.profissional_id == null ? null : Number(row.profissional_id),
+  profissional_nome: row.profissional_nome ?? null,
+  motivo: row.motivo ?? null,
+  dia_inteiro: Boolean(row.dia_inteiro),
+});
 
 /**
  * GET /slots?establishmentId=ID&weekStart=YYYY-MM-DD
@@ -217,7 +242,7 @@ router.get('/', async (req, res) => {
 
     const [blq] = await pool.query(
       `
-      SELECT inicio, fim
+      SELECT inicio, fim, profissional_id
         FROM bloqueios
        WHERE estabelecimento_id = ?
          AND inicio < ?
@@ -245,7 +270,15 @@ router.get('/', async (req, res) => {
         professionalId: row.profissional_id == null ? null : Number(row.profissional_id),
       }))
       .filter((row) => Number.isFinite(row.start) && Number.isFinite(row.end));
-    const blqIntervals = toIntervals(blq);
+    // REGRA CENTRAL de escopo aplicada à grade: bloqueio sem profissional fecha o slot para
+    // todo mundo; bloqueio de um profissional só derruba a grade DELE. Na visão "qualquer
+    // profissional" (request sem profissional_id) somente os bloqueios do estabelecimento
+    // inteiro valem — senão a ausência de uma manicure fecharia a agenda do salão todo.
+    const blockAppliesToRequest = (row) => {
+      const blockProfessionalId = row?.profissional_id == null ? null : Number(row.profissional_id);
+      return blockProfessionalId == null || blockProfessionalId === professionalId;
+    };
+    const blqIntervals = toIntervals((blq || []).filter(blockAppliesToRequest));
     const capacityAwareService = serviceIds.length === 1 ? Number(serviceIds[0]) : null;
 
     // Monta grade da semana em passos de 30min
@@ -390,42 +423,280 @@ router.get('/', async (req, res) => {
 });
 
 /**
+ * GET /slots/bloqueios?from=YYYY-MM-DD&to=YYYY-MM-DD
+ * from/to são datas LOCAIS (UTC-3); a janela é [from 00:00, to+1d 00:00).
+ * Sem parâmetros, devolve a semana atual.
+ * -> { bloqueios: [{ id, inicio, fim, profissional_id, profissional_nome, motivo, dia_inteiro }] }
+ */
+router.get(
+  '/bloqueios',
+  auth,
+  isEstabelecimento,
+  ensureSubscriptionOperationalAccess(BLOCK_SUBSCRIPTION_GUARD),
+  async (req, res) => {
+    try {
+      const rawFrom = String(req.query?.from ?? '').trim();
+      const rawTo = String(req.query?.to ?? '').trim();
+
+      const fromLocal = rawFrom ? parseLocalYmd(rawFrom) : currentLocalWeekStart();
+      if (!fromLocal) return res.status(400).json({ error: 'inicio_invalido' });
+      // `to` ausente = 7 dias a partir de `from` (com os dois ausentes, a semana corrente).
+      const toLocal = rawTo
+        ? parseLocalYmd(rawTo)
+        : addDaysLocal(fromLocal.year, fromLocal.month, fromLocal.day, 6);
+      if (!toLocal) return res.status(400).json({ error: 'fim_invalido' });
+
+      const rangeStartUtc = makeUtcFromLocalYMDHM(
+        fromLocal.year,
+        fromLocal.month,
+        fromLocal.day,
+        0,
+        0,
+        EST_TZ_OFFSET_MIN
+      );
+      // Fim exclusivo: 00:00 do dia seguinte a `to`, senão o próprio dia `to` ficaria de fora.
+      const afterTo = addDaysLocal(toLocal.year, toLocal.month, toLocal.day, 1);
+      const rangeEndUtcExclusive = makeUtcFromLocalYMDHM(
+        afterTo.year,
+        afterTo.month,
+        afterTo.day,
+        0,
+        0,
+        EST_TZ_OFFSET_MIN
+      );
+
+      if (rangeEndUtcExclusive.getTime() <= rangeStartUtc.getTime()) {
+        return res.status(400).json({ error: 'intervalo_invalido' });
+      }
+      if (rangeEndUtcExclusive.getTime() - rangeStartUtc.getTime() > MAX_BLOCK_LIST_DAYS * DAY_MS) {
+        return res.status(400).json({ error: 'intervalo_muito_longo' });
+      }
+
+      // Sobreposição, não "começa dentro": bloqueio de dia inteiro que atravessa a janela
+      // precisa aparecer também nas semanas do meio.
+      const [rows] = await pool.query(
+        `SELECT b.id, b.inicio, b.fim, b.profissional_id, b.motivo, b.dia_inteiro,
+                p.nome AS profissional_nome
+           FROM bloqueios b
+           LEFT JOIN profissionais p ON p.id = b.profissional_id
+          WHERE b.estabelecimento_id = ?
+            AND b.inicio < ?
+            AND b.fim > ?
+          ORDER BY b.inicio ASC, b.id ASC`,
+        [req.user.id, rangeEndUtcExclusive, rangeStartUtc]
+      );
+
+      res.json({ bloqueios: rows.map(serializeBloqueio) });
+    } catch (e) {
+      console.error('GET /slots/bloqueios error:', e);
+      res.status(500).json({ error: 'bloqueios_fetch_failed' });
+    }
+  }
+);
+
+/**
+ * POST /slots/bloqueios
+ * body: { inicio, fim, profissional_id?, motivo?, dia_inteiro?, force? }
+ * -> 201 { bloqueio }
+ * -> 409 { error: 'conflito_agendamentos', agendamentos: [...] } quando já há cliente marcado
+ *        no intervalo e `force` não veio.
+ */
+router.post(
+  '/bloqueios',
+  auth,
+  isEstabelecimento,
+  ensureSubscriptionOperationalAccess(BLOCK_SUBSCRIPTION_GUARD),
+  async (req, res) => {
+    const estabelecimentoId = req.user.id;
+    const normalized = normalizeBlockInput(req.body || {});
+    if (!normalized.ok) return res.status(400).json({ error: normalized.error });
+
+    const { inicioDate, fimDate, profissionalId, motivo, diaInteiro } = normalized;
+    const force = Boolean(req.body?.force);
+
+    try {
+      let profissionalNome = null;
+      if (profissionalId != null) {
+        const [[profRow]] = await pool.query(
+          'SELECT id, nome FROM profissionais WHERE id=? AND estabelecimento_id=?',
+          [profissionalId, estabelecimentoId]
+        );
+        if (!profRow) return res.status(400).json({ error: 'profissional_invalido' });
+        profissionalNome = profRow.nome;
+      }
+
+      const outcome = await withTransactionRetry(async (conn) => {
+        // GRAVA PRIMEIRO, confere depois. Parece ao contrário, e é de propósito.
+        //
+        // Esta transação e a de criar agendamento correm em direções opostas sobre as mesmas
+        // duas tabelas, e a ordem "lê bloqueios, lê agendamentos" NÃO evita deadlock: as duas
+        // leituras acham faixa vazia e tiram gap lock, e gap locks são MUTUAMENTE COMPATÍVEIS
+        // — ninguém espera ninguém. O ciclo só fecha no fim, quando cada uma tenta inserir na
+        // tabela que a outra gap-lockou (insert-intention x gap), e aí o InnoDB mata uma das
+        // duas com 500 na cara de quem estava agendando.
+        //
+        // Com o INSERT na frente, o lock que decide a corrida deixa de ser um gap lock e passa
+        // a ser o lock de REGISTRO da linha recém-inserida — esse é exclusivo. Quem perde a
+        // corrida para na PRIMEIRA aquisição de lock, sem segurar nada, então não há ciclo:
+        //   - se o bloqueio entrou antes, o booking trava no seu `SELECT bloqueios FOR UPDATE`
+        //     (que é a primeira coisa que ele faz) e, ao destravar, enxerga o bloqueio;
+        //   - se o booking veio antes, este INSERT espera, e o guard abaixo enxerga o
+        //     agendamento já commitado e devolve 409.
+        // Em ambos, um dos dois vê o outro — que é a propriedade que importa.
+        const [result] = await conn.query(
+          `INSERT INTO bloqueios (estabelecimento_id, profissional_id, inicio, fim, motivo, dia_inteiro)
+           VALUES (?,?,?,?,?,?)`,
+          [estabelecimentoId, profissionalId, inicioDate, fimDate, motivo, diaInteiro ? 1 : 0]
+        );
+
+        // Guard contra bloqueio fantasma: antes disto dava para bloquear por cima de um
+        // agendamento confirmado e o bloqueio simplesmente sumia da grade (o rótulo 'agendado'
+        // ganha do 'bloqueado'). Aqui o dono é avisado e decide.
+        // REGRA CENTRAL: bloqueio de um profissional só conflita com agendamentos DELE.
+        // O FOR UPDATE é obrigatório mesmo sendo só leitura: é ele que faz esta transação
+        // ESPERAR por um booking ainda não commitado, em vez de ler "não tem nada" e commitar
+        // um bloqueio por cima. A faixa varrida é ampla (o índice é por `inicio`, então o
+        // range vai do começo da agenda do estabelecimento até `fim`); aceitável porque esta
+        // transação é só INSERT + SELECT + COMMIT, sem chamada externa no meio.
+        let conflictSql = `SELECT a.id, a.inicio, a.fim, a.profissional_id, u.nome AS cliente_nome
+             FROM agendamentos a
+             JOIN usuarios u ON u.id = a.cliente_id
+            WHERE a.estabelecimento_id=?
+              AND ${activeAppointmentStatusWhere('a')}
+              AND a.inicio < ?
+              AND a.fim > ?`;
+        const conflictParams = [estabelecimentoId, fimDate, inicioDate];
+        if (profissionalId != null) {
+          conflictSql += ' AND a.profissional_id=?';
+          conflictParams.push(profissionalId);
+        }
+        conflictSql += ' ORDER BY a.inicio ASC FOR UPDATE';
+
+        const [conflitos] = await conn.query(conflictSql, conflictParams);
+
+        if (conflitos.length && !force) {
+          // ROLLBACK desfaz o INSERT acima: sem `force` não pode sobrar bloqueio nenhum.
+          return {
+            commit: false,
+            value: {
+              status: 409,
+              body: {
+                error: 'conflito_agendamentos',
+                agendamentos: conflitos.map((row) => ({
+                  id: Number(row.id),
+                  inicio: new Date(row.inicio).toISOString(),
+                  fim: new Date(row.fim).toISOString(),
+                  cliente_nome: row.cliente_nome ?? null,
+                  profissional_id: row.profissional_id == null ? null : Number(row.profissional_id),
+                })),
+              },
+            },
+          };
+        }
+
+        // Com `force`, os agendamentos existentes NÃO são cancelados — quem resolve com o
+        // cliente é o dono; cancelar por conta própria seria pior que o problema.
+        return {
+          commit: true,
+          value: {
+            status: 201,
+            body: {
+              bloqueio: serializeBloqueio({
+                id: result.insertId,
+                inicio: inicioDate,
+                fim: fimDate,
+                profissional_id: profissionalId,
+                profissional_nome: profissionalNome,
+                motivo,
+                dia_inteiro: diaInteiro,
+              }),
+            },
+          },
+        };
+      }, { opName: 'slots/bloqueios' });
+
+      res.status(outcome.status).json(outcome.body);
+    } catch (e) {
+      console.error('POST /slots/bloqueios error:', e);
+      res.status(500).json({ error: 'bloqueio_create_failed' });
+    }
+  }
+);
+
+/**
+ * DELETE /slots/bloqueios/:id
+ * 404 tanto para inexistente quanto para bloqueio de outro estabelecimento — o dono não
+ * precisa saber que o id existe em outra agenda.
+ */
+router.delete(
+  '/bloqueios/:id',
+  auth,
+  isEstabelecimento,
+  ensureSubscriptionOperationalAccess(BLOCK_SUBSCRIPTION_GUARD),
+  async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(404).json({ error: 'nao_encontrado' });
+
+    try {
+      const [result] = await pool.query(
+        'DELETE FROM bloqueios WHERE id=? AND estabelecimento_id=?',
+        [id, req.user.id]
+      );
+      if (!result.affectedRows) return res.status(404).json({ error: 'nao_encontrado' });
+      res.json({ ok: true });
+    } catch (e) {
+      console.error('DELETE /slots/bloqueios error:', e);
+      res.status(500).json({ error: 'bloqueio_delete_failed' });
+    }
+  }
+);
+
+/**
  * POST /slots/toggle
  * body: { slotDatetime }
- * — Bloqueia ou libera um intervalo de 30 min do estabelecimento logado
+ * — Bloqueia ou libera um intervalo de 30 min do estabelecimento logado.
+ * Rota legada (o painel novo usa POST/DELETE /slots/bloqueios); mantida com o mesmo shape
+ * de resposta { ok, action } para não quebrar cliente antigo.
  */
-router.post('/toggle', auth, isEstabelecimento, ensureSubscriptionOperationalAccess({
-  message: 'Regularize a assinatura para ajustar a agenda.',
-}), async (req, res) => {
+router.post('/toggle', auth, isEstabelecimento, ensureSubscriptionOperationalAccess(
+  BLOCK_SUBSCRIPTION_GUARD
+), async (req, res) => {
   const { slotDatetime } = req.body;
   if (!slotDatetime) return res.status(400).json({ error: 'missing_slot' });
 
-  try {
-    const s = new Date(slotDatetime);
-    const e = new Date(s.getTime() + INTERVAL_MIN * 60000);
+  const inicioRaw = new Date(slotDatetime);
+  const normalized = normalizeBlockInput({
+    inicio: slotDatetime,
+    fim: new Date(inicioRaw.getTime() + INTERVAL_MIN * 60000),
+  });
+  if (!normalized.ok) return res.status(400).json({ error: normalized.error });
+  const { inicioDate, fimDate } = normalized;
 
-    // Ja existe bloqueio exato para esse intervalo?
+  try {
+    // Casa por intervalo EXATO e só entre bloqueios do estabelecimento inteiro: o toggle não
+    // pode remover um bloqueio de profissional criado pelo painel novo.
     const [rows] = await pool.query(
       `SELECT id
          FROM bloqueios
         WHERE estabelecimento_id = ?
+          AND profissional_id IS NULL
           AND inicio = ?
           AND fim = ?`,
-      [req.user.id, s, e]
+      [req.user.id, inicioDate, fimDate]
     );
 
     if (rows.length) {
       await pool.query(`DELETE FROM bloqueios WHERE id = ?`, [rows[0].id]);
       return res.json({ ok: true, action: 'liberado' });
-    } else {
-      // Antes de bloquear, voce pode checar se ja ha agendamento nesse horario
-      // e impedir o bloqueio; por ora, so criamos o bloqueio.
-      await pool.query(
-        `INSERT INTO bloqueios (estabelecimento_id, inicio, fim) VALUES (?,?,?)`,
-        [req.user.id, s, e]
-      );
-      return res.json({ ok: true, action: 'bloqueado' });
     }
+
+    // Sem guard de agendamento aqui: é a rota legada, de janela fixa. Quem precisa do aviso
+    // de conflito usa POST /slots/bloqueios.
+    await pool.query(
+      `INSERT INTO bloqueios (estabelecimento_id, inicio, fim) VALUES (?,?,?)`,
+      [req.user.id, inicioDate, fimDate]
+    );
+    return res.json({ ok: true, action: 'bloqueado' });
   } catch (e) {
     console.error('POST /slots/toggle error:', e);
     res.status(500).json({ error: 'toggle_failed' });

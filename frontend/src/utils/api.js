@@ -501,6 +501,20 @@ export const Api = {
 
 
 
+  // Bloqueios de agenda (dono trava faixa de horas / dia inteiro / férias).
+
+  // from/to são datas LOCAIS 'YYYY-MM-DD'; a janela do backend é [from 00:00, to+1d 00:00).
+
+  listarBloqueios: ({ from, to } = {}) => req(`/slots/bloqueios${toQuery({ from, to })}`),
+
+  // Sem `force`, o backend recusa com 409 quando há agendamento ativo na faixa.
+
+  criarBloqueio: (payload) => req('/slots/bloqueios', { method: 'POST', body: JSON.stringify(payload) }),
+
+  removerBloqueio: (id) => req(`/slots/bloqueios/${id}`, { method: 'DELETE' }),
+
+
+
   // Agendamentos
 
   // Agora aceita opcional { idempotencyKey }
