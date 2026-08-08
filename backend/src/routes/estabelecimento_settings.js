@@ -14,8 +14,18 @@ import {
   createEstablishmentSubaccount,
 } from '../lib/asaas_onboarding.js';
 
+import {
+  JANELA_MODO_LIVRE,
+  JANELA_MODO_SEMANAL,
+  computeJanela,
+  fetchJanelaConfig,
+} from '../lib/janela_agendamento.js';
+
 const router = Router();
 const DEFAULT_DEPOSIT_HOLD_MINUTES = 15;
+// Teto igual ao da lib. Aqui a violação vira 400 em vez de cair no default: no PUT vindo da
+// tela, clampar em silêncio transformaria um dedo errado em "domingo, 1 semana" sem avisar.
+const JANELA_MAX_SEMANAS = 12;
 // Aceita UUID genérico (walletIds do Asaas podem não ser v4 estrito).
 const WALLET_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -114,6 +124,23 @@ function serializeDeposit(settings, allowed) {
   };
 }
 
+/**
+ * Config crua + prévia do efeito. A tela precisa das duas coisas: os campos para editar, e
+ * "hoje o cliente consegue marcar até X, a próxima leva abre em Y" para o dono conferir que
+ * configurou o que queria antes de descobrir pelo cliente reclamando.
+ */
+function serializeJanelaSettings(config, now = new Date()) {
+  const janela = computeJanela({ config, now });
+  return {
+    modo: config.modo,
+    abre_dia: config.abreDia,
+    abre_hora: config.abreHora,
+    semanas: config.semanas,
+    limite: janela.limiteUtc ? janela.limiteUtc.toISOString() : null,
+    abre_em: janela.abreEmUtc ? janela.abreEmUtc.toISOString() : null,
+  };
+}
+
 router.get('/settings', auth, isEstabelecimento, async (req, res) => {
   try {
     const estId = Number(req.user?.id);
@@ -126,8 +153,12 @@ router.get('/settings', auth, isEstabelecimento, async (req, res) => {
     }
     const settings = await fetchDepositSettings(estId);
     const allowed = planAllowsDeposit(planContext.plan);
+    const janelaConfig = await fetchJanelaConfig(pool, estId);
     return res.json({
       deposit: serializeDeposit(settings, allowed),
+      // Sem gate de plano: limitar o horizonte da própria agenda é ajuste de operação, não
+      // recurso pago. Quem tiver conta ativa configura.
+      janela: serializeJanelaSettings(janelaConfig),
       provider: resolveDepositProvider(),
       features: { deposit: allowed },
     });
@@ -283,6 +314,97 @@ router.put('/settings/deposit', auth, isEstabelecimento, async (req, res) => {
     });
   } catch (err) {
     console.error('PUT /estabelecimento/settings/deposit', err);
+    return res.status(500).json({ error: 'settings_save_failed' });
+  }
+});
+
+/**
+ * PUT /estabelecimento/settings/janela
+ * body: { modo: 'livre'|'semanal', abreDia?: 0..6, abreHora?: 0..23, semanas?: 1..12 }
+ *
+ * PUT parcial: campo omitido preserva o atual. Trocar para 'livre' NÃO zera abreDia/hora —
+ * quem desliga para testar e religa depois espera reencontrar a configuração de antes.
+ */
+router.put('/settings/janela', auth, isEstabelecimento, async (req, res) => {
+  try {
+    const estId = Number(req.user?.id);
+    if (!Number.isFinite(estId) || estId <= 0) {
+      return res.status(400).json({ error: 'missing_estabelecimento_id' });
+    }
+    const planContext = await getPlanContext(estId);
+    if (!planContext) {
+      return res.status(404).json({ error: 'estabelecimento_inexistente' });
+    }
+
+    const current = await fetchJanelaConfig(pool, estId);
+    const body = req.body || {};
+    const has = (key) => Object.prototype.hasOwnProperty.call(body, key);
+
+    let modo = current.modo;
+    if (has('modo')) {
+      modo = String(body.modo || '').trim().toLowerCase();
+      if (modo !== JANELA_MODO_LIVRE && modo !== JANELA_MODO_SEMANAL) {
+        return res.status(400).json({ error: 'invalid_modo', message: 'Modo inválido.' });
+      }
+    }
+
+    // Inteiro dentro da faixa ou 400 — nada de clampar em silêncio (ver JANELA_MAX_SEMANAS).
+    const parseRange = (raw, min, max) => {
+      const num = Number(raw);
+      if (!Number.isFinite(num) || !Number.isInteger(num) || num < min || num > max) return null;
+      return num;
+    };
+
+    let abreDia = current.abreDia;
+    if (has('abreDia')) {
+      abreDia = parseRange(body.abreDia, 0, 6);
+      if (abreDia === null) {
+        return res.status(400).json({ error: 'invalid_abre_dia', message: 'Dia da semana inválido (0=domingo a 6=sábado).' });
+      }
+    }
+
+    let abreHora = current.abreHora;
+    if (has('abreHora')) {
+      abreHora = parseRange(body.abreHora, 0, 23);
+      if (abreHora === null) {
+        return res.status(400).json({ error: 'invalid_abre_hora', message: 'Hora inválida (0 a 23).' });
+      }
+    }
+
+    let semanas = current.semanas;
+    if (has('semanas')) {
+      semanas = parseRange(body.semanas, 1, JANELA_MAX_SEMANAS);
+      if (semanas === null) {
+        return res.status(400).json({ error: 'invalid_semanas', message: `Informe de 1 a ${JANELA_MAX_SEMANAS} semanas.` });
+      }
+    }
+
+    await pool.query(
+      `INSERT INTO establishment_settings
+         (estabelecimento_id, janela_modo, janela_abre_dia, janela_abre_hora, janela_semanas)
+       VALUES (?,?,?,?,?)
+       ON DUPLICATE KEY UPDATE
+         janela_modo=VALUES(janela_modo),
+         janela_abre_dia=VALUES(janela_abre_dia),
+         janela_abre_hora=VALUES(janela_abre_hora),
+         janela_semanas=VALUES(janela_semanas)`,
+      [estId, modo, abreDia, abreHora, semanas]
+    );
+
+    const saved = await fetchJanelaConfig(pool, estId);
+    const diff = diffFields(current, saved, ['modo', 'abreDia', 'abreHora', 'semanas']);
+    setAudit(req, {
+      acao: 'config.janela_agendamento',
+      entidade: 'configuracao',
+      entidade_id: estId,
+      estabelecimento_id: estId,
+      dados_antes: diff?.antes || null,
+      dados_depois: diff?.depois || null,
+    });
+
+    return res.json({ ok: true, janela: serializeJanelaSettings(saved) });
+  } catch (err) {
+    console.error('PUT /estabelecimento/settings/janela', err?.stack || err);
     return res.status(500).json({ error: 'settings_save_failed' });
   }
 });

@@ -18,6 +18,7 @@ import DescriptionSection from '../components/settings/DescriptionSection.jsx';
 import VisualIdentitySection from '../components/settings/VisualIdentitySection.jsx';
 import AddressSection from '../components/settings/AddressSection.jsx';
 import WorkingHoursSection from '../components/settings/WorkingHoursSection.jsx';
+import BookingWindowSection from '../components/settings/BookingWindowSection.jsx';
 import NotificationsSection from '../components/settings/NotificationsSection.jsx';
 import SocialLinksSection from '../components/settings/SocialLinksSection.jsx';
 import SecuritySection from '../components/settings/SecuritySection.jsx';
@@ -49,6 +50,9 @@ export default function Configuracoes() {
         { id: 'visual-identity', title: 'Identidade visual', content: <VisualIdentitySection /> },
         { id: 'address', title: 'Endereço', content: <AddressSection /> },
         { id: 'working-hours', title: 'Horários de funcionamento', content: <WorkingHoursSection /> },
+        // Logo abaixo dos horários de propósito: os dois respondem "quando dá para marcar" —
+        // um define as horas do dia, o outro até que data.
+        { id: 'booking-window', title: 'Janela de agendamento', content: <BookingWindowSection /> },
         { id: 'notifications', title: 'Notificações', content: <NotificationsSection /> },
         { id: 'social-links', title: 'Redes sociais', content: <SocialLinksSection /> },
       );

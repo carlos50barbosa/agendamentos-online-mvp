@@ -7,6 +7,7 @@ import { auth, isEstabelecimento } from '../middleware/auth.js';
 import { ensureSubscriptionOperationalAccess } from '../middleware/billing.js';
 import { activeAppointmentStatusWhere, normalizeServiceSlotCapacity } from '../lib/service_capacity.js';
 import { normalizeBlockInput } from '../lib/bloqueios.js';
+import { isDentroDaJanela, resolveJanela, serializeJanela } from '../lib/janela_agendamento.js';
 
 const router = Router();
 
@@ -124,12 +125,15 @@ const extractProfessionalId = (query) => {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : NaN;
 };
 
-// Segunda-feira da semana local corrente. A agenda do painel abre sempre na semana atual, e
-// segunda é o início de semana usado pelo frontend (DateHelpers.weekStartISO).
+// Domingo da semana local corrente. A agenda do painel abre sempre na semana atual, e
+// domingo é o início de semana da plataforma inteira (DateHelpers.weekStartISO no frontend).
+// A convenção mudou de segunda para domingo junto com a janela de agendamento: a janela
+// libera a leva de uma vez num dia fixo, e com a grade em outra convenção essa leva cairia
+// partida entre duas páginas da grade.
 const currentLocalWeekStart = () => {
   const local = new Date(Date.now() + EST_TZ_OFFSET_MIN * 60_000);
-  const backToMonday = (local.getUTCDay() + 6) % 7; // getUTCDay: 0=domingo
-  return addDaysLocal(local.getUTCFullYear(), local.getUTCMonth() + 1, local.getUTCDate(), -backToMonday);
+  const backToSunday = local.getUTCDay(); // getUTCDay: 0=domingo
+  return addDaysLocal(local.getUTCFullYear(), local.getUTCMonth() + 1, local.getUTCDate(), -backToSunday);
 };
 
 // Instantes vão para o cliente em ISO-8601 UTC, o mesmo formato do GET /slots.
@@ -257,6 +261,10 @@ router.get('/', async (req, res) => {
     );
     const horariosJson = profileRows?.[0]?.horarios_json || null;
     const workingRules = buildWorkingRules(horariosJson);
+
+    // Ate onde no futuro este estabelecimento aceita agendamento. Modo 'livre' (o default de
+    // todo mundo) devolve limiteUtc null e nada abaixo muda. Ver lib/janela_agendamento.js.
+    const janela = await resolveJanela(pool, establishmentId);
 
     const toIntervals = (rows) =>
       (rows || [])
@@ -400,9 +408,28 @@ router.get('/', async (req, res) => {
           const bloqueado = ultrapassaFim || bloqueadoDb || bloqueadoHorario;
           // Horário já passado (ou dentro da antecedência mínima) nunca fica "free".
           const isPast = sMs <= nowMs + MIN_LEAD_MIN * 60_000;
+          // Além do horizonte que o estabelecimento aceita (modo 'livre' => sempre false).
+          const foraDaJanela = !isDentroDaJanela(sMs, janela);
 
-          const label = ocupado ? 'agendado' : ((bloqueado || isPast) ? 'bloqueado' : 'disponivel');
-          const status = ocupado ? 'booked' : ((bloqueado || isPast) ? 'unavailable' : 'free');
+          // `foraDaJanela` tem precedência sobre `ocupado`, e só ele: a semana fechada
+          // precisa renderizar uniforme, e marcar "agendado" lá entregaria a agenda do
+          // estabelecimento para quem nem pode marcar naquela faixa ainda. Para o resto a
+          // ordem histórica se mantém — ocupado ganha de bloqueado/passado.
+          let label;
+          let status;
+          if (foraDaJanela) {
+            label = 'bloqueado';
+            status = 'unavailable';
+          } else if (ocupado) {
+            label = 'agendado';
+            status = 'booked';
+          } else if (bloqueado || isPast) {
+            label = 'bloqueado';
+            status = 'unavailable';
+          } else {
+            label = 'disponivel';
+            status = 'free';
+          }
 
           slots.push({
             datetime: slotStartUtc.toISOString(), // ISO-8601 em UTC equivalente ao hor rio local
@@ -415,7 +442,9 @@ router.get('/', async (req, res) => {
       }
     }
 
-    res.json({ slots });
+    // `janela` vai junto para o front conseguir dizer QUANDO abre e travar a seta de avançar
+    // semana. Sem isso a grade toda cinza depois do limite parece defeito do sistema.
+    res.json({ slots, janela: serializeJanela(janela) });
   } catch (e) {
     console.error('GET /slots error:', e);
     res.status(500).json({ error: 'slots_fetch_failed' });

@@ -48,7 +48,9 @@ const DateHelpers = {
 
     const day = date.getDay()
 
-    const diff = (day + 6) % 7
+    // Domingo é o início de semana da plataforma inteira — ver o comentário em
+    // NovoAgendamento.DateHelpers.weekStartISO para o porquê (janela de agendamento).
+    const diff = day // 0=Dom
 
     date.setHours(0, 0, 0, 0)
 
@@ -142,7 +144,7 @@ const DateHelpers = {
 
     first.setDate(1)
 
-    const firstWeekday = (first.getDay() + 6) % 7
+    const firstWeekday = first.getDay() // 0=Dom, igual ao weekStartISO
 
     const start = DateHelpers.addDays(first, -firstWeekday)
 
@@ -3076,7 +3078,7 @@ function ProfessionalAgendaView({
 
                   <div className="month__grid">
 
-                    {['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sab', 'Dom'].map((d, index) => (
+                    {['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sab'].map((d, index) => (
 
                       <div key={`${d}-${index}`} className="month__dow muted">{d}</div>
 

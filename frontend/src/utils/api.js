@@ -380,6 +380,10 @@ export const Api = {
   onboardingFinish: () => req('/estabelecimento/onboarding/finalizar', { method: 'POST' }),
   updateEstablishmentDepositSettings: (payload) =>
     req('/estabelecimento/settings/deposit', { method: 'PUT', body: JSON.stringify(payload) }),
+  // Janela de agendamento: até onde no futuro o cliente pode marcar.
+  // payload: { modo: 'livre'|'semanal', abreDia?: 0..6, abreHora?: 0..23, semanas?: 1..12 }
+  updateEstablishmentBookingWindow: (payload) =>
+    req('/estabelecimento/settings/janela', { method: 'PUT', body: JSON.stringify(payload) }),
   // Subconta Asaas: a plataforma abre a conta de recebimento pelo estabelecimento.
   getAsaasSubaccount: () => req('/estabelecimento/asaas/subconta'),
   createAsaasSubaccount: (payload) =>

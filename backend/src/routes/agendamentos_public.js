@@ -32,6 +32,7 @@ import { applyClientLoyaltyBenefitsTx, previewClientLoyaltyBenefits } from '../l
 import { cancelPendingPaymentAppointmentTx, cancelPublicPendingAppointmentTx } from '../lib/appointment_loyalty.js'
 import { checkAppointmentSlotCapacityTx, normalizeServiceSlotCapacity } from '../lib/service_capacity.js';
 import { normalizePhoneBR, toDigits, isValidMobileBR } from '../lib/phone_br.js';
+import { isDentroDaJanela, resolveJanela, serializeJanela } from '../lib/janela_agendamento.js';
 
 const router = Router();
 const TZ = 'America/Sao_Paulo';
@@ -741,6 +742,23 @@ router.post('/', ensureSubscriptionOperationalAccess({
     if (Number.isNaN(inicioDate.getTime())) return res.status(400).json({ error: 'invalid_date' });
     if (inicioDate.getTime() <= Date.now() + MIN_LEAD_MIN * 60_000) {
       return res.status(400).json({ error: 'past_datetime', message: 'Escolha um horário futuro.' });
+    }
+
+    // Janela de agendamento. Esconder o slot na grade não basta: esta rota não exige login
+    // e aceita `inicio` arbitrário, então sem a revalidação aqui um POST direto — ou o
+    // ?week= digitado na URL — furaria o limite. É a mesma lição do bloqueio, que durante
+    // muito tempo só existia no GET /slots e era cosmético.
+    //
+    // Vale só para quem agenda pelo link público (e para o bot do WhatsApp, que passa por
+    // esta rota). O dono agenda pelo painel, por POST /agendamentos/estabelecimento, que
+    // NÃO tem esta checagem de propósito: o horizonte é regra para o cliente, não para ele.
+    const janela = await resolveJanela(pool, estabelecimento_id);
+    if (!isDentroDaJanela(inicioDate, janela)) {
+      return res.status(400).json({
+        error: 'fora_da_janela',
+        message: 'Este horário ainda não está aberto para agendamento.',
+        janela: serializeJanela(janela),
+      });
     }
 
     const { items: serviceItems, missing } = await fetchServicesForAppointment(pool, estabelecimento_id, serviceIds);

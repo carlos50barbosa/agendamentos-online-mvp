@@ -87,6 +87,14 @@ function installSlotsPoolMock({
       return [[], []];
     }
 
+    // Janela de agendamento (ate onde no futuro o cliente pode marcar). Linha ausente = modo
+    // 'livre' = sem horizonte, que e o default e o que estes testes de capacidade assumem:
+    // aqui o assunto e capacidade por horario, nao horizonte. Cobertura propria em
+    // tests/janela-agendamento.test.js.
+    if (statement.includes('FROM establishment_settings')) {
+      return [[], []];
+    }
+
     throw new Error(`Unexpected SQL in slots test: ${statement}`);
   };
 

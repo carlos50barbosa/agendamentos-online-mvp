@@ -187,7 +187,12 @@ const DateHelpers = {
 
     const day = date.getDay(); // 0=Dom
 
-    const diff = (day + 6) % 7; // 1=Seg
+    // A semana da plataforma comeca no DOMINGO. Nao e preferencia visual: a janela de
+    // agendamento abre num dia fixo (domingo, por padrao) e libera a leva inteira de uma
+    // vez. Com a grade comecando na segunda, essa leva cairia partida entre duas paginas —
+    // o cliente abriria no domingo, veria so o ultimo dia da pagina atual disponivel, e
+    // precisaria avancar para achar o resto. Parece defeito.
+    const diff = day; // 0=Dom
 
     date.setHours(0, 0, 0, 0);
 
@@ -230,6 +235,17 @@ const DateHelpers = {
   addWeeksISO: (iso, n) => DateHelpers.toISODate(DateHelpers.addDays(DateHelpers.parseLocal(iso), n * 7)),
 
   sameYMD: (a, b) => a.slice(0, 10) === b.slice(0, 10),
+
+  // Última semana que a janela de agendamento permite abrir. `limite` é EXCLUSIVO (o
+  // instante em que a próxima leva abre), então o último horário agendável é 1ms antes —
+  // usar o próprio limite jogaria a navegação uma semana adiante, para uma grade toda
+  // fechada. Sem janela (modo livre) devolve null e nada é travado.
+  maxWeekStartFor: (limiteIso) => {
+    if (!limiteIso) return null;
+    const limite = new Date(limiteIso);
+    if (Number.isNaN(limite.getTime())) return null;
+    return DateHelpers.weekStartISO(new Date(limite.getTime() - 1));
+  },
 
   weekDays: (isoMonday) => {
 
@@ -277,13 +293,13 @@ const DateHelpers = {
 
   monthGrid: (monthStartIso) => {
 
-    // Retorna 6 linhas x 7 colunas começando na segunda-feira
+    // Retorna 6 linhas x 7 colunas começando no domingo (ver weekStartISO)
 
     const first = DateHelpers.parseLocal(monthStartIso);
 
     first.setDate(1);
 
-    const firstWeekday = (first.getDay() + 6) % 7; // 0=Seg
+    const firstWeekday = first.getDay(); // 0=Dom
 
     const start = DateHelpers.addDays(first, -firstWeekday);
 
@@ -2779,6 +2795,10 @@ export default function NovoAgendamento() {
 
     slots: [],
 
+    // Preenchido pelo GET /slots: { modo, limite, abre_em, semanas }. null = ainda não
+    // carregou; modo 'livre' = sem horizonte, que é o default de todo estabelecimento.
+    janela: null,
+
     loading: false,
 
     error: "",
@@ -5138,6 +5158,11 @@ useEffect(() => {
 
           forceBusy: filteredForced,
 
+          // Até onde este estabelecimento aceita agendamento. Vem do backend porque só ele
+          // sabe a config; guardar aqui é o que permite travar a seta de avançar semana e
+          // dizer QUANDO abre — sem isso a grade toda cinza parece defeito do sistema.
+          janela: slotsData?.janela || null,
+
         };
 
       });
@@ -5208,7 +5233,19 @@ useEffect(() => {
 
       if (e.key === "ArrowLeft") setState((p) => ({ ...p, currentWeek: DateHelpers.addWeeksISO(p.currentWeek, -1) }));
 
-      if (e.key === "ArrowRight") setState((p) => ({ ...p, currentWeek: DateHelpers.addWeeksISO(p.currentWeek, 1) }));
+      // Avançar respeita a janela: sem o clamp, a seta do teclado seria o furo que a trava
+      // do handleWeekChange fechou.
+      if (e.key === "ArrowRight") setState((p) => {
+
+        const proxima = DateHelpers.addWeeksISO(p.currentWeek, 1);
+
+        const maxWeek = DateHelpers.maxWeekStartFor(p.janela?.limite);
+
+        if (maxWeek && proxima > maxWeek) return p;
+
+        return { ...p, currentWeek: proxima };
+
+      });
 
     };
 
@@ -6536,6 +6573,15 @@ useEffect(() => {
 
     try { norm = DateHelpers.weekStartISO(new Date(newWeek)); } catch {}
 
+    // Trava do horizonte. Vale para TODO caminho de troca de semana — a seta, o seletor de
+    // data e o ?week= digitado na URL, que era por onde dava para pular para dezembro.
+    // O clamp é feito ANTES do setState (e não dentro dele) porque a URL abaixo precisa
+    // gravar a semana que realmente ficou na tela; senão o link compartilhado devolveria
+    // a pessoa para uma semana que a trava não deixa abrir.
+    const maxWeek = DateHelpers.maxWeekStartFor(state.janela?.limite);
+
+    if (maxWeek && norm > maxWeek) norm = maxWeek;
+
     setState((p) => ({ ...p, currentWeek: norm, selectedSlot: null }));
 
     try{
@@ -6549,6 +6595,33 @@ useEffect(() => {
     }catch{}
 
   };
+
+  // Frase que explica por que a grade acaba onde acaba. Vazia quando não há janela ligada —
+  // que é o caso da esmagadora maioria dos estabelecimentos.
+  const janelaAviso = useMemo(() => {
+
+    const janela = state.janela;
+
+    if (!janela?.limite || janela.modo !== 'semanal') return '';
+
+    // `limite` é exclusivo: o último horário agendável é 1ms antes dele.
+    const fim = new Date(new Date(janela.limite).getTime() - 1);
+
+    if (Number.isNaN(fim.getTime())) return '';
+
+    const dia = fim.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+
+    const abertura = janela.abre_em ? new Date(janela.abre_em) : null;
+
+    if (!abertura || Number.isNaN(abertura.getTime())) return `A agenda vai até ${dia}.`;
+
+    const quando = abertura.toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: '2-digit' });
+
+    const hora = `${String(abertura.getHours()).padStart(2, '0')}h`;
+
+    return `A agenda vai até ${dia}. Os próximos horários abrem ${quando} às ${hora}.`;
+
+  }, [state.janela]);
 
   const handleSlotSelect = (slot) =>
 
@@ -8055,11 +8128,26 @@ useEffect(() => {
 
                     className="input"
 
-                    title="Segunda-feira da semana"
+                    max={DateHelpers.maxWeekStartFor(state.janela?.limite) || undefined}
+
+                    title="Domingo da semana"
 
                   />
 
                 </label>
+
+                {/* Por que a agenda "acaba" aqui. Sem esta frase o cliente que chega no fim
+                    da janela vê uma grade cinza e conclui que o sistema quebrou — foi a
+                    reclamação previsível de travar o horizonte sem explicar nada. */}
+                {janelaAviso ? (
+
+                  <p className="muted" style={{ margin: '4px 0 0', fontSize: 13 }}>
+
+                    {janelaAviso}
+
+                  </p>
+
+                ) : null}
 
                 <div className="row" style={{ alignItems: 'center', gap: 10 }}>
 
@@ -8152,7 +8240,7 @@ useEffect(() => {
 
             <div className="month__grid">
 
-              {['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'].map((d, index) => (
+              {['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'].map((d, index) => (
 
                 <div key={`${d}-${index}`} className="month__dow muted">{d}</div>
 
