@@ -1438,6 +1438,7 @@ export default function CockpitOverview({ establishmentId, currentUser, professi
             closeButton
             onClose={() => { if (!modalSaving) setSelectedEvent(null) }}
             disableOutsideClick={modalSaving}
+            bodyClassName={styles.tokens}
             actions={
               waDigits ? (
                 <a
@@ -1549,6 +1550,7 @@ export default function CockpitOverview({ establishmentId, currentUser, professi
           closeButton
           onClose={closeBlockModal}
           disableOutsideClick={blkSaving}
+          bodyClassName={styles.tokens}
         >
           <div className={styles.blkForm}>
             <p className={styles.blkHint}>
@@ -1720,6 +1722,7 @@ export default function CockpitOverview({ establishmentId, currentUser, professi
           closeButton
           onClose={() => { if (!blkRemoving) setSelectedBlock(null) }}
           disableOutsideClick={blkRemoving}
+          bodyClassName={styles.tokens}
         >
           <div className={styles.modalDetail}>
             <dl className={styles.modalRows}>

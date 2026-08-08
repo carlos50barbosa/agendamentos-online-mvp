@@ -6,7 +6,16 @@
  * cor (preenchido em índigo), com o resto arejado.
  * -------------------------------------------------------------------------- */
 
-.wrap {
+/* Os tokens vivem numa lista de seletores, e não só em .wrap, por causa do PORTAL.
+   `components/Modal.jsx` faz createPortal(dialogo, document.body), então o conteúdo do
+   modal deixa de ser descendente de .wrap — e custom property não atravessa portal, ela
+   herda pela árvore do DOM. Sem isto, todo `var(--c-*)` dentro de um modal fica sem valor:
+   `background: var(--c-brand)` do botão primário caía para o inicial (transparente) e o
+   botão sumia sob o texto branco, e `border-color: var(--c-line-strong)` do "Cancelar"
+   virava currentColor (borda escura). Quem abre <Modal> aqui aplica `styles.tokens` no
+   filho raiz para reidratar os tokens do outro lado do portal. */
+.wrap,
+.tokens {
   /* Tokens locais derivados do design system, com fallback ao hex da marca. */
   --c-brand: var(--brand, #5049E5);
   --c-brand-light: var(--brand-light, #7669ED);
@@ -28,7 +37,11 @@
   --c-done-soft: var(--status-concluido-bg, #E7EDF5);
   --c-wa: #1aa34d;
   --c-shadow: 0 4px 18px -10px rgba(30, 27, 75, 0.2);
+}
 
+/* Layout só de .wrap: `.tokens` é usado dentro do modal, onde o filho raiz tem o próprio
+   display/grid — herdar `display: block` daqui quebraria o formulário. */
+.wrap {
   display: block;
   max-width: 100%;
   min-width: 0;
