@@ -150,14 +150,19 @@ const Icon = ({ path, width = 16, strokeWidth = 1.8 }) => (
   </svg>
 )
 
-// ---- Datas (semana começa na segunda) ----
-const WEEKDAY_SHORT = ['seg', 'ter', 'qua', 'qui', 'sex', 'sáb', 'dom'] // índice = (getDay()+6)%7
+// ---- Datas (semana começa no DOMINGO) ----
+// A convenção é da plataforma inteira, não deste componente: a janela de agendamento libera
+// a leva de horários de uma vez num dia fixo (domingo, por padrão), e com a grade começando
+// na segunda essa leva cairia partida entre duas páginas. Ver DateHelpers.weekStartISO em
+// pages/NovoAgendamento.jsx e currentLocalWeekStart em backend/src/routes/slots.js — os três
+// precisam concordar, senão o painel mostra uma semana e a página pública, outra.
+const WEEKDAY_SHORT = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb'] // índice = getDay()
 const startOfDayD = (d) => { const x = new Date(d); x.setHours(0, 0, 0, 0); return x }
 const addDaysD = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x }
-const startOfWeekMon = (d) => addDaysD(startOfDayD(d), -(((new Date(d).getDay()) + 6) % 7))
+const startOfWeekSun = (d) => addDaysD(startOfDayD(d), -(new Date(d).getDay()))
 const startOfMonthD = (d) => { const x = new Date(d.getFullYear(), d.getMonth(), 1); x.setHours(0, 0, 0, 0); return x }
 const ymdKey = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`
-const weekIndex = (d) => (d.getDay() + 6) % 7 // seg=0 ... dom=6
+const weekIndex = (d) => d.getDay() // dom=0 ... sáb=6
 const firstName = (name) => String(name || '').trim().split(/\s+/)[0] || ''
 
 // Normaliza os agendamentos (TODAS as datas) e colapsa duplicatas exatas
@@ -477,7 +482,7 @@ export default function CockpitOverview({ establishmentId, currentUser, professi
       return { from: ymdKey(gridStart), to: ymdKey(addDaysD(gridStart, 41)) }
     }
     if (view === 'semana') {
-      const ws = startOfWeekMon(base)
+      const ws = startOfWeekSun(base)
       return { from: ymdKey(ws), to: ymdKey(addDaysD(ws, 6)) }
     }
     const d = startOfDayD(base)
@@ -686,7 +691,7 @@ export default function CockpitOverview({ establishmentId, currentUser, professi
       return { mode: 'mes', ...buildMonthGrid(dedupedAll, refDate, now, blocks) }
     }
 
-    const weekStart = startOfWeekMon(refDate)
+    const weekStart = startOfWeekSun(refDate)
     const items = view === 'semana'
       ? dedupedAll.filter((ev) => ev.start >= weekStart && ev.start < addDaysD(weekStart, 7))
       : dedupedAll.filter((ev) => isSameLocalDay(ev.start, refDate))
@@ -816,7 +821,7 @@ export default function CockpitOverview({ establishmentId, currentUser, professi
 
     // Linha "AGORA": só quando a visão inclui o dia de hoje.
     const includesToday = view === 'semana'
-      ? ymdKey(weekStart) === ymdKey(startOfWeekMon(now))
+      ? ymdKey(weekStart) === ymdKey(startOfWeekSun(now))
       : isSameLocalDay(refDate, now)
     const nowM = minutesOfDay(now)
     const nowLeft = includesToday && nowM >= lo && nowM <= hi ? clampPct(((nowM - lo) / span) * 100) : null
@@ -919,19 +924,19 @@ export default function CockpitOverview({ establishmentId, currentUser, professi
   const shiftAnchor = (dir) => {
     const base = refDate
     if (view === 'dia') setAnchor(startOfDayD(addDaysD(base, dir)))
-    else if (view === 'semana') setAnchor(startOfWeekMon(addDaysD(base, dir * 7)))
+    else if (view === 'semana') setAnchor(startOfWeekSun(addDaysD(base, dir * 7)))
     else setAnchor(startOfMonthD(new Date(base.getFullYear(), base.getMonth() + dir, 1)))
   }
   const isTodayView =
     view === 'dia' ? isSameLocalDay(refDate, now)
-      : view === 'semana' ? ymdKey(startOfWeekMon(refDate)) === ymdKey(startOfWeekMon(now))
+      : view === 'semana' ? ymdKey(startOfWeekSun(refDate)) === ymdKey(startOfWeekSun(now))
         : refDate.getFullYear() === now.getFullYear() && refDate.getMonth() === now.getMonth()
   const fmtShortDay = (d) => d.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' }).replace(/\./g, '')
   const periodLabel =
     view === 'dia'
       ? capitalize(refDate.toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: 'short' }).replace(/\./g, ''))
       : view === 'semana'
-        ? `${fmtShortDay(startOfWeekMon(refDate))} – ${fmtShortDay(addDaysD(startOfWeekMon(refDate), 6))}`
+        ? `${fmtShortDay(startOfWeekSun(refDate))} – ${fmtShortDay(addDaysD(startOfWeekSun(refDate), 6))}`
         : capitalize(refDate.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' }))
 
   if (loading) {
