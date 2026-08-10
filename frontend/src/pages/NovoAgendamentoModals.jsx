@@ -299,7 +299,10 @@ export default function NovoAgendamentoModals(props) {
 
                   </div>
 
-                  <div className="estab-info__content">
+                  {/* `key` na aba: remonta o painel a cada troca — a animação de entrada roda
+                      novamente e a rolagem volta ao topo em vez de herdar a posição da aba anterior. */}
+
+                  <div className="estab-info__content" key={infoActiveTab}>
 
                     {infoActiveTab === 'about' ? (
 
@@ -867,6 +870,8 @@ export default function NovoAgendamentoModals(props) {
 
                     <div
 
+                      className="gallery-viewer__stage"
+
                       style={{
 
                         position: 'relative',
@@ -885,29 +890,20 @@ export default function NovoAgendamentoModals(props) {
 
                     >
 
+                      {/* Posição e transform das setas moram no CSS (.gallery-nav): inline eles
+                          venceriam o `transform` de hover/press e o efeito não apareceria. */}
+
                       <button
 
                         type="button"
 
-                        className="btn btn--ghost btn--sm"
+                        className="btn btn--ghost btn--sm gallery-nav gallery-nav--prev"
 
                         onClick={handleGalleryPrev}
 
                         disabled={galleryImages.length < 2}
 
-                        style={{
-
-                          position: 'absolute',
-
-                          top: '50%',
-
-                          left: 8,
-
-                          transform: 'translateY(-50%)',
-
-                          zIndex: 2,
-
-                        }}
+                        aria-label="Imagem anterior"
 
                       >
 
@@ -919,25 +915,13 @@ export default function NovoAgendamentoModals(props) {
 
                         type="button"
 
-                        className="btn btn--ghost btn--sm"
+                        className="btn btn--ghost btn--sm gallery-nav gallery-nav--next"
 
                         onClick={handleGalleryNext}
 
                         disabled={galleryImages.length < 2}
 
-                        style={{
-
-                          position: 'absolute',
-
-                          top: '50%',
-
-                          right: 8,
-
-                          transform: 'translateY(-50%)',
-
-                          zIndex: 2,
-
-                        }}
+                        aria-label="Próxima imagem"
 
                       >
 
@@ -986,6 +970,13 @@ export default function NovoAgendamentoModals(props) {
                         return (
 
                           <img
+
+                            /* `key` no índice: força remontar a cada troca, e é isso que faz a
+                               animação de entrada rodar de novo em vez de só na primeira foto. */
+
+                            key={galleryViewIndex}
+
+                            className="gallery-viewer__img"
 
                             src={src}
 
@@ -1049,11 +1040,11 @@ export default function NovoAgendamentoModals(props) {
 
                               onClick={() => setGalleryViewIndex(index)}
 
-                              className="gallery-thumb"
+                              className={`gallery-thumb${isActive ? ' is-active' : ''}`}
+
+                              aria-current={isActive ? 'true' : undefined}
 
                               style={{
-
-                                border: isActive ? '2px solid var(--brand, #6c2bd9)' : '1px solid #e0e0e0',
 
                                 borderRadius: 8,
 

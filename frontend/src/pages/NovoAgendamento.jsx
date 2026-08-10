@@ -8709,7 +8709,28 @@ useEffect(() => {
 
                   {establishmentAvatar ? (
 
-                    <img src={establishmentAvatar} alt={`Logo de ${selectedEstablishmentName || 'estabelecimento'}`} />
+                    <>
+
+                      <img src={establishmentAvatar} alt={`Logo de ${selectedEstablishmentName || 'estabelecimento'}`} />
+
+                      {/* Sem esta lupa nada indica que a foto abre — no toque ela fica sempre
+                          visível (não há hover para revelá-la). Ver .novo-agendamento__summary-avatar-zoom. */}
+
+                      <span className="novo-agendamento__summary-avatar-zoom" aria-hidden="true">
+
+                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+
+                          <circle cx="11" cy="11" r="7" />
+
+                          <path d="M20 20l-3.2-3.2" />
+
+                          <path d="M11 8.5v5M8.5 11h5" />
+
+                        </svg>
+
+                      </span>
+
+                    </>
 
                   ) : (
 

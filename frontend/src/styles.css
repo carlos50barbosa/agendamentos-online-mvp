@@ -12902,3 +12902,195 @@ body.planos-no-scrollbar .container--wide::-webkit-scrollbar{
   .lp-upgrade__action{ align-items:stretch; }
   .lp-section-head{ align-items:flex-start; flex-direction:column; }
 }
+
+/* ============================================================
+   Microinterações da página do estabelecimento e dos modais
+   (Galeria, Detalhes, Avaliações, Avaliar e foto de perfil).
+
+   Tudo aqui é feedback de toque/clique e entrada/saída de diálogo — nada
+   move layout. Fica no fim do arquivo de propósito: o bloco público em
+   `.novo-agendamento__summary--establishment` usa !important em tamanho e
+   espaçamento, então estes efeitos se apoiam só em `transform`, `opacity`,
+   `box-shadow` e `animation`, que aquele bloco não trava.
+
+   O corte por `prefers-reduced-motion` está no fim da seção.
+   ============================================================ */
+
+@keyframes ao-backdrop-in{ from{ opacity:0; } to{ opacity:1; } }
+@keyframes ao-backdrop-out{ from{ opacity:1; } to{ opacity:0; } }
+@keyframes ao-modal-in{
+  from{ opacity:0; transform:translateY(14px) scale(.965); }
+  to{ opacity:1; transform:none; }
+}
+@keyframes ao-modal-out{
+  from{ opacity:1; transform:none; }
+  to{ opacity:0; transform:translateY(8px) scale(.985); }
+}
+@keyframes ao-modal-sheet-in{
+  from{ opacity:0; transform:translateY(28px); }
+  to{ opacity:1; transform:none; }
+}
+@keyframes ao-fade-up{ from{ opacity:0; transform:translateY(7px); } to{ opacity:1; transform:none; } }
+@keyframes ao-photo-in{ from{ opacity:0; transform:scale(.9); } to{ opacity:1; transform:none; } }
+@keyframes ao-image-in{ from{ opacity:0; transform:scale(1.05); } to{ opacity:1; transform:none; } }
+@keyframes ao-pop{ 0%{ transform:scale(1); } 45%{ transform:scale(1.18); } 100%{ transform:scale(1); } }
+@keyframes ao-star-pop{ 0%{ transform:scale(1) rotate(0); } 45%{ transform:scale(1.35) rotate(-8deg); } 100%{ transform:scale(1) rotate(0); } }
+@keyframes ao-ripple{
+  from{ opacity:.2; transform:translate(-50%,-50%) scale(.25); }
+  to{ opacity:0; transform:translate(-50%,-50%) scale(1); }
+}
+
+/* ---- Diálogo: entra subindo, sai encolhendo -------------------------------
+   A saída depende de `.is-closing`, que o Modal.jsx aplica antes de desmontar
+   (CLOSE_ANIMATION_MS lá tem que continuar batendo com os .16s daqui). */
+.modal-backdrop{ animation:ao-backdrop-in .18s ease-out both; }
+/* O blur mora num pseudo-elemento, e não no próprio backdrop, porque
+   backdrop-filter cria bloco contentor para descendentes `position:fixed` —
+   exatamente a armadilha documentada no topo do Modal.jsx. O pseudo não é
+   ancestral do diálogo, então nada dentro do modal muda de referencial. */
+.modal-backdrop::before{
+  content:""; position:absolute; inset:0; pointer-events:none;
+  backdrop-filter:blur(3px); -webkit-backdrop-filter:blur(3px);
+}
+.modal{ position:relative; z-index:1; animation:ao-modal-in .24s cubic-bezier(.2,.85,.3,1.2) both; }
+/* Durante a saída o diálogo ainda está montado: sem isto daria para clicar num
+   botão dele nesses 160ms finais. */
+.modal-backdrop.is-closing{ animation:ao-backdrop-out .16s ease-in both; pointer-events:none; }
+.modal-backdrop.is-closing .modal{ animation:ao-modal-out .16s ease-in both; }
+/* No celular o diálogo ocupa quase a tela toda; entrar de baixo lê como folha,
+   não como caixa que aparece do nada. */
+@media (max-width:640px){
+  .modal{ animation-name:ao-modal-sheet-in; }
+}
+
+/* ---- Barra de ações do estabelecimento (Galeria/Detalhes/Avaliar/...) ----
+   `overflow:hidden` recorta a onda de clique no formato da pílula. No bloco
+   público ele já vem !important; aqui garantimos o mesmo fora dele. */
+.summary-action{
+  position:relative; overflow:hidden;
+  transition:background .15s ease,color .15s ease,border-color .15s ease,box-shadow .2s ease,transform .12s ease;
+}
+.summary-action::after{
+  content:""; position:absolute; left:50%; top:50%;
+  width:180%; aspect-ratio:1/1; border-radius:50%;
+  background:currentColor; opacity:0; pointer-events:none;
+  transform:translate(-50%,-50%) scale(.25);
+}
+.summary-action:not(:disabled):active{ transform:scale(.94); }
+.summary-action:not(:disabled):active::after{ animation:ao-ripple .5s ease-out; }
+.summary-action svg,
+.summary-action > span[aria-hidden]{ transition:transform .18s ease; }
+.summary-action:not(:disabled):hover svg,
+.summary-action:not(:disabled):hover > span[aria-hidden]{ transform:translateY(-1px) scale(1.1); }
+/* Favoritar: o coração dá um pulo quando o estado vira favorito. */
+.summary-action--highlight > span[aria-hidden]{ animation:ao-pop .38s ease; }
+
+/* ---- Foto de perfil: clique abre a foto em tamanho grande ---------------- */
+.novo-agendamento__summary-avatar.is-clickable{ position:relative; }
+.novo-agendamento__summary-avatar.is-clickable:not(:disabled):active{ transform:scale(.97); }
+.novo-agendamento__summary-avatar img{ transition:transform .35s cubic-bezier(.2,.8,.3,1); }
+.novo-agendamento__summary-avatar.is-clickable:hover img{ transform:scale(1.06); }
+/* Véu com lupa: sem ele nada anuncia que a foto é clicável. Alinhado embaixo
+   ao centro para não cair no recorte do border-radius do avatar. */
+.novo-agendamento__summary-avatar-zoom{
+  position:absolute; inset:0; display:grid; align-items:end; justify-items:center;
+  padding-bottom:8px; color:#fff; pointer-events:none; opacity:0;
+  background:linear-gradient(to top, rgba(15,23,42,.58), rgba(15,23,42,0) 58%);
+  transition:opacity .2s ease;
+}
+.novo-agendamento__summary-avatar.is-clickable:hover .novo-agendamento__summary-avatar-zoom,
+.novo-agendamento__summary-avatar.is-clickable:focus-visible .novo-agendamento__summary-avatar-zoom{ opacity:1; }
+/* No dedo não existe hover: a dica precisa estar sempre visível, um pouco mais discreta. */
+@media (pointer:coarse){
+  .novo-agendamento__summary-avatar.is-clickable .novo-agendamento__summary-avatar-zoom{ opacity:.85; }
+}
+.profile-image-modal__img{ animation:ao-photo-in .3s cubic-bezier(.2,.85,.3,1.15) both; }
+
+/* ---- Modal Galeria ------------------------------------------------------- */
+.gallery-nav{
+  position:absolute; top:50%; z-index:2; transform:translateY(-50%);
+  transition:transform .16s ease,box-shadow .16s ease,background .16s ease;
+}
+.gallery-nav--prev{ left:8px; }
+.gallery-nav--next{ right:8px; }
+.gallery-nav:not(:disabled):hover{ transform:translateY(-50%) scale(1.14); box-shadow:0 8px 18px rgba(15,23,42,.18); }
+.gallery-nav:not(:disabled):active{ transform:translateY(-50%) scale(.92); }
+.gallery-viewer__img{ animation:ao-image-in .34s cubic-bezier(.2,.8,.3,1) both; }
+.gallery-thumb{
+  border:1px solid var(--border); cursor:pointer;
+  transition:transform .18s ease,box-shadow .18s ease,border-color .18s ease,opacity .18s ease;
+}
+.gallery-thumb:not(.is-active){ opacity:.72; }
+.gallery-thumb:hover{ opacity:1; transform:translateY(-2px); box-shadow:0 10px 18px rgba(15,23,42,.16); }
+.gallery-thumb:active{ transform:scale(.94); }
+.gallery-thumb.is-active{
+  opacity:1; border:2px solid var(--brand,var(--primary-600));
+  animation:ao-pop .3s ease;
+}
+
+/* ---- Modal Detalhes: abas e conteúdo ------------------------------------- */
+.estab-info__tab{ position:relative; transition:color .15s ease,background .15s ease,transform .12s ease; }
+.estab-info__tab:not(:disabled):active{ transform:scale(.96); }
+/* Sublinhado que cresce do centro; encosta na borda de `.estab-info__tabs`
+   (padding-bottom:6px + 1px de borda). */
+.estab-info__tab::after{
+  content:""; position:absolute; left:10px; right:10px; bottom:-7px; height:2px; border-radius:2px;
+  background:var(--brand,var(--primary-600));
+  transform:scaleX(0); transform-origin:center;
+  transition:transform .24s cubic-bezier(.2,.8,.3,1);
+}
+.estab-info__tab.is-active::after{ transform:scaleX(1); }
+.estab-info__content{ animation:ao-fade-up .26s ease both; }
+
+/* ---- Aba Avaliações ------------------------------------------------------ */
+/* Escada curta na entrada: só nos primeiros itens, para o "carregar mais" não
+   virar uma cascata longa a cada página nova. */
+.estab-reviews__list > li{ animation:ao-fade-up .3s ease both; }
+.estab-reviews__list > li:nth-child(2){ animation-delay:.04s; }
+.estab-reviews__list > li:nth-child(3){ animation-delay:.08s; }
+.estab-reviews__list > li:nth-child(4){ animation-delay:.12s; }
+.estab-reviews__list > li:nth-child(5){ animation-delay:.16s; }
+.estab-reviews__list > li:nth-child(n+6){ animation-delay:.2s; }
+.estab-reviews__item{ transition:transform .18s ease,box-shadow .18s ease,border-color .18s ease; }
+.estab-reviews__item:hover{
+  transform:translateY(-2px);
+  border-color:var(--brand-200,var(--border));
+  box-shadow:0 12px 22px rgba(15,23,42,.08);
+}
+
+/* ---- Modal Avaliar ------------------------------------------------------- */
+.rating-star{ transition:color .15s ease,transform .15s ease; }
+.rating-star:not(:disabled):active{ transform:scale(.88); }
+/* A animação dispara quando a estrela ganha `--active`, ou seja, no clique.
+   O atraso por posição faz as estrelas acenderem em sequência, da 1 à nota. */
+.rating-star--active{ animation:ao-star-pop .34s ease; }
+.rating-modal__stars .rating-star:nth-child(2){ animation-delay:.05s; }
+.rating-modal__stars .rating-star:nth-child(3){ animation-delay:.1s; }
+.rating-modal__stars .rating-star:nth-child(4){ animation-delay:.15s; }
+.rating-modal__stars .rating-star:nth-child(5){ animation-delay:.2s; }
+/* Prévia ao passar o mouse: as estrelas depois da apontada esmaecem. */
+.rating-modal__stars .rating-star:not(:disabled):hover ~ .rating-star{ opacity:.4; }
+
+@media (prefers-reduced-motion: reduce){
+  .modal-backdrop,
+  .modal-backdrop.is-closing,
+  .modal,
+  .modal-backdrop.is-closing .modal,
+  .estab-info__content,
+  .estab-reviews__list > li,
+  .rating-star--active,
+  .summary-action--highlight > span[aria-hidden],
+  .profile-image-modal__img,
+  .gallery-viewer__img,
+  .gallery-thumb.is-active{ animation:none !important; }
+  .summary-action::after{ display:none; }
+  .summary-action:active,
+  .summary-action:hover svg,
+  .summary-action:hover > span[aria-hidden],
+  .gallery-thumb:hover,
+  .gallery-thumb:active,
+  .estab-reviews__item:hover,
+  .rating-star:active,
+  .novo-agendamento__summary-avatar.is-clickable:hover img,
+  .novo-agendamento__summary-avatar.is-clickable:active{ transform:none !important; }
+}

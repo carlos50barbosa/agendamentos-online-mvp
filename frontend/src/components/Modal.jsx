@@ -14,11 +14,21 @@
 //
 // Portal é seguro neste projeto porque o tema vive em `:root` (data-theme no documentElement) e
 // nenhum CSS escopa `.modal`/`.modal-backdrop` sob um pai específico.
-import React, { useEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 const FOCUSABLE =
   'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+// Precisa bater com a duração de `.modal-backdrop.is-closing` no styles.css: o desmonte é
+// adiado por este tempo para a animação de saída caber na tela. Se um dia divergirem, o
+// modal some antes de terminar de sumir (ou fica um frame parado depois de pronto).
+const CLOSE_ANIMATION_MS = 160;
+
+const prefersReducedMotion = () =>
+  typeof window !== 'undefined' &&
+  typeof window.matchMedia === 'function' &&
+  window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 export default function Modal({
 
@@ -42,6 +52,25 @@ export default function Modal({
   const hasTitle = Boolean(title);
   const headerClass = hasTitle ? 'modal__header' : 'modal__header modal__header--compact';
   const dialogRef = useRef(null);
+
+  // Saída animada: em vez de chamar `onClose` na hora (o que desmontaria o nó antes de
+  // qualquer animação rodar), marcamos `is-closing` e só avisamos o consumidor quando a
+  // animação termina. Quem fecha o modal por conta própria (ex.: setState depois de salvar)
+  // continua funcionando — apenas sem a saída animada.
+  const [closing, setClosing] = useState(false);
+  const closingRef = useRef(false);
+  const closeTimerRef = useRef(null);
+
+  useEffect(() => () => { if (closeTimerRef.current) clearTimeout(closeTimerRef.current); }, []);
+
+  const requestClose = useCallback((event) => {
+    if (typeof onClose !== 'function') return;
+    if (prefersReducedMotion()) { onClose(event); return; }
+    if (closingRef.current) return; // segundo clique no backdrop não agenda um segundo fechamento
+    closingRef.current = true;
+    setClosing(true);
+    closeTimerRef.current = setTimeout(() => onClose(event), CLOSE_ANIMATION_MS);
+  }, [onClose]);
 
   // Gestão de foco (padrão de diálogo acessível): ao abrir, leva o foco para dentro;
   // prende o Tab no modal; ao fechar, devolve o foco a quem abriu. Mount-only (deps [])
@@ -95,7 +124,7 @@ export default function Modal({
 
     }
 
-    if (typeof onClose === 'function') onClose(event);
+    requestClose(event);
 
   };
 
@@ -103,7 +132,11 @@ export default function Modal({
 
   const dialogo = (
 
-    <div className="modal-backdrop" role="presentation" onClick={handleBackdropClick}>
+    <div
+      className={closing ? 'modal-backdrop is-closing' : 'modal-backdrop'}
+      role="presentation"
+      onClick={handleBackdropClick}
+    >
 
       <div
 
@@ -128,7 +161,7 @@ export default function Modal({
             {title ? <h3 className="modal__title">{title}</h3> : <span aria-hidden="true" />}
             {closeButton && (
 
-              <button type="button" className="modal__close" onClick={onClose} aria-label="Fechar">
+              <button type="button" className="modal__close" onClick={requestClose} aria-label="Fechar">
 
                 <span aria-hidden="true">X</span>
 
