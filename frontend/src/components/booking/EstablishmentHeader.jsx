@@ -5,15 +5,49 @@
 //   Galeria (lightbox) · Detalhes (sobre + horários + contato) · Favoritar · Avaliar.
 // Consome o payload de Api.getEstablishment (profile.horarios, rating, gallery,
 // is_favorite, user_review). Favoritar/Avaliar exigem cliente logado (senão → login).
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
   ChevronLeft, ChevronRight, MapPin, Star, Images, Info, MessageSquare, Flag, X,
-  Clock, Phone, AtSign, Globe, MessageCircle, Check, Loader2, MapPinned,
+  Clock, Phone, AtSign, Globe, MessageCircle, Check, Loader2, MapPinned, Maximize2,
 } from 'lucide-react';
 import { Api, resolveAssetUrl } from '../../utils/api.js';
 import { getUser } from '../../utils/auth.js';
 import { waLink } from '../../config/site.js';
+import './EstablishmentHeader.css';
+
+// ---------------------------------------------------------------------------
+// Fechamento animado
+// ---------------------------------------------------------------------------
+// Chamar onClose direto desmonta o modal antes de qualquer animação rodar — só
+// dá para animar a saída se alguém segurar o desmonte. Este hook marca
+// `is-closing` no overlay e avisa o dono do estado quando a animação acaba.
+// Os 160ms têm que bater com `.eh-overlay.is-closing` no CSS.
+const CLOSE_MS = 160;
+
+const semAnimacao = () =>
+  typeof window !== 'undefined' &&
+  typeof window.matchMedia === 'function' &&
+  window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+function useAnimatedClose(onClose) {
+  const [closing, setClosing] = useState(false);
+  const jaFechando = useRef(false);
+  const timer = useRef(null);
+
+  useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
+
+  const close = useCallback(() => {
+    if (typeof onClose !== 'function') return;
+    if (semAnimacao()) { onClose(); return; }
+    if (jaFechando.current) return; // clique repetido não agenda um segundo fechamento
+    jaFechando.current = true;
+    setClosing(true);
+    timer.current = setTimeout(onClose, CLOSE_MS);
+  }, [onClose]);
+
+  return [closing, close];
+}
 
 // ---------------------------------------------------------------------------
 // Horários / status "aberto agora"
@@ -119,6 +153,17 @@ function buildAddress(est) {
   return [line1, est?.bairro, cityState].filter(Boolean).join(' • ');
 }
 
+// Compartilhado pelos dois estados do avatar (com foto vira <button>, sem foto é
+// <div>): a caixa tem que ser idêntica nos dois, senão o recorte da capa muda.
+// position/zIndex: garante o avatar POR CIMA da capa (que é position:relative);
+// sem isso, a capa posicionada é pintada sobre o topo do avatar.
+const AVATAR_BOX = {
+  position: 'relative', zIndex: 1,
+  width: 76, height: 76, marginTop: -38, marginBottom: 8,
+  background: 'var(--brand-100, #EEEDFC)', color: 'var(--brand, #5049E5)',
+  border: '4px solid var(--surface, #fff)', boxShadow: '0 10px 24px -10px rgba(30,27,75,0.45)',
+};
+
 // ---------------------------------------------------------------------------
 // Componente principal
 // ---------------------------------------------------------------------------
@@ -200,7 +245,7 @@ export default function EstablishmentHeader({ establishment, onBack, showBack = 
               type="button"
               onClick={handleBack}
               aria-label="Voltar"
-              className="tw-absolute tw-left-3 tw-top-3 tw-inline-flex tw-items-center tw-justify-center tw-rounded-full"
+              className="eh-iconbtn tw-absolute tw-left-3 tw-top-3 tw-inline-flex tw-items-center tw-justify-center tw-rounded-full"
               style={{
                 width: 40, height: 40,
                 background: 'rgba(255,255,255,0.94)', color: 'var(--brand-deep, #1E1B4B)',
@@ -214,7 +259,7 @@ export default function EstablishmentHeader({ establishment, onBack, showBack = 
             <button
               type="button"
               onClick={() => setModal('gallery')}
-              className="tw-absolute tw-right-3 tw-top-3 tw-inline-flex tw-items-center tw-gap-1.5 tw-rounded-full tw-px-3"
+              className="eh-iconbtn tw-absolute tw-right-3 tw-top-3 tw-inline-flex tw-items-center tw-gap-1.5 tw-rounded-full tw-px-3"
               style={{
                 height: 34, background: 'rgba(255,255,255,0.94)', color: 'var(--brand-deep, #1E1B4B)',
                 fontSize: 12, fontWeight: 700, cursor: 'pointer',
@@ -228,23 +273,31 @@ export default function EstablishmentHeader({ establishment, onBack, showBack = 
 
         {/* Corpo */}
         <div className="tw-flex tw-flex-col tw-items-center tw-px-4 tw-pb-4 tw-text-center">
-          <div
-            className="tw-inline-flex tw-items-center tw-justify-center tw-overflow-hidden tw-rounded-2xl"
-            style={{
-              // position/zIndex: garante o avatar POR CIMA da capa (que é position:relative);
-              // sem isso, a capa posicionada é pintada sobre o topo do avatar.
-              position: 'relative', zIndex: 1,
-              width: 76, height: 76, marginTop: -38, marginBottom: 8,
-              background: 'var(--brand-100, #EEEDFC)', color: 'var(--brand, #5049E5)',
-              border: '4px solid var(--surface, #fff)', boxShadow: '0 10px 24px -10px rgba(30,27,75,0.45)',
-            }}
-          >
-            {avatar ? (
+          {/* Com foto o avatar é um <button> que a abre em tamanho grande. Sem foto
+              são só as iniciais: um botão ali seria alvo de toque que não faz nada. */}
+          {avatar ? (
+            <button
+              type="button"
+              onClick={() => setModal('photo')}
+              aria-label="Ver foto de perfil"
+              title="Ver foto de perfil"
+              className="eh-avatar tw-inline-flex tw-items-center tw-justify-center tw-overflow-hidden tw-rounded-2xl"
+              style={AVATAR_BOX}
+            >
               <img src={avatar} alt={est.nome || ''} className="tw-h-full tw-w-full tw-object-cover" />
-            ) : (
+              {/* Sem esta lupa nada anuncia que a foto abre. */}
+              <span className="eh-avatar__zoom" aria-hidden="true">
+                <Maximize2 size={14} strokeWidth={2.4} />
+              </span>
+            </button>
+          ) : (
+            <div
+              className="tw-inline-flex tw-items-center tw-justify-center tw-overflow-hidden tw-rounded-2xl"
+              style={AVATAR_BOX}
+            >
               <span className="tw-text-lg tw-font-extrabold">{initials}</span>
-            )}
-          </div>
+            </div>
+          )}
 
           <h1 className="tw-m-0 tw-text-xl tw-font-extrabold" style={{ color: 'var(--brand-deep, #1E1B4B)' }}>
             {est.nome || 'Estabelecimento'}
@@ -304,6 +357,9 @@ export default function EstablishmentHeader({ establishment, onBack, showBack = 
         </div>
       </header>
 
+      {modal === 'photo' && avatar && (
+        <PhotoModal src={avatar} alt={est.nome || 'Foto de perfil'} onClose={() => setModal(null)} />
+      )}
       {modal === 'gallery' && <GalleryModal images={gallery} onClose={() => setModal(null)} />}
       {modal === 'details' && (
         <DetailsModal est={est} profile={profile} status={status} address={address} onClose={() => setModal(null)} />
@@ -330,7 +386,7 @@ function ActionChip({ icon: Icon, label, onClick, muted, active, busy }) {
       type="button"
       onClick={onClick}
       disabled={busy}
-      className="tw-flex tw-flex-1 tw-min-w-0 tw-flex-col tw-items-center tw-justify-center tw-gap-1 tw-rounded-2xl tw-px-1 tw-py-2 tw-transition"
+      className="eh-chip tw-flex tw-flex-1 tw-min-w-0 tw-flex-col tw-items-center tw-justify-center tw-gap-1 tw-rounded-2xl tw-px-1 tw-py-2 tw-transition"
       style={{
         minHeight: 58,
         background: active ? 'var(--brand-100, #EEEDFC)' : 'var(--surface-soft, #FBFBFE)',
@@ -353,7 +409,9 @@ function ActionChip({ icon: Icon, label, onClick, muted, active, busy }) {
 // ---------------------------------------------------------------------------
 // Modal base (overlay + card centralizado)
 // ---------------------------------------------------------------------------
-function ModalShell({ children, onClose, maxWidth = 480, dark = false }) {
+// `closing` vem de fora (useAnimatedClose no modal que usa este shell): assim o X
+// do cabeçalho e o clique no fundo disparam exatamente o mesmo fechamento animado.
+function ModalShell({ children, onClose, closing = false, maxWidth = 480, dark = false }) {
   useEffect(() => {
     const onKey = (e) => { if (e.key === 'Escape') onClose(); };
     window.addEventListener('keydown', onKey);
@@ -364,12 +422,12 @@ function ModalShell({ children, onClose, maxWidth = 480, dark = false }) {
       role="dialog"
       aria-modal="true"
       onClick={onClose}
-      className="tw-fixed tw-inset-0 tw-z-50 tw-flex tw-items-end tw-justify-center sm:tw-items-center tw-p-0 sm:tw-p-4"
+      className={`eh-overlay${closing ? ' is-closing' : ''} tw-fixed tw-inset-0 tw-z-50 tw-flex tw-items-end tw-justify-center sm:tw-items-center tw-p-0 sm:tw-p-4`}
       style={{ background: dark ? 'rgba(15,13,40,0.92)' : 'rgba(30,27,75,0.45)' }}
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="tw-w-full tw-max-h-[92vh] tw-overflow-y-auto tw-rounded-t-3xl sm:tw-rounded-3xl"
+        className="eh-card tw-w-full tw-max-h-[92vh] tw-overflow-y-auto tw-rounded-t-3xl sm:tw-rounded-3xl"
         style={{ maxWidth, background: 'var(--surface, #fff)', border: '1px solid var(--brand-border, #E7E5F5)' }}
       >
         {children}
@@ -389,11 +447,53 @@ function ModalHeader({ title, onClose }) {
         type="button"
         onClick={onClose}
         aria-label="Fechar"
-        className="tw-inline-flex tw-items-center tw-justify-center tw-rounded-xl"
+        className="eh-iconbtn tw-inline-flex tw-items-center tw-justify-center tw-rounded-xl"
         style={{ minWidth: 38, minHeight: 38, background: 'var(--surface-soft, #F6F5FB)', color: 'var(--brand-deep, #1E1B4B)', cursor: 'pointer' }}
       >
         <X size={19} strokeWidth={2.2} aria-hidden="true" />
       </button>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Foto de perfil em tamanho grande
+// ---------------------------------------------------------------------------
+// Lightbox próprio, e não o ModalShell: aqui não há cabeçalho nem cartão branco —
+// é a foto sobre fundo escuro, como na galeria.
+function PhotoModal({ src, alt, onClose }) {
+  const [closing, close] = useAnimatedClose(onClose);
+
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') close(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [close]);
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={alt}
+      onClick={close}
+      className={`eh-overlay eh-overlay--solid${closing ? ' is-closing' : ''} tw-fixed tw-inset-0 tw-z-50 tw-flex tw-items-center tw-justify-center tw-p-4`}
+      style={{ background: 'rgba(15,13,40,0.94)' }}
+    >
+      <button
+        type="button"
+        onClick={close}
+        aria-label="Fechar"
+        className="eh-iconbtn tw-absolute tw-right-4 tw-top-4 tw-inline-flex tw-items-center tw-justify-center tw-rounded-full"
+        style={{ width: 42, height: 42, background: 'rgba(255,255,255,0.14)', color: '#fff', cursor: 'pointer', zIndex: 1 }}
+      >
+        <X size={22} strokeWidth={2.2} aria-hidden="true" />
+      </button>
+      <img
+        src={src}
+        alt={alt}
+        onClick={(e) => e.stopPropagation()}
+        className="eh-photo tw-max-h-[80vh] tw-w-auto tw-max-w-full tw-rounded-3xl tw-object-contain"
+      />
     </div>
   );
 }
@@ -404,17 +504,32 @@ function ModalHeader({ title, onClose }) {
 function GalleryModal({ images, onClose }) {
   const total = images.length;
   const [idx, setIdx] = useState(0);
-  const go = useCallback((d) => setIdx((i) => (i + d + total) % total), [total]);
+  // `dir` só existe para a animação: a foto nova entra do lado de onde ela veio.
+  // O contador incrementa para a chave do <img> mudar mesmo quando o índice repete
+  // (galeria de uma foto só, ou clique na miniatura já ativa).
+  const [dir, setDir] = useState('none');
+  const [seq, setSeq] = useState(0);
+  const [closing, close] = useAnimatedClose(onClose);
+  const go = useCallback((d) => {
+    setDir(d > 0 ? 'next' : 'prev');
+    setSeq((s) => s + 1);
+    setIdx((i) => (i + d + total) % total);
+  }, [total]);
+  const jumpTo = useCallback((i) => {
+    setDir((atual) => (i === idx ? 'none' : i > idx ? 'next' : 'prev'));
+    setSeq((s) => s + 1);
+    setIdx(i);
+  }, [idx]);
 
   useEffect(() => {
     const onKey = (e) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') close();
       else if (e.key === 'ArrowRight') go(1);
       else if (e.key === 'ArrowLeft') go(-1);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [go, onClose]);
+  }, [go, close]);
 
   const current = images[idx] || {};
   const src = resolveAssetUrl(current.url || '');
@@ -423,15 +538,15 @@ function GalleryModal({ images, onClose }) {
     <div
       role="dialog"
       aria-modal="true"
-      onClick={onClose}
-      className="tw-fixed tw-inset-0 tw-z-50 tw-flex tw-flex-col tw-items-center tw-justify-center tw-gap-3 tw-p-4"
+      onClick={close}
+      className={`eh-overlay eh-overlay--solid${closing ? ' is-closing' : ''} tw-fixed tw-inset-0 tw-z-50 tw-flex tw-flex-col tw-items-center tw-justify-center tw-gap-3 tw-p-4`}
       style={{ background: 'rgba(15,13,40,0.94)' }}
     >
       <button
         type="button"
-        onClick={onClose}
+        onClick={close}
         aria-label="Fechar"
-        className="tw-absolute tw-right-4 tw-top-4 tw-inline-flex tw-items-center tw-justify-center tw-rounded-full"
+        className="eh-iconbtn tw-absolute tw-right-4 tw-top-4 tw-inline-flex tw-items-center tw-justify-center tw-rounded-full"
         style={{ width: 42, height: 42, background: 'rgba(255,255,255,0.14)', color: '#fff', cursor: 'pointer' }}
       >
         <X size={22} strokeWidth={2.2} aria-hidden="true" />
@@ -444,24 +559,27 @@ function GalleryModal({ images, onClose }) {
               type="button"
               onClick={() => go(-1)}
               aria-label="Anterior"
-              className="tw-absolute tw-left-2 tw-inline-flex tw-items-center tw-justify-center tw-rounded-full"
-              style={{ width: 40, height: 40, background: 'rgba(255,255,255,0.16)', color: '#fff', cursor: 'pointer' }}
+              className="eh-iconbtn tw-absolute tw-left-2 tw-inline-flex tw-items-center tw-justify-center tw-rounded-full"
+              style={{ width: 40, height: 40, background: 'rgba(255,255,255,0.16)', color: '#fff', cursor: 'pointer', zIndex: 1 }}
             >
               <ChevronLeft size={22} strokeWidth={2.4} aria-hidden="true" />
             </button>
           )}
+          {/* A chave remonta o <img> a cada troca — é o que faz a animação rodar de
+              novo em vez de só na primeira foto. */}
           <img
+            key={seq}
             src={src}
             alt={current.titulo || ''}
-            className="tw-max-h-[70vh] tw-w-auto tw-max-w-full tw-rounded-2xl tw-object-contain"
+            className={`eh-gallery-img--${dir} tw-max-h-[70vh] tw-w-auto tw-max-w-full tw-rounded-2xl tw-object-contain`}
           />
           {total > 1 && (
             <button
               type="button"
               onClick={() => go(1)}
               aria-label="Próxima"
-              className="tw-absolute tw-right-2 tw-inline-flex tw-items-center tw-justify-center tw-rounded-full"
-              style={{ width: 40, height: 40, background: 'rgba(255,255,255,0.16)', color: '#fff', cursor: 'pointer' }}
+              className="eh-iconbtn tw-absolute tw-right-2 tw-inline-flex tw-items-center tw-justify-center tw-rounded-full"
+              style={{ width: 40, height: 40, background: 'rgba(255,255,255,0.16)', color: '#fff', cursor: 'pointer', zIndex: 1 }}
             >
               <ChevronRight size={22} strokeWidth={2.4} aria-hidden="true" />
             </button>
@@ -483,9 +601,10 @@ function GalleryModal({ images, onClose }) {
                 <button
                   key={img.id ?? i}
                   type="button"
-                  onClick={() => setIdx(i)}
+                  onClick={() => jumpTo(i)}
                   aria-label={`Foto ${i + 1}`}
-                  className="tw-overflow-hidden tw-rounded-lg"
+                  aria-current={i === idx ? 'true' : undefined}
+                  className={`eh-thumb${i === idx ? ' is-active' : ''} tw-overflow-hidden tw-rounded-lg`}
                   style={{
                     width: 52, height: 52, flexShrink: 0, cursor: 'pointer',
                     border: `2px solid ${i === idx ? '#fff' : 'transparent'}`, opacity: i === idx ? 1 : 0.6,
@@ -517,10 +636,12 @@ function DetailsModal({ est, profile, status, address, onClose }) {
     profile.instagram_url && { icon: AtSign, label: 'Instagram', href: profile.instagram_url },
   ].filter(Boolean);
 
+  const [closing, close] = useAnimatedClose(onClose);
+
   return (
-    <ModalShell onClose={onClose} maxWidth={480}>
-      <ModalHeader title={est.nome || 'Detalhes'} onClose={onClose} />
-      <div className="tw-flex tw-flex-col tw-gap-4 tw-p-4">
+    <ModalShell onClose={close} closing={closing} maxWidth={480}>
+      <ModalHeader title={est.nome || 'Detalhes'} onClose={close} />
+      <div className="eh-stagger tw-flex tw-flex-col tw-gap-4 tw-p-4">
         {status && (
           <span
             className="tw-inline-flex tw-w-fit tw-items-center tw-gap-1.5 tw-rounded-full tw-px-3 tw-py-1 tw-text-xs"
@@ -680,10 +801,12 @@ function ReviewsModal({ est, onClose }) {
     setItems((atual) => atual.map((r) => (r.id === id ? { ...r, ...patch } : r)));
   };
 
+  const [closing, close] = useAnimatedClose(onClose);
+
   return (
-    <ModalShell onClose={onClose} maxWidth={520}>
-      <ModalHeader title="Avaliações" onClose={onClose} />
-      <div className="tw-flex tw-flex-col tw-gap-3 tw-p-4">
+    <ModalShell onClose={close} closing={closing} maxWidth={520}>
+      <ModalHeader title="Avaliações" onClose={close} />
+      <div className="eh-stagger tw-flex tw-flex-col tw-gap-3 tw-p-4">
         {loading && <p className="tw-m-0 tw-text-sm" style={{ color: 'var(--muted-ink, #6B7280)' }}>Carregando…</p>}
         {erro && <p className="tw-m-0 tw-text-sm" style={{ color: 'var(--status-cancelado-fg, #B4232A)' }}>{erro}</p>}
         {!loading && !erro && !items.length && (
@@ -732,7 +855,7 @@ function ReviewItem({ est, review, isDono, onPatch }) {
   };
 
   return (
-    <div className="tw-rounded-2xl tw-p-3" style={{ border: '1px solid var(--brand-border, #E7E5F5)' }}>
+    <div className="eh-review tw-rounded-2xl tw-p-3" style={{ border: '1px solid var(--brand-border, #E7E5F5)' }}>
       <div className="tw-flex tw-items-center tw-gap-2">
         <strong className="tw-text-sm" style={{ color: 'var(--ink, #1E1B4B)' }}>{review.author?.name || 'Cliente'}</strong>
         <span className="tw-inline-flex tw-items-center tw-gap-1 tw-text-sm" style={{ color: '#f5a524' }}>
@@ -845,9 +968,11 @@ function RatingModal({ est, myReview, onClose, onSaved }) {
     }
   };
 
+  const [closing, close] = useAnimatedClose(onClose);
+
   return (
-    <ModalShell onClose={onClose} maxWidth={420}>
-      <ModalHeader title={myReview ? 'Editar avaliação' : 'Avaliar'} onClose={onClose} />
+    <ModalShell onClose={close} closing={closing} maxWidth={420}>
+      <ModalHeader title={myReview ? 'Editar avaliação' : 'Avaliar'} onClose={close} />
       <div className="tw-flex tw-flex-col tw-gap-4 tw-p-4">
         <div>
           <p className="tw-m-0 tw-mb-1 tw-text-sm tw-font-semibold" style={{ color: 'var(--brand-deep, #1E1B4B)' }}>
@@ -867,7 +992,10 @@ function RatingModal({ est, myReview, onClose, onSaved }) {
                 onMouseLeave={() => setHover(0)}
                 onClick={() => setNota(n)}
                 aria-label={`${n} ${n === 1 ? 'estrela' : 'estrelas'}`}
-                className="tw-inline-flex tw-items-center tw-justify-center tw-border-0 tw-bg-transparent"
+                /* is-filled segue `nota`, e não `filled`: `filled` inclui o hover, e a
+                   classe entrando e saindo a cada passada do mouse reiniciaria o pulo
+                   sem parar. O pulo é do clique; o hover já tem o próprio scale. */
+                className={`eh-star${nota >= n ? ' is-filled' : ''} tw-inline-flex tw-items-center tw-justify-center tw-border-0 tw-bg-transparent`}
                 style={{ padding: 4, cursor: 'pointer' }}
               >
                 <Star

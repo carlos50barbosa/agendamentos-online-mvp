@@ -1,0 +1,166 @@
+/* src/components/booking/EstablishmentHeader.css
+ *
+ * Microinterações do cabeçalho público do estabelecimento e dos seus modais
+ * (Galeria, Detalhes, Avaliações, Avaliar e a foto de perfil).
+ *
+ * Por que um CSS à parte, e não Tailwind como o resto do componente: o que está
+ * aqui é keyframe, estado :active e pseudo-elemento de onda — coisas que em
+ * utilitário viram uma sopa de classes ilegível. O prefixo `eh-` mantém tudo
+ * escopado a este componente sem depender de CSS Modules.
+ *
+ * O corte por prefers-reduced-motion está no fim do arquivo e desliga tudo.
+ */
+
+/* --- Keyframes ----------------------------------------------------------- */
+@keyframes eh-overlay-in{ from{ opacity:0; } to{ opacity:1; } }
+@keyframes eh-overlay-out{ from{ opacity:1; } to{ opacity:0; } }
+/* Desktop: o cartão nasce um pouco menor e sobe. */
+@keyframes eh-card-in{
+  from{ opacity:0; transform:translateY(16px) scale(.96); }
+  to{ opacity:1; transform:none; }
+}
+@keyframes eh-card-out{
+  from{ opacity:1; transform:none; }
+  to{ opacity:0; transform:translateY(10px) scale(.985); }
+}
+/* Mobile: o ModalShell encosta embaixo (tw-items-end), então ele é uma folha
+   que sobe — escalar aqui daria a impressão de que a folha "descolou" da borda. */
+@keyframes eh-sheet-in{ from{ opacity:0; transform:translateY(40px); } to{ opacity:1; transform:none; } }
+@keyframes eh-sheet-out{ from{ opacity:1; transform:none; } to{ opacity:0; transform:translateY(24px); } }
+@keyframes eh-fade-up{ from{ opacity:0; transform:translateY(8px); } to{ opacity:1; transform:none; } }
+@keyframes eh-zoom-in{ from{ opacity:0; transform:scale(.88); } to{ opacity:1; transform:none; } }
+@keyframes eh-slide-next{ from{ opacity:0; transform:translateX(38px); } to{ opacity:1; transform:none; } }
+@keyframes eh-slide-prev{ from{ opacity:0; transform:translateX(-38px); } to{ opacity:1; transform:none; } }
+@keyframes eh-pop{ 0%{ transform:scale(1); } 45%{ transform:scale(1.2); } 100%{ transform:scale(1); } }
+@keyframes eh-star-pop{ 0%{ transform:scale(1) rotate(0); } 45%{ transform:scale(1.3) rotate(-9deg); } 100%{ transform:scale(1) rotate(0); } }
+@keyframes eh-ripple{
+  from{ opacity:.22; transform:translate(-50%,-50%) scale(.25); }
+  to{ opacity:0; transform:translate(-50%,-50%) scale(1); }
+}
+
+/* --- Overlay e cartão dos modais ----------------------------------------- */
+.eh-overlay{ animation:eh-overlay-in .18s ease-out both; }
+/* O desfoque mora num pseudo-elemento porque backdrop-filter cria bloco
+   contentor para descendentes position:fixed — no próprio overlay ele
+   mudaria o referencial do que está dentro.
+
+   z-index:-1 e não um z-index positivo nos filhos: o overlay tem tw-z-50, logo é
+   raiz de contexto de empilhamento, e ali um filho negativo pinta ACIMA do fundo
+   do overlay e ABAIXO do conteúdo — que é o que queremos. Empurrar os filhos com
+   `.eh-overlay > *{position:relative}` quebraria o `tw-absolute` do botão Fechar. */
+.eh-overlay::before{
+  content:""; position:absolute; inset:0; pointer-events:none; z-index:-1;
+  backdrop-filter:blur(3px); -webkit-backdrop-filter:blur(3px);
+}
+/* Overlay quase opaco (galeria e foto de perfil, rgba(...,0.94)): não dá para ver
+   desfoque através dele. backdrop-filter é o item mais caro desta folha — obriga a
+   GPU a refotografar e borrar o fundo a cada quadro — então em tela cheia, sem
+   nada a mostrar, ele sai. Só sobra onde o fundo é translúcido de verdade. */
+.eh-overlay--solid::before{ display:none; }
+.eh-overlay.is-closing{ animation:eh-overlay-out .16s ease-in both; pointer-events:none; }
+
+.eh-card{ animation:eh-sheet-in .26s cubic-bezier(.2,.85,.3,1.15) both; }
+.eh-overlay.is-closing .eh-card{ animation:eh-sheet-out .16s ease-in both; }
+/* sm: (640px) é onde o ModalShell troca items-end por items-center. */
+@media (min-width:640px){
+  .eh-card{ animation-name:eh-card-in; }
+  .eh-overlay.is-closing .eh-card{ animation-name:eh-card-out; }
+}
+
+/* --- Chips de ação (Galeria / Detalhes / Avaliações / Avaliar) ------------ */
+.eh-chip{
+  position:relative; overflow:hidden;
+  transition:transform .14s ease, box-shadow .2s ease, background .18s ease, border-color .18s ease;
+}
+.eh-chip::after{
+  content:""; position:absolute; left:50%; top:50%;
+  width:150%; aspect-ratio:1/1; border-radius:50%;
+  background:currentColor; opacity:0; pointer-events:none;
+  transform:translate(-50%,-50%) scale(.25);
+}
+.eh-chip:not(:disabled):hover{ transform:translateY(-2px); box-shadow:0 10px 20px -10px rgba(30,27,75,.5); }
+.eh-chip:not(:disabled):active{ transform:scale(.94); box-shadow:none; }
+.eh-chip:not(:disabled):active::after{ animation:eh-ripple .5s ease-out; }
+.eh-chip svg{ transition:transform .18s ease; }
+.eh-chip:not(:disabled):hover svg{ transform:scale(1.14); }
+
+/* --- Botões redondos da capa (voltar, "N fotos") e setas da galeria ------- */
+.eh-iconbtn{ transition:transform .14s ease, background .18s ease, box-shadow .18s ease; }
+.eh-iconbtn:not(:disabled):hover{ transform:scale(1.08); }
+.eh-iconbtn:not(:disabled):active{ transform:scale(.9); }
+
+/* --- Foto de perfil: clicar abre a foto ----------------------------------- */
+.eh-avatar{ padding:0; cursor:pointer; transition:transform .18s ease, box-shadow .22s ease; }
+.eh-avatar:hover{ transform:translateY(-2px) scale(1.04); }
+.eh-avatar:active{ transform:scale(.97); }
+.eh-avatar img{ transition:transform .4s cubic-bezier(.2,.8,.3,1); }
+.eh-avatar:hover img{ transform:scale(1.1); }
+/* Sem esta lupa nada anuncia que a foto abre. Encostada embaixo para não cair
+   no recorte do border-radius do avatar. */
+.eh-avatar__zoom{
+  position:absolute; inset:0; display:grid; align-items:end; justify-items:center;
+  padding-bottom:5px; color:#fff; pointer-events:none; opacity:0;
+  background:linear-gradient(to top, rgba(15,13,40,.62), rgba(15,13,40,0) 62%);
+  transition:opacity .2s ease;
+}
+.eh-avatar:hover .eh-avatar__zoom,
+.eh-avatar:focus-visible .eh-avatar__zoom{ opacity:1; }
+/* No dedo não existe hover: a dica precisa ficar visível o tempo todo. */
+@media (pointer:coarse){
+  .eh-avatar .eh-avatar__zoom{ opacity:.9; }
+}
+.eh-photo{ animation:eh-zoom-in .3s cubic-bezier(.2,.85,.3,1.15) both; }
+
+/* --- Galeria -------------------------------------------------------------- */
+/* A direção vem do JSX (avançar/voltar): a foto entra do lado de onde veio. */
+.eh-gallery-img--next{ animation:eh-slide-next .3s cubic-bezier(.2,.8,.3,1) both; }
+.eh-gallery-img--prev{ animation:eh-slide-prev .3s cubic-bezier(.2,.8,.3,1) both; }
+.eh-gallery-img--none{ animation:eh-zoom-in .3s cubic-bezier(.2,.8,.3,1) both; }
+.eh-thumb{ transition:transform .18s ease, opacity .18s ease, border-color .18s ease, box-shadow .18s ease; }
+.eh-thumb:hover{ opacity:1; transform:translateY(-3px); box-shadow:0 8px 16px -6px rgba(0,0,0,.6); }
+.eh-thumb:active{ transform:scale(.92); }
+.eh-thumb.is-active{ animation:eh-pop .3s ease; }
+
+/* --- Conteúdo em escada (Detalhes, Avaliações) ---------------------------- */
+/* Escada curta: só os primeiros filhos ganham atraso, para uma lista longa não
+   virar uma cascata que se arrasta. */
+.eh-stagger > *{ animation:eh-fade-up .3s ease both; }
+.eh-stagger > *:nth-child(2){ animation-delay:.05s; }
+.eh-stagger > *:nth-child(3){ animation-delay:.1s; }
+.eh-stagger > *:nth-child(4){ animation-delay:.15s; }
+.eh-stagger > *:nth-child(n+5){ animation-delay:.2s; }
+.eh-review{ transition:transform .18s ease, box-shadow .18s ease, border-color .18s ease; }
+.eh-review:hover{ transform:translateY(-2px); box-shadow:0 12px 22px -14px rgba(30,27,75,.55); }
+
+/* --- Avaliar: estrelas ----------------------------------------------------- */
+.eh-star{ transition:transform .16s ease; }
+.eh-star:hover{ transform:scale(1.16); }
+.eh-star:active{ transform:scale(.9); }
+/* Dispara quando a estrela passa a preenchida, ou seja, no clique. O atraso por
+   posição faz as estrelas acenderem em sequência, da 1 até a nota. */
+.eh-star.is-filled{ animation:eh-star-pop .34s ease; }
+.eh-star.is-filled:nth-child(2){ animation-delay:.05s; }
+.eh-star.is-filled:nth-child(3){ animation-delay:.1s; }
+.eh-star.is-filled:nth-child(4){ animation-delay:.15s; }
+.eh-star.is-filled:nth-child(5){ animation-delay:.2s; }
+
+@media (prefers-reduced-motion: reduce){
+  .eh-overlay,
+  .eh-overlay.is-closing,
+  .eh-card,
+  .eh-overlay.is-closing .eh-card,
+  .eh-stagger > *,
+  .eh-thumb.is-active,
+  .eh-star.is-filled,
+  .eh-photo,
+  .eh-gallery-img--next,
+  .eh-gallery-img--prev,
+  .eh-gallery-img--none{ animation:none !important; }
+  .eh-chip::after{ display:none; }
+  .eh-chip:hover, .eh-chip:active, .eh-chip:hover svg,
+  .eh-iconbtn:hover, .eh-iconbtn:active,
+  .eh-avatar:hover, .eh-avatar:active, .eh-avatar:hover img,
+  .eh-thumb:hover, .eh-thumb:active,
+  .eh-review:hover,
+  .eh-star:hover, .eh-star:active{ transform:none !important; }
+}
