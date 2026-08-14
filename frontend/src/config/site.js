@@ -51,6 +51,15 @@ export const site = {
     // Mensagem pré-preenchida ao tocar no atalho de WhatsApp de um agendamento.
     defaultMessage: 'Olá! Sobre o seu agendamento em {estabelecimento}...',
   },
+
+  // Canais do NOSSO suporte (não os do estabelecimento). Ficam aqui porque já são citados em mais
+  // de uma tela — /contato e o fluxo de cancelamento — e um número de suporte escrito duas vezes
+  // é um número que um dia vai mudar em uma só.
+  support: {
+    whatsapp: '5511915155349',
+    email: 'contato@agenda0.com.br',
+    demoUrl: 'https://cal.com/agendamentos-online/demo',
+  },
 };
 
 /** Retorna a mensagem de WhatsApp com placeholders substituídos. */

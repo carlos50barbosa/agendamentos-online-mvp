@@ -12,6 +12,7 @@ import React, { Suspense, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useLocation, useSearchParams, Link } from 'react-router-dom';
 import { getUser } from '../utils/auth';
 import { Api } from '../utils/api';
+import ExitSurvey from '../components/feedback/ExitSurvey.jsx';
 
 const PlanosLowerExtras = React.lazy(() => import('./PlanosLowerExtras.jsx'));
 
@@ -414,6 +415,10 @@ export default function Planos() {
           onTalkSpecialist={() => nav('/contato')}
         />
       </Suspense>
+
+      {/* Mesma pesquisa da landing, com contexto próprio: "achei caro" saindo da tabela de preços
+          vale mais que o mesmo clique na home. Nunca aparece para quem já está logado. */}
+      <ExitSurvey contexto="planos" />
     </div>
   );
 }

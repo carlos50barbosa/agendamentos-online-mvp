@@ -288,6 +288,20 @@ export const Api = {
   // WhatsApp está no ar — a flag vive no .env da VPS, então religar não exige rebuild do bundle.
   publicConfig: () => req('/public/config'),
 
+  // Feedback sobre a PLATAFORMA (motivo de cancelamento/downgrade, NPS, pesquisa da landing) —
+  // nada a ver com `saveEstablishmentReview`, que é o cliente final avaliando o estabelecimento.
+  // Funciona deslogado de propósito: quem responde a pesquisa da landing ainda não tem conta.
+  sendFeedback: (payload) => req('/feedback', { method: 'POST', body: JSON.stringify(payload || {}) }),
+
+  // Quem decide a hora de perguntar é o servidor: a elegibilidade depende de idade da conta,
+  // volume de agendamentos e de já ter respondido — nada disso o navegador sabe sozinho.
+  npsEligibility: () => req('/feedback/nps/elegivel'),
+
+  // Completa a resposta que já foi gravada (o NPS manda a nota no clique e o comentário depois).
+  // É UPDATE, não um novo envio: duas linhas contariam o mesmo respondente duas vezes na métrica.
+  updateFeedbackComment: (id, comentario) =>
+    req(`/feedback/${id}/comentario`, { method: 'PATCH', body: JSON.stringify({ comentario }) }),
+
   // Opt-in do WhatsApp do usuário logado. Sem consentimento registrado o backend NÃO envia nada —
   // nem ao cliente, nem ao dono do salão. `precisa_reaceitar` marca o dono que tem a notificação
   // ligada de antes do opt-in existir e nunca deu aceite.
@@ -639,6 +653,16 @@ export const Api = {
   adminListSubscriptions: (adminToken, limit = 50) =>
 
     req(`/admin/billing/subscriptions?limit=${encodeURIComponent(limit)}`, {
+
+      headers: { 'X-Admin-Token': String(adminToken || '') },
+
+    }),
+
+  // Feedback de produto: respostas + agregados (motivos e NPS) da janela pedida.
+
+  adminFeedback: (adminToken, params = {}) =>
+
+    req(`/admin/feedback${toQuery(params)}`, {
 
       headers: { 'X-Admin-Token': String(adminToken || '') },
 

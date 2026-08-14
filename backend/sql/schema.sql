@@ -710,3 +710,22 @@ CREATE TABLE IF NOT EXISTS auditoria (
   executado_por VARCHAR(100),
   criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- Feedback sobre a PLATAFORMA (cancelamento, downgrade, NPS, pesquisa da landing). Nada a ver
+-- com `estabelecimento_reviews`, que é o cliente final avaliando o negócio do nosso cliente.
+-- Detalhes das decisões em sql/2026-08-13-add-product-feedback.sql.
+CREATE TABLE IF NOT EXISTS product_feedback (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  tipo VARCHAR(32) NOT NULL,
+  motivo VARCHAR(48) NULL,
+  nota TINYINT NULL,
+  comentario TEXT NULL,
+  usuario_id INT NULL,
+  plano VARCHAR(32) NULL,
+  contexto VARCHAR(120) NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_feedback_tipo_data (tipo, created_at),
+  INDEX idx_feedback_usuario (usuario_id),
+  CONSTRAINT fk_feedback_usuario FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE SET NULL,
+  CONSTRAINT chk_feedback_nota CHECK (nota IS NULL OR nota BETWEEN 0 AND 10)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;

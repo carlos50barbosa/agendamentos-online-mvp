@@ -18,6 +18,7 @@ import { IconArrowRight, IconScissors } from '../components/Icons.jsx';
 import { Api } from '../utils/api.js';
 import { getUser } from '../utils/auth.js';
 import LogoAO from '../components/LogoAO.jsx';
+import ExitSurvey from '../components/feedback/ExitSurvey.jsx';
 import { getLegalEntityLine } from '../utils/legal.js';
 import styles from './LandingPublica.module.css';
 
@@ -580,6 +581,10 @@ export default function LandingPublica() {
         <p className={styles.footerCopy}>© {year} Agendamentos Online</p>
         <p className={styles.footerLegal}>{getLegalEntityLine()}</p>
       </footer>
+
+      {/* A única fonte de "por que o visitante NÃO assinou" que existe. O componente decide
+          sozinho se aparece (uma vez por navegador, deslogado, após ler a página). */}
+      <ExitSurvey contexto="landing" />
     </div>
   );
 }

@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import Modal from '../components/Modal.jsx';
+import FeedbackReasonModal from '../components/feedback/FeedbackReasonModal.jsx';
 import { Api } from '../utils/api.js';
 import { getUser } from '../utils/auth.js';
 import { buildSubscriptionFinancialHistory } from '../utils/subscriptionFinancialHistory.js';
@@ -665,6 +666,18 @@ export default function Assinatura() {
     setPlanChangeModal({ open: false, plan: null, cycle: 'mensal' });
   }, [planChangeModal, handleAsaasCheckout]);
 
+  // Perguntar o motivo de quem desce de plano ou cancela. Estes dois caminhos terminam no suporte
+  // (downgrade e cancelamento nao sao self-serve hoje), e ate aqui o motivo se perdia no meio de
+  // uma conversa de WhatsApp: a pessoa sumia e ninguem sabia por que. `tipo` diz qual lista de
+  // motivos usar.
+  const [feedbackModal, setFeedbackModal] = useState({ open: false, tipo: null });
+  const closeFeedbackModal = useCallback(() => setFeedbackModal({ open: false, tipo: null }), []);
+
+  const openDowngradeFeedback = useCallback(() => {
+    setPlanChangeModal({ open: false, plan: null, cycle: 'mensal' });
+    setFeedbackModal({ open: true, tipo: 'downgrade' });
+  }, []);
+
   const openCardChoice = useCallback(() => {
     if (typeof window === 'undefined') return;
     window.requestAnimationFrame(() => {
@@ -1036,6 +1049,35 @@ export default function Assinatura() {
         ) : null}
       </details>
 
+      {/*
+        A saída existe e fica visível. Esconder o cancelamento não segura ninguém: quem decidiu sair
+        manda mensagem no WhatsApp de qualquer jeito — e aí sai sem dizer por quê, que é o único
+        desfecho de que não dá para se recuperar. Aqui a pergunta vem antes do adeus.
+
+        Fica no rodapé, discreto, e só para quem tem assinatura ativa: para quem está em teste ou
+        com pagamento pendente, "cancelar" não descreve nada que exista.
+      */}
+      {!loading && userIsActive ? (
+        <p className="muted" style={{ marginTop: 24, fontSize: 13 }}>
+          Precisa encerrar?{' '}
+          <button
+            type="button"
+            className="btn btn--link"
+            onClick={() => setFeedbackModal({ open: true, tipo: 'cancelamento' })}
+          >
+            Quero cancelar minha assinatura
+          </button>
+        </p>
+      ) : null}
+
+      {feedbackModal.open ? (
+        <FeedbackReasonModal
+          tipo={feedbackModal.tipo}
+          contexto={`assinatura:${planKey}:${currentCycle}`}
+          onClose={closeFeedbackModal}
+        />
+      ) : null}
+
       {cpfModal.open ? (
         <Modal
           title="Informe seu CPF ou CNPJ"
@@ -1088,9 +1130,21 @@ export default function Assinatura() {
             title={mustUseSupport ? 'Troca via suporte' : 'Confirmar troca de plano'}
             onClose={closePlanChangeModal}
             actions={mustUseSupport ? [
-              <button key="ok" type="button" className="btn btn--primary" onClick={closePlanChangeModal}>
-                Entendi
-              </button>,
+              // Descer de plano é o sinal; subir numa assinatura anual não é. Os dois terminam no
+              // suporte, mas só o downgrade rende a pergunta — perguntar "o que não valeu a pena?"
+              // a quem está pagando MAIS seria absurdo, e ensina a fechar a caixa sem ler.
+              ...(isDowngradeChange ? [
+                <button key="cancel" type="button" className="btn btn--outline" onClick={closePlanChangeModal}>
+                  Voltar
+                </button>,
+                <button key="ok" type="button" className="btn btn--primary" onClick={openDowngradeFeedback}>
+                  Continuar
+                </button>,
+              ] : [
+                <button key="ok" type="button" className="btn btn--primary" onClick={closePlanChangeModal}>
+                  Entendi
+                </button>,
+              ]),
             ] : [
               <button key="cancel" type="button" className="btn btn--outline" onClick={closePlanChangeModal} disabled={checkoutLoading}>
                 Cancelar
@@ -1101,15 +1155,19 @@ export default function Assinatura() {
             ]}
           >
             {mustUseSupport ? (
-              annualLocked ? (
+              // Downgrade antes de anual: numa troca anual PARA BAIXO os dois fatos valem, mas o que
+              // descreve a ação é a descida — e é esse texto que combina com o "Continuar".
+              isDowngradeChange ? (
                 <p className="muted" style={{ marginTop: 0 }}>
-                  Sua assinatura <strong>anual</strong> está ativa{renewalLabel ? ` até ${renewalLabel}` : ''}. Para trocar de
-                  plano antes disso, fale com o suporte — ajustamos sem você perder o período já pago.
+                  Baixar do plano <strong>{planMeta.label}</strong> para <strong>{targetMeta.label}</strong> ainda não está
+                  disponível por aqui — quem ajusta é o suporte, sem você perder o período já pago
+                  {annualLocked && renewalLabel ? ` (sua assinatura anual vale até ${renewalLabel})` : ''}. Em
+                  <strong> Continuar</strong> a gente já te leva para lá.
                 </p>
               ) : (
                 <p className="muted" style={{ marginTop: 0 }}>
-                  Baixar do plano <strong>{planMeta.label}</strong> para <strong>{targetMeta.label}</strong> ainda não está
-                  disponível por aqui. Fale com o suporte para ajustar sem perder o período já pago.
+                  Sua assinatura <strong>anual</strong> está ativa{renewalLabel ? ` até ${renewalLabel}` : ''}. Para trocar de
+                  plano antes disso, fale com o suporte — ajustamos sem você perder o período já pago.
                 </p>
               )
             ) : (

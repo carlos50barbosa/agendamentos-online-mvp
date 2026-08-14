@@ -664,3 +664,143 @@ test('so o dono responde e denuncia; a denuncia nao aparece em publico', { skip 
   assert.equal(item.denunciado_em, undefined);
   assert.equal(item.denuncia_motivo, undefined);
 });
+
+// ---------------------------------------------------------------------------
+// Feedback de produto (cancelamento/downgrade, NPS, pesquisa da landing).
+//
+// A SQL destas rotas nao aparece em nenhum teste de unidade: a lib e pura de proposito, entao
+// INSERT, o COUNT de agendamentos e os agregados do admin so sao exercitados aqui. E exatamente o
+// tipo de query que quebra em silencio — um nome de coluna errado no INSERT devolveria 500 e a
+// resposta do cliente sumiria sem ninguem notar, porque quem responde uma pesquisa nao reclama
+// quando ela falha: fecha a aba.
+
+test('feedback anonimo (landing) e aceito e chega ao banco', { skip }, async () => {
+  const res = await postJson('/feedback', {
+    tipo: 'landing',
+    motivo: 'preco',
+    comentario: 'achei caro pro meu tamanho',
+    contexto: 'planos',
+  });
+  assert.equal(res.status, 201, res.body);
+
+  const [rows] = await pool.query(
+    "SELECT tipo, motivo, comentario, usuario_id, nota FROM product_feedback WHERE tipo='landing' ORDER BY id DESC LIMIT 1"
+  );
+  assert.equal(rows[0].motivo, 'preco');
+  assert.equal(rows[0].usuario_id, null, 'visitante da landing nao tem conta — a linha e anonima');
+  assert.equal(rows[0].nota, null);
+});
+
+test('feedback autenticado congela o usuario e o plano do momento', { skip }, async () => {
+  const res = await post('/feedback', { tipo: 'cancelamento', motivo: 'sem_uso' }, { token: estabToken });
+  assert.equal(res.status, 201, res.body);
+
+  const [rows] = await pool.query(
+    'SELECT usuario_id, plano FROM product_feedback WHERE tipo=? AND usuario_id=? ORDER BY id DESC LIMIT 1',
+    ['cancelamento', ESTAB_ID]
+  );
+  assert.equal(rows[0].usuario_id, ESTAB_ID);
+  // O fixture e 'premium': o plano vem do token/banco, nunca do corpo da requisicao.
+  assert.equal(rows[0].plano, 'premium');
+});
+
+test('o corpo da requisicao nao escolhe de quem e a resposta', { skip }, async () => {
+  // Mandar usuario_id/plano no JSON nao pode atribuir feedback a terceiro nem forjar o plano.
+  const res = await post(
+    '/feedback',
+    { tipo: 'nps', nota: 10, usuario_id: CLIENTE_ID, plano: 'starter' },
+    { token: estabToken }
+  );
+  assert.equal(res.status, 201, res.body);
+
+  const [rows] = await pool.query(
+    "SELECT usuario_id, plano FROM product_feedback WHERE tipo='nps' ORDER BY id DESC LIMIT 1"
+  );
+  assert.equal(rows[0].usuario_id, ESTAB_ID);
+  assert.equal(rows[0].plano, 'premium');
+});
+
+test('resposta invalida e recusada com 400, nao gravada', { skip }, async () => {
+  const [[antes]] = await pool.query('SELECT COUNT(*) AS total FROM product_feedback');
+  assert.equal((await postJson('/feedback', { tipo: 'inexistente' })).status, 400);
+  assert.equal((await postJson('/feedback', { tipo: 'landing', motivo: 'inventado' })).status, 400);
+  assert.equal((await postJson('/feedback', { tipo: 'nps' })).status, 400);
+  const [[depois]] = await pool.query('SELECT COUNT(*) AS total FROM product_feedback');
+  assert.equal(depois.total, antes.total, 'nenhuma linha invalida entrou');
+});
+
+test('a elegibilidade do NPS roda a SQL de marco de uso', { skip }, async () => {
+  const res = await get('/feedback/nps/elegivel', { token: estabToken });
+  assert.equal(res.status, 200, `${res.body}\n---- log ----\n${tailLog()}`);
+  const data = JSON.parse(res.body);
+  assert.equal(typeof data.elegivel, 'boolean');
+  // O teste anterior acabou de gravar um NPS para este mesmo estabelecimento — o cooldown manda.
+  assert.equal(data.elegivel, false);
+  assert.equal(data.motivo, 'respondeu_recentemente');
+});
+
+test('so estabelecimento responde o NPS', { skip }, async () => {
+  assert.equal((await get('/feedback/nps/elegivel', { token: clienteToken })).status, 403);
+  assert.equal((await get('/feedback/nps/elegivel')).status, 401);
+});
+
+test('o agregado do admin roda contra o schema real', { skip }, async () => {
+  const res = await fetch(`${baseUrl}/admin/feedback?dias=90&limit=50`, {
+    headers: { 'X-Admin-Token': process.env.ADMIN_TOKEN || '' },
+  });
+  const body = await res.text();
+  // Sem ADMIN_TOKEN no ambiente a rota admin inteira responde 404 (admin_disabled) — nao e falha
+  // deste teste, e sim ambiente sem admin. Com token, o que importa e a SQL nao explodir.
+  if (res.status === 404) return;
+  assert.equal(res.status, 200, `${body}\n---- log ----\n${tailLog()}`);
+  const data = JSON.parse(body);
+  assert.ok(Array.isArray(data.feedback));
+  assert.ok(Array.isArray(data.motivos));
+  assert.ok(data.nps && typeof data.nps.total === 'number');
+});
+
+test('o comentario do NPS COMPLETA a linha da nota — nunca cria uma segunda', { skip }, async () => {
+  // Duas linhas com nota contariam o mesmo respondente duas vezes no calculo do NPS, e a metrica
+  // passaria a premiar quem escreve em vez de quem esta satisfeito.
+  const criado = await post('/feedback', { tipo: 'nps', nota: 8, contexto: 'app' }, { token: estabToken });
+  assert.equal(criado.status, 201, criado.body);
+  const { id } = JSON.parse(criado.body);
+  assert.ok(id, 'o POST devolve o id para o comentario poder completar a linha');
+
+  const [[antes]] = await pool.query("SELECT COUNT(*) AS total FROM product_feedback WHERE tipo='nps'");
+
+  const res = await fetch(`${baseUrl}/feedback/${id}/comentario`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${estabToken}` },
+    body: JSON.stringify({ comentario: 'faltou relatorio por profissional' }),
+  });
+  assert.equal(res.status, 200, await res.text());
+
+  const [[depois]] = await pool.query("SELECT COUNT(*) AS total FROM product_feedback WHERE tipo='nps'");
+  assert.equal(depois.total, antes.total, 'o comentario nao cria linha nova');
+
+  const [[linha]] = await pool.query('SELECT nota, comentario FROM product_feedback WHERE id=?', [id]);
+  assert.equal(linha.nota, 8);
+  assert.equal(linha.comentario, 'faltou relatorio por profissional');
+});
+
+test('o comentario nao reescreve resposta alheia nem resposta ja comentada', { skip }, async () => {
+  const criado = await post('/feedback', { tipo: 'nps', nota: 3, contexto: 'app' }, { token: estabToken });
+  const { id } = JSON.parse(criado.body);
+
+  const patch = (token, comentario) => fetch(`${baseUrl}/feedback/${id}/comentario`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ comentario }),
+  });
+
+  // Outro usuario nao alcanca a linha (404 e nao 403: nem confirma que ela existe).
+  assert.equal((await patch(clienteToken, 'invadindo')).status, 404);
+
+  assert.equal((await patch(estabToken, 'primeira versao')).status, 200);
+  // Segunda tentativa nao sobrescreve — a rota completa o que esta vazio, nao edita o passado.
+  assert.equal((await patch(estabToken, 'segunda versao')).status, 404);
+
+  const [[linha]] = await pool.query('SELECT comentario FROM product_feedback WHERE id=?', [id]);
+  assert.equal(linha.comentario, 'primeira versao');
+});

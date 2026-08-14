@@ -45,6 +45,7 @@ import {
 
 } from './utils/preferences.js';
 import layoutStyles from './AppContentLayouts.module.css';
+import NpsPrompt from './components/feedback/NpsPrompt.jsx';
 
 
 
@@ -1689,6 +1690,12 @@ const topbarAlert = useMemo(() => {
         </main>
 
       </div>
+
+      {/* NPS do dono, fora do <main> porque é uma caixa flutuante e não conteúdo da rota. Fica no
+          shell (e não numa página) de propósito: a pergunta é sobre o produto inteiro, então
+          aparece em qualquer tela do painel em que o dono esteja quando o marco de uso bate.
+          `ativo` é o único filtro daqui — o resto (idade da conta, volume, cooldown) é servidor. */}
+      <NpsPrompt ativo={!hideShell && currentUser?.tipo === 'estabelecimento'} />
 
     </>
 

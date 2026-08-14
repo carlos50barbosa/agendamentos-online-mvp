@@ -7,6 +7,7 @@ import { enrichMercadoPagoSubscriptionEvent } from '../lib/mercadopago_payment_o
 import { getTenantBotSettings, upsertTenantBotSettings } from '../bot/storage/settingsStore.js';
 import { setAudit, diffFields } from '../lib/audit.js';
 import { reconcileTenantSubscription } from '../lib/subscription_reconcile.js';
+import { FEEDBACK_TYPES, summarizeNps } from '../lib/product_feedback.js';
 
 const IDENT_RE = /^[a-zA-Z0-9_]+$/;
 function isIdent(s = '') { return IDENT_RE.test(String(s)); }
@@ -224,6 +225,61 @@ router.get('/billing/subscriptions', checkAdmin, async (req, res) => {
       LIMIT ?`;
     const [rows] = await pool.query(sql, [limit]);
     res.json({ subscriptions: rows, limit });
+  } catch (e) {
+    res.status(500).json({ error: 'db_error', message: e?.message || String(e) });
+  }
+});
+
+// Feedback de produto: respostas cruas + NPS consolidado.
+//
+// Admin, e não uma tela do dono, porque isto é o que os CLIENTES acham da plataforma — inclusive
+// os que saíram. Não é dado de tenant nenhum; é dado sobre nós.
+router.get('/feedback', checkAdmin, auditAdmin('admin.feedback.listar', { entidade: 'product_feedback' }), async (req, res) => {
+  const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 100, 1), 500);
+  const tipo = String(req.query.tipo || '').trim().toLowerCase();
+  // Filtro validado contra a lista, e não interpolado: `tipo` vem da query string.
+  const tipoFiltro = FEEDBACK_TYPES.includes(tipo) ? tipo : null;
+  const dias = Math.min(Math.max(parseInt(req.query.dias, 10) || 90, 1), 730);
+  try {
+    const where = ['created_at >= (NOW() - INTERVAL ? DAY)'];
+    const params = [dias];
+    if (tipoFiltro) { where.push('tipo = ?'); params.push(tipoFiltro); }
+    const whereSql = `WHERE ${where.join(' AND ')}`;
+
+    const [rows] = await pool.query(
+      `SELECT f.id, f.tipo, f.motivo, f.nota, f.comentario, f.usuario_id, f.plano, f.contexto, f.created_at,
+              u.nome AS usuario_nome, u.email AS usuario_email
+         FROM product_feedback f
+         LEFT JOIN usuarios u ON u.id = f.usuario_id
+         ${whereSql}
+        ORDER BY f.id DESC
+        LIMIT ?`,
+      [...params, limit]
+    );
+
+    // Agregados sobre a JANELA inteira, não sobre as `limit` linhas devolvidas: senão o NPS
+    // mudaria conforme o tamanho da página, que é o jeito mais silencioso de errar uma métrica.
+    const [motivos] = await pool.query(
+      `SELECT tipo, motivo, COUNT(*) AS total
+         FROM product_feedback
+         ${whereSql}
+        GROUP BY tipo, motivo
+        ORDER BY total DESC`,
+      params
+    );
+    const [notas] = await pool.query(
+      `SELECT nota FROM product_feedback ${whereSql} AND tipo = 'nps' AND nota IS NOT NULL`,
+      params
+    );
+
+    res.json({
+      feedback: rows,
+      motivos,
+      nps: summarizeNps(notas),
+      limit,
+      dias,
+      tipo: tipoFiltro,
+    });
   } catch (e) {
     res.status(500).json({ error: 'db_error', message: e?.message || String(e) });
   }

@@ -93,6 +93,157 @@ function ReconcileReport({ report }) {
   );
 }
 
+// Rótulos dos códigos de motivo. Duplicados de propósito em relação a components/feedback/reasons.js:
+// lá o texto é a PERGUNTA feita ao cliente ("O preço não cabe no meu momento"), aqui é a etiqueta
+// do relatório ("Preço"). Reaproveitar o mesmo texto deixaria a tabela ilegível, e amarrar as duas
+// telas obrigaria a escolher entre uma copy gentil e um relatório escaneável.
+const MOTIVO_LABELS = {
+  preco: 'Preço',
+  sem_uso: 'Não usou',
+  falta_recurso: 'Faltou recurso',
+  dificuldade: 'Achou difícil',
+  concorrente: 'Foi p/ concorrente',
+  fechei_negocio: 'Fechou o negócio',
+  duvida_funciona: 'Não entendeu se serve',
+  so_pesquisando: 'Só pesquisando',
+  outro: 'Outro',
+};
+
+const TIPO_LABELS = {
+  cancelamento: 'Cancelamento',
+  downgrade: 'Downgrade',
+  nps: 'NPS',
+  landing: 'Landing',
+};
+
+function npsTone(score) {
+  if (score == null) return 'neutral';
+  if (score >= 50) return 'success';
+  if (score >= 0) return 'warning';
+  return 'danger';
+}
+
+function FeedbackPanel({ token }) {
+  const [dias, setDias] = useState(90);
+  const [tipo, setTipo] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState('');
+
+  async function carregar() {
+    setErr(''); setLoading(true);
+    try {
+      const r = await Api.adminFeedback(token, { dias, tipo: tipo || undefined, limit: 200 });
+      setData(r);
+    } catch (e) {
+      setErr(e?.data?.message || e?.message || 'Falha ao carregar feedback');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const nps = data?.nps;
+
+  return (
+    <div className="card">
+      <h3 style={{ marginTop: 0 }}>Feedback de produto</h3>
+      <p className="muted" style={{ marginTop: 0 }}>
+        Motivo de cancelamento e downgrade, NPS dos donos e a pesquisa de saída da landing. É o que os
+        clientes acham da PLATAFORMA — não confundir com as avaliações que os clientes finais deixam
+        nos estabelecimentos.
+      </p>
+
+      <div className="row" style={{ gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+        <label className="label" style={{ margin: 0 }}>
+          <span>Janela</span>
+          <select className="input" value={dias} onChange={(e) => setDias(Number(e.target.value))}>
+            <option value={30}>30 dias</option>
+            <option value={90}>90 dias</option>
+            <option value={180}>180 dias</option>
+            <option value={365}>365 dias</option>
+          </select>
+        </label>
+        <label className="label" style={{ margin: 0 }}>
+          <span>Canal</span>
+          <select className="input" value={tipo} onChange={(e) => setTipo(e.target.value)}>
+            <option value="">Todos</option>
+            {Object.entries(TIPO_LABELS).map(([key, label]) => (
+              <option key={key} value={key}>{label}</option>
+            ))}
+          </select>
+        </label>
+        <button className="btn btn--primary" onClick={carregar} disabled={!token || loading}>
+          {loading ? <span className="spinner" /> : 'Carregar'}
+        </button>
+      </div>
+
+      {err ? (
+        <div className="box" role="alert" style={{ marginTop: 10, borderColor: 'var(--danger-border)', color: 'var(--danger-text)', background: 'var(--danger-bg)' }}>
+          Erro: {err}
+        </div>
+      ) : null}
+
+      {data ? (
+        <div style={{ marginTop: 14, display: 'grid', gap: 14 }}>
+          <div className="box" style={{ display: 'grid', gap: 8 }}>
+            <div className="row" style={{ gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <strong>NPS</strong>
+              {/* Sem resposta o placar é "—", nunca 0: zero é uma nota real (tantos promotores
+                  quanto detratores) e mostrá-la por ausência de dado seria inventar a métrica. */}
+              <Badge tone={npsTone(nps?.score)}>{nps?.score == null ? '—' : nps.score}</Badge>
+              <span className="muted" style={{ fontSize: 13 }}>
+                {nps?.total ? `${nps.total} resposta(s) · ${nps.promotor} promotor(es), ${nps.neutro} neutro(s), ${nps.detrator} detrator(es)` : 'sem respostas na janela'}
+              </span>
+            </div>
+          </div>
+
+          {Array.isArray(data.motivos) && data.motivos.length ? (
+            <div>
+              <strong style={{ fontSize: 14 }}>Motivos por canal</strong>
+              <ul style={{ margin: '6px 0 0', paddingLeft: 18, fontSize: 14 }}>
+                {data.motivos.filter((m) => m.motivo).map((m) => (
+                  <li key={`${m.tipo}-${m.motivo}`}>
+                    <span className="muted">{TIPO_LABELS[m.tipo] || m.tipo}: </span>
+                    {MOTIVO_LABELS[m.motivo] || m.motivo} — <strong>{m.total}</strong>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+
+          <div>
+            <strong style={{ fontSize: 14 }}>Respostas ({data.feedback?.length || 0})</strong>
+            {data.feedback?.length ? (
+              <ul style={{ margin: '6px 0 0', paddingLeft: 0, listStyle: 'none', display: 'grid', gap: 8 }}>
+                {data.feedback.map((f) => (
+                  <li key={f.id} className="box" style={{ fontSize: 14 }}>
+                    <div className="row" style={{ gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                      <Badge tone="neutral">{TIPO_LABELS[f.tipo] || f.tipo}</Badge>
+                      {f.nota != null ? <Badge tone={f.nota >= 9 ? 'success' : f.nota >= 7 ? 'warning' : 'danger'}>nota {f.nota}</Badge> : null}
+                      {f.motivo ? <span>{MOTIVO_LABELS[f.motivo] || f.motivo}</span> : null}
+                      <span className="muted" style={{ fontSize: 12, marginLeft: 'auto' }}>{fmtDate(f.created_at)}</span>
+                    </div>
+                    {f.comentario ? <p style={{ margin: '6px 0 0', whiteSpace: 'pre-wrap' }}>{f.comentario}</p> : null}
+                    <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
+                      {/* Linha anônima é o esperado na landing (visitante sem conta) e também no
+                          cancelamento de quem já apagou a conta — o FK é ON DELETE SET NULL. */}
+                      {f.usuario_email ? `${f.usuario_nome || 'sem nome'} · ${f.usuario_email}` : 'anônimo'}
+                      {f.plano ? ` · plano ${f.plano}` : ''}
+                      {f.contexto ? ` · ${f.contexto}` : ''}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="muted" style={{ margin: '6px 0 0' }}>Nenhuma resposta na janela escolhida.</p>
+            )}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export default function AdminTools() {
   const [token, setToken] = useState('');
 
@@ -195,6 +346,8 @@ export default function AdminTools() {
 
           <ReconcileReport report={reconReport} />
         </div>
+
+        <FeedbackPanel token={token} />
 
         {/* Limpeza */}
         <div className="card">
