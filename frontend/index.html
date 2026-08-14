@@ -34,19 +34,161 @@
         "email": "contato@agenda0.com.br"
       }
     </script>
+    <!-- Estilos da tela de boot (o markup dentro de #root). Vivem aqui porque
+         precisam valer ANTES de qualquer CSS do bundle — é justamente quando o
+         bundle não chega que esta tela importa. -->
+    <style>
+      .boot-wrap{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;background:#f6f8fb;color:#0f172a;font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;}
+      .boot-card{max-width:420px;width:100%;text-align:center;}
+      /* O card com sombra só aparece no estado de erro: enquanto carrega, uma
+         caixa branca no meio da tela parece conteúdo que falhou em renderizar. */
+      .boot-card.is-error{background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:24px;box-shadow:0 12px 28px rgba(15,23,42,.12);}
+      /* O spinner entra com 350ms de atraso: em conexão boa o React monta antes
+         disso e a pessoa não vê pisca-pisca de loading nenhum. */
+      .boot-loading{animation:bootIn .2s ease .35s both;}
+      .boot-spinner{width:28px;height:28px;margin:0 auto 12px;border:3px solid #dbe2ea;border-top-color:#5049E5;border-radius:50%;animation:bootSpin .7s linear infinite;}
+      .boot-title{margin:0 0 8px;font-size:20px;font-weight:700;line-height:1.3;}
+      .boot-text{margin:0 0 12px;font-size:15px;line-height:1.5;color:#334155;}
+      .boot-muted{color:#64748b;font-size:14px;}
+      .boot-actions{display:flex;flex-direction:column;gap:8px;margin:16px 0;}
+      .boot-btn{display:block;width:100%;padding:12px 16px;border-radius:10px;border:0;background:#5049E5;color:#fff;font:inherit;font-weight:600;font-size:15px;cursor:pointer;}
+      .boot-btn-ghost{background:#fff;color:#0f172a;border:1px solid #cbd5e1;}
+      .boot-tip{background:#f1f5f9;border-radius:10px;padding:12px;text-align:left;}
+      .boot-url{margin:0 0 12px;font-size:13px;word-break:break-all;user-select:all;-webkit-user-select:all;color:#334155;}
+      .boot-legal{margin:12px 0 0;font-size:12px;color:#64748b;}
+      .boot-link{color:#5049E5;}
+      @keyframes bootSpin{to{transform:rotate(360deg)}}
+      @keyframes bootIn{from{opacity:0}to{opacity:1}}
+      @media (prefers-reduced-motion:reduce){
+        .boot-spinner{animation:none}
+        .boot-loading{animation-duration:.01ms}
+      }
+    </style>
   </head>
   <body>
+    <!-- Tela de boot. O React substitui os filhos de #root ao montar, então este
+         markup é o PRIMEIRO frame de toda visita — não só das que falham. Por
+         isso o estado padrão é "carregando"; o erro só aparece quando o bundle
+         realmente não vem (ver o script logo abaixo). A versão antiga já dizia
+         "não foi possível carregar" de saída e acusava falha em toda visita
+         lenta, com a pessoa fechando a aba antes de o app montar. -->
     <div id="root">
-      <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;background:#f6f8fb;color:#0f172a;font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;">
-        <div style="max-width:520px;text-align:center;background:#ffffff;border:1px solid #e2e8f0;border-radius:12px;padding:24px;box-shadow:0 12px 28px rgba(15,23,42,0.12);">
-          <div style="font-weight:700;font-size:20px;margin-bottom:8px;">Agendamentos Online</div>
-          <p style="margin:0 0 12px;">Não foi possível carregar a aplicação.</p>
-          <p style="margin:0 0 12px;">Se você estiver no Instagram, toque em "..." e escolha "Abrir no navegador".</p>
-          <p style="margin:0;">Ou tente atualizar a página.</p>
-          <p style="margin:12px 0 0;font-size:12px;color:#64748b;">68.068.260 JOSE CARLOS BARBOSA — CNPJ 68.068.260/0001-32</p>
+      <div class="boot-wrap" role="status" aria-live="polite">
+        <div class="boot-card" id="boot-card">
+          <div class="boot-loading" id="boot-loading">
+            <div class="boot-spinner" aria-hidden="true"></div>
+            <p class="boot-text boot-muted">Carregando…</p>
+          </div>
+
+          <div id="boot-error" hidden>
+            <h1 class="boot-title">O site não carregou</h1>
+            <p class="boot-text">Pode ser a sua conexão — ou o navegador do app onde você tocou no link.</p>
+
+            <div class="boot-actions">
+              <button type="button" class="boot-btn" onclick="location.reload()">Tentar de novo</button>
+              <button type="button" class="boot-btn boot-btn-ghost" id="boot-copy" hidden>Copiar link do site</button>
+            </div>
+            <p class="boot-url" id="boot-url" hidden></p>
+
+            <p class="boot-text boot-tip" id="boot-tip">
+              Abriu por um link do Instagram, Facebook ou TikTok? Toque em <strong>⋯</strong>
+              no canto da tela e escolha <strong>“Abrir no navegador”</strong>.
+            </p>
+
+            <p class="boot-text boot-muted" style="margin-bottom:0;">
+              Continua assim? <a class="boot-link" href="https://wa.me/5511915155349?text=Ol%C3%A1%20Time%20Agendamentos%20Online%2C%20o%20site%20n%C3%A3o%20est%C3%A1%20carregando">Fale com a gente no WhatsApp</a>.
+            </p>
+          </div>
+
+          <!-- Razão social + CNPJ ficam nos DOIS estados, sempre visíveis: a
+               verificação de empresa da Meta lê o HTML cru e recusa quando não
+               acha o nome do CNPJ. Não esconder com hidden/display:none. -->
+          <p class="boot-legal">68.068.260 JOSE CARLOS BARBOSA — CNPJ 68.068.260/0001-32</p>
         </div>
       </div>
     </div>
-    <script type="module" src="/src/main.jsx"></script> 
+    <script type="module" src="/src/main.jsx"></script>
+    <script>
+      // Decide QUANDO a tela de boot vira tela de erro. Clássico e inline de
+      // propósito: roda antes do módulo (que é deferido) e não depende de rede.
+      (function () {
+        var card = document.getElementById('boot-card');
+        var loading = document.getElementById('boot-loading');
+        var error = document.getElementById('boot-error');
+        var shown = false;
+        var timer;
+        var deadline = 0;
+
+        // Agenda o erro em vez de disparar na hora. Vale para sinais fortes mas
+        // não conclusivos: o plugin-legacy do Vite provoca um syntax error DE
+        // PROPÓSITO para detectar navegador antigo, e nesses casos o bundle
+        // legacy assume e o app carrega normal. Disparar na hora acusaria falha
+        // exatamente na população que o legacy existe para atender.
+        // Só antecipa, nunca adia: um erro tardio não pode empurrar para depois
+        // o prazo que já estava correndo.
+        function failIn(ms) {
+          if (shown || !card.isConnected) return;
+          var at = Date.now() + ms;
+          if (deadline && at >= deadline) return;
+          deadline = at;
+          clearTimeout(timer);
+          timer = setTimeout(fail, ms);
+        }
+
+        function fail() {
+          // Guarda obrigatória: se o React já montou, estes nós foram
+          // descartados e mexer neles não pinta nada na tela — mas um erro de
+          // runtime qualquer do app cairia aqui e "ressuscitaria" o fallback.
+          if (shown || !card.isConnected) return;
+          shown = true;
+          loading.hidden = true;
+          error.hidden = false;
+          card.className = 'boot-card is-error';
+
+          // A dica do navegador embutido só vira instrução direta quando dá
+          // para confirmar que a pessoa está num: no Chrome comum, ler sobre o
+          // menu "⋯" do Instagram é ruído.
+          var ua = navigator.userAgent || '';
+          if (/Instagram|FBAN|FBAV|FB_IAB|FBIOS|TikTok|Messenger|Line\/|Twitter/i.test(ua)) {
+            document.getElementById('boot-tip').innerHTML =
+              'Toque em <strong>⋯</strong> no canto da tela e escolha <strong>“Abrir no navegador”</strong>. ' +
+              'O navegador de dentro do app costuma travar aqui.';
+            // Muita gente não acha o menu "⋯", mas cola link no navegador sem
+            // dificuldade — este botão é a rota de fuga real desse caso.
+            var copy = document.getElementById('boot-copy');
+            copy.hidden = false;
+            copy.onclick = function () {
+              var url = location.href;
+              var ok = function () {
+                copy.textContent = 'Link copiado!';
+                setTimeout(function () { copy.textContent = 'Copiar link do site'; }, 2500);
+              };
+              var fallback = function () {
+                var el = document.getElementById('boot-url');
+                el.textContent = url;
+                el.hidden = false;
+                copy.hidden = true;
+              };
+              try {
+                navigator.clipboard.writeText(url).then(ok, fallback);
+              } catch (e) { fallback(); }
+            };
+          }
+        }
+
+        // Crash durante o boot (um throw antes do primeiro render). Encurta a
+        // espera para 4s em vez de 8s. Sem capture de propósito — assim erro de
+        // imagem ou de fonte, que não borbulha, não derruba a tela.
+        window.addEventListener('error', function () { failIn(4000); });
+        // Bundle que não chega: 404 de chunk depois de um deploy, rede caída.
+        // Sinal inequívoco, dispara direto. O [src] evita casar com os scripts
+        // de módulo INLINE que o plugin-legacy injeta.
+        var mod = document.querySelector('script[type="module"][src]');
+        if (mod) mod.addEventListener('error', fail);
+        // Rede muito lenta que nunca resolve. 8s é folgado por escolha: melhor
+        // esperar demais do que acusar falha em 3G que ia funcionar.
+        failIn(8000);
+      })();
+    </script>
   </body>
 </html>
