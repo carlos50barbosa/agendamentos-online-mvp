@@ -2,6 +2,7 @@ import { notifyEmail } from './notifications.js';
 import { sendAppointmentWhatsApp } from './whatsapp_outbox.js';
 import { clientWhatsappDisabled } from './client_notifications.js';
 import { issueConfirmLink } from './appointment_confirm_link.js';
+import { isPlaceholderGuestEmail } from './guest_placeholder_email.js';
 
 const TZ = 'America/Sao_Paulo';
 const INTERVAL_MS = Number(process.env.REMINDER_8H_INTERVAL_MS || 60_000); // 1 min default
@@ -78,6 +79,21 @@ async function sendReminderEmail(pool, row, { motivo } = {}) {
   const email = String(row?.cliente_email || '').trim().toLowerCase();
   if (!email) return { ok: false, reason: 'no_email' };
 
+  // Convidado que agendou só com telefone tem um e-mail placeholder, que satisfaz o `if` acima mas
+  // não recebe nada. A saída antecipada é ANTES do issueConfirmLink de propósito: aquilo grava um
+  // token no banco, e emitir token para um e-mail que não vai sair é lixo com prazo de validade.
+  //
+  // O warn existe porque este ramo é o único caminho em que o cliente fica COMPLETAMENTE sem
+  // aviso: sem WhatsApp (foi ele que trouxe a gente até aqui) e agora sem e-mail. Antes disso
+  // acontecia igual, só que em silêncio e com a função devolvendo `ok: true`.
+  if (isPlaceholderGuestEmail(email)) {
+    console.warn('[reminder8h][email] cliente sem e-mail real — nenhum lembrete foi enviado', {
+      agendamentoId: row?.id,
+      motivo: motivo || 'desconhecido',
+    });
+    return { ok: false, reason: 'placeholder_email' };
+  }
+
   try {
     const inicioISO = new Date(row.inicio).toISOString();
     const hora = brTime(inicioISO);
@@ -95,11 +111,21 @@ async function sendReminderEmail(pool, row, { motivo } = {}) {
          <p style="color:#64748b;font-size:12px">Se o botão não funcionar, copie este endereço no navegador:<br />${link.url}</p>`
       : '';
 
-    await notifyEmail(
+    // O retorno do notifyEmail é olhado agora. Antes era descartado, e a função devolvia
+    // `ok: true` mesmo quando o SMTP recusava — "lembrete enviado" no log sem lembrete nenhum.
+    const sent = await notifyEmail(
       email,
       'Lembrete do seu agendamento',
       `<p>Olá${saudacao}! Faltam 8 horas para o seu agendamento de <b>${row.servico_nome}</b> em <b>${estNomeFriendly}</b> (${hora} de ${data}).</p>${cta}`
     );
+    if (!sent?.ok) {
+      console.warn('[reminder8h][email] envio recusado', {
+        agendamentoId: row?.id,
+        motivo: motivo || 'desconhecido',
+        erro: sent?.error || 'desconhecido',
+      });
+      return { ok: false, reason: sent?.error || 'email_error' };
+    }
     return { ok: true, linked: Boolean(link) };
   } catch (err) {
     console.warn('[reminder8h][email] falhou', { agendamentoId: row?.id, motivo, erro: err?.message || err });

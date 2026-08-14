@@ -6,6 +6,7 @@ import { extractWamid, sendWhatsAppMessage } from '../services/waGraph.js';
 import { buildConfirmacaoAgendamentoV2Components, isConfirmacaoAgendamentoV2 } from './whatsapp_templates.js';
 import { getWaAccountByEstabelecimentoId, recordWaMessage } from '../services/waTenant.js';
 import { resolveWhatsAppTenantConfig } from '../services/waAccountResolver.js';
+import { isPlaceholderGuestEmail } from './guest_placeholder_email.js';
 
 /**
  * Configuração (via ENV)
@@ -678,6 +679,18 @@ if (smtp.host && smtp.auth?.user) {
 
 export async function notifyEmail(to, subject, html) {
   if (!to) return { ok: false, error: 'missing_to' };
+  // "Não existe endereço" e "existe um endereço que comprovadamente não recebe" são o mesmo fato
+  // para quem envia — por isso o guard mora aqui, irmão do `missing_to`, e não nos call sites.
+  //
+  // O placeholder de convidado satisfaz o `if (cli?.email)` de TODOS os pontos de envio (a
+  // confirmação, o lembrete de 8h, o reagendamento...), então cada um deles tentava um SMTP
+  // condenado a falhar na resolução do domínio. Espalhar cinco checagens iguais só garantiria que
+  // a sexta, escrita daqui a três meses, esqueceria. Um choke point cobre inclusive quem ainda
+  // não foi escrito.
+  if (isPlaceholderGuestEmail(to)) {
+    if (cfg.debug) console.log('[email] destinatário é placeholder de convidado, envio pulado (%s)', to);
+    return { ok: false, error: 'placeholder_email' };
+  }
   try {
     await transporter.sendMail({
       from: process.env.EMAIL_FROM || `"Agendamentos Online" <${process.env.SMTP_USER || 'no-reply@localhost'}>`,

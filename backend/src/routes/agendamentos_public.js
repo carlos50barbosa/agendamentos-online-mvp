@@ -6,6 +6,7 @@ import { assertDentroExpediente, formatExpedienteMessage, getExpediente, getLoca
 import { getPlanContext, isDelinquentStatus, formatPlanLimitExceeded, planAllowsDeposit } from '../lib/plans.js';
 import bcrypt from 'bcryptjs';
 import { notifyEmail } from '../lib/notifications.js';
+import { buildPlaceholderGuestEmail, isPlaceholderGuestEmail } from '../lib/guest_placeholder_email.js';
 import { sendPushToUser } from '../lib/web_push.js';
 import { sendAppointmentWhatsApp, WA_AUDIENCE_ESTABLISHMENT } from '../lib/whatsapp_outbox.js';
 import { buildConfirmacaoAgendamentoV2Components, isConfirmacaoAgendamentoV2 } from '../lib/whatsapp_templates.js';
@@ -56,13 +57,8 @@ const DEFAULT_DEPOSIT_HOLD_MINUTES = 15;
 // E-mail é opcional no agendamento público: nome + telefone bastam. Como usuarios.email é
 // NOT NULL UNIQUE, o cadastro sem e-mail recebe um placeholder determinístico pelo telefone —
 // preserva a unicidade sem inventar um endereço que possa colidir com o de outra pessoa. Nunca é
-// um e-mail real: as rotinas de envio o reconhecem pelo domínio e caem para o outro canal (nada
-// de bounce nem de cobrança por template enviado a lugar nenhum).
-const GUEST_PLACEHOLDER_EMAIL_DOMAIN = 'sem-email.agendou.local';
-const isPlaceholderGuestEmail = (email) =>
-  typeof email === 'string' && email.toLowerCase().endsWith(`@${GUEST_PLACEHOLDER_EMAIL_DOMAIN}`);
-const buildPlaceholderGuestEmail = (phoneKey) =>
-  `guest-${phoneKey}@${GUEST_PLACEHOLDER_EMAIL_DOMAIN}`;
+// um e-mail real, e quem garante que nada sai para ele é o `notifyEmail`, que recusa o domínio na
+// entrada (ver lib/guest_placeholder_email.js).
 const isValidEmailFormat = (value) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || '').trim());
 
 const safeJson = (payload) => {
@@ -534,8 +530,9 @@ async function notifyPublicConfirmedAppointment(appointmentId) {
 
     try {
       const emailNorm = ag.cliente_email ? String(ag.cliente_email).trim().toLowerCase() : '';
-      // Placeholder de guest sem e-mail não é endereço real — pular o envio (a confirmação vai por
-      // WhatsApp quando houve opt-in). Ver buildPlaceholderGuestEmail.
+      // Economia, não segurança: quem impede o envio ao placeholder é o próprio `notifyEmail`.
+      // O `if` fica porque montar o template inteiro (query de mensagens, replaces, link) para
+      // depois descartar é trabalho puro — a confirmação do convidado vai por WhatsApp.
       if (emailNorm && !isPlaceholderGuestEmail(emailNorm)) {
         const subject = tmpl.email_subject || 'Agendamento confirmado';
         const rawTemplate =
