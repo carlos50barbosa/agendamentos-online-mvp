@@ -840,6 +840,17 @@ export const Api = {
   profissionaisCreate: (payload) => req('/profissionais', { method: 'POST', body: JSON.stringify(payload) }),
 
   profissionaisUpdate: (id, payload) => req(`/profissionais/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
+  // Horário próprio da profissional, num PUT SÓ DELE — o corpo não leva mais nada, então a
+  // rota reconstrói nome/foto/status a partir da linha atual e uma edição de escala nunca
+  // arrasta outro campo junto.
+  //
+  // O `?? null` é o ponto todo desta função. O backend distingue três estados por
+  // hasOwnProperty: chave ausente = não mexer, null = limpar e voltar a herdar do salão, array
+  // = gravar. Como `JSON.stringify` REMOVE chaves com `undefined`, montar o corpo por
+  // truthiness (`if (h) payload.horarios = h`) transformaria "limpar" em "não mexer": a tela
+  // diria salvo e a coluna continuaria como estava.
+  profissionaisUpdateHorarios: (id, horarios) =>
+    req(`/profissionais/${id}`, { method: 'PUT', body: JSON.stringify({ horarios: horarios ?? null }) }),
 
   profissionaisDelete: (id) => req(`/profissionais/${id}`, { method: 'DELETE' }),
 

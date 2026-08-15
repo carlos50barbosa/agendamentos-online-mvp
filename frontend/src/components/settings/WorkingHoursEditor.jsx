@@ -4,15 +4,10 @@
 // sanitizeHorariosInput): dias com slug `monday`..`sunday`, opcional bloco de pausa.
 import React from 'react';
 
-export const WEEKDAYS = [
-  { key: 'monday', label: 'Segunda' },
-  { key: 'tuesday', label: 'Terça' },
-  { key: 'wednesday', label: 'Quarta' },
-  { key: 'thursday', label: 'Quinta' },
-  { key: 'friday', label: 'Sexta' },
-  { key: 'saturday', label: 'Sábado' },
-  { key: 'sunday', label: 'Domingo' },
-];
+// A lista passou a morar em horariosProfissional.js, que não tem JSX e por isso pode ser
+// importado pelo `node --test`. Reexportada aqui para os consumidores existentes não mudarem.
+export { WEEKDAYS } from './horariosProfissional.js';
+import { WEEKDAYS } from './horariosProfissional.js';
 
 function emptyDay(key, label) {
   return { key, label, enabled: false, start: '09:00', end: '18:00', hasBreak: false, breakStart: '12:00', breakEnd: '13:00' };

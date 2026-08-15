@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import Modal from '../components/Modal.jsx';
+import HorarioProfissionalModal from '../components/settings/HorarioProfissionalModal.jsx';
 import {
   IconChart,
   IconPlus,
@@ -197,6 +198,7 @@ export default function ProfissionaisEstabelecimento() {
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
   const [togglingId, setTogglingId] = useState(null);
+  const [horariosTarget, setHorariosTarget] = useState(null);
 
   const toastTimerRef = useRef(null);
 
@@ -706,6 +708,12 @@ export default function ProfissionaisEstabelecimento() {
                       <span>Perfil</span>
                       <strong>{isComplete ? 'Completo' : 'Em construção'}</strong>
                     </div>
+                    {/* Único lugar da lista onde dá para ver quem tem escala própria. Coluna
+                        nula = herda o salão, que é o estado de todo mundo até alguém mexer. */}
+                    <div className="professionals-page__meta-card">
+                      <span>Horário</span>
+                      <strong>{professional.horarios_json ? 'Próprio' : 'Do salão'}</strong>
+                    </div>
                   </div>
 
                   <div className="professionals-page__card-actions">
@@ -716,6 +724,14 @@ export default function ProfissionaisEstabelecimento() {
                       disabled={isBusy}
                     >
                       {togglingId === professional.id ? <span className="spinner" /> : professional.ativo ? 'Inativar' : 'Ativar'}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn--outline btn--sm"
+                      onClick={() => setHorariosTarget(professional)}
+                      disabled={isBusy}
+                    >
+                      Horários
                     </button>
                     <button
                       type="button"
@@ -846,6 +862,27 @@ export default function ProfissionaisEstabelecimento() {
             </p>
           </div>
         </Modal>
+      )}
+
+      {/* Modal próprio, e não uma seção do formulário de editar: os campos de nome e foto são
+          compartilhados entre criar e editar, e pendurar a escala neles faria toda troca de
+          foto regravar a semana. A linha devolvida pelo servidor já traz horarios_json, então
+          o meta-card do card atualiza junto. */}
+      {horariosTarget && (
+        <HorarioProfissionalModal
+          professional={horariosTarget}
+          onClose={() => setHorariosTarget(null)}
+          onSaved={(updated, voltouAoSalao) => {
+            setList((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+            showToast(
+              'success',
+              voltouAoSalao
+                ? `${updated.nome} voltou a seguir o horário do salão.`
+                : `Horários de ${updated.nome} atualizados.`
+            );
+            setHorariosTarget(null);
+          }}
+        />
       )}
     </div>
   );
