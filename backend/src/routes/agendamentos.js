@@ -750,10 +750,32 @@ router.post('/', authRequired, isCliente, ensureSubscriptionOperationalAccess({
       return res.status(400).json({ error: 'duracao_invalida', message: 'Duração do serviço inválida.' });
     }
     const fimDate = new Date(inicioDate.getTime() + duracaoTotalComBuffer * 60_000);
+    // `profissional_id` — a MESMA variável que vai para checkAppointmentSlotCapacityTx e para o
+    // INSERT, nunca uma releitura de req.body nem `profissionalRow?.id`. Se o valor que mede o
+    // expediente puder divergir do valor gravado, o sistema confere o horário de uma pessoa e
+    // agenda outra, e isso é indistinguível de sucesso. Ela já foi validada contra o banco acima
+    // (existe, está ativa, é DESTE estabelecimento) — o que importa porque getExpediente falha
+    // ABERTO para profissional de outro salão: devolveria o expediente do salão, sem erro.
+    //
+    // NUNCA condicionar a `requiresProfessional`. É o erro natural aqui, porque imita o filtro
+    // de capacidade da camada vizinha e passa em revisão — e abre a agenda em silêncio: os
+    // INSERTs gravam `profissional_id` incondicionalmente, então a profissional fica agendada
+    // fora do horário dela. Se veio profissional, o horário dela vale.
+    //
+    // A LEITURA RODA FORA DA TRANSAÇÃO, e é de propósito. A janela de corrida (a dona edita o
+    // horário enquanto um POST está em voo) existe desde antes do horário por profissional: é a
+    // mesma query, no mesmo ponto, para o `horarios_json` do salão. Fechá-la NÃO é `FOR UPDATE`
+    // — o expediente mora em uma linha por salão e uma por profissional, não há faixa a travar
+    // como há em `bloqueios`, e travar essas linhas serializaria o salão inteiro numa fila e
+    // criaria ciclo com o PUT /profissionais/:id. Também não é "mover para dentro da transação":
+    // db.js fixa REPEATABLE READ, então leitura não-locking lá dentro passa a ler snapshot
+    // congelado em vez do valor atual. Fechar de verdade pede releitura imediatamente antes do
+    // INSERT, ou versionamento do horário conferido na gravação. Outra fase.
     const expediente = await getExpediente({
-      db: conn || pool,
+      db: pool,
       estabelecimentoId: estabelecimento_id,
       dateUtc: inicioDate,
+      profissionalId: profissional_id,
     });
     const { startMin, endMin, spansDays } = getLocalRangeMinutes(inicioDate, fimDate);
     if (!assertDentroExpediente({
@@ -764,13 +786,6 @@ router.post('/', authRequired, isCliente, ensureSubscriptionOperationalAccess({
       spansDays,
       breaks: expediente.breaks,
     })) {
-      if (conn) {
-        if (txStarted) {
-          await conn.rollback();
-        }
-        conn.release();
-        conn = null;
-      }
       return res.status(400).json({ error: 'outside_business_hours', message: formatExpedienteMessage(expediente) });
     }
     const planConfig = planContext?.config;
@@ -1559,10 +1574,13 @@ router.post('/estabelecimento', authRequired, isEstabelecimento, ensureSubscript
     const duracaoTotalComBuffer = summary.duracaoTotal + APPOINTMENT_BUFFER_MIN;
     if (!Number.isFinite(duracaoTotalComBuffer) || duracaoTotalComBuffer <= 0) return res.status(400).json({ error: 'duracao_invalida' });
     const fimDate = new Date(inicioDate.getTime() + duracaoTotalComBuffer * 60_000);
+    // Mesmas razões do gate do POST de cliente, documentadas lá: a variável já validada contra o
+    // banco, sem condicionar a `requiresProfessional`, e a leitura fora da transação de propósito.
     const expediente = await getExpediente({
-      db: conn || pool,
+      db: pool,
       estabelecimentoId: estabelecimento_id,
       dateUtc: inicioDate,
+      profissionalId: profissional_id,
     });
     const { startMin, endMin, spansDays } = getLocalRangeMinutes(inicioDate, fimDate);
     if (!assertDentroExpediente({
@@ -1573,13 +1591,6 @@ router.post('/estabelecimento', authRequired, isEstabelecimento, ensureSubscript
       spansDays,
       breaks: expediente.breaks,
     })) {
-      if (conn) {
-        if (txStarted) {
-          await conn.rollback();
-        }
-        conn.release();
-        conn = null;
-      }
       return res.status(400).json({ error: 'outside_business_hours', message: formatExpedienteMessage(expediente) });
     }
     const planConfig = planContext?.config;
@@ -2010,6 +2021,18 @@ router.put('/:id/reschedule-estab', authRequired, isEstabelecimento, ensureSubsc
       return res.status(404).json({ error: 'not_found', message: 'Agendamento não encontrado.' });
     }
 
+    // O profissional desta rota NÃO vem do corpo — o handler desestrutura apenas `{ inicio }`.
+    // Ele vem da linha travada acima, e é por isso que este é o sítio mais fácil de esquecer:
+    // quem procurar `profissional_id` no req.body conclui que a rota não tem profissional. Tem.
+    // Sem o gate aqui a fuga é trivial — marca 10:00 (aceito) e remarca para 18:00 (aceito) — e
+    // é por esta mesma rota que o bot do WhatsApp remarca.
+    //
+    // Normalizado uma vez e reusado no expediente E na capacidade, para os dois falarem
+    // provadamente do mesmo valor. getExpediente lança TypeError se receber string; a coluna é
+    // INT NULL e hoje o driver entrega number|null, mas deixar isso implícito é o tipo de
+    // premissa que um upgrade de driver quebra em silêncio.
+    const profissionalIdAg = ag.profissional_id == null ? null : Number(ag.profissional_id);
+
     const statusNorm = String(ag.status || '').toLowerCase();
     if (statusNorm === 'cancelado') {
       if (txStarted && conn) {
@@ -2071,10 +2094,18 @@ router.put('/:id/reschedule-estab', authRequired, isEstabelecimento, ensureSubsc
 
     const fimDate = new Date(inicioDate.getTime() + duracaoTotalComBuffer * 60_000);
 
+    // Ao contrário dos dois gates de criação, ESTE roda dentro da transação — `conn` já foi
+    // aberta acima, para o SELECT ... FOR UPDATE do agendamento.
+    //
+    // `profissionalIdAg`, e não `ag.profissional_id` cru, para o expediente e a capacidade
+    // logo abaixo usarem provadamente o mesmo valor. E sem condicionar a `requiresProfessional`:
+    // além de errado pelo mesmo motivo dos outros sítios, ele nem existe aqui — só é declarado
+    // vinte linhas adiante, então a referência seria ReferenceError por TDZ.
     const expediente = await getExpediente({
       db: conn || pool,
       estabelecimentoId: estId,
       dateUtc: inicioDate,
+      profissionalId: profissionalIdAg,
     });
     const { startMin, endMin, spansDays } = getLocalRangeMinutes(inicioDate, fimDate);
     if (!assertDentroExpediente({
@@ -2102,7 +2133,9 @@ router.put('/:id/reschedule-estab', authRequired, isEstabelecimento, ensureSubsc
       db: conn,
       estabelecimentoId: estId,
       serviceItems,
-      profissionalId: ag.profissional_id,
+      // Mesmo valor normalizado que mediu o expediente acima: se estes dois divergirem, o
+      // sistema confere o horário de uma pessoa e reserva o slot de outra.
+      profissionalId: profissionalIdAg,
       requiresProfessional,
       inicioDate,
       fimDate,

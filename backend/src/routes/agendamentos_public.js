@@ -803,10 +803,16 @@ router.post('/', ensureSubscriptionOperationalAccess({
     const duracaoTotal = summary.duracaoTotal + APPOINTMENT_BUFFER_MIN;
     if (!Number.isFinite(duracaoTotal) || duracaoTotal <= 0) return res.status(400).json({ error: 'duracao_invalida' });
     const fimDate = new Date(inicioDate.getTime() + duracaoTotal * 60_000);
+    // Mesma regra dos gates do painel, documentada em routes/agendamentos.js: a variável já
+    // validada contra o banco (existe, ativa, deste estabelecimento), sem condicionar a
+    // `requiresProfessional`, e a leitura fora da transação de propósito.
+    //
+    // Esta é a rota de MAIOR alcance das quatro: atende o link público e o bot do WhatsApp.
     const expediente = await getExpediente({
       db: pool,
       estabelecimentoId: estabelecimento_id,
       dateUtc: inicioDate,
+      profissionalId: profissional_id,
     });
     const { startMin, endMin, spansDays } = getLocalRangeMinutes(inicioDate, fimDate);
     if (!assertDentroExpediente({
