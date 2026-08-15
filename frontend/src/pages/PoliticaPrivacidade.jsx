@@ -26,6 +26,7 @@ const sections = [
       'Informações de cadastro: nome, e-mail, telefone, senha, tipo de conta, dados de endereço do estabelecimento e outras informações fornecidas pelo usuário.',
       'Dados de agendamentos: serviços selecionados, datas, horários, profissionais envolvidos, status das solicitações e mensagens trocadas.',
       'Dados de suporte: interações por e-mail, WhatsApp ou formulários que contenham dúvidas, feedbacks ou anexos.',
+      'Respostas a pesquisas sobre a plataforma: motivo informado ao cancelar ou trocar de plano, nota de recomendação (NPS) e comentários enviados em pesquisas rápidas exibidas no site. Responder é sempre opcional. As pesquisas do site público podem ser respondidas por visitantes sem conta, e nesse caso a resposta é registrada sem qualquer identificação.',
       'Dados técnicos: logs de acesso, identificadores de dispositivo, navegador, sistema operacional, endereço IP, cookies e métricas de uso.',
     ],
   },
@@ -35,7 +36,7 @@ const sections = [
     paragraphs: [
       'Execução de contrato: criar e manter a conta do usuário, permitir agendamentos, enviar notificações e processar pagamentos.',
       'Cumprimento de obrigações legais: emitir notas, atender requisições de autoridades e registrar consentimentos.',
-      'Interesse legítimo: melhorar funcionalidades, prevenir fraudes, garantir segurança da plataforma e promover novos recursos relevantes.',
+      'Interesse legítimo: melhorar funcionalidades, prevenir fraudes, garantir segurança da plataforma, promover novos recursos relevantes e realizar pesquisas de satisfação e de motivo de cancelamento, cujos resultados são analisados de forma agregada.',
       'Consentimento: envio de comunicações de marketing e uso de cookies não essenciais, quando aplicável.',
     ],
   },
@@ -113,6 +114,7 @@ const sections = [
     paragraphs: [
       'Os dados são mantidos enquanto a conta estiver ativa e pelo período necessário para cumprir obrigações legais, resolver disputas e garantir direitos.',
       'Após o prazo legal, os dados são eliminados ou anonimizados de forma segura.',
+      'Respostas a pesquisas sobre a plataforma são desvinculadas da conta quando ela é excluída: a resposta permanece de forma anônima, sem vínculo com o titular, apenas para análise agregada.',
     ],
   },
   {
