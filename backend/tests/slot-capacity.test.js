@@ -87,6 +87,13 @@ function installSlotsPoolMock({
       return [[], []];
     }
 
+    // Horario proprio da profissional. Linha ausente = coluna NULL = herda o expediente do
+    // salao, que e o que estes testes assumem: aqui o assunto e capacidade por horario.
+    // Cobertura propria em tests/grade-profissional.test.js.
+    if (statement.startsWith('SELECT horarios_json FROM profissionais')) {
+      return [[], []];
+    }
+
     // Janela de agendamento (ate onde no futuro o cliente pode marcar). Linha ausente = modo
     // 'livre' = sem horizonte, que e o default e o que estes testes de capacidade assumem:
     // aqui o assunto e capacidade por horario, nao horizonte. Cobertura propria em

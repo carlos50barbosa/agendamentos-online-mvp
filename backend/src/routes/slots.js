@@ -2,7 +2,7 @@
 import { Router } from 'express';
 import { pool, withTransactionRetry } from '../lib/db.js';
 import { EST_TZ_OFFSET_MIN, makeUtcFromLocalYMDHM, weekDayIndexInTZ } from '../lib/datetime_tz.js';
-import { buildWorkingRules, resolveExpedienteForDay } from '../lib/expediente.js';
+import { buildWorkingRules, intersectExpediente, resolveExpedienteForDay } from '../lib/expediente.js';
 import { auth, isEstabelecimento } from '../middleware/auth.js';
 import { ensureSubscriptionOperationalAccess } from '../middleware/billing.js';
 import { activeAppointmentStatusWhere, normalizeServiceSlotCapacity } from '../lib/service_capacity.js';
@@ -122,7 +122,12 @@ const extractProfessionalId = (query) => {
     null;
   if (raw === null || raw === undefined || String(raw).trim() === '') return null;
   const parsed = Number(raw);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : NaN;
+  // isInteger, e não isFinite: `?profissional_id=3.5` passava e, com o horário por profissional,
+  // a consulta simplesmente não casa linha nenhuma — a grade cairia para o horário do salão
+  // inteiro enquanto o POST recusa o mesmo pedido com `profissional_invalido`. Tela e
+  // enforcement discordando em silêncio é exatamente o que esta série de mudanças existe para
+  // matar. (`1e1` continua passando: Number('1e1') é 10, inteiro de verdade.)
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : NaN;
 };
 
 // Domingo da semana local corrente. A agenda do painel abre sempre na semana atual, e
@@ -262,6 +267,46 @@ router.get('/', async (req, res) => {
     const horariosJson = profileRows?.[0]?.horarios_json || null;
     const workingRules = buildWorkingRules(horariosJson);
 
+    // Horário próprio da profissional. UMA leitura por request, aqui em cima junto da do salão:
+    // a rota resolve um profissional só e o laço abaixo anda os 7 dias.
+    //
+    // O `AND estabelecimento_id=?` é o isolamento de tenant do único parâmetro desta rota que
+    // vem cru da querystring — esta rota é PÚBLICA e não valida que o profissional é deste
+    // salão (o extractProfessionalId acima confere só o formato). Sem esse filtro, o horário de
+    // uma profissional de outro estabelecimento estreitaria esta grade, e daria para sondá-lo
+    // comparando grades.
+    let profWorkingRules = null;
+    if (professionalId != null) {
+      const [profRows] = await pool.query(
+        'SELECT horarios_json FROM profissionais WHERE id = ? AND estabelecimento_id = ? LIMIT 1',
+        [professionalId, establishmentId]
+      );
+      profWorkingRules = buildWorkingRules(profRows?.[0]?.horarios_json || null);
+    }
+
+    // Os SETE expedientes efetivos de uma vez, e não dois cálculos dentro do laço.
+    //
+    // NÃO é otimização — é o que torna INEXPRIMÍVEL intersectar o expediente do dia e esquecer
+    // o do dia anterior. O laço usa os dois (`:306` e `:308`), e o do dia anterior é o que monta
+    // o rabo pós-meia-noite de um turno que vira. Intersectar só o primeiro deixaria a
+    // profissional de folga na sexta com a madrugada de sábado inteira na tela — medido: o
+    // sábado sai byte a byte igual ao de hoje. Lendo os dois do mesmo array, a assimetria deixa
+    // de ter como ser escrita.
+    //
+    // `profWorkingRules ? … : null` é literal de propósito: resolveExpedienteForDay(null, dia)
+    // NÃO devolve "sem regra", devolve a janela fabricada 07:00-22:00.
+    const expedientesDaSemana = Array.from({ length: 7 }, (_ignorado, diaIndex) => {
+      const doEstabelecimento = resolveExpedienteForDay(workingRules, diaIndex);
+      // Visão "qualquer profissional": nenhum caminho novo, nem a query acima. É o mesmo
+      // precedente do blockAppliesToRequest logo abaixo — na visão não filtrada, restrição
+      // individual não fecha a agenda do salão inteiro.
+      if (professionalId == null) return doEstabelecimento;
+      return intersectExpediente(
+        doEstabelecimento,
+        profWorkingRules ? resolveExpedienteForDay(profWorkingRules, diaIndex) : null
+      );
+    });
+
     // Ate onde no futuro este estabelecimento aceita agendamento. Modo 'livre' (o default de
     // todo mundo) devolve limiteUtc null e nada abaixo muda. Ver lib/janela_agendamento.js.
     const janela = await resolveJanela(pool, establishmentId);
@@ -303,9 +348,9 @@ router.get('/', async (req, res) => {
         EST_TZ_OFFSET_MIN
       );
       const dayIndex = weekDayIndexInTZ(dayStartUtc, EST_TZ_OFFSET_MIN) ?? localDay.weekday;
-      const expediente = resolveExpedienteForDay(workingRules, dayIndex);
+      const expediente = expedientesDaSemana[dayIndex];
       const prevDayIndex = (dayIndex + 6) % 7;
-      const prevExpediente = resolveExpedienteForDay(workingRules, prevDayIndex);
+      const prevExpediente = expedientesDaSemana[prevDayIndex];
       const intervals = [];
 
       if (

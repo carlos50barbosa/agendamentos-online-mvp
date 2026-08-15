@@ -798,6 +798,12 @@ function installGridPoolMock({ blocks = [], professionals = [] } = {}) {
     if (/from\s+estabelecimento_perfis/i.test(statement)) {
       return [[], []];
     }
+    // Horario proprio da profissional: linha ausente = coluna NULL = herda o salao. Aqui o
+    // assunto e o escopo do BLOQUEIO; o horario por profissional tem cobertura propria em
+    // tests/grade-profissional.test.js.
+    if (/from\s+profissionais/i.test(statement) && /horarios_json/i.test(statement)) {
+      return [[], []];
+    }
     // Janela de agendamento: linha ausente = modo 'livre' = sem horizonte. Aqui o assunto e
     // o escopo do BLOQUEIO; o horizonte tem cobertura em tests/janela-agendamento.test.js.
     if (/from\s+establishment_settings/i.test(statement)) {
