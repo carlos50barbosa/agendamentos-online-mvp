@@ -76,6 +76,8 @@ CREATE TABLE IF NOT EXISTS profissionais (
   descricao          TEXT         NULL,
   avatar_url         VARCHAR(255) NULL,
   ativo              TINYINT(1)   NOT NULL DEFAULT 1,
+  -- NULL = herda o expediente do estabelecimento. Ver 2026-08-15-add-profissionais-horarios.sql.
+  horarios_json      TEXT         NULL,
   created_at         TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at         TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   INDEX idx_profissionais_estab (estabelecimento_id),

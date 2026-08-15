@@ -5,8 +5,27 @@ import {
 } from '../lib/plans.js';
 import { saveAvatarFromDataUrl, removeAvatarFile } from '../lib/avatar.js';
 import { ensureSubscriptionOperationalAccess, ensureWithinProfessionalLimit } from '../middleware/billing.js';
+import { montarUpdateComHorarios, parseHorariosProfissional } from '../lib/horarios_profissional.js';
 
 const router = Router();
+
+// Distingue os TRÊS estados de `horarios` no corpo, e a distinção precisa ser por
+// hasOwnProperty: o idioma usado no resto do arquivo (`x != null ? x : atual`) colapsa "campo
+// ausente" e "campo null" no mesmo ramo, e aí não existe jeito de pedir "limpe o horário
+// próprio e volte a herdar do salão".
+const lerHorariosDoCorpo = (body) =>
+  Object.prototype.hasOwnProperty.call(body || {}, 'horarios')
+    ? parseHorariosProfissional(body.horarios)
+    : { mode: 'skip', json: null };
+
+// Erro de validação de horário sai como 400 com código, na convenção de routes/onboarding.js.
+const respostaDeErro = (res, err, contexto, fallback) => {
+  if (err?.status === 400) {
+    return res.status(400).json({ error: err.code, message: err.message });
+  }
+  console.error(contexto, err);
+  return res.status(500).json({ error: fallback });
+};
 
 function toBoolean(value) {
   if (value === true || value === false) return value;
@@ -42,8 +61,11 @@ router.get('/', async (req, res, next) => {
 router.get('/', auth, isEstabelecimento, async (req, res) => {
   try {
     const estId = req.user.id;
+    // `horarios_json` só aparece AQUI, na listagem autenticada. O GET público acima serve a
+    // página de agendamento e não pode publicar a escala individual da equipe — a grade que o
+    // cliente vê já vem do /slots, calculada.
     const [rows] = await pool.query(
-      `SELECT id, estabelecimento_id, nome, descricao, avatar_url, ativo, created_at
+      `SELECT id, estabelecimento_id, nome, descricao, avatar_url, ativo, horarios_json, created_at
        FROM profissionais
        WHERE estabelecimento_id=?
        ORDER BY nome`,
@@ -78,6 +100,12 @@ router.post(
       return res.status(400).json({ error: 'nome_obrigatorio', message: 'Informe o nome do profissional.' });
     }
 
+    // Na criação não existe "não mexer": `skip` e `clear` gravam NULL do mesmo jeito, e NULL
+    // aqui é o estado correto — profissional nova herda o horário do salão até alguém dizer
+    // o contrário. Valida ANTES de salvar avatar e de inserir, para um horário recusado não
+    // deixar arquivo órfão no disco.
+    const horarios = lerHorariosDoCorpo(req.body);
+
     let avatarUrl = null;
     if (avatar) {
       try {
@@ -95,18 +123,17 @@ router.post(
     }
 
     const [insert] = await pool.query(
-      'INSERT INTO profissionais (estabelecimento_id, nome, descricao, avatar_url, ativo) VALUES (?,?,?,?,?)',
-      [estId, nome, descricao || null, avatarUrl, isActive ? 1 : 0]
+      'INSERT INTO profissionais (estabelecimento_id, nome, descricao, avatar_url, ativo, horarios_json) VALUES (?,?,?,?,?,?)',
+      [estId, nome, descricao || null, avatarUrl, isActive ? 1 : 0, horarios.json]
     );
 
     const [[row]] = await pool.query(
-      'SELECT id, estabelecimento_id, nome, descricao, avatar_url, ativo, created_at FROM profissionais WHERE id=?',
+      'SELECT id, estabelecimento_id, nome, descricao, avatar_url, ativo, horarios_json, created_at FROM profissionais WHERE id=?',
       [insert.insertId]
     );
     return res.json(row);
   } catch (err) {
-    console.error('[profissionais][create]', err);
-    return res.status(500).json({ error: 'create_profissional_failed' });
+    return respostaDeErro(res, err, '[profissionais][create]', 'create_profissional_failed');
   }
   }
 );
@@ -117,7 +144,7 @@ async function loadProfessional(req, res, next) {
     const { id } = req.params;
 
     const [[row]] = await pool.query(
-      'SELECT id, nome, descricao, avatar_url, ativo FROM profissionais WHERE id=? AND estabelecimento_id=?',
+      'SELECT id, nome, descricao, avatar_url, ativo, horarios_json FROM profissionais WHERE id=? AND estabelecimento_id=?',
       [id, estId]
     );
     if (!row) return res.status(404).json({ error: 'not_found' });
@@ -151,6 +178,10 @@ router.put(
     const { id } = req.params;
     let { nome, descricao, avatar, avatarRemove, ativo } = req.body || {};
 
+    // Validado ANTES de mexer em avatar: horário recusado não pode deixar arquivo órfão no
+    // disco nem apagar a foto de quem só errou o formato do horário.
+    const horarios = lerHorariosDoCorpo(req.body);
+
     const row = req.professional;
     const nextNome = nome != null ? String(nome).trim() : row.nome;
     const nextDescricao = descricao != null ? String(descricao).trim() : row.descricao;
@@ -179,19 +210,26 @@ router.put(
 
     const nextAtivo = ativo == null ? row.ativo : (toBoolean(ativo) ? 1 : 0);
 
+    // A coluna só entra no SET quando o corpo pediu — ver o docblock de montarUpdateComHorarios
+    // para o motivo, que é `undefined` virando NULL em silêncio no bind.
+    const { campos, valores } = montarUpdateComHorarios(
+      ['nome=?', 'descricao=?', 'avatar_url=?', 'ativo=?'],
+      [nextNome, nextDescricao || null, nextAvatar, nextAtivo],
+      horarios
+    );
+
     await pool.query(
-      'UPDATE profissionais SET nome=?, descricao=?, avatar_url=?, ativo=? WHERE id=? AND estabelecimento_id=?',
-      [nextNome, nextDescricao || null, nextAvatar, nextAtivo, id, estId]
+      `UPDATE profissionais SET ${campos.join(', ')} WHERE id=? AND estabelecimento_id=?`,
+      [...valores, id, estId]
     );
 
     const [[updated]] = await pool.query(
-      'SELECT id, estabelecimento_id, nome, descricao, avatar_url, ativo, created_at FROM profissionais WHERE id=?',
+      'SELECT id, estabelecimento_id, nome, descricao, avatar_url, ativo, horarios_json, created_at FROM profissionais WHERE id=?',
       [id]
     );
     res.json(updated);
   } catch (err) {
-    console.error('[profissionais][update]', err);
-    res.status(500).json({ error: 'update_profissional_failed' });
+    respostaDeErro(res, err, '[profissionais][update]', 'update_profissional_failed');
   }
   }
 );

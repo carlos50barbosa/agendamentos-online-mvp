@@ -1,0 +1,25 @@
+-- Horario proprio por profissional (Fase 3 de "horario por profissional").
+--
+-- NULL significa "sem regra propria": a profissional herda o expediente do estabelecimento.
+-- Por isso a coluna nasce NULL para todo mundo e criar ela nao muda nada para ninguem —
+-- intersectExpediente(salao, null) devolve o expediente do salao intacto.
+--
+-- O QUE NAO PODE ACONTECER: NULL virar o resultado de "a dona configurou alguma coisa".
+-- buildWorkingRules devolve null tambem para JSON vazio, malformado ou sem slug de dia, e o
+-- reader falha ABERTO de proposito. Entao um writer que grave "[]" para "nao trabalha nenhum
+-- dia" produz o pior desfecho possivel: a folga vira agenda liberada os sete dias, com a tela
+-- dizendo "salvo". Quem grava aqui e lib/horarios_profissional.js, que exige os sete dias
+-- explicitos e rele o proprio JSON antes de deixar salvar.
+--
+-- TEXT NULL e o mesmo tipo do campo gemeo estabelecimento_perfis.horarios_json: os dois lados
+-- da intersecao com o mesmo tipo e o mesmo default.
+--
+-- ORDEM DO DEPLOY: scripts/deploy.sh roda migrate.mjs ANTES do pm2 reload, entao a coluna
+-- existe antes do codigo que a le. Isso importa porque o SELECT dela em lib/expediente.js NAO
+-- tem try/catch, de proposito: codigo novo contra schema velho vira 500, e nao "essa
+-- profissional atende 07:00-22:00, sete dias por semana".
+--
+-- Idempotente (ADD COLUMN IF NOT EXISTS, MariaDB), no mesmo padrao de
+-- 2026-08-08-add-janela-dias.sql.
+ALTER TABLE profissionais
+  ADD COLUMN IF NOT EXISTS horarios_json TEXT NULL AFTER ativo;
