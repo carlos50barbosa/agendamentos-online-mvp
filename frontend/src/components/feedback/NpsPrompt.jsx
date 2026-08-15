@@ -28,6 +28,11 @@ const NOTAS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
 export default function NpsPrompt({ ativo = false }) {
   const [visivel, setVisivel] = useState(false);
   const [nota, setNota] = useState(null);
+  // `nota` é só o que está selecionado na tela; `notaSalva` é o que o servidor confirmou. São
+  // estados separados de propósito: enquanto eram um só, a tela avançava para "Obrigado pela
+  // nota!" no clique e agradecia por um dado que o POST podia ter perdido no caminho.
+  const [notaSalva, setNotaSalva] = useState(false);
+  const [enviandoNota, setEnviandoNota] = useState(false);
   // Id da linha criada pelo clique na nota. É o que permite o comentário COMPLETAR a resposta em
   // vez de virar uma segunda — duas linhas com nota contariam esta pessoa duas vezes no NPS.
   const [feedbackId, setFeedbackId] = useState(null);
@@ -61,49 +66,68 @@ export default function NpsPrompt({ ativo = false }) {
   }, [ativo]);
 
   const fechar = useCallback(() => {
-    markAsked(STORAGE_KEY);
+    // Fechar depois de uma falha NÃO silencia por 30 dias: o silêncio é para quem escolheu não
+    // responder, não para quem tentou e foi derrubado pelo nosso lado. Essa pessoa continua
+    // elegível — e o servidor, que é quem manda na elegibilidade, ainda não registrou nada dela.
+    if (!erro) markAsked(STORAGE_KEY);
     setVisivel(false);
-  }, []);
+  }, [erro]);
 
   // A nota vai embora no clique. Se a pessoa fechar antes de escrever o comentário, o número já
   // está salvo — é ele que compõe a métrica.
   const escolherNota = useCallback(async (valor) => {
+    if (enviandoNota) return;
     setNota(valor);
-    markAsked(STORAGE_KEY);
     setErro('');
+    setEnviandoNota(true);
     try {
       const res = await Api.sendFeedback({ tipo: 'nps', nota: valor, contexto: 'app' });
       setFeedbackId(res?.id || null);
+      // Só aqui a tela avança e só aqui a pessoa passa a descansar os 30 dias. Marcar antes do
+      // resultado gastava a janela de quem não chegou a ser ouvido.
+      setNotaSalva(true);
+      markAsked(STORAGE_KEY);
     } catch (err) {
-      setErro(err?.data?.message || 'Não conseguimos registrar sua nota agora.');
+      setErro(err?.data?.message || 'Não conseguimos registrar sua nota. Toque de novo para tentar.');
+    } finally {
+      setEnviandoNota(false);
     }
-  }, []);
+  }, [enviandoNota]);
 
-  // Completa a linha da nota. Sem `feedbackId` (a gravação da nota falhou) não há o que completar:
-  // insistir aqui criaria uma resposta solta com comentário e sem nota.
+  // Completa a linha da nota. Sem `feedbackId` não há o que completar: insistir aqui criaria uma
+  // resposta solta, com comentário e sem nota, que entraria no relatório como respondente novo.
   const enviarComentario = useCallback(async () => {
     if (!comentario.trim() || salvandoComentario) return;
+
+    // Antes isto caía no `finally` e mostrava "sua resposta foi registrada" com o comentário
+    // jogado fora. O aviso troca de tom porque o fato é outro: a nota está salva, o texto não.
+    if (!feedbackId) {
+      setErro('Sua nota foi registrada, mas não conseguimos anexar o comentário.');
+      return;
+    }
+
     setSalvandoComentario(true);
+    setErro('');
     try {
-      if (feedbackId) await Api.updateFeedbackComment(feedbackId, comentario);
-    } catch {
-      // Silencioso: a nota — o dado que compõe a métrica — já está salva.
-    } finally {
-      setSalvandoComentario(false);
+      await Api.updateFeedbackComment(feedbackId, comentario);
       setConcluido(true);
       setTimeout(() => setVisivel(false), 2200);
+    } catch {
+      // A caixa fica aberta: a nota já compõe a métrica, então aqui não se perde a resposta —
+      // mas fingir que o texto entrou seria mentir para quem parou para escrever.
+      setErro('Não conseguimos anexar seu comentário. Sua nota já está registrada.');
+    } finally {
+      setSalvandoComentario(false);
     }
   }, [comentario, feedbackId, salvandoComentario]);
 
   if (!visivel) return null;
 
-  const pediuNota = nota !== null;
-
   return (
     <aside className={`${styles.floating} ${styles.npsCard}`} role="dialog" aria-label="Pesquisa de satisfação">
       <div className={styles.floatingHeader}>
         <h3 className={styles.title}>
-          {concluido ? 'Obrigado!' : pediuNota ? 'Obrigado pela nota!' : 'Como estamos indo?'}
+          {concluido ? 'Obrigado!' : notaSalva ? 'Obrigado pela nota!' : 'Como estamos indo?'}
         </h3>
         <button type="button" className={styles.dismiss} onClick={fechar} aria-label="Fechar pesquisa">
           <span aria-hidden="true">×</span>
@@ -112,7 +136,7 @@ export default function NpsPrompt({ ativo = false }) {
 
       {concluido ? (
         <p className={styles.lead} style={{ marginTop: 8 }}>Sua resposta foi registrada. Isso ajuda de verdade.</p>
-      ) : pediuNota ? (
+      ) : notaSalva ? (
         <>
           <p className={styles.lead}>
             {nota >= 9
@@ -163,6 +187,7 @@ export default function NpsPrompt({ ativo = false }) {
                   type="button"
                   className={nota === valor ? `${styles.scaleButton} ${styles.scaleButtonSelected}` : styles.scaleButton}
                   onClick={() => void escolherNota(valor)}
+                  disabled={enviandoNota}
                 >
                   {valor}
                 </button>
@@ -173,6 +198,9 @@ export default function NpsPrompt({ ativo = false }) {
               <span>Não recomendaria</span>
               <span>Recomendaria muito</span>
             </div>
+            {/* O erro precisa aparecer AQUI: quando a gravação falha a tela não avança mais para o
+                painel de comentário, que era o único lugar que mostrava esta mensagem. */}
+            {erro ? <p className={styles.error}>{erro}</p> : null}
           </div>
         </>
       )}
