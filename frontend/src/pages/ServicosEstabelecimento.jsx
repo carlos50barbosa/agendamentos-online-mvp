@@ -6,18 +6,17 @@ import { Api, resolveAssetUrl } from "../utils/api";
 
 import { compressImageToDataUrl, MAX_ENTRADA_BYTES } from "../utils/imageCompress";
 
+import {
+  SERVICE_DURATION_OPTIONS,
+  SERVICE_DURATION_MIN,
+  SERVICE_DURATION_MAX,
+  formatServiceDuration,
+  parseServiceDuration,
+} from "../utils/serviceDuration";
+
 
 
 const MAX_SERVICE_IMAGE_SIZE = 2 * 1024 * 1024; // 2MB
-const SERVICE_DURATION_STEP = 15;
-const SERVICE_DURATION_MAX = 480;
-const SERVICE_DURATION_OPTIONS = (() => {
-  const values = [];
-  for (let minutes = SERVICE_DURATION_STEP; minutes <= SERVICE_DURATION_MAX; minutes += SERVICE_DURATION_STEP) {
-    values.push(minutes);
-  }
-  return values;
-})();
 
 
 
@@ -1075,7 +1074,7 @@ export default function ServicosEstabelecimento() {
 
                           <div className="service-card__price">{formatBRL(s.preco_centavos ?? 0)}</div>
 
-                          <div className="service-card__duration">{s.duracao_min} min</div>
+                          <div className="service-card__duration">{formatServiceDuration(s.duracao_min)}</div>
 
                           {Number(s.capacidade_por_horario || 1) > 1 && (
                             <div className="service-card__duration">
@@ -1275,14 +1274,14 @@ export default function ServicosEstabelecimento() {
 
                   }
 
-                  title="Duração (min)"
+                  title="Duração do serviço"
 
                 >
 
                   {SERVICE_DURATION_OPTIONS.map((m) => (
                     <option key={m} value={m}>
 
-                      {m} min
+                      {formatServiceDuration(m)}
 
                     </option>
 
@@ -1518,24 +1517,11 @@ export default function ServicosEstabelecimento() {
 
             />
 
-            <select
-
-              className="input"
-
+            <DurationField
               value={editForm.duracao_min}
-
-              onChange={(e)=> setEditForm(f => ({ ...f, duracao_min: parseInt(e.target.value,10) }))}
-
-              title="Duração (min)"
-
-            >
-
-              {SERVICE_DURATION_OPTIONS.map(m => (
-                <option key={m} value={m}>{m} min</option>
-
-              ))}
-
-            </select>
+              onChange={(minutes) => setEditForm((f) => ({ ...f, duracao_min: minutes }))}
+              disabled={editSaving}
+            />
 
             <label className="service-form__field">
 
@@ -1762,6 +1748,188 @@ export default function ServicosEstabelecimento() {
 
 
 /* ---------- Componentes auxiliares ---------- */
+
+
+
+/**
+ * Duração do serviço: a lista pronta de 15 em 15 resolve o caso comum, e "Outro (digitar)"
+ * abre um campo livre para o resto — henna de 20 min, progressiva de 5h20. A lista sozinha
+ * obrigava a arredondar para cima e o horário seguinte nascia errado.
+ *
+ * Serviço já gravado fora da grade (valor antigo) abre direto no campo livre: antes o
+ * <select> não encontrava a opção e mostrava a duração em branco.
+ *
+ * Comunica duração inválida com onChange(0) — quem chama já bloqueia salvar com `!duracao_min`.
+ */
+function DurationField({ value, onChange, disabled }) {
+
+  const startsCustom = !SERVICE_DURATION_OPTIONS.includes(Number(value));
+
+  const [custom, setCustom] = useState(startsCustom);
+
+  const [text, setText] = useState(startsCustom && Number(value) > 0 ? formatServiceDuration(value) : '');
+
+  const inputRef = useRef(null);
+
+  // Contador, não booleano: alternar lista -> "Outro" -> lista -> "Outro" precisa focar TODA vez.
+  const [focarPedido, setFocarPedido] = useState(0);
+
+
+
+  const typed = text.trim();
+
+  const parsed = parseServiceDuration(typed);
+
+  const outOfRange = parsed != null && (parsed < SERVICE_DURATION_MIN || parsed > SERVICE_DURATION_MAX);
+
+  const error =
+    !custom || !typed ? ''
+      : parsed == null ? 'Não entendi. Escreva como 1h40, 45 min ou 100.'
+      : outOfRange ? `A duração precisa ficar entre ${formatServiceDuration(SERVICE_DURATION_MIN)} e ${formatServiceDuration(SERVICE_DURATION_MAX)}.`
+      : '';
+
+
+
+  // O foco é do CLIQUE em "Outro (digitar)", nunca da montagem. Com autoFocus no campo, todo
+  // serviço gravado fora da grade roubava o cursor ao abrir a edição — no celular o teclado
+  // subia por cima do modal antes de a dona tocar em qualquer coisa.
+  useEffect(() => {
+
+    if (focarPedido > 0 && inputRef.current) inputRef.current.focus();
+
+  }, [focarPedido]);
+
+
+
+  // Duração legada fora de 5 min–8h (o backend não tem teto) abria o modal com o erro vermelho
+  // na tela e o "Salvar alterações" habilitado assim mesmo, regravando o valor recusado.
+  // Aqui o pai fica sabendo já na abertura, e a tela passa a cumprir o que ela mesma diz.
+  useEffect(() => {
+
+    if (startsCustom && (parsed == null || outOfRange)) onChange(0);
+
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+
+
+  function pick(e) {
+
+    const raw = e.target.value;
+
+    if (raw === 'custom') {
+
+      setCustom(true);
+
+      // Já começa preenchido com a duração atual: quem quer 100 costuma partir de 90.
+      setText(Number(value) > 0 ? formatServiceDuration(value) : '');
+
+      setFocarPedido((n) => n + 1);
+
+      return;
+
+    }
+
+    setCustom(false);
+
+    setText('');
+
+    onChange(parseInt(raw, 10));
+
+  }
+
+
+
+  function type(e) {
+
+    const next = e.target.value;
+
+    setText(next);
+
+    const minutes = parseServiceDuration(next);
+
+    const valid = minutes != null && minutes >= SERVICE_DURATION_MIN && minutes <= SERVICE_DURATION_MAX;
+
+    onChange(valid ? minutes : 0);
+
+  }
+
+
+
+  return (
+
+    <div className="service-form__field">
+
+      <span className="service-form__label">Duração</span>
+
+      <select
+
+        className="input"
+
+        value={custom ? 'custom' : value}
+
+        onChange={pick}
+
+        disabled={disabled}
+
+        aria-label="Duração do serviço"
+
+      >
+
+        {SERVICE_DURATION_OPTIONS.map(m => (
+          <option key={m} value={m}>{formatServiceDuration(m)}</option>
+
+        ))}
+
+        <option value="custom">Outro (digitar)…</option>
+
+      </select>
+
+      {custom && (
+
+        <>
+
+          <input
+
+            ref={inputRef}
+
+            className="input"
+
+            type="text"
+
+            inputMode="text"
+
+            value={text}
+
+            onChange={type}
+
+            disabled={disabled}
+
+            placeholder="Ex.: 1h40, 45 min ou 100"
+
+            aria-label="Duração personalizada"
+
+          />
+
+          {error
+
+            ? <div className="service-form__error">{error}</div>
+
+            : <small className="muted" style={{ fontSize: 11 }}>
+
+                {typed && parsed != null ? `Entendi: ${formatServiceDuration(parsed)}` : 'Aceita minutos (100) ou horas (1h40).'}
+
+              </small>}
+
+        </>
+
+      )}
+
+    </div>
+
+  );
+
+}
 
 
 
