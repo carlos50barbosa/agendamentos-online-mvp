@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { Api } from '../utils/api';
 import { getUser, saveUser } from '../utils/auth';
+import { SERVICE_DURATION_OPTIONS, formatServiceDuration } from '../utils/serviceDuration';
 import WhatsAppOptInBanner from '../components/estab/WhatsAppOptInBanner.jsx';
 
 const STEPS = [
@@ -324,8 +325,8 @@ function EtapaServicos({
             value={form.duracao_min}
             onChange={(event) => setForm((current) => ({ ...current, duracao_min: Number(event.target.value) }))}
           >
-            {[15, 30, 45, 60, 75, 90, 120, 180].map((minutes) => (
-              <option key={minutes} value={minutes}>{minutes} min</option>
+            {SERVICE_DURATION_OPTIONS.map((minutes) => (
+              <option key={minutes} value={minutes}>{formatServiceDuration(minutes)}</option>
             ))}
           </select>
         </label>
@@ -390,7 +391,7 @@ function EtapaServicos({
         items={services.map((item) => ({
           id: item.id,
           title: item.nome,
-          meta: `${item.duracao_min || 0} min · ${formatMoney(item.preco_centavos)}`,
+          meta: `${formatServiceDuration(item.duracao_min)} · ${formatMoney(item.preco_centavos)}`,
           detail: item.professionals?.length
             ? item.professionals.map((professional) => professional.nome).join(', ')
             : 'Sem profissionais vinculados',
@@ -535,7 +536,7 @@ function EtapaRevisao({ professionals, services, schedule }) {
             items={services.map((item) => ({
               id: item.id,
               title: item.nome,
-              meta: `${item.duracao_min || 0} min · ${formatMoney(item.preco_centavos)}`,
+              meta: `${formatServiceDuration(item.duracao_min)} · ${formatMoney(item.preco_centavos)}`,
               detail: item.professionals?.map((professional) => professional.nome).join(', ') || '',
             }))}
           />
