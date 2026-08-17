@@ -35,6 +35,37 @@ function fmtDate(value) {
   return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
 }
 
+// Satisfação daquela conta, ao lado do plano e do vencimento — a combinação "dono insatisfeito com
+// renovação chegando" é o que decide para quem ligar hoje. O painel completo (grão de resposta,
+// incluindo as anônimas da landing, que não têm tenant) mora em /admin/feedback.
+function SatisfacaoCell({ feedback }) {
+  const nota = feedback?.nps;
+  const saida = feedback?.sinalizou_saida;
+
+  // `null` (nunca respondeu) NÃO é 0 (respondeu zero). Sem essa distinção, quem nunca foi ouvido
+  // apareceria em vermelho no topo da lista de quem precisa de atenção.
+  if (nota == null && !saida) return <span className="ae-muted">—</span>;
+
+  const tone = nota == null ? 'neutral' : nota >= 9 ? 'success' : nota >= 7 ? 'warning' : 'danger';
+  return (
+    <div style={{ display: 'grid', gap: 4, justifyItems: 'start' }}>
+      {nota != null ? (
+        <span className="ae-badge" style={{ background: `var(--${tone}-bg)`, color: `var(--${tone}-text)`, boxShadow: `inset 0 0 0 1px var(--${tone}-border)` }}>
+          NPS {nota}
+        </span>
+      ) : null}
+      {saida ? (
+        <span className="ae-badge" style={{ background: 'var(--danger-bg)', color: 'var(--danger-text)', boxShadow: 'inset 0 0 0 1px var(--danger-border)' }}>
+          sinalizou saída
+        </span>
+      ) : null}
+      {nota != null && feedback?.nps_em ? (
+        <span className="ae-muted" style={{ fontSize: 11 }}>{fmtDate(feedback.nps_em)}</span>
+      ) : null}
+    </div>
+  );
+}
+
 function dueStyle(value) {
   if (!value) return undefined;
   const t = new Date(value).getTime();
@@ -282,6 +313,7 @@ export default function AdminEstablishments() {
                 <th className="ae-num">Profiss.<br /><span className="ae-muted" style={{ fontWeight: 500, textTransform: 'none' }}>ativos/total</span></th>
                 <th className="ae-num">Serviços<br /><span className="ae-muted" style={{ fontWeight: 500, textTransform: 'none' }}>ativos/inativos</span></th>
                 <th className="ae-num">Agend.<br /><span className="ae-muted" style={{ fontWeight: 500, textTransform: 'none' }}>total (mês)</span></th>
+                <th>Satisfação<br /><span className="ae-muted" style={{ fontWeight: 500, textTransform: 'none' }}>último NPS</span></th>
               </tr>
             </thead>
             <tbody>
@@ -304,11 +336,12 @@ export default function AdminEstablishments() {
                     <td className="ae-num">{r.professionals?.active ?? 0}<span className="ae-muted"> / {r.professionals?.total ?? 0}</span></td>
                     <td className="ae-num">{r.services?.active ?? 0}<span className="ae-muted"> / {r.services?.inactive ?? 0}</span></td>
                     <td className="ae-num"><strong>{(r.appointments?.total ?? 0).toLocaleString('pt-BR')}</strong><span className="ae-muted"> ({r.appointments?.month ?? 0})</span></td>
+                    <td><SatisfacaoCell feedback={r.feedback} /></td>
                   </tr>
                 );
               })}
               {!filtered.length && (
-                <tr><td colSpan={7} className="ae-empty">{loading ? 'Carregando…' : (rows.length ? 'Nenhum resultado para o filtro.' : 'Cole o token e clique em Carregar.')}</td></tr>
+                <tr><td colSpan={8} className="ae-empty">{loading ? 'Carregando…' : (rows.length ? 'Nenhum resultado para o filtro.' : 'Cole o token e clique em Carregar.')}</td></tr>
               )}
             </tbody>
           </table>

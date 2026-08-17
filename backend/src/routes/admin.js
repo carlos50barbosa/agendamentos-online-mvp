@@ -7,7 +7,13 @@ import { enrichMercadoPagoSubscriptionEvent } from '../lib/mercadopago_payment_o
 import { getTenantBotSettings, upsertTenantBotSettings } from '../bot/storage/settingsStore.js';
 import { setAudit, diffFields } from '../lib/audit.js';
 import { reconcileTenantSubscription } from '../lib/subscription_reconcile.js';
-import { FEEDBACK_TYPES, summarizeNps } from '../lib/product_feedback.js';
+import {
+  FEEDBACK_TYPES,
+  NPS_EVENT_DISPENSADO,
+  NPS_EVENT_EXIBIDO,
+  summarizeNps,
+  summarizeNpsResponseRate,
+} from '../lib/product_feedback.js';
 
 const IDENT_RE = /^[a-zA-Z0-9_]+$/;
 function isIdent(s = '') { return IDENT_RE.test(String(s)); }
@@ -119,6 +125,26 @@ router.get('/establishments/overview', checkAdmin, auditAdmin('admin.establishme
       [startOfMonth],
     );
 
+    // Sinal de satisfação por tenant. Grão de ESTABELECIMENTO (a última nota daquela conta e se ela
+    // sinalizou saída), que é o que justifica morar aqui — o painel de feedback tem grão de
+    // resposta e boa parte das linhas de lá é anônima, sem tenant nenhum.
+    //
+    // Vale a pena ao lado do plano e do vencimento: dono insatisfeito com renovação chegando é a
+    // combinação que decide para quem ligar hoje.
+    const [feedbackRows] = await pool.query(
+      `SELECT usuario_id AS eid,
+              MAX(CASE WHEN tipo = 'nps' AND nota IS NOT NULL THEN created_at END) AS nps_em,
+              SUBSTRING_INDEX(
+                GROUP_CONCAT(CASE WHEN tipo = 'nps' AND nota IS NOT NULL THEN nota END
+                             ORDER BY created_at DESC), ',', 1
+              ) AS nps_nota,
+              MAX(tipo IN ('cancelamento', 'downgrade')
+                  AND created_at >= (NOW() - INTERVAL 90 DAY)) AS sinalizou_saida
+         FROM product_feedback
+        WHERE usuario_id IS NOT NULL
+        GROUP BY usuario_id`,
+    );
+
     const indexBy = (rows) => {
       const m = new Map();
       for (const r of rows) m.set(Number(r.eid), r);
@@ -127,12 +153,14 @@ router.get('/establishments/overview', checkAdmin, auditAdmin('admin.establishme
     const profMap = indexBy(profRows);
     const svcMap = indexBy(svcRows);
     const aptMap = indexBy(aptRows);
+    const fbMap = indexBy(feedbackRows);
     const num = (v) => Number(v || 0);
 
     const establishments = estabs.map((e) => {
       const p = profMap.get(Number(e.id)) || {};
       const s = svcMap.get(Number(e.id)) || {};
       const a = aptMap.get(Number(e.id)) || {};
+      const f = fbMap.get(Number(e.id)) || {};
       return {
         id: e.id,
         nome: e.nome,
@@ -145,6 +173,13 @@ router.get('/establishments/overview', checkAdmin, auditAdmin('admin.establishme
         professionals: { active: num(p.ativos), total: num(p.total) },
         services: { active: num(s.ativos), inactive: num(s.inativos), total: num(s.total) },
         appointments: { total: num(a.total), month: num(a.mes), canceled: num(a.cancelados) },
+        feedback: {
+          // null (nunca respondeu) é diferente de 0 (respondeu zero) — a tela precisa distinguir
+          // "não sei o que essa pessoa acha" de "essa pessoa nos odeia".
+          nps: f.nps_nota === null || f.nps_nota === undefined || f.nps_nota === '' ? null : Number(f.nps_nota),
+          nps_em: f.nps_em || null,
+          sinalizou_saida: Boolean(Number(f.sinalizou_saida || 0)),
+        },
       };
     });
 
@@ -246,12 +281,15 @@ router.get('/feedback', checkAdmin, auditAdmin('admin.feedback.listar', { entida
     if (tipoFiltro) { where.push('tipo = ?'); params.push(tipoFiltro); }
     const whereSql = `WHERE ${where.join(' AND ')}`;
 
+    // A listagem esconde os eventos de exibição/dispensa: eles não são resposta de ninguém e
+    // encheriam o feed com dezenas de linhas vazias, afogando os comentários — que são o conteúdo.
+    // Eles seguem contando nos agregados (é de lá que sai a taxa de resposta).
     const [rows] = await pool.query(
       `SELECT f.id, f.tipo, f.motivo, f.nota, f.comentario, f.usuario_id, f.plano, f.contexto, f.created_at,
-              u.nome AS usuario_nome, u.email AS usuario_email
+              u.nome AS usuario_nome, u.email AS usuario_email, u.telefone AS usuario_telefone
          FROM product_feedback f
          LEFT JOIN usuarios u ON u.id = f.usuario_id
-         ${whereSql}
+         ${whereSql} AND NOT (f.tipo = 'nps' AND f.nota IS NULL)
         ORDER BY f.id DESC
         LIMIT ?`,
       [...params, limit]
@@ -262,7 +300,7 @@ router.get('/feedback', checkAdmin, auditAdmin('admin.feedback.listar', { entida
     const [motivos] = await pool.query(
       `SELECT tipo, motivo, COUNT(*) AS total
          FROM product_feedback
-         ${whereSql}
+         ${whereSql} AND NOT (tipo = 'nps' AND nota IS NULL)
         GROUP BY tipo, motivo
         ORDER BY total DESC`,
       params
@@ -272,10 +310,51 @@ router.get('/feedback', checkAdmin, auditAdmin('admin.feedback.listar', { entida
       params
     );
 
+    // Denominador da taxa de resposta. Sem isto, NPS vazio é ambíguo entre "ninguém insatisfeito"
+    // e "a caixa não apareceu para ninguém".
+    const [[alcance]] = await pool.query(
+      `SELECT SUM(motivo = ?) AS exibicoes,
+              SUM(motivo = ?) AS dispensas,
+              SUM(nota IS NOT NULL) AS respostas
+         FROM product_feedback
+        WHERE created_at >= (NOW() - INTERVAL ? DAY) AND tipo = 'nps'`,
+      [NPS_EVENT_EXIBIDO, NPS_EVENT_DISPENSADO, dias]
+    );
+
+    // Série mensal do NPS. Agrupada no MySQL (e não em JS sobre as linhas devolvidas) para não
+    // depender do `limit` — a série precisa enxergar a janela inteira.
+    const [serie] = await pool.query(
+      `SELECT DATE_FORMAT(created_at, '%Y-%m') AS mes,
+              COUNT(*) AS respostas,
+              SUM(nota >= 9) AS promotores,
+              SUM(nota BETWEEN 7 AND 8) AS neutros,
+              SUM(nota <= 6) AS detratores
+         FROM product_feedback
+        WHERE created_at >= (NOW() - INTERVAL ? DAY) AND tipo = 'nps' AND nota IS NOT NULL
+        GROUP BY mes
+        ORDER BY mes ASC`,
+      [dias]
+    );
+
     res.json({
       feedback: rows,
       motivos,
       nps: summarizeNps(notas),
+      alcance: summarizeNpsResponseRate({
+        exibicoes: Number(alcance?.exibicoes || 0),
+        dispensas: Number(alcance?.dispensas || 0),
+        respostas: Number(alcance?.respostas || 0),
+      }),
+      serie: serie.map((s) => ({
+        mes: s.mes,
+        respostas: Number(s.respostas || 0),
+        promotores: Number(s.promotores || 0),
+        neutros: Number(s.neutros || 0),
+        detratores: Number(s.detratores || 0),
+        score: Number(s.respostas)
+          ? Math.round(((Number(s.promotores || 0) - Number(s.detratores || 0)) / Number(s.respostas)) * 100)
+          : null,
+      })),
       limit,
       dias,
       tipo: tipoFiltro,

@@ -804,3 +804,102 @@ test('o comentario nao reescreve resposta alheia nem resposta ja comentada', { s
   const [[linha]] = await pool.query('SELECT comentario FROM product_feedback WHERE id=?', [id]);
   assert.equal(linha.comentario, 'primeira versao');
 });
+
+test('exibicao e dispensa do NPS entram como evento, sem virar resposta', { skip }, async () => {
+  await pool.query("DELETE FROM product_feedback WHERE usuario_id = ?", [ESTAB_ID]);
+
+  assert.equal((await post('/feedback', { tipo: 'nps', motivo: 'exibido', contexto: 'app' }, { token: estabToken })).status, 201);
+  assert.equal((await post('/feedback', { tipo: 'nps', nota: 9, contexto: 'app' }, { token: estabToken })).status, 201);
+
+  const [[conta]] = await pool.query(
+    `SELECT SUM(nota IS NOT NULL) AS respostas, SUM(motivo='exibido') AS exibicoes
+       FROM product_feedback WHERE usuario_id = ? AND tipo = 'nps'`,
+    [ESTAB_ID]
+  );
+  assert.equal(Number(conta.respostas), 1, 'a exibicao NAO conta como resposta');
+  assert.equal(Number(conta.exibicoes), 1);
+});
+
+test('a elegibilidade distingue exibicao de resposta', { skip }, async () => {
+  await pool.query('DELETE FROM product_feedback WHERE usuario_id = ?', [ESTAB_ID]);
+
+  // O fixture nasce AGORA e com 2 agendamentos: nao bate nenhum marco de uso (30 dias de conta ou
+  // 20 agendamentos), entao sem envelhecer a conta tudo daria "inelegivel" e os asserts abaixo
+  // passariam por acidente, sem exercitar cooldown nenhum. Restaurado no fim.
+  const [[antesDb]] = await pool.query('SELECT criado_em FROM usuarios WHERE id = ?', [ESTAB_ID]);
+  await pool.query('UPDATE usuarios SET criado_em = (NOW() - INTERVAL 60 DAY) WHERE id = ?', [ESTAB_ID]);
+
+  try {
+    const antes = JSON.parse((await get('/feedback/nps/elegivel', { token: estabToken })).body);
+    assert.equal(antes.elegivel, true, 'com a conta envelhecida o fixture precisa comecar elegivel');
+    assert.equal(antes.motivo, 'tempo_de_casa');
+
+    await post('/feedback', { tipo: 'nps', motivo: 'exibido', contexto: 'app' }, { token: estabToken });
+    const depoisExibicao = JSON.parse((await get('/feedback/nps/elegivel', { token: estabToken })).body);
+    assert.equal(depoisExibicao.elegivel, false);
+    // O motivo importa: se viesse 'respondeu_recentemente', uma exibicao estaria calando a pessoa
+    // por 90 dias em vez de 7.
+    assert.equal(depoisExibicao.motivo, 'exibido_recentemente');
+
+    await pool.query('DELETE FROM product_feedback WHERE usuario_id = ?', [ESTAB_ID]);
+    await post('/feedback', { tipo: 'nps', motivo: 'dispensado', contexto: 'app' }, { token: estabToken });
+    const depoisDispensa = JSON.parse((await get('/feedback/nps/elegivel', { token: estabToken })).body);
+    assert.equal(depoisDispensa.motivo, 'dispensou_recentemente');
+
+    await pool.query('DELETE FROM product_feedback WHERE usuario_id = ?', [ESTAB_ID]);
+    await post('/feedback', { tipo: 'nps', nota: 7, contexto: 'app' }, { token: estabToken });
+    const depoisResposta = JSON.parse((await get('/feedback/nps/elegivel', { token: estabToken })).body);
+    assert.equal(depoisResposta.motivo, 'respondeu_recentemente');
+  } finally {
+    await pool.query('UPDATE usuarios SET criado_em = ? WHERE id = ?', [antesDb.criado_em, ESTAB_ID]);
+  }
+});
+
+test('o agregado do admin separa evento de resposta', { skip }, async () => {
+  // A tabela INTEIRA, e nao so as linhas deste tenant: o endpoint agrega tudo da janela (inclusive
+  // as respostas anonimas da landing), entao assertar sobre ele exige um estado global conhecido.
+  // O banco e descartavel e os testes anteriores ja fizeram suas assercoes.
+  await pool.query('DELETE FROM product_feedback');
+  await post('/feedback', { tipo: 'nps', motivo: 'exibido', contexto: 'app' }, { token: estabToken });
+  await post('/feedback', { tipo: 'nps', nota: 4, contexto: 'app' }, { token: estabToken });
+
+  const res = await fetch(`${baseUrl}/admin/feedback?dias=90&limit=50`, {
+    headers: { 'X-Admin-Token': process.env.ADMIN_TOKEN || '' },
+  });
+  const body = await res.text();
+  if (res.status === 404) return; // sem ADMIN_TOKEN no ambiente: rota admin desativada
+  assert.equal(res.status, 200, `${body}\n---- log ----\n${tailLog()}`);
+  const data = JSON.parse(body);
+
+  // A exibicao nao entra no NPS...
+  assert.equal(data.nps.total, 1);
+  assert.equal(data.nps.detrator, 1);
+  // ...mas entra no denominador da taxa de resposta.
+  assert.equal(data.alcance.exibicoes, 1);
+  assert.equal(data.alcance.respostas, 1);
+  assert.equal(data.alcance.taxa, 100);
+  // E nao polui o feed de leitura.
+  assert.equal(data.feedback.filter((f) => f.motivo === 'exibido').length, 0);
+});
+
+test('o panorama traz o ultimo NPS e a marca de saida por tenant', { skip }, async () => {
+  await pool.query('DELETE FROM product_feedback WHERE usuario_id = ?', [ESTAB_ID]);
+  await post('/feedback', { tipo: 'nps', nota: 3, contexto: 'app' }, { token: estabToken });
+  await post('/feedback', { tipo: 'cancelamento', motivo: 'preco' }, { token: estabToken });
+
+  const res = await fetch(`${baseUrl}/admin/establishments/overview`, {
+    headers: { 'X-Admin-Token': process.env.ADMIN_TOKEN || '' },
+  });
+  const body = await res.text();
+  if (res.status === 404) return;
+  assert.equal(res.status, 200, `${body}\n---- log ----\n${tailLog()}`);
+
+  const alvo = JSON.parse(body).establishments.find((e) => Number(e.id) === ESTAB_ID);
+  assert.ok(alvo, 'o estabelecimento do fixture precisa aparecer no panorama');
+  assert.equal(alvo.feedback.nps, 3);
+  assert.equal(alvo.feedback.sinalizou_saida, true);
+
+  // Quem nunca respondeu fica com null — e nao com 0, que seria a pior nota possivel.
+  const outro = JSON.parse(body).establishments.find((e) => Number(e.id) !== ESTAB_ID);
+  if (outro) assert.equal(outro.feedback.nps, null);
+});

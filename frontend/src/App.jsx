@@ -91,6 +91,7 @@ const DefinirSenha = React.lazy(() => import('./pages/DefinirSenha.jsx'));
 const AdminTools = React.lazy(() => import('./pages/AdminTools.jsx'));
 
 const AdminEstablishments = React.lazy(() => import('./pages/AdminEstablishments.jsx'));
+const AdminFeedback = React.lazy(() => import('./pages/AdminFeedback.jsx'));
 
 const AdminDB = React.lazy(() => import('./pages/AdminDB.jsx'));
 
@@ -210,6 +211,8 @@ const APP_ROUTES = [
   { path: '/admin-tools', element: <AdminTools />, auth: true },
 
   { path: '/admin/establishments', element: <AdminEstablishments />, auth: true },
+
+  { path: '/admin/feedback', element: <AdminFeedback />, auth: true },
 
   { path: '/admin/db', element: <AdminDB />, auth: true },
 
