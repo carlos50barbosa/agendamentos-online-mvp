@@ -6,6 +6,7 @@ const {
   classifyNps,
   summarizeNps,
   isNpsEligible,
+  summarizeNpsResponseRate,
   NPS_COOLDOWN_DIAS,
 } = await import('../src/lib/product_feedback.js')
 
@@ -132,4 +133,78 @@ test('quem acabou de responder não é perguntado de novo, mesmo batendo todos o
 
   const vencido = new Date(agora.getTime() - (NPS_COOLDOWN_DIAS + 1) * DIA)
   assert.equal(isNpsEligible({ contaCriadaEm: antiga, agendamentos: 999, ultimaRespostaEm: vencido, agora }).eligible, true)
+})
+
+// --- Eventos do NPS (exibição/dispensa) ---------------------------------------------------
+
+test('exibição e dispensa são aceitas como evento, sem nota', () => {
+  for (const evento of ['exibido', 'dispensado']) {
+    const r = normalizeFeedbackSubmission({ tipo: 'nps', motivo: evento, contexto: 'app' })
+    assert.equal(r.ok, true, evento)
+    assert.equal(r.value.motivo, evento)
+    assert.equal(r.value.nota, null)
+  }
+})
+
+test('evento que venha com nota tem a nota descartada', () => {
+  // Senão o denominador da taxa de resposta viraria o numerador: uma exibição contada como
+  // resposta infla o NPS com uma nota que ninguém deu.
+  const r = normalizeFeedbackSubmission({ tipo: 'nps', motivo: 'exibido', nota: 10 })
+  assert.equal(r.value.nota, null)
+})
+
+test('motivo inventado no NPS continua exigindo nota', () => {
+  // A saída antecipada vale só para a lista fechada de eventos — não vira porta para gravar
+  // qualquer coisa em tipo 'nps'.
+  assert.equal(normalizeFeedbackSubmission({ tipo: 'nps', motivo: 'qualquer' }).error, 'nota_obrigatoria')
+})
+
+test('taxa de resposta usa exibições como denominador', () => {
+  const r = summarizeNpsResponseRate({ exibicoes: 10, respostas: 3, dispensas: 4 })
+  assert.equal(r.taxa, 30)
+  // Quem viu e navegou embora (10 - 3 - 4 = 3) também não respondeu e precisa continuar na conta.
+  assert.equal(r.exibicoes, 10)
+})
+
+test('taxa de resposta sem exibições é null, não zero', () => {
+  // Zero significaria "apareceu e ninguém respondeu". Ausência de dado é outra coisa.
+  assert.equal(summarizeNpsResponseRate({ exibicoes: 0, respostas: 0 }).taxa, null)
+})
+
+test('taxa de resposta nunca passa de 100%', () => {
+  // Acontece de verdade: respostas antigas, de antes de existir registro de exibição.
+  assert.equal(summarizeNpsResponseRate({ exibicoes: 3, respostas: 4 }).taxa, 100)
+})
+
+test('cada evento do NPS tem seu próprio prazo de silêncio', () => {
+  const agora = new Date('2026-08-17T12:00:00Z')
+  const antiga = new Date(agora.getTime() - 400 * DIA)
+  const base = { contaCriadaEm: antiga, agendamentos: 999, agora }
+  const diasAtras = (n) => new Date(agora.getTime() - n * DIA)
+
+  // Só viu: 7 dias.
+  assert.equal(isNpsEligible({ ...base, ultimaExibicaoEm: diasAtras(3) }).reason, 'exibido_recentemente')
+  assert.equal(isNpsEligible({ ...base, ultimaExibicaoEm: diasAtras(8) }).eligible, true)
+
+  // Fechou no X: 30 dias.
+  assert.equal(isNpsEligible({ ...base, ultimaDispensaEm: diasAtras(10) }).reason, 'dispensou_recentemente')
+  assert.equal(isNpsEligible({ ...base, ultimaDispensaEm: diasAtras(31) }).eligible, true)
+
+  // Respondeu: 90 dias.
+  assert.equal(isNpsEligible({ ...base, ultimaRespostaEm: diasAtras(40) }).reason, 'respondeu_recentemente')
+})
+
+test('evento fraco não encurta o silêncio de um forte', () => {
+  // A armadilha do "pega o mais recente e aplica o prazo dele": quem respondeu ontem e viu a caixa
+  // hoje (por qualquer motivo) voltaria a ser elegível em 7 dias em vez de 90.
+  const agora = new Date('2026-08-17T12:00:00Z')
+  const r = isNpsEligible({
+    contaCriadaEm: new Date(agora.getTime() - 400 * DIA),
+    agendamentos: 999,
+    ultimaRespostaEm: new Date(agora.getTime() - 2 * DIA),
+    ultimaExibicaoEm: new Date(agora.getTime() - 1 * DIA),
+    agora,
+  })
+  assert.equal(r.eligible, false)
+  assert.equal(r.reason, 'respondeu_recentemente')
 })

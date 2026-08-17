@@ -11,15 +11,30 @@ import { Router } from 'express';
 import { pool } from '../lib/db.js';
 import { auth, isEstabelecimento, tryAuthenticateRequest } from '../middleware/auth.js';
 import { buildRateLimitBody, buildRateLimitClientKey, consumeRateLimit, setRateLimitHeaders } from '../lib/request_rate_limit.js';
-import { COMENTARIO_MAX, isNpsEligible, normalizeFeedbackSubmission, NPS_COOLDOWN_DIAS } from '../lib/product_feedback.js';
+import {
+  COMENTARIO_MAX,
+  isNpsEligible,
+  normalizeFeedbackSubmission,
+  NPS_COOLDOWN_DIAS,
+  NPS_EVENT_DISPENSADO,
+  NPS_EVENT_EXIBIDO,
+} from '../lib/product_feedback.js';
 import { log } from '../lib/logger.js';
 
 const router = Router();
 
-// Uma pessoa responde a uma pesquisa dessas uma vez por semana, no máximo. 6 em 10 minutos deixa
-// passar quem errou e reenviou, e corta o script que descobriu um endpoint público de escrita.
+// Corta o script que descobriu um endpoint público de escrita, sem atrapalhar gente.
+//
+// Era 6 por 10 minutos, contando só respostas deliberadas. Não serve mais: desde que o NPS passou
+// a registrar exibição e dispensa, um ciclo normal já gasta 2 requisições sozinho, sem ninguém ter
+// digitado nada — e uma pessoa que vê o NPS, fecha, e depois entra no fluxo de cancelamento
+// estourava a cota no meio de uma ação que ela tinha todo direito de completar. A suíte de smoke
+// bateu no teto antes de qualquer usuário, que é o tipo de aviso que vale ouvir.
+//
+// 20 continua sendo ordens de grandeza abaixo do que um script faria e ordens de grandeza acima do
+// que uma pessoa consegue gerar em 10 minutos.
 const RATE_WINDOW_MS = 10 * 60 * 1000;
-const RATE_MAX = 6;
+const RATE_MAX = 20;
 
 router.post('/', async (req, res, next) => {
   try {
@@ -103,15 +118,26 @@ router.get('/nps/elegivel', auth, isEstabelecimento, async (req, res, next) => {
       "SELECT COUNT(*) AS total FROM agendamentos WHERE estabelecimento_id=? AND status IN ('confirmado','concluido')",
       [estabelecimentoId]
     );
-    const [[ultima]] = await pool.query(
-      "SELECT created_at FROM product_feedback WHERE usuario_id=? AND tipo='nps' ORDER BY created_at DESC LIMIT 1",
-      [estabelecimentoId]
+    // Os três marcos vêm separados porque valem prazos diferentes. Uma consulta só, com CASE, em
+    // vez de três idas ao banco por page load — esta rota é chamada em toda abertura do painel.
+    //
+    // `nota IS NOT NULL` é o que distingue resposta de evento: sem isso, uma exibição registrada
+    // silenciaria a pessoa por 90 dias como se ela tivesse respondido.
+    const [[marcos]] = await pool.query(
+      `SELECT MAX(CASE WHEN nota IS NOT NULL THEN created_at END) AS respondeu_em,
+              MAX(CASE WHEN motivo = ? THEN created_at END) AS dispensou_em,
+              MAX(CASE WHEN motivo = ? THEN created_at END) AS exibido_em
+         FROM product_feedback
+        WHERE usuario_id = ? AND tipo = 'nps'`,
+      [NPS_EVENT_DISPENSADO, NPS_EVENT_EXIBIDO, estabelecimentoId]
     );
 
     const result = isNpsEligible({
       contaCriadaEm: conta?.criado_em || null,
       agendamentos: Number(volume?.total || 0),
-      ultimaRespostaEm: ultima?.created_at || null,
+      ultimaRespostaEm: marcos?.respondeu_em || null,
+      ultimaDispensaEm: marcos?.dispensou_em || null,
+      ultimaExibicaoEm: marcos?.exibido_em || null,
     });
 
     // Cooldown vai junto para o frontend poder silenciar a caixa localmente e nem refazer esta

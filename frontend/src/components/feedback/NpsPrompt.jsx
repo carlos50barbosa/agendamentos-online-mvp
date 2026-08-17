@@ -52,7 +52,18 @@ export default function NpsPrompt({ ativo = false }) {
       try {
         const res = await Api.npsEligibility();
         if (cancelado || !res?.elegivel) return;
-        timer = setTimeout(() => { if (!cancelado) setVisivel(true); }, DELAY_MS);
+        timer = setTimeout(() => {
+          if (cancelado) return;
+          setVisivel(true);
+          // Registra que a caixa APARECEU. É o denominador da taxa de resposta — sem ele, uma
+          // tabela de NPS vazia é ambígua entre "ninguém está insatisfeito" e "a caixa não chegou
+          // a aparecer para ninguém", que pedem ações opostas.
+          //
+          // De quebra conserta um incômodo real: como o silêncio local só era gravado ao responder
+          // ou ao fechar no X, quem apenas navegava para outra tela recebia a mesma caixa 12s
+          // depois, em toda página, até ceder. A exibição registrada compra uma semana de paz.
+          Api.sendFeedback({ tipo: 'nps', motivo: 'exibido', contexto: 'app' }).catch(() => {});
+        }, DELAY_MS);
       } catch {
         // Elegibilidade é opcional por natureza: se a chamada falhar, ninguém é perguntado hoje.
         // Uma pesquisa nunca deve virar erro na tela de quem só queria abrir a agenda.
@@ -69,9 +80,18 @@ export default function NpsPrompt({ ativo = false }) {
     // Fechar depois de uma falha NÃO silencia por 30 dias: o silêncio é para quem escolheu não
     // responder, não para quem tentou e foi derrubado pelo nosso lado. Essa pessoa continua
     // elegível — e o servidor, que é quem manda na elegibilidade, ainda não registrou nada dela.
-    if (!erro) markAsked(STORAGE_KEY);
+    if (!erro) {
+      markAsked(STORAGE_KEY);
+      // Fechar no X é diferente de ignorar: um é "não quero" (30 dias de silêncio), o outro é
+      // "não vi" (7 dias). Sem este registro, os dois eram a mesma coisa para o servidor — e o
+      // "não quero" só valia neste navegador.
+      //
+      // Não é enviado depois de responder: ali a linha da nota já existe e este evento entraria
+      // como uma segunda linha do mesmo ciclo, derrubando a taxa de resposta sem motivo.
+      if (!notaSalva) Api.sendFeedback({ tipo: 'nps', motivo: 'dispensado', contexto: 'app' }).catch(() => {});
+    }
     setVisivel(false);
-  }, [erro]);
+  }, [erro, notaSalva]);
 
   // A nota vai embora no clique. Se a pessoa fechar antes de escrever o comentário, o número já
   // está salvo — é ele que compõe a métrica.
