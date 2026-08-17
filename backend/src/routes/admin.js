@@ -8,6 +8,12 @@ import { getTenantBotSettings, upsertTenantBotSettings } from '../bot/storage/se
 import { setAudit, diffFields } from '../lib/audit.js';
 import { reconcileTenantSubscription } from '../lib/subscription_reconcile.js';
 import {
+  ExclusaoBloqueada,
+  excluirEstabelecimento,
+  listarProtocolos,
+  previewExclusao,
+} from '../lib/account_deletion.js';
+import {
   FEEDBACK_TYPES,
   NPS_EVENT_DISPENSADO,
   NPS_EVENT_EXIBIDO,
@@ -186,6 +192,74 @@ router.get('/establishments/overview', checkAdmin, auditAdmin('admin.establishme
     return res.json({ ok: true, count: establishments.length, generated_at: now.toISOString(), month_start: startOfMonth, establishments });
   } catch (e) {
     console.error('[admin/establishments/overview]', e?.message || e);
+    return res.status(500).json({ error: 'db_error', message: e?.message || String(e) });
+  }
+});
+
+// ─── Exclusão de conta com protocolo ────────────────────────────────────────────────────────────
+//
+// Fluxo em dois passos de propósito: o preview diz o tamanho do estrago (inclusive quantos CLIENTES
+// perdem histórico junto, que não pediram nada) e só então o DELETE acontece, confirmado pelo nome.
+// A regra toda vive em `lib/account_deletion.js`; aqui é só HTTP.
+
+router.get('/establishments/:id/deletion-preview', checkAdmin, auditAdmin('admin.estabelecimento.preview_exclusao', { entidade: 'usuario' }), async (req, res) => {
+  try {
+    const preview = await previewExclusao(req.params.id);
+    return res.json({ ok: true, ...preview });
+  } catch (e) {
+    if (e instanceof ExclusaoBloqueada) {
+      return res.status(e.code === 'nao_encontrado' ? 404 : 400).json({ error: e.code, message: e.message, ...e.extra });
+    }
+    console.error('[admin/deletion-preview]', e?.message || e);
+    return res.status(500).json({ error: 'db_error', message: e?.message || String(e) });
+  }
+});
+
+router.post('/establishments/:id/delete', checkAdmin, async (req, res) => {
+  const { motivo, confirmacao, ignorar_assinatura: ignorarAssinatura } = req.body || {};
+  try {
+    const resultado = await excluirEstabelecimento({
+      id: req.params.id,
+      executor: String(req.body?.executor || 'admin').slice(0, 255),
+      motivo,
+      confirmacao,
+      ignorarAssinatura: Boolean(ignorarAssinatura),
+      contexto: { ip: req.ip, userAgent: req.headers['user-agent'] },
+    });
+    // A linha que vale como prova já foi gravada dentro da transação. Esta aqui é a trilha da
+    // REQUISIÇÃO (quem chamou, de onde), e por isso carrega o protocolo mas não o substitui.
+    setAudit(req, {
+      acao: 'admin.estabelecimento.excluir',
+      ator_tipo: 'admin',
+      entidade: 'usuario',
+      entidade_id: resultado.usuario.id,
+      metadados: { protocolo: resultado.protocolo },
+    });
+    return res.json({ ok: true, ...resultado });
+  } catch (e) {
+    if (e instanceof ExclusaoBloqueada) {
+      const status = e.code === 'nao_encontrado' ? 404 : e.code === 'assinatura_ativa' ? 409 : 400;
+      setAudit(req, {
+        acao: 'admin.estabelecimento.excluir',
+        ator_tipo: 'admin',
+        entidade: 'usuario',
+        entidade_id: Number(req.params.id) || null,
+        resultado: 'negado',
+        motivo: e.code,
+      });
+      return res.status(status).json({ error: e.code, message: e.message, ...e.extra });
+    }
+    console.error('[admin/establishment-delete]', e?.message || e);
+    return res.status(500).json({ error: 'db_error', message: e?.message || String(e) });
+  }
+});
+
+router.get('/deletion-protocols', checkAdmin, auditAdmin('admin.protocolos.listar', { entidade: 'audit_log' }), async (req, res) => {
+  try {
+    const protocolos = await listarProtocolos({ limit: req.query.limit });
+    return res.json({ ok: true, count: protocolos.length, protocolos });
+  } catch (e) {
+    console.error('[admin/deletion-protocols]', e?.message || e);
     return res.status(500).json({ error: 'db_error', message: e?.message || String(e) });
   }
 });

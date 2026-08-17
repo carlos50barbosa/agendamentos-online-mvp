@@ -1,7 +1,7 @@
 // src/pages/AdminEstablishments.jsx
 // Panorama super-admin: todos os estabelecimentos com plano/status/vencimento + contagens.
 import React, { useEffect, useMemo, useState } from 'react';
-import { Mail, Phone, Search, RefreshCw, Users, CheckCircle2, AlertTriangle, CalendarDays, ArrowUp, ArrowDown } from 'lucide-react';
+import { Mail, Phone, Search, RefreshCw, Users, CheckCircle2, AlertTriangle, CalendarDays, ArrowUp, ArrowDown, Trash2, FileText, Copy, X } from 'lucide-react';
 import { API_BASE_URL as API_BASE } from '../utils/api';
 
 // plan_status -> tom semantico (usa as variaveis do tema, logo acompanha claro/escuro).
@@ -140,6 +140,268 @@ const DEFAULT_DIR = {
   status: 'asc',
 };
 
+async function adminFetch(path, { token, method = 'GET', body } = {}) {
+  const res = await fetch(`${API_BASE}${path}`, {
+    method,
+    headers: { 'X-Admin-Token': token, ...(body ? { 'Content-Type': 'application/json' } : {}) },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const err = new Error(data?.message || data?.error || `HTTP ${res.status}`);
+    err.code = data?.error;
+    err.data = data;
+    throw err;
+  }
+  return data;
+}
+
+/**
+ * Exclusão em dois passos: primeiro o tamanho do estrago, só depois o botão vermelho.
+ *
+ * O número que decide não é "quantos agendamentos" — é `clientes_afetados`: pessoas que não pediram
+ * nada e perdem o próprio histórico junto. Por isso ele aparece destacado, e não numa lista.
+ *
+ * A confirmação por nome digitado é repetida no servidor. Aqui ela evita o clique distraído; lá
+ * evita a chamada de API com o id errado.
+ */
+function ExcluirModal({ token, alvo, onClose, onDone }) {
+  const [preview, setPreview] = useState(null);
+  const [erro, setErro] = useState('');
+  const [erroCodigo, setErroCodigo] = useState('');
+  const [carregando, setCarregando] = useState(true);
+  const [enviando, setEnviando] = useState(false);
+  const [nome, setNome] = useState('');
+  const [motivo, setMotivo] = useState('');
+  const [ignorarAssinatura, setIgnorarAssinatura] = useState(false);
+  const [resultado, setResultado] = useState(null);
+
+  useEffect(() => {
+    let vivo = true;
+    setCarregando(true);
+    adminFetch(`/admin/establishments/${alvo.id}/deletion-preview`, { token })
+      .then((d) => { if (vivo) { setPreview(d); setErro(''); } })
+      .catch((e) => { if (vivo) setErro(e.message); })
+      .finally(() => { if (vivo) setCarregando(false); });
+    return () => { vivo = false; };
+  }, [alvo.id, token]);
+
+  const esperado = String(preview?.usuario?.nome || alvo.nome || '').trim();
+  const assinatura = preview?.assinatura_ativa || null;
+
+  // O cancelamento automático só existe para o Asaas. Mercado Pago (contas antigas) continua sendo
+  // decisão manual — e o Asaas pode recusar, o que só se descobre ao tentar: daí o 409 também
+  // destravar o mesmo checkbox.
+  const cancelaSozinho = Boolean(
+    assinatura && String(assinatura.gateway || '').toLowerCase() === 'asaas' && assinatura.gateway_subscription_id
+  );
+  const precisaAssumir = Boolean(assinatura) && (!cancelaSozinho || erroCodigo === 'assinatura_ativa');
+  const podeExcluir = Boolean(preview) && nome.trim() === esperado && (!precisaAssumir || ignorarAssinatura);
+
+  async function excluir() {
+    setEnviando(true); setErro(''); setErroCodigo('');
+    try {
+      const r = await adminFetch(`/admin/establishments/${alvo.id}/delete`, {
+        token,
+        method: 'POST',
+        body: { confirmacao: nome.trim(), motivo: motivo.trim() || null, ignorar_assinatura: ignorarAssinatura },
+      });
+      setResultado(r);
+      onDone?.();
+    } catch (e) {
+      setErro(e.message);
+      setErroCodigo(e.code || '');
+    } finally {
+      setEnviando(false);
+    }
+  }
+
+  return (
+    <div className="ae-overlay" role="dialog" aria-modal="true" aria-label="Excluir estabelecimento">
+      <div className="ae-modal">
+        <div className="ae-modal-head">
+          <strong>{resultado ? 'Estabelecimento excluído' : 'Excluir estabelecimento'}</strong>
+          <button type="button" className="btn btn--ghost" onClick={onClose} aria-label="Fechar"><X size={16} /></button>
+        </div>
+
+        {resultado ? (
+          <div className="ae-modal-body">
+            <p className="ae-muted" style={{ marginTop: 0 }}>
+              Guarde este número: é o que você devolve ao titular como comprovante. Ele fica no histórico
+              de protocolos mesmo depois de a conta não existir mais.
+            </p>
+            <div className="ae-proto-box">
+              <code>{resultado.protocolo}</code>
+              <button type="button" className="btn" onClick={() => navigator.clipboard?.writeText(resultado.protocolo)}>
+                <Copy size={14} /> Copiar
+              </button>
+            </div>
+            <p className="ae-muted" style={{ fontSize: 12, margin: 0 }}>
+              Apagados junto: {resultado.impacto?.agendamentos ?? 0} agendamentos de{' '}
+              {resultado.impacto?.clientes_afetados ?? 0} clientes, {resultado.impacto?.servicos ?? 0} serviços e{' '}
+              {resultado.impacto?.profissionais ?? 0} profissionais.
+            </p>
+            <p className="ae-muted" style={{ fontSize: 12, margin: 0 }}>
+              Assinatura:{' '}
+              {resultado.gateway?.cancelada
+                ? `cancelada no gateway (${resultado.gateway.gateway_subscription_id})`
+                : resultado.gateway?.motivo === 'sem_assinatura'
+                  ? 'não havia assinatura ativa'
+                  : 'NÃO cancelada — resolva no painel do gateway'}
+              .
+            </p>
+            {/* Lixo em disco não invalida a exclusão, mas some da tela se ninguém contar — e ninguém
+                vai procurar por uma foto órfã que não sabe que existe. */}
+            <p className="ae-muted" style={{ fontSize: 12, margin: 0 }}>
+              Arquivos: {resultado.arquivos?.removidos ?? 0} de {resultado.arquivos?.previstos ?? 0} removidos do disco
+              {resultado.arquivos?.falhas?.length ? ` — falharam: ${resultado.arquivos.falhas.join(', ')}` : ''}.
+            </p>
+            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+              <button type="button" className="btn btn--primary" onClick={onClose}>Fechar</button>
+            </div>
+          </div>
+        ) : (
+          <div className="ae-modal-body">
+            {carregando && <p className="ae-muted">Carregando o impacto…</p>}
+            {erro && <div className="notice notice--error" role="alert">{erro}</div>}
+
+            {preview && (
+              <>
+                <div className="ae-alvo">
+                  <div className="ae-name">{preview.usuario.nome || `#${preview.usuario.id}`}</div>
+                  <div className="ae-muted" style={{ fontSize: 12 }}>#{preview.usuario.id} · {preview.usuario.email}</div>
+                </div>
+
+                <div className="ae-impacto">
+                  <div className="ae-impacto-forte">
+                    <span>{preview.impacto.clientes_afetados}</span>
+                    clientes perdem o histórico
+                  </div>
+                  <div className="ae-impacto-linha">
+                    {preview.impacto.agendamentos} agendamentos · {preview.impacto.servicos} serviços ·{' '}
+                    {preview.impacto.profissionais} profissionais
+                  </div>
+                </div>
+
+                {assinatura && (
+                  <div className={precisaAssumir ? 'notice notice--error' : 'notice notice--warn'} style={{ display: 'grid', gap: 8 }}>
+                    <strong>Assinatura ativa no gateway</strong>
+                    <span style={{ fontSize: 13 }}>
+                      {assinatura.gateway} · {assinatura.status}
+                      {assinatura.gateway_subscription_id ? ` · ${assinatura.gateway_subscription_id}` : ''}
+                    </span>
+                    <span style={{ fontSize: 13 }}>
+                      {cancelaSozinho
+                        ? 'Ela será cancelada no Asaas antes da exclusão. Se o Asaas recusar, nada é apagado — a cobrança nunca fica viva com o id já fora do banco.'
+                        : 'Este gateway não tem cancelamento automático aqui. Apagar sem cancelar lá deixa a cobrança recorrente viva e os webhooks chegando órfãos.'}
+                    </span>
+                    {precisaAssumir && (
+                      <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 13 }}>
+                        <input type="checkbox" checked={ignorarAssinatura} onChange={(e) => setIgnorarAssinatura(e.target.checked)} />
+                        Já cancelei no painel (ou assumo a pendência) — seguir mesmo assim
+                      </label>
+                    )}
+                  </div>
+                )}
+
+                <label className="label" style={{ display: 'grid', gap: 4 }}>
+                  Motivo (vai para o protocolo)
+                  <input className="input" value={motivo} onChange={(e) => setMotivo(e.target.value)} placeholder="Pedido formal de exclusão do titular" />
+                </label>
+
+                <label className="label" style={{ display: 'grid', gap: 4 }}>
+                  Para confirmar, digite <b>{esperado}</b>
+                  <input className="input" value={nome} onChange={(e) => setNome(e.target.value)} autoComplete="off" />
+                </label>
+
+                <p className="ae-muted" style={{ fontSize: 12, margin: 0 }}>
+                  Irreversível — este schema não tem soft delete. As imagens enviadas são apagadas do disco junto.
+                </p>
+
+                <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                  <button type="button" className="btn" onClick={onClose}>Cancelar</button>
+                  <button type="button" className="btn ae-danger" onClick={excluir} disabled={!podeExcluir || enviando}>
+                    {enviando ? <span className="spinner" /> : <Trash2 size={15} />} Excluir e gerar protocolo
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Histórico. Lê da `audit_log`, a única tabela do caminho sem FK para `usuarios` — é por isso que
+ * ela ainda sabe responder quem foi excluído depois de a conta ter deixado de existir.
+ */
+function ProtocolosPanel({ token }) {
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [erro, setErro] = useState('');
+
+  useEffect(() => {
+    if (!token) return undefined;
+    let vivo = true;
+    setLoading(true);
+    adminFetch('/admin/deletion-protocols?limit=200', { token })
+      .then((d) => { if (vivo) { setRows(d.protocolos || []); setErro(''); } })
+      .catch((e) => { if (vivo) setErro(e.message); })
+      .finally(() => { if (vivo) setLoading(false); });
+    return () => { vivo = false; };
+  }, [token]);
+
+  return (
+    <div className="ae-tablecard">
+      <div className="ae-scroll">
+        <table className="ae-table">
+          <thead>
+            <tr>
+              <th>Protocolo</th>
+              <th>Quando</th>
+              <th>Conta excluída</th>
+              <th className="ae-num">Impacto</th>
+              <th>Motivo</th>
+              <th>Executor</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.id}>
+                <td><code style={{ fontSize: 12.5 }}>{r.protocolo || '—'}</code></td>
+                <td style={{ whiteSpace: 'nowrap' }}>{fmtDateTime(r.criado_em)}</td>
+                <td>
+                  <div className="ae-name">{r.nome || `#${r.entidade_id}`}</div>
+                  <div className="ae-muted" style={{ fontSize: 12 }}>#{r.entidade_id} · {r.email || 'sem e-mail'}</div>
+                </td>
+                <td className="ae-num">
+                  {r.impacto
+                    ? <>{r.impacto.agendamentos ?? 0} ag.<span className="ae-muted"> / {r.impacto.clientes_afetados ?? 0} cli.</span></>
+                    : <span className="ae-muted">—</span>}
+                </td>
+                <td style={{ maxWidth: 260 }}>{r.motivo || <span className="ae-muted">—</span>}</td>
+                <td className="ae-muted">{r.ator_email || 'admin'}</td>
+              </tr>
+            ))}
+            {!rows.length && (
+              <tr><td colSpan={6} className="ae-empty">{loading ? 'Carregando…' : (erro || 'Nenhuma exclusão registrada.')}</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function fmtDateTime(value) {
+  if (!value) return '—';
+  const d = new Date(value);
+  if (!Number.isFinite(d.getTime())) return String(value);
+  return d.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+
 function Kpi({ icon: Icon, label, value, tone }) {
   return (
     <div className="ae-kpi">
@@ -166,6 +428,8 @@ export default function AdminEstablishments() {
   // Abre por ID decrescente: quem entra aqui quase sempre quer ver quem se cadastrou por último.
   const [sort, setSort] = useState('id');
   const [dir, setDir] = useState(DEFAULT_DIR.id);
+  const [aba, setAba] = useState('estabelecimentos');
+  const [alvoExclusao, setAlvoExclusao] = useState(null);
 
   useEffect(() => { try { localStorage.setItem('admin_token', token || ''); } catch {} }, [token]);
 
@@ -244,16 +508,43 @@ export default function AdminEstablishments() {
         .ae-badge { display: inline-flex; align-items: center; padding: 3px 10px; border-radius: 9999px; font-size: 12px; font-weight: 600; white-space: nowrap; text-transform: capitalize; }
         .ae-muted { color: var(--muted); }
         .ae-empty { text-align: center; padding: 28px 16px; color: var(--muted); }
+        .ae-danger { background: var(--danger-bg); color: var(--danger-text); box-shadow: inset 0 0 0 1px var(--danger-border); display: inline-flex; align-items: center; gap: 6px; }
+        .ae-danger:disabled { opacity: .5; }
+        .ae-iconbtn { display: inline-flex; align-items: center; gap: 5px; padding: 4px 9px; border-radius: 8px; font-size: 12px; font-weight: 600; border: 1px solid var(--border); background: var(--card); color: var(--muted); cursor: pointer; }
+        .ae-iconbtn:hover { color: var(--danger-text); border-color: var(--danger-border); background: var(--danger-bg); }
+        .ae-overlay { position: fixed; inset: 0; background: rgba(15, 12, 41, .55); display: grid; place-items: center; padding: 16px; z-index: 50; }
+        .ae-modal { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); width: min(560px, 100%); max-height: 90vh; overflow: auto; }
+        .ae-modal-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 18px; border-bottom: 1px solid var(--border); }
+        .ae-modal-body { display: grid; gap: 12px; padding: 18px; }
+        .ae-alvo { background: var(--surface-soft); border-radius: 10px; padding: 10px 12px; }
+        .ae-impacto { border: 1px solid var(--danger-border); background: var(--danger-bg); border-radius: 10px; padding: 12px; display: grid; gap: 4px; }
+        .ae-impacto-forte { color: var(--danger-text); font-weight: 700; display: flex; align-items: baseline; gap: 8px; }
+        .ae-impacto-forte span { font-size: 28px; line-height: 1; }
+        .ae-impacto-linha { color: var(--danger-text); font-size: 13px; opacity: .85; }
+        .ae-proto-box { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; border: 1px solid var(--success-border); background: var(--success-bg); border-radius: 10px; padding: 14px; }
+        .ae-proto-box code { font-size: 17px; font-weight: 700; color: var(--success-text); letter-spacing: .02em; }
+        .ae-tabs { display: inline-flex; gap: 4px; background: var(--surface-soft); padding: 4px; border-radius: 10px; }
+        .ae-tab { border: 0; background: transparent; color: var(--muted); font-weight: 600; font-size: 13px; padding: 6px 12px; border-radius: 7px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+        .ae-tab[aria-selected="true"] { background: var(--card); color: var(--text); box-shadow: var(--shadow-soft); }
       `}</style>
 
       <div className="ae-head">
         <h2>Panorama dos estabelecimentos</h2>
         <p className="ae-sub">Plano, status, vencimento e uso (profissionais, serviços e agendamentos) de cada conta.</p>
+        <div className="ae-tabs" role="tablist" style={{ marginBottom: 12 }}>
+          <button type="button" role="tab" aria-selected={aba === 'estabelecimentos'} className="ae-tab" onClick={() => setAba('estabelecimentos')}>
+            <Users size={14} /> Estabelecimentos
+          </button>
+          <button type="button" role="tab" aria-selected={aba === 'protocolos'} className="ae-tab" onClick={() => setAba('protocolos')}>
+            <FileText size={14} /> Protocolos de exclusão
+          </button>
+        </div>
         <div className="ae-toolbar">
           <input className="input" type="password" placeholder="X-Admin-Token" value={token} onChange={(e) => setToken(e.target.value)} style={{ minWidth: 220 }} />
           <button className="btn btn--primary" onClick={load} disabled={!token || loading} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
             {loading ? <span className="spinner" /> : <RefreshCw size={16} />} Carregar
           </button>
+          {aba === 'estabelecimentos' && (<>
           <span className="ae-field">
             <Search size={16} />
             <input className="input" placeholder="Buscar nome, e-mail, telefone ou ID" value={q} onChange={(e) => setQ(e.target.value)} style={{ minWidth: 240 }} />
@@ -288,11 +579,12 @@ export default function AdminEstablishments() {
             {dir === 'asc' ? <ArrowUp size={16} /> : <ArrowDown size={16} />}
             {dir === 'asc' ? 'Crescente' : 'Decrescente'}
           </button>
+          </>)}
         </div>
         {error && <div className="notice notice--error" role="alert" style={{ marginTop: 12 }}>{error}</div>}
       </div>
 
-      {meta && (
+      {aba === 'estabelecimentos' && meta && (
         <div className="ae-kpis">
           <Kpi icon={Users} label="Estabelecimentos" value={totals.estab} />
           <Kpi icon={CheckCircle2} label="Ativos" value={totals.ativos} tone="success" />
@@ -301,6 +593,7 @@ export default function AdminEstablishments() {
         </div>
       )}
 
+      {aba === 'protocolos' ? <ProtocolosPanel token={token} /> : (
       <div className="ae-tablecard">
         <div className="ae-scroll">
           <table className="ae-table">
@@ -314,6 +607,7 @@ export default function AdminEstablishments() {
                 <th className="ae-num">Serviços<br /><span className="ae-muted" style={{ fontWeight: 500, textTransform: 'none' }}>ativos/inativos</span></th>
                 <th className="ae-num">Agend.<br /><span className="ae-muted" style={{ fontWeight: 500, textTransform: 'none' }}>total (mês)</span></th>
                 <th>Satisfação<br /><span className="ae-muted" style={{ fontWeight: 500, textTransform: 'none' }}>último NPS</span></th>
+                <th>Ações</th>
               </tr>
             </thead>
             <tbody>
@@ -337,16 +631,31 @@ export default function AdminEstablishments() {
                     <td className="ae-num">{r.services?.active ?? 0}<span className="ae-muted"> / {r.services?.inactive ?? 0}</span></td>
                     <td className="ae-num"><strong>{(r.appointments?.total ?? 0).toLocaleString('pt-BR')}</strong><span className="ae-muted"> ({r.appointments?.month ?? 0})</span></td>
                     <td><SatisfacaoCell feedback={r.feedback} /></td>
+                    <td>
+                      <button type="button" className="ae-iconbtn" onClick={() => setAlvoExclusao(r)} title="Excluir com protocolo">
+                        <Trash2 size={13} /> Excluir
+                      </button>
+                    </td>
                   </tr>
                 );
               })}
               {!filtered.length && (
-                <tr><td colSpan={8} className="ae-empty">{loading ? 'Carregando…' : (rows.length ? 'Nenhum resultado para o filtro.' : 'Cole o token e clique em Carregar.')}</td></tr>
+                <tr><td colSpan={9} className="ae-empty">{loading ? 'Carregando…' : (rows.length ? 'Nenhum resultado para o filtro.' : 'Cole o token e clique em Carregar.')}</td></tr>
               )}
             </tbody>
           </table>
         </div>
       </div>
+      )}
+
+      {alvoExclusao && (
+        <ExcluirModal
+          token={token}
+          alvo={alvoExclusao}
+          onClose={() => setAlvoExclusao(null)}
+          onDone={load}
+        />
+      )}
     </div>
   );
 }
