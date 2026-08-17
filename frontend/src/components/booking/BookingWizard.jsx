@@ -565,21 +565,11 @@ export default function BookingWizard({
                   <Check size={30} strokeWidth={3} style={{ color: '#fff' }} />
                 </span>
                 <p className="tw-m-0 tw-text-sm" style={{ color: 'var(--ink, #1E1B4B)' }}>
-                  {pix.message || 'Seu agendamento foi registrado. Enviamos a confirmação para o seu e-mail.'}
+                  {pix.message || 'Seu agendamento foi registrado.'}
                 </p>
                 {/* O WhatsApp só liga aqui: a pessoa clica, o WhatsApp dela abre com "AUTORIZO"
                     pronto, e ela envia. É a prova de posse do número que não dá para forjar. */}
-                {wantsNotify && (
-                  <>
-                    <AutorizoWhatsApp number={waNumber} available={waAvailable} />
-                    {waAvailable && waNumber && (
-                      <p className="tw-m-0 tw-text-xs" style={{ color: 'var(--muted-ink, #6B7280)' }}>
-                        Toque acima e <b>envie</b> a mensagem que abrir — é assim que confirmamos que o
-                        número é seu.
-                      </p>
-                    )}
-                  </>
-                )}
+                <AutorizoWhatsApp number={waNumber} available={waAvailable} />
                 {/* Volta para a página do estabelecimento. Âncora normal (recarrega a página fresca),
                     e não navegação SPA: garante o retorno mesmo quando a URL de origem é a mesma. */}
                 {establishmentHref && (
@@ -602,9 +592,18 @@ export default function BookingWizard({
                   expirationDate={pix?.expirationDate}
                   status={pix?.status || 'pending'}
                 />
-                <p className="tw-mt-4 tw-text-center tw-text-xs" style={{ color: 'var(--muted-ink, #6B7280)' }}>
-                  Assim que o pagamento for confirmado, seu horário fica garantido.
-                </p>
+                {/* Pago também é tela de sucesso — é onde termina quem pagou sinal. Sem o botão
+                    aqui, essa cliente sairia sem canal nenhum igual à do agendamento sem sinal; e o
+                    aviso de "assim que for confirmado" some, porque já foi. */}
+                {pix?.status === 'paid' ? (
+                  <div className="tw-mx-auto tw-flex tw-w-full tw-max-w-sm tw-flex-col tw-items-center tw-text-center">
+                    <AutorizoWhatsApp number={waNumber} available={waAvailable} />
+                  </div>
+                ) : (
+                  <p className="tw-mt-4 tw-text-center tw-text-xs" style={{ color: 'var(--muted-ink, #6B7280)' }}>
+                    Assim que o pagamento for confirmado, seu horário fica garantido.
+                  </p>
+                )}
               </>
             )}
           </StepShell>
@@ -711,20 +710,33 @@ function NotifyOptIn({ checked, onChange, email, onEmailChange, available }) {
  * A prova de que o número é dele é ele MANDAR a mensagem: ninguém envia do WhatsApp de um estranho.
  * O clique aqui não autoriza nada; quem grava o consentimento é o servidor, quando a mensagem
  * chega. Some quando o canal está fora do ar ou sem número configurado.
+ *
+ * ─── Por que NÃO depende mais da caixa "Deseja receber notificações" ────────────────────────────
+ *
+ * Ficava atrás dela, e a caixa nasce desmarcada. Quem não marcava nunca via que o WhatsApp existia,
+ * e como o aceite só nasce daqui, o canal ficava desligado para sempre. Medido em produção em
+ * 17/08/2026, últimos 30 dias: 91 mensagens de cliente bloqueadas por `no_optin` contra 22 aceites
+ * em toda a história da base. A instrução ("toque e ENVIE") vive dentro do componente porque o
+ * clique sozinho não autoriza nada — sem ela o botão promete algo que ele não faz.
  */
 function AutorizoWhatsApp({ number, available }) {
   if (!available || !number) return null;
   const link = `https://wa.me/${number}?text=${encodeURIComponent('AUTORIZO')}`;
   return (
-    <a
-      href={link}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="tw-mt-3 tw-inline-flex tw-w-full tw-items-center tw-justify-center tw-gap-2 tw-rounded-xl tw-px-4 tw-font-semibold tw-text-white"
-      style={{ minHeight: 48, background: '#16A34A' }}
-    >
-      Ativar lembretes no WhatsApp
-    </a>
+    <>
+      <a
+        href={link}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="tw-mt-3 tw-inline-flex tw-w-full tw-items-center tw-justify-center tw-gap-2 tw-rounded-xl tw-px-4 tw-font-semibold tw-text-white"
+        style={{ minHeight: 48, background: '#16A34A' }}
+      >
+        Ativar lembretes no WhatsApp
+      </a>
+      <p className="tw-m-0 tw-text-xs" style={{ color: 'var(--muted-ink, #6B7280)' }}>
+        Toque acima e <b>envie</b> a mensagem que abrir — é assim que confirmamos que o número é seu.
+      </p>
+    </>
   );
 }
 

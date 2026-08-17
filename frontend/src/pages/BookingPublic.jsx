@@ -240,9 +240,16 @@ export default function BookingPublic() {
     const pix = resp?.pix || null;
     const hasDeposit = Boolean(resp?.deposit_required || resp?.paymentId || pix?.payment_id);
     if (!hasDeposit) {
+      // A promessa do e-mail era incondicional, e para convidada sem e-mail era MENTIRA: o backend
+      // grava um placeholder `guest-…@sem-email.agendou.local` e o `notifyEmail` descarta o envio.
+      // Somado ao WhatsApp bloqueado por falta de aceite, a pessoa lia "enviamos a confirmação" e
+      // não recebia nada em canal nenhum — foi o que aconteceu em produção. Sem e-mail, o texto
+      // aponta para o único canal que ela ainda pode ligar, que é o botão logo abaixo.
       return {
         confirmed: true,
-        message: 'Agendamento registrado! Enviamos a confirmação para o seu e-mail.',
+        message: email
+          ? 'Agendamento registrado! Enviamos a confirmação para o seu e-mail.'
+          : 'Agendamento registrado! Seu horário está guardado. Como você não informou e-mail, ative o WhatsApp abaixo para receber os lembretes.',
       };
     }
 
