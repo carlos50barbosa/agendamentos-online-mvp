@@ -194,7 +194,18 @@ function normalizeItems(itens) {
   const rankOf = (ev) => STATUS_RANK[ev.norm] ?? 1
   const byKey = new Map()
   for (const ev of mapped) {
-    const key = `${String(ev.client || '').trim().toLowerCase()}|${ev.start.getTime()}`
+    // O `resourceId` na chave NÃO é decoração: sem ele o dedupe atravessa profissionais e
+    // ESCONDE atendimento simultâneo, que em salão é rotina — a mesma cliente faz escova com
+    // uma e unha com outra no mesmo horário. Com a chave só em cliente+início as duas linhas
+    // colidem, sobrevive a de id maior e a outra some da lane, do faturamento e das contagens
+    // do dia (tudo sai de `dedupedAll`). Medido em 19/08/2026: três agendamentos sumiram de um
+    // sábado só, e o estabelecimento leu a lane vazia da profissional como "tarde livre" —
+    // enquanto a grade pública, que lê o banco, recusava o horário como ocupado.
+    //
+    // O que o dedupe existe para colapsar continua colapsando, porque é sempre da MESMA
+    // profissional: a remarcação no mesmo horário (cancelado + confirmado) some pelo
+    // STATUS_RANK, igual a antes.
+    const key = `${String(ev.resourceId)}|${String(ev.client || '').trim().toLowerCase()}|${ev.start.getTime()}`
     const cur = byKey.get(key)
     if (!cur || rankOf(ev) > rankOf(cur) || (rankOf(ev) === rankOf(cur) && Number(ev.id) > Number(cur.id))) {
       byKey.set(key, ev)
