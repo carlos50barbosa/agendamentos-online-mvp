@@ -249,8 +249,17 @@ export default function BookingPublic() {
         confirmed: true,
         appointmentId: resp?.id || null,
         accessToken: resp?.access_token || null,
+        // O e-mail aparece ESCRITO, e não como "o seu e-mail". Ele nunca foi verificado — o backend
+        // só checa formato (`isValidEmailFormat`), então um dedo errado passa inteiro e a mensagem
+        // de sucesso vira uma garantia falsa. Foi o que aconteceu com a cliente 264/265 em 19/08:
+        // dois agendamentos com e-mails tortos, os dois devolvidos, WhatsApp bloqueado por
+        // `no_optin`, e ela saiu daqui lendo que estava avisada. Mostrar o endereço é a única
+        // chance de a pessoa flagrar o próprio erro — ela é a única que sabe qual é o certo.
+        //
+        // E o convite do WhatsApp fica mesmo QUANDO HÁ e-mail: a frase antiga encerrava o assunto
+        // ("enviamos, está resolvido") e tirava todo motivo de tocar no botão logo abaixo.
         message: email
-          ? 'Agendamento registrado! Enviamos a confirmação para o seu e-mail.'
+          ? `Agendamento registrado! Enviamos a confirmação para ${email}. Não é esse o seu e-mail? Ative o WhatsApp abaixo para não perder o lembrete.`
           : 'Agendamento registrado! Seu horário está guardado. Como você não informou e-mail, ative o WhatsApp abaixo para receber os lembretes.',
       };
     }
