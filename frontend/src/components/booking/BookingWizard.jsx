@@ -22,6 +22,7 @@ import { formatBRPhone, formatCpfCnpj, isValidMobileBR } from '../../utils/masks
 import { useWhatsAppConfig } from '../../hooks/useWhatsAppStatus.js';
 import { site } from '../../config/site.js';
 import { iconSizes } from '../../config/theme.js';
+import { getUser } from '../../utils/auth.js';
 
 const STEP = { SERVICO: 0, PROFISSIONAL: 1, DIA: 2, HORARIO: 3, CONFIRMACAO: 4, PAGAMENTO: 5 };
 
@@ -570,6 +571,7 @@ export default function BookingWizard({
                 {/* O WhatsApp só liga aqui: a pessoa clica, o WhatsApp dela abre com "AUTORIZO"
                     pronto, e ela envia. É a prova de posse do número que não dá para forjar. */}
                 <AutorizoWhatsApp number={waNumber} available={waAvailable} />
+                <MeusAgendamentosLink appointmentId={pix?.appointmentId} accessToken={pix?.accessToken} />
                 {/* Volta para a página do estabelecimento. Âncora normal (recarrega a página fresca),
                     e não navegação SPA: garante o retorno mesmo quando a URL de origem é a mesma. */}
                 {establishmentHref && (
@@ -598,6 +600,7 @@ export default function BookingWizard({
                 {pix?.status === 'paid' ? (
                   <div className="tw-mx-auto tw-flex tw-w-full tw-max-w-sm tw-flex-col tw-items-center tw-text-center">
                     <AutorizoWhatsApp number={waNumber} available={waAvailable} />
+                    <MeusAgendamentosLink appointmentId={pix?.appointmentId} accessToken={pix?.accessToken} />
                   </div>
                 ) : (
                   <p className="tw-mt-4 tw-text-center tw-text-xs" style={{ color: 'var(--muted-ink, #6B7280)' }}>
@@ -701,6 +704,41 @@ function NotifyOptIn({ checked, onChange, email, onEmailChange, available }) {
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * "Ver meus agendamentos" — o caminho de volta que não existia.
+ *
+ * A conta de quem agenda pelo link público nasce sem senha utilizável (e-mail placeholder
+ * guest-<telefone>@…), então /cliente é uma porta trancada para ela. O pedido veio de uma
+ * avaliação real: a pessoa marcou, saiu da tela e não tinha como rever o próprio horário.
+ *
+ * Dois destinos, porque são duas situações diferentes:
+ *   - COM login de cliente: /cliente, a tela completa (cancelar, filtrar, pagar sinal pendente).
+ *   - CONVIDADO: /meus-agendamentos com o token de leitura na URL, que abre ESTE agendamento sem
+ *     pedir nada. De lá ela pede um código se quiser a lista inteira.
+ *
+ * Âncora comum, e não navegação SPA, pelo mesmo motivo do "Voltar para o estabelecimento" logo
+ * abaixo: o wizard não conhece o router, e a carga limpa evita herdar o estado do fluxo.
+ */
+function MeusAgendamentosLink({ appointmentId, accessToken }) {
+  const isClient = String(getUser()?.tipo || '') === 'cliente';
+  // Sem token (agendamento antigo, ou backend sem JWT_SECRET) o link continua útil: a página
+  // pública sabe pedir o código. O que não pode é sumir e devolver a pessoa ao beco de antes.
+  const href = isClient
+    ? '/cliente'
+    : (appointmentId && accessToken
+      ? `/meus-agendamentos?ag=${encodeURIComponent(appointmentId)}&token=${encodeURIComponent(accessToken)}`
+      : '/meus-agendamentos');
+  return (
+    <a
+      href={href}
+      className="tw-mt-3 tw-inline-flex tw-w-full tw-items-center tw-justify-center tw-gap-2 tw-rounded-xl tw-px-4 tw-font-semibold"
+      style={{ minHeight: 48, border: '1px solid var(--brand, #5049E5)', color: 'var(--brand, #5049E5)' }}
+    >
+      Ver meus agendamentos
+    </a>
   );
 }
 

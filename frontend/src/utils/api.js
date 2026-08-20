@@ -580,6 +580,13 @@ export const Api = {
 
   publicGetAgendamento: (id, token) => req(`/public/agendamentos/${id}${toQuery({ token })}`),
 
+  // Lista do convidado. O otp_token vai no header, nao na querystring: a URL entra em historico de
+  // navegador e em log de servidor, e esta credencial abre o historico inteiro da pessoa.
+  publicMeusAgendamentos: (otpToken) =>
+    req('/public/agendamentos/meus', {
+      headers: { 'X-Otp-Token': String(otpToken || '') },
+    }),
+
   publicAgendamentoDepositPix: (id, token) =>
     req(`/public/agendamentos/${id}/deposit/pix`, { method: 'POST', body: JSON.stringify({ token }) }),
 

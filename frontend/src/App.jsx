@@ -111,6 +111,7 @@ const Loading = React.lazy(() => import('./pages/Loading.jsx'));
 const AgendaNova = React.lazy(() => import('./pages/AgendaNova.jsx'));
 const BookingNovo = React.lazy(() => import('./pages/BookingNovo.jsx'));
 const BookingPublic = React.lazy(() => import('./pages/BookingPublic.jsx'));
+const MeusAgendamentos = React.lazy(() => import('./pages/MeusAgendamentos.jsx'));
 
 // Deep-link público de agendamento (/novo?estabelecimento=…&servico=… ou /novo/:slug):
 // redireciona para o fluxo novo (/agendar), mantendo o mesmo padrão visual do redesign.
@@ -222,6 +223,11 @@ const APP_ROUTES = [
   { path: '/agenda-nova', element: <AgendaNova /> },
   { path: '/agendar', element: <BookingNovo /> },
   { path: '/agendar/:idOrSlug', element: <BookingPublic /> },
+
+  // Publica de proposito: quem agenda como convidado nao tem senha (o fluxo publico grava e-mail
+  // placeholder), entao exigir login aqui devolveria a pessoa ao mesmo beco. O acesso e provado
+  // por token de leitura na URL ou por codigo OTP — ver a propria pagina.
+  { path: '/meus-agendamentos', element: <MeusAgendamentos /> },
 
   // Link curto na raiz: agenda0.com.br/<slug>. Precisa ser a ÚLTIMA rota — o React Router
   // prioriza segmentos estáticos, então /login, /planos, /configuracoes seguem ganhando.

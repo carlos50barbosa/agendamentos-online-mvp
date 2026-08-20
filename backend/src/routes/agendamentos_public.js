@@ -5,6 +5,7 @@ import { pool } from '../lib/db.js';
 import { assertDentroExpediente, formatExpedienteMessage, getExpediente, getLocalRangeMinutes } from '../lib/expediente.js';
 import { getPlanContext, isDelinquentStatus, formatPlanLimitExceeded, planAllowsDeposit } from '../lib/plans.js';
 import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
 import { notifyEmail } from '../lib/notifications.js';
 import { buildPlaceholderGuestEmail, isPlaceholderGuestEmail } from '../lib/guest_placeholder_email.js';
 import { sendPushToUser } from '../lib/web_push.js';
@@ -29,6 +30,7 @@ import {
   markDepositPaymentExpired,
 } from '../lib/deposit_payments.js';
 import { buildPublicDepositToken, verifyPublicDepositToken } from '../lib/public_deposit_token.js';
+import { buildPublicAppointmentToken, verifyPublicAppointmentToken } from '../lib/public_appointment_token.js';
 import { applyClientLoyaltyBenefitsTx, previewClientLoyaltyBenefits } from '../lib/client_loyalty_credits.js'
 import { cancelPendingPaymentAppointmentTx, cancelPublicPendingAppointmentTx } from '../lib/appointment_loyalty.js'
 import { checkAppointmentSlotCapacityTx, normalizeServiceSlotCapacity } from '../lib/service_capacity.js';
@@ -364,6 +366,30 @@ const fetchAppointmentItems = async (db, appointmentIds) => {
     });
   });
   return byAppointment;
+};
+
+// Estava sendo CHAMADA no GET /:id sem existir neste arquivo: a original e um `const` privado de
+// routes/agendamentos.js, nunca exportado. O resultado era ReferenceError -> catch -> 500 em todo
+// GET /public/agendamentos/:id. As tres dependencias (fetchAppointmentItems, summarizeServices,
+// safeJsonParse) ja estao definidas aqui em cima, entao a definicao local fecha o buraco sem
+// mover codigo de rota. Ver a copia irma em routes/agendamentos.js.
+const hydrateAppointmentsWithItems = async (db, rows) => {
+  const ids = (rows || [])
+    .map((row) => Number(row?.id))
+    .filter((id) => Number.isFinite(id) && id > 0);
+  if (!ids.length) return rows;
+  const itemsByAppointment = await fetchAppointmentItems(db, ids);
+  rows.forEach((row) => {
+    const items = itemsByAppointment.get(Number(row.id)) || [];
+    const summary = summarizeServices(items);
+    row.servicos = items;
+    row.servico_ids = summary.serviceIds;
+    row.servico_nome = summary.serviceLabel || row.servico_nome || '';
+    row.duracao_total = summary.duracaoTotal;
+    row.preco_total = summary.precoTotal;
+    row.loyalty_benefit_snapshot = safeJsonParse(row.loyalty_benefit_snapshot_json);
+  });
+  return rows;
 };
 
 function brDateTime(iso) {
@@ -1290,6 +1316,15 @@ router.post('/', ensureSubscriptionOperationalAccess({
       [appointmentId]
     );
     const totalCentavosFinal = Number(totalRow?.total_centavos || 0);
+    // Credencial de leitura do agendamento recem-criado, devolvida nos TRES finais possiveis
+    // (Asaas, Mercado Pago e sem sinal). E o que sustenta o link "ver meu agendamento" da tela de
+    // sucesso: sem ela, quem agenda como convidado termina o fluxo sem forma nenhuma de reabrir o
+    // proprio horario — /cliente exige senha, e conta de convidado nao tem.
+    const publicAccessToken = buildPublicAppointmentToken({
+      agendamentoId: appointmentId,
+      clienteId: userId,
+      estabelecimentoId: estabelecimento_id,
+    });
     console.info('[public/agendamento][total]', { appointmentId, totalCentavosFinal });
     if (
       !Number.isFinite(totalCentavosFinal) ||
@@ -1405,6 +1440,7 @@ router.post('/', ensureSubscriptionOperationalAccess({
           return res.status(201).json({
             id: appointmentId,
             agendamentoId: appointmentId,
+            access_token: publicAccessToken,
             status: 'pendente_pagamento',
             total_centavos: totalCentavosFinal,
             deposit_required: 1,
@@ -1482,6 +1518,7 @@ router.post('/', ensureSubscriptionOperationalAccess({
         return res.status(201).json({
           id: appointmentId,
           agendamentoId: appointmentId,
+          access_token: publicAccessToken,
           status: 'pendente_pagamento',
           total_centavos: totalCentavosFinal,
           deposit_required: 1,
@@ -1526,6 +1563,7 @@ router.post('/', ensureSubscriptionOperationalAccess({
 
     return res.status(201).json({
       id: appointmentId,
+      access_token: publicAccessToken,
       cliente_id: userId,
       estabelecimento_id,
       servico_id: primaryServiceId,
@@ -1655,6 +1693,87 @@ router.get('/confirm', async (req, res) => {
   }
 });
 
+// GET /public/agendamentos/meus
+//
+// A lista completa de quem NAO tem login. O portao aqui e o OTP, e nao ha atalho: o telefone
+// digitado no wizard nunca foi verificado, entao qualquer credencial nascida do agendamento
+// provaria apenas "alguem digitou este numero", jamais "sou o dono dele". Com o codigo, prova.
+//
+// O otp_token vale 30 min (otp_public.js) e nao vira sessao — expirou, pede outro codigo.
+router.get('/meus', async (req, res) => {
+  try {
+    // So header. A querystring entra em historico de navegador, em Referer e em log de acesso do
+    // nginx, e esta credencial abre o historico inteiro de uma pessoa — nao e coisa para viver numa
+    // URL. O token de LEITURA vai na URL porque abre um agendamento so, aquele que ela acabou de
+    // fazer; sao riscos de tamanhos diferentes.
+    const raw = String(req.headers['x-otp-token'] || '');
+    const secret = process.env.JWT_SECRET;
+    if (!raw || !secret) return res.status(401).json({ error: 'otp_required' });
+
+    let payload = null;
+    try {
+      payload = jwt.verify(raw, secret);
+      if (payload?.scope !== 'otp') throw new Error('bad_scope');
+    } catch {
+      return res.status(401).json({ error: 'otp_invalid' });
+    }
+
+    const channel = String(payload?.ch || '');
+    const value = String(payload?.v || '');
+    if (!value || !['phone', 'email'].includes(channel)) {
+      return res.status(401).json({ error: 'otp_invalid' });
+    }
+
+    // Mesma resolucao do POST: e-mail exato, ou telefone tentando normalizado e cru. Divergir dela
+    // devolveria lista vazia justamente para quem agendou — o vinculo do agendamento (cliente_id)
+    // nasceu daquele lookup.
+    let clienteId = null;
+    if (channel === 'email') {
+      const [rows] = await pool.query(
+        'SELECT id FROM usuarios WHERE LOWER(email)=? LIMIT 1',
+        [value.toLowerCase()]
+      );
+      clienteId = rows?.[0]?.id || null;
+    } else {
+      const candidates = [];
+      const norm = normalizePhoneBR(value);
+      const digits = toDigits(value);
+      if (norm) candidates.push(norm);
+      if (digits && digits !== norm) candidates.push(digits);
+      for (const candidate of candidates) {
+        const [rows] = await pool.query('SELECT id FROM usuarios WHERE telefone=? LIMIT 1', [candidate]);
+        if (rows?.length) { clienteId = rows[0].id; break; }
+      }
+    }
+
+    // Codigo certo e nenhum cadastro: nao e erro, e uma agenda vazia. Devolver 404 aqui contaria a
+    // quem pediu se aquele numero existe na base.
+    if (!clienteId) return res.json({ items: [] });
+
+    const [rows] = await pool.query(
+      `SELECT a.id, a.inicio, a.fim, a.status, a.estabelecimento_id,
+              a.loyalty_benefit_snapshot_json,
+              u.nome AS estabelecimento_nome,
+              u.slug AS estabelecimento_slug,
+              p.nome AS profissional_nome
+         FROM agendamentos a
+         JOIN usuarios u ON u.id = a.estabelecimento_id
+         LEFT JOIN profissionais p ON p.id = a.profissional_id
+        WHERE a.cliente_id = ?
+        ORDER BY a.inicio DESC
+        LIMIT 200`,
+      [clienteId]
+    );
+    await hydrateAppointmentsWithItems(pool, rows);
+    rows.forEach((row) => { delete row.loyalty_benefit_snapshot_json; });
+
+    return res.json({ items: rows });
+  } catch (err) {
+    console.error('[public/agendamentos][meus]', err);
+    return res.status(500).json({ error: 'server_error' });
+  }
+});
+
 // GET /public/agendamentos/:id?token=... (detalhe com PIX reaproveitado)
 router.get('/:id', async (req, res) => {
   try {
@@ -1662,15 +1781,21 @@ router.get('/:id', async (req, res) => {
     if (!Number.isFinite(id)) {
       return res.status(400).json({ error: 'invalid_id' });
     }
-    const token = req.query?.token || req.headers['x-deposit-token'];
-    const verification = verifyPublicDepositToken(token);
+    // Duas credenciais chegam aqui e ambas valem: o token do SINAL (nasce so no fluxo de PIX, e a
+    // chave do checkout) e o de LEITURA, emitido em todo agendamento publico. Sao escopos
+    // separados de proposito — ver lib/public_appointment_token.js.
+    const token = req.query?.token || req.headers['x-deposit-token'] || req.headers['x-appointment-token'];
+    const depositCheck = verifyPublicDepositToken(token);
+    const accessCheck = depositCheck.ok ? null : verifyPublicAppointmentToken(token);
+    const verification = depositCheck.ok ? depositCheck : accessCheck;
     if (!verification.ok) {
-      console.warn('[public/agendamentos][deposit] invalid_token', verification.reason);
+      console.warn('[public/agendamentos][token] invalid_token', verification.reason);
       return res.status(401).json({ error: 'invalid_token' });
     }
     if (Number(verification.payload?.agendamento_id || 0) !== id) {
       return res.status(403).json({ error: 'forbidden' });
     }
+    const isDepositToken = Boolean(depositCheck.ok);
 
     const [rows] = await pool.query(
       `SELECT a.*,
@@ -1705,7 +1830,7 @@ router.get('/:id', async (req, res) => {
       }
     }
 
-    item.deposit_token = String(token || '') || null;
+    item.deposit_token = isDepositToken ? (String(token || '') || null) : null;
     return res.json(item);
   } catch (err) {
     console.error('[public/agendamentos][GET]', err);

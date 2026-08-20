@@ -247,6 +247,8 @@ export default function BookingPublic() {
       // aponta para o único canal que ela ainda pode ligar, que é o botão logo abaixo.
       return {
         confirmed: true,
+        appointmentId: resp?.id || null,
+        accessToken: resp?.access_token || null,
         message: email
           ? 'Agendamento registrado! Enviamos a confirmação para o seu e-mail.'
           : 'Agendamento registrado! Seu horário está guardado. Como você não informou e-mail, ative o WhatsApp abaixo para receber os lembretes.',
@@ -262,6 +264,8 @@ export default function BookingPublic() {
       status: 'pending',
       paymentId: resp?.paymentId || pix?.payment_id || null,
       token: resp?.deposit_token || null,
+      appointmentId: resp?.id || resp?.agendamentoId || null,
+      accessToken: resp?.access_token || null,
     };
   }, [establishmentId]);
 

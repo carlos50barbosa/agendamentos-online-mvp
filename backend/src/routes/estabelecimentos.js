@@ -2667,7 +2667,8 @@ const RESERVED_SLUGS = new Set([
   'admin-tools', 'agenda-nova', 'agendar', 'ajuda', 'assinatura', 'cadastro', 'cliente', 'clientes',
   'configuracao-inicial', 'configuracoes', 'contato', 'definir-senha', 'divulgacao', 'estab',
   'financeiro', 'implantacao', 'link-phone', 'loading', 'login', 'login-cliente',
-  'login-estabelecimento', 'novo', 'novo-agendamento', 'planos', 'politica-privacidade',
+  'login-estabelecimento', 'meus-agendamentos', 'novo', 'novo-agendamento', 'planos',
+  'politica-privacidade',
   'profissionais', 'recuperar-senha', 'relatorios', 'servicos', 'sinal', 'termos', 'whatsappbusiness',
   // infra e reservas futuras
   'api', 'admin', 'app', 'assets', 'auth', 'blog', 'checkout', 'conta', 'dashboard', 'favicon',
