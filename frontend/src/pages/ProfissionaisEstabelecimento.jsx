@@ -33,7 +33,7 @@ function getInitials(name) {
 function getDescriptionLabel(value) {
   const description = String(value || '').trim();
   if (description) return description;
-  return 'Adicione uma descricao curta para apresentar a especialidade e o estilo de atendimento.';
+  return 'Adicione uma descrição curta para apresentar a especialidade e o estilo de atendimento.';
 }
 
 function ProfessionalFormFields({
@@ -161,8 +161,6 @@ function ProfessionalsSkeleton() {
           <div className="shimmer professionals-page__shimmer-line" />
           <div className="shimmer professionals-page__shimmer-line professionals-page__shimmer-line--short" />
           <div className="professionals-page__meta">
-            <div className="shimmer professionals-page__shimmer-box" />
-            <div className="shimmer professionals-page__shimmer-box" />
             <div className="shimmer professionals-page__shimmer-box" />
           </div>
           <div className="professionals-page__card-actions">
@@ -652,7 +650,6 @@ export default function ProfissionaisEstabelecimento() {
               const avatarUrl = resolveAssetUrl(professional?.avatar_url || '');
               const hasPhoto = Boolean(avatarUrl);
               const hasDescription = Boolean(String(professional?.descricao || '').trim());
-              const isComplete = hasPhoto && hasDescription;
               const isBusy = deletingId === professional.id || togglingId === professional.id;
 
               return (
@@ -695,21 +692,11 @@ export default function ProfissionaisEstabelecimento() {
                     {getDescriptionLabel(professional.descricao)}
                   </p>
 
+                  {/* Sobrou só o horário: status está no chip e no botão, foto está no avatar e
+                      descrição está no parágrafo acima. Repetir tudo isso em caixinha era ruído.
+                      Único lugar da lista onde dá para ver quem tem escala própria. Coluna
+                      nula = herda o salão, que é o estado de todo mundo até alguém mexer. */}
                   <div className="professionals-page__meta">
-                    <div className="professionals-page__meta-card">
-                      <span>Status</span>
-                      <strong>{professional.ativo ? 'Disponível' : 'Pausado'}</strong>
-                    </div>
-                    <div className="professionals-page__meta-card">
-                      <span>Apresentação</span>
-                      <strong>{hasDescription ? 'Pronta' : 'Ajustar bio'}</strong>
-                    </div>
-                    <div className="professionals-page__meta-card">
-                      <span>Perfil</span>
-                      <strong>{isComplete ? 'Completo' : 'Em construção'}</strong>
-                    </div>
-                    {/* Único lugar da lista onde dá para ver quem tem escala própria. Coluna
-                        nula = herda o salão, que é o estado de todo mundo até alguém mexer. */}
                     <div className="professionals-page__meta-card">
                       <span>Horário</span>
                       <strong>{professional.horarios_json ? 'Próprio' : 'Do salão'}</strong>

@@ -4709,27 +4709,45 @@ button.danger:disabled,
 }
 .professionals-page__meta{
   display:grid;
-  grid-template-columns:repeat(3, minmax(0, 1fr));
+  /* Duas colunas, nao tres: com tres, cada celula ficava estreita demais e o rotulo
+     vazava por cima da vizinha. */
+  grid-template-columns:repeat(2, minmax(0, 1fr));
   gap:10px;
 }
 .professionals-page__meta-card{
   display:flex;
   flex-direction:column;
   gap:6px;
+  min-width:0;
   padding:12px;
   border-radius:14px;
   border:1px solid var(--border);
   background:var(--surface-soft);
+}
+/* Numero impar de cartoes: o ultimo ocupa a linha inteira em vez de deixar um buraco
+   ao lado. Vale tanto para o card real quanto para o esqueleto de carregamento. */
+.professionals-page__meta > *:last-child:nth-child(odd){
+  grid-column:1 / -1;
+}
+/* Sozinha, a caixa vira uma linha: rotulo a esquerda, valor a direita. Empilhado ela
+   ocuparia a largura toda para dizer duas palavras. */
+.professionals-page__meta-card:only-child{
+  flex-direction:row;
+  align-items:baseline;
+  justify-content:space-between;
+  gap:12px;
 }
 .professionals-page__meta-card span{
   color:var(--muted);
   font-size:11px;
   text-transform:uppercase;
   letter-spacing:.05em;
+  overflow-wrap:anywhere;
 }
 .professionals-page__meta-card strong{
   font-size:.9rem;
   line-height:1.3;
+  overflow-wrap:anywhere;
 }
 .professionals-page__card-actions{
   display:flex;
@@ -4921,7 +4939,7 @@ button.danger:disabled,
 .professionals-page__shimmer-line--meta{width:110px;}
 .professionals-page__shimmer-line--short{width:65%;}
 .professionals-page__shimmer-pill{width:88px;height:30px;border-radius:999px;}
-.professionals-page__shimmer-box{height:62px;border-radius:14px;}
+.professionals-page__shimmer-box{height:44px;border-radius:14px;}
 .professionals-page__shimmer-button{height:38px;border-radius:12px;flex:1 1 140px;}
 @media (max-width:1080px){
   .professionals-page__metrics{grid-template-columns:repeat(2, minmax(0, 1fr));}
