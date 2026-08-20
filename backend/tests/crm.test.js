@@ -23,6 +23,40 @@ test('computeAverageReturnDays returns rounded average gap', () => {
   assert.equal(avg, 10);
 });
 
+// Regressao: a entrada e uma linha por AGENDAMENTO, e atendimento simultaneo (escova com uma
+// profissional + unha com outra, mesmo horario) sao dois agendamentos de UMA visita. O gap 0
+// entre eles entrava na media e a diluia pela metade — quem volta a cada 30 dias aparecia como
+// "Retorno medio 12d". Medido em producao em 19/08/2026 (14 pares simultaneos num salao so).
+test('computeAverageReturnDays nao conta atendimento simultaneo como duas visitas', () => {
+  const simultaneo = computeAverageReturnDays([
+    '2026-01-01T13:00:00Z', '2026-01-01T13:00:00Z',
+    '2026-01-31T13:00:00Z', '2026-01-31T13:00:00Z',
+    '2026-03-02T13:00:00Z', '2026-03-02T13:00:00Z',
+  ]);
+  const umServicoPorVisita = computeAverageReturnDays([
+    '2026-01-01T13:00:00Z', '2026-01-31T13:00:00Z', '2026-03-02T13:00:00Z',
+  ]);
+  assert.equal(umServicoPorVisita, 30);
+  // O ponto: as duas formas de agendar a MESMA rotina de 30 dias tem de dar o mesmo numero.
+  assert.equal(simultaneo, 30);
+});
+
+// Dois servicos no mesmo dia em horarios diferentes tambem sao uma visita: dentro de um
+// expediente (~9h) o arredondamento para dias ja leva o par a 0, entao ele e descartado.
+test('computeAverageReturnDays trata dois horarios do mesmo dia como uma visita', () => {
+  const avg = computeAverageReturnDays([
+    '2026-01-01T12:00:00Z', '2026-01-01T20:00:00Z',
+    '2026-01-11T12:00:00Z',
+  ]);
+  assert.equal(avg, 10);
+});
+
+// Cliente que so veio uma vez, com dois servicos simultaneos: nao ha retorno para medir.
+// null (a tela mostra "-") e mais honesto do que o 0 que saia antes.
+test('computeAverageReturnDays devolve null quando so houve uma visita', () => {
+  assert.equal(computeAverageReturnDays(['2026-01-01T13:00:00Z', '2026-01-01T13:00:00Z']), null);
+});
+
 test('classifyRelationship prioritizes VIP and inactivity', () => {
   assert.equal(classifyRelationship({ totalAppointments: 8, daysSinceLastVisit: 5, isVip: true }).code, 'vip');
   assert.equal(classifyRelationship({ totalAppointments: 4, daysSinceLastVisit: 120 }).code, 'inativo');

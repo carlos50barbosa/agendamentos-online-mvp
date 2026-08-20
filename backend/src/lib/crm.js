@@ -29,7 +29,19 @@ export function computeAverageReturnDays(values = []) {
   let gapCount = 0;
   for (let index = 1; index < dates.length; index += 1) {
     const gapDays = Math.round((dates[index].getTime() - dates[index - 1].getTime()) / DAY_MS);
-    if (gapDays < 0) continue;
+    // `<= 0`, e não `< 0`: a entrada é uma linha por AGENDAMENTO, e o que esta função mede é o
+    // intervalo entre VISITAS. Em salão, atendimento simultâneo é rotina — a mesma cliente faz
+    // escova com uma profissional e unha com outra no mesmo horário, e isso são dois
+    // agendamentos de UMA visita. Contar o intervalo 0 entre eles diluía a média pela metade:
+    // quem volta a cada 30 dias sempre marcando dois serviços gera [d0,d0,d30,d30,d60,d60],
+    // ou seja gaps 0,30,0,30,0 -> "Retorno médio 12d" para um retorno real de 30.
+    //
+    // Descartar o gap é equivalente a colapsar a visita e não exige raciocinar sobre fuso: o
+    // arredondamento para dias já leva a 0 qualquer par dentro do mesmo expediente (a folga
+    // máxima de um dia comercial é ~9h, bem abaixo das 12h que arredondariam para 1).
+    // Se TODOS os pares colapsarem, gapCount fica 0 e o retorno é null — "uma visita só, não
+    // dá para medir retorno", que é mais honesto do que o 0 que saía antes.
+    if (gapDays <= 0) continue;
     totalGap += gapDays;
     gapCount += 1;
   }
