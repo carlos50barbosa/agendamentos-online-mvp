@@ -180,16 +180,12 @@ export default function EstablishmentHeader({ establishment, onBack, showBack = 
     () => (Array.isArray(est.gallery) ? est.gallery.filter((g) => g?.url) : []),
     [est.gallery],
   );
-  const rating = est.rating || {};
   const horarios = profile.horarios || [];
   const status = useMemo(() => computeOpenStatus(horarios), [horarios]);
   const cover = gallery.length ? resolveAssetUrl(gallery[0].url) : '';
   const avatar = resolveAssetUrl(est.avatar_url || est.logo_url || est.foto_url || '');
   const address = useMemo(() => buildAddress(est), [est]);
   const initials = (est.nome || 'AO').trim().slice(0, 2).toUpperCase();
-  const avg = Number(rating.average);
-  const hasRating = Number.isFinite(avg) && Number(rating.count) > 0;
-
   const viewer = getUser();
   const isCliente = viewer?.tipo === 'cliente';
 
@@ -214,7 +210,11 @@ export default function EstablishmentHeader({ establishment, onBack, showBack = 
   // Avaliar NÃO exige mais login: a prova de que a pessoa esteve ali é o contato bater com um
   // agendamento (backend: findClienteComAtendimento). Exigir sessão excluiria justamente quem
   // agenda como convidado pelo link — que é a maior parte dos clientes de um salão.
-  const openRating = useCallback(() => setModal('rating'), []);
+  const [ratingFrom, setRatingFrom] = useState(null);
+  const openRating = useCallback((from = null) => {
+    setRatingFrom(from);
+    setModal('rating');
+  }, []);
 
   return (
     <>
@@ -312,38 +312,26 @@ export default function EstablishmentHeader({ establishment, onBack, showBack = 
             </p>
           )}
 
-          {/* Pills: status + nota */}
-          {(status || hasRating) && (
+          {/* Pill: status. A nota mudou de lugar — vive no card de Avaliações, com a lista. */}
+          {status && (
             <div className="tw-mt-3 tw-flex tw-flex-wrap tw-items-center tw-justify-center tw-gap-2">
-              {status && (
+              <span
+                className="tw-inline-flex tw-items-center tw-gap-1.5 tw-rounded-full tw-px-3 tw-py-1 tw-text-xs"
+                style={
+                  status.open
+                    ? { background: 'var(--status-confirmado-bg, #E1F3E8)', color: 'var(--status-confirmado-fg, #128C4A)' }
+                    : { background: 'var(--surface-soft, #F6F5FB)', color: 'var(--muted-ink, #6B7280)', border: '1px solid var(--brand-border, #E7E5F5)' }
+                }
+              >
                 <span
-                  className="tw-inline-flex tw-items-center tw-gap-1.5 tw-rounded-full tw-px-3 tw-py-1 tw-text-xs"
-                  style={
-                    status.open
-                      ? { background: 'var(--status-confirmado-bg, #E1F3E8)', color: 'var(--status-confirmado-fg, #128C4A)' }
-                      : { background: 'var(--surface-soft, #F6F5FB)', color: 'var(--muted-ink, #6B7280)', border: '1px solid var(--brand-border, #E7E5F5)' }
-                  }
-                >
-                  <span
-                    style={{
-                      width: 7, height: 7, borderRadius: 9999,
-                      background: status.open ? 'var(--status-confirmado-fg, #128C4A)' : '#9CA3AF',
-                    }}
-                  />
-                  <strong className="tw-font-bold">{status.label}</strong>
-                  {status.detail && <span style={{ opacity: 0.85 }}>· {status.detail}</span>}
-                </span>
-              )}
-              {hasRating && (
-                <span
-                  className="tw-inline-flex tw-items-center tw-gap-1 tw-rounded-full tw-px-3 tw-py-1 tw-text-xs tw-font-bold"
-                  style={{ background: 'var(--brand-100, #EEEDFC)', color: 'var(--brand-deep, #1E1B4B)' }}
-                >
-                  <Star size={13} strokeWidth={0} fill="#F5A623" aria-hidden="true" />
-                  {avg.toFixed(1)}
-                  <span style={{ fontWeight: 600, color: 'var(--muted-ink, #6B7280)' }}>({rating.count})</span>
-                </span>
-              )}
+                  style={{
+                    width: 7, height: 7, borderRadius: 9999,
+                    background: status.open ? 'var(--status-confirmado-fg, #128C4A)' : '#9CA3AF',
+                  }}
+                />
+                <strong className="tw-font-bold">{status.label}</strong>
+                {status.detail && <span style={{ opacity: 0.85 }}>· {status.detail}</span>}
+              </span>
             </div>
           )}
 
@@ -352,7 +340,6 @@ export default function EstablishmentHeader({ establishment, onBack, showBack = 
             <ActionChip icon={Images} label="Galeria" muted={!gallery.length} onClick={() => gallery.length && setModal('gallery')} />
             <ActionChip icon={Info} label="Detalhes" onClick={() => setModal('details')} />
             <ActionChip icon={MessageSquare} label="Avaliações" onClick={() => setModal('reviews')} />
-            <ActionChip icon={Star} label="Avaliar" onClick={openRating} />
           </div>
         </div>
       </header>
@@ -364,13 +351,23 @@ export default function EstablishmentHeader({ establishment, onBack, showBack = 
       {modal === 'details' && (
         <DetailsModal est={est} profile={profile} status={status} address={address} onClose={() => setModal(null)} />
       )}
-      {modal === 'reviews' && <ReviewsModal est={est} onClose={() => setModal(null)} />}
+      {modal === 'reviews' && (
+        <ReviewsModal
+          est={est}
+          myReview={myReview}
+          onRate={() => openRating('reviews')}
+          onClose={() => setModal(null)}
+        />
+      )}
       {modal === 'rating' && (
         <RatingModal
           est={est}
           myReview={myReview}
-          onClose={() => setModal(null)}
-          onSaved={(review) => { setMyReview(review); setModal(null); }}
+          onClose={() => setModal(ratingFrom === 'reviews' ? 'reviews' : null)}
+          onSaved={(review) => {
+            setMyReview(review);
+            setModal(ratingFrom === 'reviews' ? 'reviews' : null);
+          }}
         />
       )}
     </>
@@ -780,9 +777,14 @@ function SectionTitle({ icon: Icon, children }) {
 // nada: registra para o suporte olhar — sumir com avaliação verdadeira por reclamação do
 // avaliado é o abuso que o campo precisa evitar.
 // ---------------------------------------------------------------------------
-function ReviewsModal({ est, onClose }) {
+function ReviewsModal({ est, myReview, onRate, onClose }) {
   const viewer = getUser();
   const isDono = viewer?.tipo === 'estabelecimento' && Number(viewer?.id) === Number(est.id);
+
+  const rating = est.rating || {};
+  const avg = Number(rating.average);
+  const hasRating = Number.isFinite(avg) && Number(rating.count) > 0;
+  const total = Number(rating.count) || 0;
 
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -807,6 +809,34 @@ function ReviewsModal({ est, onClose }) {
     <ModalShell onClose={close} closing={closing} maxWidth={520}>
       <ModalHeader title="Avaliações" onClose={close} />
       <div className="eh-stagger tw-flex tw-flex-col tw-gap-3 tw-p-4">
+        {/* Resumo: a média com o tamanho de quem é a informação principal do card. */}
+        {hasRating && (
+          <div className="tw-flex tw-items-center tw-gap-2">
+            <Star size={20} strokeWidth={0} fill="#F5A623" aria-hidden="true" />
+            <strong className="tw-text-xl tw-font-extrabold" style={{ color: 'var(--brand-deep, #1E1B4B)' }}>
+              {avg.toFixed(1)}
+            </strong>
+            <span className="tw-text-sm" style={{ color: 'var(--muted-ink, #6B7280)' }}>
+              {total === 1 ? '1 avaliação' : `${total} avaliações`}
+            </span>
+          </div>
+        )}
+
+        {/* Avaliar vem ANTES da lista. Depois de rolar dez comentários dos outros, o convite chega
+            tarde — e o dono deste botão é justamente quem ainda não escreveu o seu. Não aparece
+            para o dono do estabelecimento: ninguém avalia o próprio salão. */}
+        {!isDono && (
+          <button
+            type="button"
+            onClick={onRate}
+            className="tw-inline-flex tw-w-full tw-items-center tw-justify-center tw-gap-2 tw-rounded-xl tw-px-4 tw-font-semibold"
+            style={{ minHeight: 44, background: 'var(--brand, #5049E5)', color: '#fff', border: 0 }}
+          >
+            <Star size={16} strokeWidth={2.4} aria-hidden="true" />
+            {myReview ? 'Editar sua avaliação' : 'Avaliar este estabelecimento'}
+          </button>
+        )}
+
         {loading && <p className="tw-m-0 tw-text-sm" style={{ color: 'var(--muted-ink, #6B7280)' }}>Carregando…</p>}
         {erro && <p className="tw-m-0 tw-text-sm" style={{ color: 'var(--status-cancelado-fg, #B4232A)' }}>{erro}</p>}
         {!loading && !erro && !items.length && (
