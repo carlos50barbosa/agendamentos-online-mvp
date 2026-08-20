@@ -170,6 +170,15 @@ test('apply: confirmacao de assinatura grava periodo (current_period_end + plan_
   const res = await applyAsaasWebhookAction(desc, { db, rawPayload: '{}' })
   assert.equal(res.matched, true)
   assert.match(db.calls[1].sql, /current_period_end=/) // grava o periodo pago
+  // O VALOR, e nao so a presenca da coluna. `dueDate` do Asaas e date-only, e `new Date` o
+  // parseava como UTC (= 21:00 do dia anterior aqui); isso se cancelava com o toDatabaseDateTime
+  // que gravava em UTC. Ao unificar a gravacao em hora local o cancelamento acabou, e sem o
+  // parse correto o periodo pago recuaria para '2026-08-05 21:00:00' — o estabelecimento seria
+  // bloqueado as 21:00 do dia ANTERIOR ao vencimento, dentro de um ciclo pago. Esta asercao e a
+  // que faltava: a versao antiga do teste, so com /current_period_end=/, passava nos dois casos.
+  assert.equal(db.calls[1].params[1], '2026-08-06 00:00:00') // current_period_end
+  assert.equal(db.calls[1].params[2], '2026-08-06 00:00:00') // next_billing_at
+  assert.equal(db.calls[2].params[2], '2026-08-06 00:00:00') // usuarios.plan_active_until
   assert.match(db.calls[1].sql, /status<>'canceled'/) // guard contra zumbi de gateway
   assert.equal(db.calls[1].params[3], 'credit_card') // payment_method real (billingType CREDIT_CARD), nao 'pix' fixo
   assert.match(db.calls[2].sql, /plan_active_until=/) // seta a validade -> nao reverte para expired

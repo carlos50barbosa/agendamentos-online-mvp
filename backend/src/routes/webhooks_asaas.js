@@ -18,6 +18,7 @@ import { cancelPendingPaymentAppointmentTx } from '../lib/appointment_loyalty.js
 import { notifyAppointmentConfirmed } from '../lib/appointment_confirmation.js';
 import { confirmAsaasTopupByChargeId, expireAsaasTopupByChargeId } from '../lib/billing.js';
 import { toDatabaseDateTime } from '../lib/database_datetime.js';
+import { makeUtcFromLocalYMDHM } from '../lib/datetime_tz.js';
 import {
   activateClientPlanCycle,
   markClientPlanPastDue,
@@ -29,6 +30,28 @@ const SUBSCRIPTION_REF_PREFIX = 'subscription:';
 const TOPUP_REF_PREFIX = 'topup:';
 // Plano recorrente do CLIENTE no estabelecimento (fidelidade). Ver docs/PLANO-FIDELIDADE-ASAAS.md.
 const CLIENT_PLAN_REF_PREFIX = 'clientplan:';
+
+/**
+ * `payment.dueDate` do Asaas é DATE-ONLY ('YYYY-MM-DD') — o cliente já o envia assim
+ * (services/asaas/payments.js, toDateOnly). E `new Date('2026-07-06')` NÃO é 06/07 aqui: a
+ * spec manda parsear ISO date-only como UTC, então o valor vira 05/07 21:00 no nosso fuso.
+ *
+ * Isso passou despercebido por anos porque se cancelava com um SEGUNDO erro: o
+ * toDatabaseDateTime gravava em UTC, e as 21:00 do dia anterior voltavam a ser a meia-noite do
+ * dia certo. Ao unificar a gravação em hora local, o cancelamento acabou e o parse precisou
+ * ficar correto sozinho: sem isto, o período pago recuaria 3h e o estabelecimento seria
+ * bloqueado às 21:00 do dia ANTERIOR ao vencimento — dentro de um ciclo que ele pagou.
+ */
+function parseAsaasDueDate(value) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value ?? '').trim());
+  // makeUtcFromLocalYMDHM, e não `new Date(ano, mes, dia)`: o construtor por componentes usa o
+  // fuso do PROCESSO, e o resto desta cadeia (formatLocalSqlDateTime) usa o offset FIXO. Na VPS
+  // os dois coincidem e a diferença some; na CI, que roda em UTC, não — e o teste passaria aqui
+  // para quebrar lá. Com o offset fixo dos dois lados a cadeia inteira independe do TZ da
+  // máquina, que é a razão de EST_TZ_OFFSET_MIN existir.
+  if (match) return makeUtcFromLocalYMDHM(Number(match[1]), Number(match[2]), Number(match[3]), 0, 0);
+  return value ? new Date(value) : new Date();
+}
 
 /** Avança a data em 1 ciclo (mensal por padrão; anual quando billing_cycle='anual'). */
 function addCycle(base, billingCycle) {
@@ -247,7 +270,7 @@ export async function applyAsaasWebhookAction(descriptor, { db = pool, rawPayloa
   if (action === 'confirm') {
     // Grava o PERIODO pago (fim do ciclo = vencimento da cobranca, ou agora, + 1 ciclo). Sem isso o
     // motor de billing reverte a ativacao (dueAt no passado -> expired) e nao ha janela de carencia.
-    const periodEnd = toDatabaseDateTime(addCycle(descriptor.dueDate ? new Date(descriptor.dueDate) : new Date(), sub.billing_cycle));
+    const periodEnd = toDatabaseDateTime(addCycle(parseAsaasDueDate(descriptor.dueDate), sub.billing_cycle));
     const paymentMethod = normalizeAsaasPaymentMethod(descriptor.billingType); // real (credit_card|pix), nao 'pix' fixo
     // Guard status<>'canceled': nao reativa/repointa a partir de uma sub cancelada (zumbi de gateway).
     const [r] = await db.query(
