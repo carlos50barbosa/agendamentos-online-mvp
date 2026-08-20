@@ -19,6 +19,7 @@ import VisualIdentitySection from '../components/settings/VisualIdentitySection.
 import AddressSection from '../components/settings/AddressSection.jsx';
 import WorkingHoursSection from '../components/settings/WorkingHoursSection.jsx';
 import BookingWindowSection from '../components/settings/BookingWindowSection.jsx';
+import DailyLimitSection from '../components/settings/DailyLimitSection.jsx';
 import NotificationsSection from '../components/settings/NotificationsSection.jsx';
 import SocialLinksSection from '../components/settings/SocialLinksSection.jsx';
 import SecuritySection from '../components/settings/SecuritySection.jsx';
@@ -53,6 +54,9 @@ export default function Configuracoes() {
         // Logo abaixo dos horários de propósito: os dois respondem "quando dá para marcar" —
         // um define as horas do dia, o outro até que data.
         { id: 'booking-window', title: 'Janela de agendamento', content: <BookingWindowSection /> },
+        // Vizinho da janela: os dois limitam o que o CLIENTE consegue marcar sozinho, um por
+        // data e o outro por quantidade no dia. O dono não é limitado por nenhum dos dois.
+        { id: 'daily-limit', title: 'Agendamentos por cliente no mesmo dia', content: <DailyLimitSection /> },
         { id: 'notifications', title: 'Notificações', content: <NotificationsSection /> },
         { id: 'social-links', title: 'Redes sociais', content: <SocialLinksSection /> },
       );

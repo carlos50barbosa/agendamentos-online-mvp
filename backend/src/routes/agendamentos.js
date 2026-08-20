@@ -29,6 +29,11 @@ import { ensureSubscriptionOperationalAccess } from '../middleware/billing.js';
 import { applyClientLoyaltyBenefitsTx, previewClientLoyaltyBenefits } from '../lib/client_loyalty_credits.js'
 import { cancelPendingPaymentAppointmentTx, restoreAppointmentLoyaltyBenefitsTx } from '../lib/appointment_loyalty.js'
 import { checkAppointmentSlotCapacityTx, normalizeServiceSlotCapacity } from '../lib/service_capacity.js';
+import {
+  checkLimiteDiarioClienteTx,
+  diaLocalRange,
+  mensagemLimiteDiario,
+} from '../lib/limite_diario_cliente.js';
 import { setAudit } from '../lib/audit.js';
 import { normalizePhoneBR, toDigits } from '../lib/phone_br.js';
 
@@ -917,6 +922,29 @@ router.post('/', authRequired, isCliente, ensureSubscriptionOperationalAccess({
       });
     }
 
+    // Trava opcional de agendamentos por cliente/dia. Vale AQUI, e nao so' na rota publica:
+    // este e o mesmo ator (o cliente), so' que com conta. Deixar de fora seria oferecer o desvio
+    // "faca login e marque o segundo" para quem esbarrasse na trava pelo link publico.
+    // Dentro da transacao e depois do capacityCheck — ver o comentario extenso em
+    // routes/agendamentos_public.js, que explica o gap lock e a ordem dos locks.
+    const limiteDiario = await checkLimiteDiarioClienteTx({
+      db: conn,
+      estabelecimentoId: estabelecimento_id,
+      clienteId: req.user.id,
+      inicioDate,
+    });
+    if (!limiteDiario.ok) {
+      if (txStarted && conn) {
+        await conn.rollback();
+      }
+      conn.release();
+      return res.status(409).json({
+        error: 'limite_diario_cliente',
+        message: mensagemLimiteDiario(limiteDiario.max),
+        limite_diario: { max: limiteDiario.max, usados: limiteDiario.usados, dia: limiteDiario.dia },
+      });
+    }
+
     const loyaltyApplication = await applyClientLoyaltyBenefitsTx({
       db: conn,
       clienteId: req.user.id,
@@ -1749,6 +1777,14 @@ router.post('/estabelecimento', authRequired, isEstabelecimento, ensureSubscript
     await conn.beginTransaction();
     txStarted = true;
 
+    // SEM a trava de agendamentos por cliente/dia aqui, de propósito — e este é o único lugar
+    // isento. O horizonte da janela de agendamento já segue a mesma regra: o limite existe para
+    // conter o CLIENTE, não o dono. Quem liga o telefone pedindo encaixe no mesmo dia continua
+    // sendo encaixado pelo balcão, que é o motivo de o dono ter um painel.
+    //
+    // A rota irmã que MOVE um agendamento (PUT /:id/reschedule-estab) NÃO é isenta quando o dia
+    // muda — senão a trava seria contornável marcando no dia A e remarcando para o dia B. As
+    // duas decisões são a mesma regra vista de dois lados; ver o comentário lá.
     const capacityCheck = await checkAppointmentSlotCapacityTx({
       db: conn,
       estabelecimentoId: estabelecimento_id,
@@ -2154,6 +2190,47 @@ router.put('/:id/reschedule-estab', authRequired, isEstabelecimento, ensureSubsc
     }
 
     const oldInicioIso = ag?.inicio ? new Date(ag.inicio).toISOString() : null;
+
+    // Trava de agendamentos por cliente/dia, SO' QUANDO O DIA MUDA.
+    //
+    // Esta rota é do estabelecimento (o bot do WhatsApp também remarca por ela, autenticado como
+    // o dono), e criar pelo painel é isento da trava de propósito. Se o reagendamento também
+    // fosse isento, a trava seria contornável em dois toques: marca no dia A, remarca para o
+    // dia B, que é onde o cliente queria o segundo horário.
+    //
+    // Mas checar SEMPRE quebraria o próprio dono no primeiro dia de uso: mover um horário
+    // DENTRO do mesmo dia não muda contagem de dia nenhum, e mesmo assim seria recusado sempre
+    // que aquele dia já tivesse o limite cheio — inclusive por dados anteriores à trava existir,
+    // ou pelo segundo horário que ele mesmo encaixou pelo balcão. Comparar os dias resolve os
+    // dois casos: o remanejamento interno passa sempre, a fuga entre dias continua barrada.
+    //
+    // `ag.inicio` veio do SELECT ... FOR UPDATE acima, então é o valor corrente e travado.
+    const diaAtual = diaLocalRange(new Date(ag.inicio))?.inicioDia || null;
+    const diaDestino = diaLocalRange(inicioDate)?.inicioDia || null;
+    if (diaAtual && diaDestino && diaAtual !== diaDestino) {
+      const limiteDiario = await checkLimiteDiarioClienteTx({
+        db: conn,
+        estabelecimentoId: estId,
+        clienteId: ag.cliente_id,
+        inicioDate,
+        // O próprio agendamento não pode contar contra si mesmo. Aqui ele está em OUTRO dia,
+        // então não entraria na contagem de qualquer forma — o exclude fica por simetria com o
+        // capacityCheck acima e para o dia em que alguém mudar esta condição.
+        excludeAppointmentId: ag.id,
+      });
+      if (!limiteDiario.ok) {
+        if (txStarted && conn) {
+          await conn.rollback();
+        }
+        conn.release();
+        conn = null;
+        return res.status(409).json({
+          error: 'limite_diario_cliente',
+          message: mensagemLimiteDiario(limiteDiario.max),
+          limite_diario: { max: limiteDiario.max, usados: limiteDiario.usados, dia: limiteDiario.dia },
+        });
+      }
+    }
 
     await conn.query(
       'UPDATE agendamentos SET inicio=?, fim=? WHERE id=? AND estabelecimento_id=?',

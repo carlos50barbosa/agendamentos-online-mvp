@@ -398,6 +398,10 @@ export const Api = {
   // payload: { modo: 'livre'|'semanal', abreDia?: 0..6, abreHora?: 0..23, semanas?: 1..12 }
   updateEstablishmentBookingWindow: (payload) =>
     req('/estabelecimento/settings/janela', { method: 'PUT', body: JSON.stringify(payload) }),
+  // Trava de agendamentos do mesmo cliente no mesmo dia. PUT parcial: mandar só o que mudou.
+  // payload: { ativo?: boolean, max?: 1..20 }
+  updateEstablishmentDailyLimit: (payload) =>
+    req('/estabelecimento/settings/limite-diario', { method: 'PUT', body: JSON.stringify(payload) }),
   // Subconta Asaas: a plataforma abre a conta de recebimento pelo estabelecimento.
   getAsaasSubaccount: () => req('/estabelecimento/asaas/subconta'),
   createAsaasSubaccount: (payload) =>

@@ -22,6 +22,11 @@ import {
   fetchJanelaConfig,
 } from '../lib/janela_agendamento.js';
 
+import {
+  LIMITE_DIARIO_MAX_TETO,
+  fetchLimiteDiarioConfig,
+} from '../lib/limite_diario_cliente.js';
+
 const router = Router();
 const DEFAULT_DEPOSIT_HOLD_MINUTES = 15;
 // Teto igual ao da lib. Aqui a violação vira 400 em vez de cair no default: no PUT vindo da
@@ -144,6 +149,18 @@ function serializeJanelaSettings(config, now = new Date()) {
   };
 }
 
+/**
+ * A trava de agendamentos por cliente/dia. Sem previa calculada como a da janela: o efeito dela
+ * depende de QUEM esta marcando, e a tela de configuracao nao tem cliente nenhum em maos.
+ */
+function serializeLimiteDiario(config) {
+  return {
+    ativo: config.ativo,
+    max: config.max,
+    max_teto: LIMITE_DIARIO_MAX_TETO,
+  };
+}
+
 router.get('/settings', auth, isEstabelecimento, async (req, res) => {
   try {
     const estId = Number(req.user?.id);
@@ -157,11 +174,15 @@ router.get('/settings', auth, isEstabelecimento, async (req, res) => {
     const settings = await fetchDepositSettings(estId);
     const allowed = planAllowsDeposit(planContext.plan);
     const janelaConfig = await fetchJanelaConfig(pool, estId);
+    const limiteDiarioConfig = await fetchLimiteDiarioConfig(pool, estId);
     return res.json({
       deposit: serializeDeposit(settings, allowed),
       // Sem gate de plano: limitar o horizonte da própria agenda é ajuste de operação, não
       // recurso pago. Quem tiver conta ativa configura.
       janela: serializeJanelaSettings(janelaConfig),
+      // Mesmo raciocínio da janela, e por isso fora de `features`: quantos horários o mesmo
+      // cliente pode ocupar num dia é regra de operação da casa, não recurso vendido.
+      limite_diario: serializeLimiteDiario(limiteDiarioConfig),
       provider: resolveDepositProvider(),
       features: { deposit: allowed },
     });
@@ -418,6 +439,73 @@ router.put('/settings/janela', auth, isEstabelecimento, async (req, res) => {
     return res.json({ ok: true, janela: serializeJanelaSettings(saved) });
   } catch (err) {
     console.error('PUT /estabelecimento/settings/janela', err?.stack || err);
+    return res.status(500).json({ error: 'settings_save_failed' });
+  }
+});
+
+router.put('/settings/limite-diario', auth, isEstabelecimento, async (req, res) => {
+  try {
+    const estId = Number(req.user?.id);
+    if (!Number.isFinite(estId) || estId <= 0) {
+      return res.status(400).json({ error: 'missing_estabelecimento_id' });
+    }
+    const planContext = await getPlanContext(estId);
+    if (!planContext) {
+      return res.status(404).json({ error: 'estabelecimento_inexistente' });
+    }
+
+    const current = await fetchLimiteDiarioConfig(pool, estId);
+    const body = req.body || {};
+    const has = (key) => Object.prototype.hasOwnProperty.call(body, key);
+
+    // PUT parcial, como o da janela: campo omitido preserva o que estava. Assim a tela pode
+    // mandar só o que o dono mexeu, e um cliente HTTP antigo não zera campo que nem conhece.
+    let ativo = current.ativo;
+    if (has('ativo')) {
+      if (typeof body.ativo !== 'boolean') {
+        return res.status(400).json({ error: 'invalid_ativo', message: 'Informe verdadeiro ou falso.' });
+      }
+      ativo = body.ativo;
+    }
+
+    let max = current.max;
+    if (has('max')) {
+      const num = Number(body.max);
+      // Faixa inválida vira 400 e não clamp silencioso — mesmo critério do PUT /settings/janela.
+      // Clampar faria o dono digitar 50, ver "salvo" e receber uma regra que não foi a que pediu.
+      if (!Number.isFinite(num) || !Number.isInteger(num) || num < 1 || num > LIMITE_DIARIO_MAX_TETO) {
+        return res.status(400).json({
+          error: 'invalid_max',
+          message: `Informe de 1 a ${LIMITE_DIARIO_MAX_TETO} agendamentos por dia.`,
+        });
+      }
+      max = num;
+    }
+
+    await pool.query(
+      `INSERT INTO establishment_settings
+         (estabelecimento_id, limite_diario_ativo, limite_diario_max)
+       VALUES (?,?,?)
+       ON DUPLICATE KEY UPDATE
+         limite_diario_ativo=VALUES(limite_diario_ativo),
+         limite_diario_max=VALUES(limite_diario_max)`,
+      [estId, ativo ? 1 : 0, max]
+    );
+
+    const saved = await fetchLimiteDiarioConfig(pool, estId);
+    const diff = diffFields(current, saved, ['ativo', 'max']);
+    setAudit(req, {
+      acao: 'config.limite_diario_cliente',
+      entidade: 'configuracao',
+      entidade_id: estId,
+      estabelecimento_id: estId,
+      dados_antes: diff?.antes || null,
+      dados_depois: diff?.depois || null,
+    });
+
+    return res.json({ ok: true, limite_diario: serializeLimiteDiario(saved) });
+  } catch (err) {
+    console.error('PUT /estabelecimento/settings/limite-diario', err?.stack || err);
     return res.status(500).json({ error: 'settings_save_failed' });
   }
 });

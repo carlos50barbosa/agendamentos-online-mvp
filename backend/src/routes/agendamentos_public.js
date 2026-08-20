@@ -41,6 +41,10 @@ import { applyClientLoyaltyBenefitsTx, previewClientLoyaltyBenefits } from '../l
 import { cancelPendingPaymentAppointmentTx, cancelPublicPendingAppointmentTx } from '../lib/appointment_loyalty.js'
 import { checkAppointmentSlotCapacityTx, normalizeServiceSlotCapacity } from '../lib/service_capacity.js';
 import { normalizePhoneBR, toDigits, isValidMobileBR } from '../lib/phone_br.js';
+import {
+  checkLimiteDiarioClienteTx,
+  mensagemLimiteDiario,
+} from '../lib/limite_diario_cliente.js';
 import { getClientIp } from '../lib/client_ip.js';
 import {
   buildRateLimitBody,
@@ -1216,6 +1220,37 @@ router.post('/', ensureSubscriptionOperationalAccess({
       return res.status(409).json({
         error: capacityCheck.error,
         message: capacityCheck.message,
+      });
+    }
+
+    // Trava opcional do estabelecimento: N agendamentos por cliente por dia.
+    //
+    // DENTRO da transação, e depois do capacityCheck de propósito. Fora da transação ela fura no
+    // caso que a motivou: dois cliques quase simultâneos leem "0 usados" e os dois gravam — a
+    // cliente do caso 194 disparou quatro POSTs em seis segundos. Aqui o SELECT ... FOR UPDATE
+    // tranca a faixa do dia (gap lock, que só existe porque lib/db.js fixa REPEATABLE READ) e o
+    // concorrente espera em vez de passar por baixo.
+    //
+    // Depois do capacityCheck para manter a mesma ordem de aquisição de locks das duas checagens
+    // (bloqueios -> agendamentos); invertê-la é o que produz deadlock entre requisições cruzadas.
+    //
+    // Vale aqui porque esta rota é o lado do CLIENTE — e é também por onde o bot do WhatsApp
+    // cria. O dono, que marca pelo painel, não é limitado: ver POST /agendamentos/estabelecimento.
+    const limiteDiario = await checkLimiteDiarioClienteTx({
+      db: conn,
+      estabelecimentoId: estabelecimento_id,
+      clienteId: userId,
+      inicioDate,
+    });
+    if (!limiteDiario.ok) {
+      if (txStarted && conn) {
+        await conn.rollback();
+      }
+      conn.release();
+      return res.status(409).json({
+        error: 'limite_diario_cliente',
+        message: mensagemLimiteDiario(limiteDiario.max),
+        limite_diario: { max: limiteDiario.max, usados: limiteDiario.usados, dia: limiteDiario.dia },
       });
     }
 

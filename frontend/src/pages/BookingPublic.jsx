@@ -43,6 +43,11 @@ function mapBookingError(e) {
       return 'Esse horário está fora do funcionamento. Escolha outro.';
     case 'plan_limit_agendamentos':
       return 'O estabelecimento atingiu o limite de agendamentos do plano.';
+    case 'limite_diario_cliente':
+      // O backend manda a frase pronta (lib/limite_diario_cliente.js), porque ela varia com o
+      // limite que o estabelecimento configurou. Duplicar o texto aqui faria as duas divergirem
+      // no dia em que alguém mudasse um dos lados.
+      return msg || 'Você já atingiu o limite de agendamentos deste dia. Escolha outro dia.';
     case 'cliente_conflito':
       return 'Esse e-mail ou telefone já está cadastrado com dados diferentes. Use o mesmo e-mail e telefone do seu cadastro anterior.';
     case 'subscription_access_blocked':
