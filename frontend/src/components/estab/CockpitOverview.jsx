@@ -165,8 +165,8 @@ const ymdKey = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.get
 const weekIndex = (d) => d.getDay() // dom=0 ... sáb=6
 const firstName = (name) => String(name || '').trim().split(/\s+/)[0] || ''
 
-// Normaliza os agendamentos (TODAS as datas) e colapsa duplicatas exatas
-// (mesmo cliente + mesmo horário de início), mantendo o de melhor status.
+// Normaliza os agendamentos (TODAS as datas) e colapsa o que ficou OBSOLETO no mesmo horário
+// (o cancelado que foi sucedido por um confirmado), preservando tudo que continua valendo.
 const STATUS_RANK = { confirmado: 3, aguardando_sinal: 2, pendente: 2, concluido: 1, cancelado: 0 }
 function normalizeItems(itens) {
   const mapped = (itens || [])
@@ -185,6 +185,11 @@ function normalizeItems(itens) {
         id: item?.id, start, end, norm,
         resourceId: getResourceId(item), resourceName: getResourceName(item),
         client: item?.cliente_nome || item?.client_name || 'Cliente',
+        // Identidade do cliente para o AGRUPAMENTO, separada de `client`, que é rótulo de
+        // tela. Duas clientes podem se chamar "Maria Silva" (o cadastro de convidado insere
+        // por telefone, com o nome digitado à mão, e `usuarios.nome` não tem unicidade); o
+        // cancelamento de uma não pode ser absorvido pelo confirmado da outra.
+        clientKey: item?.cliente_id != null ? `c${item.cliente_id}` : `n${String(item?.cliente_nome || '').trim().toLowerCase()}`,
         service: getServiceLabel(item), confirmedAt: getConfirmedAt(item),
         clientPhone: getClientPhone(item), valueCent: getItemValueCentavos(item),
         depositPaidAt: item?.deposit_paid_at || null, depositCent: Number(item?.deposit_centavos) || 0,
@@ -192,26 +197,48 @@ function normalizeItems(itens) {
     })
     .filter(Boolean)
   const rankOf = (ev) => STATUS_RANK[ev.norm] ?? 1
-  const byKey = new Map()
-  for (const ev of mapped) {
-    // O `resourceId` na chave NÃO é decoração: sem ele o dedupe atravessa profissionais e
-    // ESCONDE atendimento simultâneo, que em salão é rotina — a mesma cliente faz escova com
-    // uma e unha com outra no mesmo horário. Com a chave só em cliente+início as duas linhas
-    // colidem, sobrevive a de id maior e a outra some da lane, do faturamento e das contagens
-    // do dia (tudo sai de `dedupedAll`). Medido em 19/08/2026: três agendamentos sumiram de um
-    // sábado só, e o estabelecimento leu a lane vazia da profissional como "tarde livre" —
-    // enquanto a grade pública, que lê o banco, recusava o horário como ocupado.
-    //
-    // O que o dedupe existe para colapsar continua colapsando, porque é sempre da MESMA
-    // profissional: a remarcação no mesmo horário (cancelado + confirmado) some pelo
-    // STATUS_RANK, igual a antes.
-    const key = `${String(ev.resourceId)}|${String(ev.client || '').trim().toLowerCase()}|${ev.start.getTime()}`
-    const cur = byKey.get(key)
-    if (!cur || rankOf(ev) > rankOf(cur) || (rankOf(ev) === rankOf(cur) && Number(ev.id) > Number(cur.id))) {
-      byKey.set(key, ev)
+
+  // Guarda de identidade: a MESMA linha nunca pode virar dois cards. É o que torna seguro o
+  // laço abaixo preservar empates — sem isto, uma duplicata exata vinda do payload passaria
+  // a ser desenhada duas vezes em vez de colapsar.
+  const vistos = new Set()
+  const unicos = mapped.filter((ev) => {
+    if (ev.id == null) return true
+    if (vistos.has(ev.id)) return false
+    vistos.add(ev.id)
+    return true
+  })
+
+  // O dedupe guarda TODOS os eventos de melhor status do grupo, não um só.
+  //
+  // Descartar no EMPATE era o defeito estrutural: duas linhas legítimas com a mesma chave e o
+  // mesmo status são dois atendimentos de verdade, e ficar com "a de id maior" fazia a outra
+  // sumir da lane, do `metrics.faturamento` e das contagens do dia (tudo sai de `dedupedAll`).
+  // Em 19/08/2026 isso escondeu 14 agendamentos em produção. A causa medida na época foi a
+  // chave sem profissional, mas trocar a chave só move o gatilho — o mesmo empate reaparece
+  // com dois profissionais EXCLUÍDOS (a FK é ON DELETE SET NULL, os dois viram `sem-id` e
+  // colidem de novo), com clientes homônimas, e com uma cliente ocupando duas vagas de um
+  // serviço de `capacidade_por_horario > 1`. Preservar o empate fecha os três de uma vez,
+  // porque para de depender de a chave ser uma identidade perfeita.
+  //
+  // O colapso que o dedupe existe para fazer continua intacto, e ele é sempre entre status
+  // DIFERENTES: a remarcação no mesmo horário (cancelado + confirmado) segue mostrando só o
+  // confirmado, porque o rank menor é descartado como antes.
+  const grupos = new Map()
+  for (const ev of unicos) {
+    const key = `${String(ev.resourceId)}|${ev.clientKey}|${ev.start.getTime()}`
+    const grupo = grupos.get(key)
+    if (!grupo) {
+      grupos.set(key, [ev])
+    } else if (rankOf(ev) > rankOf(grupo[0])) {
+      grupos.set(key, [ev])
+    } else if (rankOf(ev) === rankOf(grupo[0])) {
+      grupo.push(ev)
     }
   }
-  return Array.from(byKey.values()).sort((a, b) => a.start - b.start)
+  return Array.from(grupos.values())
+    .flat()
+    .sort((a, b) => a.start - b.start)
 }
 
 /* ---- Bloqueios de agenda ------------------------------------------------- */
