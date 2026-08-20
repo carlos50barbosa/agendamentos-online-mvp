@@ -587,6 +587,14 @@ export const Api = {
       headers: { 'X-Otp-Token': String(otpToken || '') },
     }),
 
+  // Prova de posse por mensagem RECEBIDA: pede o link, e depois pergunta se a mensagem chegou.
+  // Não é OTP — a categoria AUTHENTICATION da Meta é inalcançável para o volume desta conta.
+  publicWaLinkRequest: () =>
+    req('/public/agendamentos/meus/link', { method: 'POST', body: JSON.stringify({}) }),
+
+  publicWaLinkStatus: (requestId) =>
+    req(`/public/agendamentos/meus/link/${encodeURIComponent(requestId)}`),
+
   publicAgendamentoDepositPix: (id, token) =>
     req(`/public/agendamentos/${id}/deposit/pix`, { method: 'POST', body: JSON.stringify({ token }) }),
 

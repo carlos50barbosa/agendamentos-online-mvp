@@ -31,10 +31,23 @@ import {
 } from '../lib/deposit_payments.js';
 import { buildPublicDepositToken, verifyPublicDepositToken } from '../lib/public_deposit_token.js';
 import { buildPublicAppointmentToken, verifyPublicAppointmentToken } from '../lib/public_appointment_token.js';
+import {
+  buildLinkMessage,
+  buildWaLink,
+  consumeConfirmedLinkRequest,
+  createLinkRequest,
+} from '../lib/wa_link_requests.js';
 import { applyClientLoyaltyBenefitsTx, previewClientLoyaltyBenefits } from '../lib/client_loyalty_credits.js'
 import { cancelPendingPaymentAppointmentTx, cancelPublicPendingAppointmentTx } from '../lib/appointment_loyalty.js'
 import { checkAppointmentSlotCapacityTx, normalizeServiceSlotCapacity } from '../lib/service_capacity.js';
 import { normalizePhoneBR, toDigits, isValidMobileBR } from '../lib/phone_br.js';
+import { getClientIp } from '../lib/client_ip.js';
+import {
+  buildRateLimitBody,
+  buildRateLimitClientKey,
+  consumeRateLimit,
+  setRateLimitHeaders,
+} from '../lib/request_rate_limit.js';
 import { isDentroDaJanela, resolveJanela, serializeJanela } from '../lib/janela_agendamento.js';
 
 const router = Router();
@@ -1690,6 +1703,84 @@ router.get('/confirm', async (req, res) => {
       title: 'Erro na confirmação',
       message: 'Não foi possível confirmar agora. Tente novamente.',
     });
+  }
+});
+
+// POST /public/agendamentos/meus/link
+//
+// Abre um pedido de acesso e devolve o link de WhatsApp com a frase pronta. A prova de que o número
+// é dela é ela ENVIAR a mensagem — ninguém manda do WhatsApp de um estranho. É o mesmo mecanismo do
+// AUTORIZO, e existe aqui porque o caminho do código (template AUTHENTICATION) depende de uma
+// elegibilidade da Meta que esta conta não alcança. Ver lib/wa_link_requests.js.
+router.post('/meus/link', async (req, res) => {
+  try {
+    const limits = config.security?.rateLimit?.otpPublic || {};
+    const gate = await consumeRateLimit({
+      bucketKey: `wa-link:${buildRateLimitClientKey(req)}`,
+      windowMs: limits.windowMs,
+      max: limits.max,
+    });
+    setRateLimitHeaders(res, gate);
+    if (gate.limited) {
+      return res.status(429).json(buildRateLimitBody(gate, { request_id: req.requestId || null }));
+    }
+
+    const { requestId, code, expiresAt } = await createLinkRequest({ ip: getClientIp(req) });
+    const waLink = buildWaLink(code);
+    if (!waLink) {
+      console.error('[public/agendamentos][meus/link] WA_PUBLIC_NUMBER ausente', {
+        code: 'wa_public_number_missing',
+      });
+      return res.status(503).json({
+        error: 'wa_unavailable',
+        message: 'O acesso pelo WhatsApp está indisponível no momento.',
+      });
+    }
+
+    // O código volta em claro para a tela porque ela precisa mostrá-lo: o link wa.me abre com o
+    // texto pronto, mas em navegador embutido isso às vezes se perde e a pessoa digita.
+    return res.json({
+      request_id: requestId,
+      code,
+      message: buildLinkMessage(code),
+      wa_link: waLink,
+      expires_at: expiresAt,
+    });
+  } catch (err) {
+    console.error('[public/agendamentos][meus/link]', err);
+    return res.status(500).json({ error: 'server_error' });
+  }
+});
+
+// GET /public/agendamentos/meus/link/:requestId — a aba perguntando "já chegou?".
+//
+// Quando chegou, devolve um token de escopo 'otp' idêntico ao que o /verify emite: o telefone já
+// está PROVADO, e reaproveitar o formato deixa o GET /meus sem saber de onde veio a prova.
+router.get('/meus/link/:requestId', async (req, res) => {
+  try {
+    const secret = process.env.JWT_SECRET;
+    if (!secret) return res.status(500).json({ error: 'server_config' });
+
+    const result = await consumeConfirmedLinkRequest({ requestId: req.params.requestId });
+    if (result.status === 'pending') return res.json({ status: 'pending' });
+    if (result.status !== 'confirmed') {
+      // not_found, used e expired viram a mesma resposta: os três significam "peça outro link", e
+      // separá-los só contaria a quem perguntou se aquele request_id existiu.
+      return res.status(410).json({
+        status: 'expired',
+        message: 'Este pedido expirou. Gere um novo link e envie a mensagem de novo.',
+      });
+    }
+
+    const token = jwt.sign(
+      { scope: 'otp', ch: 'phone', v: result.phone, rid: String(req.params.requestId) },
+      secret,
+      { expiresIn: '30m' }
+    );
+    return res.json({ status: 'confirmed', otp_token: token });
+  } catch (err) {
+    console.error('[public/agendamentos][meus/link/status]', err);
+    return res.status(500).json({ error: 'server_error' });
   }
 });
 

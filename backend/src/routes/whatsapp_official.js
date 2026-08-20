@@ -18,6 +18,7 @@ import { maybeNotifyTemplatesReady } from '../services/waTemplateNotifier.js';
 import { handleInstitutionalInboundAutoReply } from '../whatsapp/inbound/institutionalAutoReply.js';
 import { handleInboundOptOut } from '../whatsapp/inbound/optOut.js';
 import { handleInboundOptInConfirm } from '../whatsapp/inbound/optInConfirm.js';
+import { handleInboundAppointmentsLink } from '../whatsapp/inbound/appointmentsLink.js';
 import { handleReminderConfirmation } from '../whatsapp/inbound/reminderConfirmation.js';
 import { TEMPLATE_KEYS } from '../bot/templates/templateRegistry.js';
 import { dispatchBotReply } from '../bot/runtime/replyDispatcher.js';
@@ -793,6 +794,10 @@ async function processWebhookPayload(payload) {
         // AUTORIZO vem depois do PARAR: quem pede para sair ganha de quem pede para entrar.
         const optIn = await handleInboundOptInConfirm({ phoneNumberId, value: block.value, message });
         if (optIn.handled) continue;
+        // "MEUS AGENDAMENTOS <código>": depois do AUTORIZO porque o consentimento é o gesto mais
+        // importante, e antes da saudação institucional porque um código válido não é conversa.
+        const link = await handleInboundAppointmentsLink({ phoneNumberId, value: block.value, message });
+        if (link.handled) continue;
         try {
           await handleInstitutionalInboundAutoReply({
             phoneNumberId,
@@ -822,6 +827,10 @@ async function processWebhookPayload(payload) {
       if (optOut.handled) continue;
       const optIn = await handleInboundOptInConfirm({ phoneNumberId, value: block.value, message });
       if (optIn.handled) continue;
+      // Também no caminho do bot do tenant: o código destrava a lista e não deve virar turno de
+      // conversa do bot.
+      const link = await handleInboundAppointmentsLink({ phoneNumberId, value: block.value, message });
+      if (link.handled) continue;
       await processInboundMessage({
         account,
         phoneNumberId,

@@ -8,19 +8,29 @@
 // Dois níveis de acesso, deliberadamente distintos:
 //   1. ESTE agendamento — token assinado na URL, emitido no fim do fluxo. Abre direto, sem atrito,
 //      e mostra UM agendamento: o que a pessoa acabou de fazer.
-//   2. TODOS — exige código por WhatsApp. O telefone digitado no wizard nunca foi verificado; sem
-//      o código, um token de URL provaria apenas que alguém digitou aquele número, e listar o
-//      histórico a partir dele deixaria qualquer um ler a agenda de um estranho.
+//   2. TODOS — exige que ela ENVIE uma mensagem pelo WhatsApp. O telefone digitado no wizard nunca
+//      foi verificado; sem prova, um token de URL diria apenas que alguém digitou aquele número, e
+//      listar o histórico a partir dele deixaria qualquer um ler a agenda de um estranho.
+//
+// ─── Por que a prova é mensagem ENVIADA, e não um código recebido ──────────────────────────────
+//
+// Prático: quem pede acesso está sempre fora da janela de 24h, e fora dela a Meta só entrega
+// template. O único template legítimo para código é o de categoria AUTHENTICATION, que exige um
+// scaling path (verificação MAIS milhares de mensagens/mês) fora do alcance desta conta.
+//
+// De fundo, e é o que decide: um código prova quem tem ACESSO AO APARELHO; uma mensagem enviada
+// daquele número prova quem é DONO dele. É o mesmo raciocínio do AUTORIZO em
+// backend/src/whatsapp/inbound/optInConfirm.js.
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { CalendarDays, ChevronLeft, Loader2, ShieldCheck } from 'lucide-react';
+import { CalendarDays, ChevronLeft, Loader2, MessageCircle, ShieldCheck } from 'lucide-react';
 import { Api } from '../utils/api.js';
 import { getUser } from '../utils/auth.js';
-import { formatBRPhone, isValidMobileBR } from '../utils/masks.js';
 import StatusBadge from '../components/client-appointments/StatusBadge.jsx';
 import { formatDateTimeBr, isPastDateTime } from '../utils/formatDateTimeBr.js';
 
 const OTP_STORAGE_KEY = 'meus_agendamentos_otp';
+const POLL_INTERVAL_MS = 3000;
 
 function serviceLabel(item) {
   const names = Array.isArray(item?.servicos) ? item.servicos.map((s) => s?.nome).filter(Boolean) : [];
@@ -69,8 +79,7 @@ export default function MeusAgendamentos() {
   const appointmentId = Number(searchParams.get('ag') || 0);
 
   const [current, setCurrent] = useState({ loading: Boolean(token && appointmentId), item: null, error: '' });
-  const [phone, setPhone] = useState('');
-  const [otp, setOtp] = useState({ step: 'idle', requestId: '', code: '', sending: false, error: '' });
+  const [link, setLink] = useState({ status: 'idle', requestId: '', code: '', waLink: '', error: '' });
   const [list, setList] = useState({ loading: false, items: null, error: '' });
 
   // Cliente COM login não precisa disto: /cliente é a tela completa dele (cancelar, filtrar, pagar
@@ -89,7 +98,7 @@ export default function MeusAgendamentos() {
         const data = await Api.publicGetAgendamento(appointmentId, token);
         if (alive) setCurrent({ loading: false, item: data, error: '' });
       } catch {
-        // Link velho ou adulterado. Não é beco sem saída: o caminho do código segue logo abaixo.
+        // Link velho ou adulterado. Não é beco sem saída: o caminho do WhatsApp segue logo abaixo.
         if (alive) setCurrent({ loading: false, item: null, error: 'Este link expirou ou não é mais válido.' });
       }
     })();
@@ -103,58 +112,65 @@ export default function MeusAgendamentos() {
       setList({ loading: false, items: Array.isArray(data?.items) ? data.items : [], error: '' });
     } catch {
       try { sessionStorage.removeItem(OTP_STORAGE_KEY); } catch {}
-      setList({ loading: false, items: null, error: 'Não foi possível carregar sua lista. Peça um novo código.' });
-      setOtp({ step: 'idle', requestId: '', code: '', sending: false, error: '' });
+      setList({ loading: false, items: null, error: 'Não foi possível carregar sua lista. Envie a mensagem de novo.' });
+      setLink({ status: 'idle', requestId: '', code: '', waLink: '', error: '' });
     }
   }, []);
 
-  // O otp_token vale 30 min no backend. Guardar na sessão evita pedir código de novo a cada recarga
-  // dentro dessa janela — e some quando a aba fecha.
+  // O token vale 30 min no backend. Guardar na sessão evita repetir a prova a cada recarga dentro
+  // dessa janela — e some quando a aba fecha.
   useEffect(() => {
     let stored = '';
     try { stored = sessionStorage.getItem(OTP_STORAGE_KEY) || ''; } catch {}
     if (stored) loadList(stored);
   }, [loadList]);
 
-  const sendCode = useCallback(async () => {
-    const digits = phone.replace(/\D/g, '');
-    if (!isValidMobileBR(digits)) {
-      setOtp((s) => ({ ...s, error: 'Informe um celular válido com DDD.' }));
-      return;
-    }
-    setOtp((s) => ({ ...s, sending: true, error: '' }));
+  const startLink = useCallback(async () => {
+    setLink({ status: 'creating', requestId: '', code: '', waLink: '', error: '' });
     try {
-      const resp = await Api.requestOtp('phone', digits);
-      setOtp({ step: 'code', requestId: resp?.request_id || '', code: '', sending: false, error: '' });
+      const resp = await Api.publicWaLinkRequest();
+      setLink({
+        status: 'waiting',
+        requestId: resp?.request_id || '',
+        code: resp?.code || '',
+        waLink: resp?.wa_link || '',
+        error: '',
+      });
     } catch (e) {
-      // 429 tem mensagem própria do backend (teto por IP e por destino) — vale mais que um genérico.
-      const message = e?.data?.message || e?.message || '';
-      setOtp((s) => ({
-        ...s,
-        sending: false,
-        error: /muitas|aguarde|tente/i.test(message) ? message : 'Não foi possível enviar o código. Tente de novo.',
-      }));
+      const message = String(e?.data?.message || '').trim();
+      setLink({
+        status: 'idle',
+        requestId: '',
+        code: '',
+        waLink: '',
+        error: message || 'Não foi possível gerar o link agora. Tente de novo.',
+      });
     }
-  }, [phone]);
+  }, []);
 
-  const confirmCode = useCallback(async () => {
-    const code = otp.code.replace(/\D/g, '');
-    if (code.length !== 6) {
-      setOtp((s) => ({ ...s, error: 'O código tem 6 dígitos.' }));
-      return;
-    }
-    setOtp((s) => ({ ...s, sending: true, error: '' }));
-    try {
-      const resp = await Api.verifyOtp(otp.requestId, code);
-      const otpToken = resp?.otp_token || '';
-      if (!otpToken) throw new Error('sem token');
-      try { sessionStorage.setItem(OTP_STORAGE_KEY, otpToken); } catch {}
-      setOtp({ step: 'done', requestId: '', code: '', sending: false, error: '' });
-      await loadList(otpToken);
-    } catch {
-      setOtp((s) => ({ ...s, sending: false, error: 'Código inválido ou expirado. Peça outro.' }));
-    }
-  }, [otp.code, otp.requestId, loadList]);
+  // Espera a mensagem dela chegar. O servidor é quem sabe: a aba só pergunta.
+  useEffect(() => {
+    if (link.status !== 'waiting' || !link.requestId) return undefined;
+    let alive = true;
+    const timer = setInterval(async () => {
+      try {
+        const resp = await Api.publicWaLinkStatus(link.requestId);
+        if (!alive || resp?.status !== 'confirmed') return;
+        clearInterval(timer);
+        const otpToken = resp?.otp_token || '';
+        try { sessionStorage.setItem(OTP_STORAGE_KEY, otpToken); } catch {}
+        setLink((s) => ({ ...s, status: 'confirmed' }));
+        loadList(otpToken);
+      } catch (e) {
+        // 410 = pedido expirou ou já foi usado. Qualquer outra falha é de rede: continuar tentando,
+        // porque a pessoa pode estar justamente trocando de app para enviar a mensagem.
+        if (!alive || e?.status !== 410) return;
+        clearInterval(timer);
+        setLink((s) => ({ ...s, status: 'expired' }));
+      }
+    }, POLL_INTERVAL_MS);
+    return () => { alive = false; clearInterval(timer); };
+  }, [link.status, link.requestId, loadList]);
 
   const showList = list.loading || list.items !== null;
 
@@ -198,7 +214,7 @@ export default function MeusAgendamentos() {
           <p className="tw-m-0 tw-text-sm" style={{ color: 'var(--muted-ink, #6B7280)' }}>{current.error}</p>
         )}
 
-        {/* 2. A lista completa, atrás do código. */}
+        {/* 2. A lista completa, atrás da mensagem enviada por ela. */}
         {!showList && (
           <section
             className="tw-flex tw-flex-col tw-gap-3 tw-rounded-2xl tw-p-4"
@@ -207,69 +223,57 @@ export default function MeusAgendamentos() {
             <div className="tw-flex tw-items-start tw-gap-2">
               <ShieldCheck size={18} strokeWidth={2.2} aria-hidden="true" style={{ color: 'var(--brand, #5049E5)', flexShrink: 0, marginTop: 2 }} />
               <p className="tw-m-0 tw-text-sm" style={{ color: 'var(--muted-ink, #6B7280)' }}>
-                Para ver <b style={{ color: 'var(--ink, #1E1B4B)' }}>todos</b> os seus agendamentos, confirme seu
-                celular. Enviamos um código de 6 dígitos no WhatsApp.
+                Para ver <b style={{ color: 'var(--ink, #1E1B4B)' }}>todos</b> os seus agendamentos, envie uma
+                mensagem pelo seu WhatsApp. É assim que confirmamos que o número é seu — sem senha e sem código.
               </p>
             </div>
 
-            {otp.step !== 'code' ? (
+            {link.status === 'waiting' || link.status === 'confirmed' ? (
               <>
-                <label className="tw-flex tw-flex-col tw-gap-1 tw-text-xs tw-font-semibold" style={{ color: 'var(--ink, #1E1B4B)' }}>
-                  Celular (WhatsApp)
-                  <input
-                    value={phone}
-                    onChange={(e) => setPhone(formatBRPhone(e.target.value))}
-                    placeholder="(11) 99999-9999"
-                    inputMode="tel"
-                    autoComplete="tel"
-                    className="tw-rounded-xl tw-px-3 tw-py-2 tw-text-sm tw-font-normal"
-                    style={{ border: '1px solid var(--brand-border, #E7E5F5)', background: 'var(--bg-lav, #F6F5FB)', color: 'var(--ink, #1E1B4B)' }}
-                  />
-                </label>
-                <button
-                  type="button"
-                  onClick={sendCode}
-                  disabled={otp.sending}
-                  className="tw-rounded-xl tw-px-4 tw-py-2.5 tw-text-sm tw-font-semibold"
-                  style={{ background: 'var(--brand, #5049E5)', color: '#fff', border: 0, opacity: otp.sending ? 0.7 : 1 }}
+                <a
+                  href={link.waLink}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="tw-inline-flex tw-w-full tw-items-center tw-justify-center tw-gap-2 tw-rounded-xl tw-px-4 tw-font-semibold tw-text-white"
+                  style={{ minHeight: 48, background: '#16A34A' }}
                 >
-                  {otp.sending ? 'Enviando…' : 'Enviar código'}
-                </button>
+                  <MessageCircle size={18} strokeWidth={2.4} aria-hidden="true" />
+                  Abrir o WhatsApp
+                </a>
+                <p className="tw-m-0 tw-text-xs" style={{ color: 'var(--muted-ink, #6B7280)' }}>
+                  Toque acima e <b>envie</b> a mensagem que abrir. Se ela não vier preenchida, escreva:
+                </p>
+                {/* O código também aparece em texto: em navegador embutido o wa.me às vezes abre sem
+                    o texto pronto, e sem isto a pessoa fica sem saber o que mandar. */}
+                <p
+                  className="tw-m-0 tw-select-all tw-rounded-xl tw-px-3 tw-py-2 tw-text-sm tw-font-semibold"
+                  style={{ background: 'var(--bg-lav, #F6F5FB)', color: 'var(--ink, #1E1B4B)', letterSpacing: '.02em' }}
+                >
+                  MEUS AGENDAMENTOS {link.code}
+                </p>
+                <p className="tw-m-0 tw-flex tw-items-center tw-gap-2 tw-text-xs" style={{ color: 'var(--muted-ink, #6B7280)' }}>
+                  <Loader2 size={14} className="tw-animate-spin" aria-hidden="true" />
+                  Esperando sua mensagem… esta tela abre sozinha assim que ela chegar.
+                </p>
               </>
             ) : (
-              <>
-                <label className="tw-flex tw-flex-col tw-gap-1 tw-text-xs tw-font-semibold" style={{ color: 'var(--ink, #1E1B4B)' }}>
-                  Código enviado para {phone}
-                  <input
-                    value={otp.code}
-                    onChange={(e) => setOtp((s) => ({ ...s, code: e.target.value.replace(/\D/g, '').slice(0, 6) }))}
-                    placeholder="000000"
-                    inputMode="numeric"
-                    autoComplete="one-time-code"
-                    className="tw-rounded-xl tw-px-3 tw-py-2 tw-text-lg tw-font-normal tw-tracking-widest"
-                    style={{ border: '1px solid var(--brand-border, #E7E5F5)', background: 'var(--bg-lav, #F6F5FB)', color: 'var(--ink, #1E1B4B)' }}
-                  />
-                </label>
-                <button
-                  type="button"
-                  onClick={confirmCode}
-                  disabled={otp.sending}
-                  className="tw-rounded-xl tw-px-4 tw-py-2.5 tw-text-sm tw-font-semibold"
-                  style={{ background: 'var(--brand, #5049E5)', color: '#fff', border: 0, opacity: otp.sending ? 0.7 : 1 }}
-                >
-                  {otp.sending ? 'Verificando…' : 'Ver meus agendamentos'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setOtp({ step: 'idle', requestId: '', code: '', sending: false, error: '' })}
-                  className="tw-bg-transparent tw-text-xs tw-font-semibold"
-                  style={{ color: 'var(--muted-ink, #6B7280)', border: 0 }}
-                >
-                  Usar outro número
-                </button>
-              </>
+              <button
+                type="button"
+                onClick={startLink}
+                disabled={link.status === 'creating'}
+                className="tw-rounded-xl tw-px-4 tw-py-2.5 tw-text-sm tw-font-semibold"
+                style={{ background: 'var(--brand, #5049E5)', color: '#fff', border: 0, opacity: link.status === 'creating' ? 0.7 : 1 }}
+              >
+                {link.status === 'creating' ? 'Gerando…' : 'Ver todos os meus agendamentos'}
+              </button>
             )}
-            {otp.error && <p className="tw-m-0 tw-text-xs" style={{ color: '#DC2626' }}>{otp.error}</p>}
+
+            {link.status === 'expired' && (
+              <p className="tw-m-0 tw-text-xs" style={{ color: '#DC2626' }}>
+                Este pedido expirou. Toque em "Ver todos os meus agendamentos" para gerar outro.
+              </p>
+            )}
+            {link.error && <p className="tw-m-0 tw-text-xs" style={{ color: '#DC2626' }}>{link.error}</p>}
           </section>
         )}
 
