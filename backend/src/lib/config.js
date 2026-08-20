@@ -104,6 +104,20 @@ export const config = {
         windowMs: parsePositiveInt(getAny('NOTIFY_RATE_LIMIT_WINDOW_MS') || 60000, 60000),
         max: parsePositiveInt(getAny('NOTIFY_RATE_LIMIT_MAX') || 20, 20),
       },
+      // /public/otp/request: rota SEM autenticação que dispara e-mail e WhatsApp para o endereço
+      // que vier no corpo. Sem teto, é um enviador aberto — e o WhatsApp sai da WABA da
+      // plataforma, que a Meta já desabilitou duas vezes.
+      //
+      // Duas chaves porque os abusos são diferentes: `max` por IP barra o script que varre uma
+      // lista de números; `destinationMax` barra o assédio a UMA pessoa a partir de muitos IPs
+      // (o caso que o teto por IP não vê). O limite por destino é baixo de propósito: quem pede
+      // um código de verificação legítimo pede duas ou três vezes, não trinta.
+      otpPublic: {
+        windowMs: parsePositiveInt(getAny('OTP_PUBLIC_RATE_LIMIT_WINDOW_MS') || 600000, 600000),
+        max: parsePositiveInt(getAny('OTP_PUBLIC_RATE_LIMIT_MAX') || 10, 10),
+        destinationWindowMs: parsePositiveInt(getAny('OTP_PUBLIC_DESTINATION_RATE_LIMIT_WINDOW_MS') || 3600000, 3600000),
+        destinationMax: parsePositiveInt(getAny('OTP_PUBLIC_DESTINATION_RATE_LIMIT_MAX') || 5, 5),
+      },
       paymentStatusPublic: {
         windowMs: parsePositiveInt(getAny('PAYMENT_STATUS_RATE_LIMIT_WINDOW_MS') || 60000, 60000),
         max: parsePositiveInt(getAny('PAYMENT_STATUS_RATE_LIMIT_MAX') || 60, 60),

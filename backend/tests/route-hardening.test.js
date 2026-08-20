@@ -206,7 +206,7 @@ test('resolveNotifyTokenAccess ignores Authorization bearer fallback and honors 
   assert.equal(bearerOnly.reason, 'missing_token');
 });
 
-test('decideNotifyAccess only allows establishment JWTs or explicit route tokens', () => {
+test('decideNotifyAccess only allows explicit route tokens, never a logged-in user', () => {
   assert.deepEqual(
     decideNotifyAccess({
       tokenAccess: { ok: true, source: 'header:x-notify-token' },
@@ -223,12 +223,15 @@ test('decideNotifyAccess only allows establishment JWTs or explicit route tokens
     { ok: false, status: 403, error: 'forbidden' }
   );
 
+  // O caso que mudou: JWT de estabelecimento válido NÃO abre a rota. Estas rotas enviam para o
+  // `to` cru do corpo sem passar pelo portão de opt-in do outbox, então um token de painel aqui
+  // é disparo em massa sem consentimento — o motivo pelo qual a WABA já caiu duas vezes.
   assert.deepEqual(
     decideNotifyAccess({
       tokenAccess: { ok: false, reason: 'missing_token' },
       authResult: { user: { id: 11, tipo: 'estabelecimento' }, error: null },
     }),
-    { ok: true, source: 'jwt_estabelecimento', user: { id: 11, tipo: 'estabelecimento' } }
+    { ok: false, status: 403, error: 'forbidden' }
   );
 
   assert.deepEqual(
@@ -246,6 +249,54 @@ test('decideNotifyAccess only allows establishment JWTs or explicit route tokens
     }),
     { ok: false, status: 401, error: 'token_expired' }
   );
+});
+
+// O teste que trava P1 de ponta a ponta: JWT REAL de estabelecimento, usuário REAL resolvido do
+// banco (mockado), e mesmo assim 403 nos dois aliases. O teste de unidade acima cobre a decisão;
+// este cobre o caminho inteiro, que é onde uma regressão passaria despercebida — basta alguém
+// reintroduzir o ramo no meio de um refactor de auth.
+//
+// Se ele ficar vermelho, a pergunta não é "como faço passar": é que a rota voltou a aceitar token
+// de painel para enviar WhatsApp ao `to` cru do corpo, sem passar pelo portão de opt-in.
+test('notify routes reject a valid establishment JWT on both aliases', async () => {
+  const secret = process.env.JWT_SECRET || 'secret';
+  const restorePool = installPoolQueryMock({
+    usersById: new Map([[11, { id: 11, nome: 'Salão Teste', tipo: 'estabelecimento' }]]),
+  });
+  const previous = { ...config.security.rateLimit.notify };
+  config.security.rateLimit.notify.max = 50;
+  config.security.rateLimit.notify.windowMs = 60000;
+  resetRateLimitStore();
+
+  const app = createNotifyApp();
+  const { server, baseUrl } = await startServer(app);
+  const token = createJwtToken(11, secret, { expiresIn: '15m' });
+
+  try {
+    for (const path of ['/notify/whatsapp/text', '/api/notify/whatsapp/text']) {
+      const res = await fetch(`${baseUrl}${path}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+        body: JSON.stringify({ to: '+5511999999999', text: 'promoção' }),
+      });
+      assert.equal(res.status, 403, `${path} deveria recusar JWT de estabelecimento`);
+      assert.deepEqual(await res.json(), { ok: false, error: 'forbidden' });
+    }
+
+    // A rota de template usa o mesmo middleware; se alguém abrir só uma das duas, aparece aqui.
+    const template = await fetch(`${baseUrl}/notify/whatsapp/template`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+      body: JSON.stringify({ to: '+5511999999999', name: 'hello_world' }),
+    });
+    assert.equal(template.status, 403);
+  } finally {
+    await stopServer(server);
+    restorePool();
+    config.security.rateLimit.notify.max = previous.max;
+    config.security.rateLimit.notify.windowMs = previous.windowMs;
+    resetRateLimitStore();
+  }
 });
 
 test('notify routes apply rate limiting across api and non-api aliases before auth succeeds', async () => {

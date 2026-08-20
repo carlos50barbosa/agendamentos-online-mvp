@@ -1,7 +1,7 @@
 // src/pages/AdminEstablishments.jsx
 // Panorama super-admin: todos os estabelecimentos com plano/status/vencimento + contagens.
 import React, { useEffect, useMemo, useState } from 'react';
-import { Mail, Phone, Search, RefreshCw, Users, CheckCircle2, AlertTriangle, CalendarDays, ArrowUp, ArrowDown, Trash2, FileText, Copy, X } from 'lucide-react';
+import { Mail, Phone, Search, RefreshCw, Users, CheckCircle2, AlertTriangle, CalendarDays, ArrowUp, ArrowDown, Trash2, FileText, Copy, X, ShieldAlert } from 'lucide-react';
 import { API_BASE_URL as API_BASE } from '../utils/api';
 
 // plan_status -> tom semantico (usa as variaveis do tema, logo acompanha claro/escuro).
@@ -61,6 +61,41 @@ function SatisfacaoCell({ feedback }) {
       ) : null}
       {nota != null && feedback?.nps_em ? (
         <span className="ae-muted" style={{ fontSize: 11 }}>{fmtDate(feedback.nps_em)}</span>
+      ) : null}
+    </div>
+  );
+}
+
+// Mensagens que a plataforma quis mandar e NÃO mandou, porque o destinatário nunca autorizou.
+//
+// É o sinal mais barato que existe de "esta conta está prestes a nos causar um problema com a
+// Meta": o dono acha que está falando com os clientes, o sistema está engolindo tudo, e ninguém
+// dos dois lados sabe. A WABA já foi desabilitada duas vezes — este número subindo é o aviso que
+// vem ANTES do e-mail da Meta.
+//
+// Zero aparece como zero, e não como travessão: "quisemos falar e todo mundo tinha autorizado" é
+// uma informação boa, não uma ausência de dado.
+function SemOptinCell({ dados }) {
+  const total = Number(dados?.blocked_30d || 0);
+  if (!total) return <span className="ae-muted">0</span>;
+
+  // Os limiares são grosseiros de propósito. O que importa é separar "acontece" de "está virando
+  // rotina" — e qualquer coisa acima de uma centena em 30 dias já é rotina.
+  //
+  // `info` e não `neutral`: o tema define success/warning/danger/info e mais nada. Um tom
+  // inventado não falha no build — vira `var(--neutral-bg)` sem valor, e o badge sai sem fundo.
+  const tone = total >= 100 ? 'danger' : total >= 20 ? 'warning' : 'info';
+  return (
+    <div style={{ display: 'grid', gap: 4, justifyItems: 'start' }}>
+      <span
+        className="ae-badge"
+        style={{ background: `var(--${tone}-bg)`, color: `var(--${tone}-text)`, boxShadow: `inset 0 0 0 1px var(--${tone}-border)` }}
+        title="Mensagens não enviadas nos últimos 30 dias porque o número não tem opt-in registrado"
+      >
+        {total.toLocaleString('pt-BR')}
+      </span>
+      {dados?.last_blocked_at ? (
+        <span className="ae-muted" style={{ fontSize: 11 }}>{fmtDate(dados.last_blocked_at)}</span>
       ) : null}
     </div>
   );
@@ -440,7 +475,11 @@ export default function AdminEstablishments() {
       const data = await res.json();
       if (!res.ok) throw new Error(data?.message || data?.error || 'Falha ao carregar panorama');
       setRows(Array.isArray(data.establishments) ? data.establishments : []);
-      setMeta({ count: data.count, generated_at: data.generated_at });
+      setMeta({
+        count: data.count,
+        generated_at: data.generated_at,
+        optinBlocked: Number(data.whatsapp_optin_blocked_30d || 0),
+      });
     } catch (e) {
       setError(e.message);
     } finally {
@@ -590,6 +629,14 @@ export default function AdminEstablishments() {
           <Kpi icon={CheckCircle2} label="Ativos" value={totals.ativos} tone="success" />
           <Kpi icon={AlertTriangle} label="Precisam atenção" value={totals.atencao} tone={totals.atencao ? 'warning' : undefined} />
           <Kpi icon={CalendarDays} label="Agendamentos (total)" value={totals.agend.toLocaleString('pt-BR')} />
+          {/* Soma da plataforma: um tenant com 5 bloqueios não assusta; 900 espalhados por trinta
+              contas é o que antecede um pedido de revisão da Meta. */}
+          <Kpi
+            icon={ShieldAlert}
+            label="Sem opt-in (30d)"
+            value={(meta.optinBlocked || 0).toLocaleString('pt-BR')}
+            tone={meta.optinBlocked >= 100 ? 'danger' : meta.optinBlocked ? 'warning' : undefined}
+          />
         </div>
       )}
 
@@ -607,6 +654,7 @@ export default function AdminEstablishments() {
                 <th className="ae-num">Serviços<br /><span className="ae-muted" style={{ fontWeight: 500, textTransform: 'none' }}>ativos/inativos</span></th>
                 <th className="ae-num">Agend.<br /><span className="ae-muted" style={{ fontWeight: 500, textTransform: 'none' }}>total (mês)</span></th>
                 <th>Satisfação<br /><span className="ae-muted" style={{ fontWeight: 500, textTransform: 'none' }}>último NPS</span></th>
+                <th>Sem opt-in<br /><span className="ae-muted" style={{ fontWeight: 500, textTransform: 'none' }}>bloqueios 30d</span></th>
                 <th>Ações</th>
               </tr>
             </thead>
@@ -631,6 +679,7 @@ export default function AdminEstablishments() {
                     <td className="ae-num">{r.services?.active ?? 0}<span className="ae-muted"> / {r.services?.inactive ?? 0}</span></td>
                     <td className="ae-num"><strong>{(r.appointments?.total ?? 0).toLocaleString('pt-BR')}</strong><span className="ae-muted"> ({r.appointments?.month ?? 0})</span></td>
                     <td><SatisfacaoCell feedback={r.feedback} /></td>
+                    <td><SemOptinCell dados={r.whatsapp_optin} /></td>
                     <td>
                       <button type="button" className="ae-iconbtn" onClick={() => setAlvoExclusao(r)} title="Excluir com protocolo">
                         <Trash2 size={13} /> Excluir
@@ -640,7 +689,7 @@ export default function AdminEstablishments() {
                 );
               })}
               {!filtered.length && (
-                <tr><td colSpan={9} className="ae-empty">{loading ? 'Carregando…' : (rows.length ? 'Nenhum resultado para o filtro.' : 'Cole o token e clique em Carregar.')}</td></tr>
+                <tr><td colSpan={10} className="ae-empty">{loading ? 'Carregando…' : (rows.length ? 'Nenhum resultado para o filtro.' : 'Cole o token e clique em Carregar.')}</td></tr>
               )}
             </tbody>
           </table>

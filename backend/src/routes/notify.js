@@ -25,20 +25,27 @@ export function resolveNotifyTokenAccess(req, env = process.env) {
   });
 }
 
+// Só token de rota. Um JWT de estabelecimento NÃO abre esta porta — e isto é uma correção, não
+// uma restrição nova por precaução.
+//
+// Estas rotas mandam WhatsApp para o `to` que vem CRU no corpo, via sendWhatsAppSmart, que não
+// passa pelo outbox. E o portão de consentimento mora só no outbox (lib/whatsapp_outbox.js:234:
+// hasWhatsAppConsent -> recordWhatsAppBlocked com reason='no_optin'). Ou seja: por aqui se envia
+// para qualquer número, sem opt-in, sem debitar carteira e sem deixar rastro de bloqueio.
+//
+// Enquanto o dono do salão não tinha uma lista de números na mão, isso era um buraco latente: o
+// rate limit é por IP (20/60s = 1.200/h) e o teto global público exclui /notify/ de propósito
+// (index.js:242). Com a importação de contatos, ele passa a ter 800 números prontos — e a WABA
+// desta plataforma já foi desabilitada pela Meta DUAS vezes por exatamente esse tipo de envio.
+//
+// Nada no produto chama estas rotas: nem o frontend, nem outro módulo do backend. O ramo do JWT
+// existia para teste manual, e o header x-notify-token/x-admin-token continua servindo para isso.
 export function decideNotifyAccess({ tokenAccess, authResult }) {
   if (tokenAccess?.ok) {
     return {
       ok: true,
       source: tokenAccess.source,
       user: null,
-    };
-  }
-
-  if (authResult?.user?.tipo === 'estabelecimento') {
-    return {
-      ok: true,
-      source: 'jwt_estabelecimento',
-      user: authResult.user,
     };
   }
 

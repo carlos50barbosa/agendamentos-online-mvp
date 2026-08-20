@@ -151,6 +151,31 @@ router.get('/establishments/overview', checkAdmin, auditAdmin('admin.establishme
         GROUP BY usuario_id`,
     );
 
+    // Mensagens que a plataforma NÃO enviou por falta de opt-in, por tenant, nos últimos 30 dias.
+    //
+    // Esta trilha já era gravada (recordWhatsAppBlocked, lib/whatsapp_wallet.js:280) e ninguém a
+    // lia: a única leitura da tabela era a listagem de recargas. Ou seja, o sistema media o
+    // sintoma mais importante que ele tem — "quantas vezes quisemos falar com alguém que nunca
+    // nos autorizou" — e jogava fora.
+    //
+    // Ler isso deixa de ser opcional agora. A WABA já foi desabilitada duas vezes por envio sem
+    // consentimento, e qualquer recurso que aumente a base de contatos (a importação de clientes,
+    // por exemplo) faz este número subir antes de qualquer outro sinal aparecer. Sensor primeiro,
+    // fonte de risco depois.
+    //
+    // 30 dias porque é a janela em que dá para agir: um pico aqui é uma conta para ligar hoje,
+    // não um gráfico histórico.
+    const [optinRows] = await pool.query(
+      `SELECT estabelecimento_id AS eid,
+              COUNT(*) AS bloqueios,
+              MAX(created_at) AS ultimo_em
+         FROM whatsapp_wallet_transactions
+        WHERE kind = 'blocked'
+          AND reason = 'no_optin'
+          AND created_at >= (NOW() - INTERVAL 30 DAY)
+        GROUP BY estabelecimento_id`,
+    );
+
     const indexBy = (rows) => {
       const m = new Map();
       for (const r of rows) m.set(Number(r.eid), r);
@@ -160,6 +185,7 @@ router.get('/establishments/overview', checkAdmin, auditAdmin('admin.establishme
     const svcMap = indexBy(svcRows);
     const aptMap = indexBy(aptRows);
     const fbMap = indexBy(feedbackRows);
+    const optinMap = indexBy(optinRows);
     const num = (v) => Number(v || 0);
 
     const establishments = estabs.map((e) => {
@@ -167,6 +193,7 @@ router.get('/establishments/overview', checkAdmin, auditAdmin('admin.establishme
       const s = svcMap.get(Number(e.id)) || {};
       const a = aptMap.get(Number(e.id)) || {};
       const f = fbMap.get(Number(e.id)) || {};
+      const o = optinMap.get(Number(e.id)) || {};
       return {
         id: e.id,
         nome: e.nome,
@@ -186,10 +213,27 @@ router.get('/establishments/overview', checkAdmin, auditAdmin('admin.establishme
           nps_em: f.nps_em || null,
           sinalizou_saida: Boolean(Number(f.sinalizou_saida || 0)),
         },
+        // 0 é informação, não ausência: significa "quisemos falar e todo mundo tinha autorizado",
+        // que é o estado saudável. Por isso não vira null como o NPS.
+        whatsapp_optin: {
+          blocked_30d: num(o.bloqueios),
+          last_blocked_at: o.ultimo_em || null,
+        },
       };
     });
 
-    return res.json({ ok: true, count: establishments.length, generated_at: now.toISOString(), month_start: startOfMonth, establishments });
+    // Total da plataforma, para o cabeçalho: um tenant com 5 bloqueios não assusta, 900 espalhados
+    // por trinta contas sim — e essa soma é o que antecede um pedido de revisão da Meta.
+    const optinBlocked30d = optinRows.reduce((acc, r) => acc + Number(r.bloqueios || 0), 0);
+
+    return res.json({
+      ok: true,
+      count: establishments.length,
+      generated_at: now.toISOString(),
+      month_start: startOfMonth,
+      whatsapp_optin_blocked_30d: optinBlocked30d,
+      establishments,
+    });
   } catch (e) {
     console.error('[admin/establishments/overview]', e?.message || e);
     return res.status(500).json({ error: 'db_error', message: e?.message || String(e) });
