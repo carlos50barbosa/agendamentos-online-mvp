@@ -713,7 +713,9 @@ pool.query = async (sql, params = []) => {
   }
 
   if (norm.startsWith('INSERT INTO profissionais')) {
-    const [estId, nome, descricao, avatarUrl, ativoFlag] = params
+    // 6 parâmetros desde db1267e, que acrescentou `horarios_json`. Enquanto o mock lia 5, o campo
+    // sumia do estado e a releitura logo depois do INSERT devolvia um profissional sem horários.
+    const [estId, nome, descricao, avatarUrl, ativoFlag, horariosJson] = params
     const nextId = state.profissionais.reduce((max, p) => Math.max(max, p.id), 0) + 1
     const newProf = {
       id: nextId,
@@ -722,6 +724,7 @@ pool.query = async (sql, params = []) => {
       descricao: descricao || null,
       avatar_url: avatarUrl || null,
       ativo: ativoFlag ? 1 : 0,
+      horarios_json: horariosJson ?? null,
       created_at: new Date(),
       updated_at: new Date(),
     }
@@ -729,7 +732,17 @@ pool.query = async (sql, params = []) => {
     return [{ insertId: nextId, affectedRows: 1 }, []]
   }
 
-  if (norm.startsWith('SELECT id, estabelecimento_id, nome, descricao, avatar_url, ativo, created_at FROM profissionais WHERE id=?')) {
+  // ⚠️ Casado por prefixo CURTO + âncora no FROM, e não pela lista inteira de colunas.
+  //
+  // Antes o matcher repetia o SELECT inteiro. db1267e acrescentou `horarios_json` entre `ativo` e
+  // `created_at`, o `startsWith` deixou de casar, e a query caiu no `throw` do fim — "Unhandled
+  // query", que não diz nada sobre a causa e transforma "adicionei uma coluna" em meia hora de
+  // depuração. Pior: como `test:plan` roda DEPOIS da suíte no CI, e a suíte estava vermelha por
+  // outro motivo, isso ficou escondido por semanas.
+  //
+  // A lista de colunas nunca foi o que este handler precisava saber; o que importa é "leitura de
+  // um profissional por id". A próxima coluna não vai repetir isso.
+  if (norm.startsWith('SELECT id, estabelecimento_id, nome') && norm.includes('FROM profissionais WHERE id=?')) {
     const id = params[0]
     const p = state.profissionais.find((row) => row.id === id)
     return [p ? [{ ...p }] : [], []]
