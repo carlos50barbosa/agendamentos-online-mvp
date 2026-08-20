@@ -25,7 +25,7 @@ import {
   isAtRisk,
   normalizeCrmTags,
 } from "../lib/crm.js";
-import { EST_TZ_OFFSET_MIN } from "../lib/datetime_tz.js";
+import { EST_TZ_OFFSET_MIN, SQL_NOW_LOCAL, SQL_TODAY_LOCAL } from "../lib/datetime_tz.js";
 import {
   csvLine,
   formatCsvBoolean,
@@ -120,7 +120,12 @@ const CRM_SORT_COLUMNS = Object.freeze({
 const CRM_RELATIONSHIP_FILTERS = new Set(['novo', 'recorrente', 'vip', 'inativo', 'sumido']);
 const CRM_DAY_FILTER_OPTIONS = Object.freeze([15, 30, 45, 60, 90]);
 // a.inicio/a.fim são gravados em UTC; NOW() seguiria o fuso do MySQL.
-const CRM_REALIZED_VISIT_SQL = "(a.status='concluido' OR (a.status='confirmado' AND a.fim < UTC_TIMESTAMP())) AND COALESCE(a.no_show,0)=0";
+// `a.fim` guarda HORA LOCAL DE PAREDE (ver SQL_NOW_LOCAL em lib/datetime_tz.js). Com
+// UTC_TIMESTAMP() a visita contava como realizada 3h antes de terminar: durante todo o
+// expediente a receita realizada e o ticket medio vinham inflados com a agenda das proximas
+// 3 horas, e o cliente aparecia como "veio hoje" antes de ter vindo — saindo, por isso, das
+// listas de reativacao.
+const CRM_REALIZED_VISIT_SQL = `(a.status='concluido' OR (a.status='confirmado' AND a.fim < ${SQL_NOW_LOCAL})) AND COALESCE(a.no_show,0)=0`;
 // Receita prevista: mesma régua de /relatorios (confirmados + pendentes + concluídos, sem no-show).
 const CRM_EXPECTED_REVENUE_SQL = "a.status IN ('confirmado','pendente','concluido') AND COALESCE(a.no_show,0)=0";
 
@@ -1798,10 +1803,12 @@ function buildCrmBaseQuery(estabelecimentoId, filters) {
       COALESCE(life.lifetime_cancelled, 0) AS lifetime_cancelled,
       COALESCE(life.total_spent_centavos, 0) AS total_spent_centavos,
       life.last_visit_at,
-      -- Os dois lados em UTC. Antes era a data local do servidor contra um timestamp UTC.
+      -- Os dois lados no relogio LOCAL. Com UTC_DATE() aqui, depois das 21:00 locais a data
+      -- UTC ja era a de amanha e days_since_last_visit saltava 1: a lista de clientes mudava
+      -- sozinha no meio da noite, e quem estava com 44 dias virava "sumido" sem ter sumido.
       CASE
         WHEN life.last_visit_at IS NULL THEN NULL
-        ELSE DATEDIFF(UTC_DATE(), DATE(life.last_visit_at))
+        ELSE DATEDIFF(${SQL_TODAY_LOCAL}, DATE(life.last_visit_at))
       END AS days_since_last_visit,
       COALESCE(vip.is_vip, 0) AS is_vip
     FROM (${statsSql}) stats

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { SQL_NOW_LOCAL } from '../src/lib/datetime_tz.js';
 import {
   CRM_DEFAULT_DORMANT_DAYS,
   CRM_INACTIVE_DAYS,
@@ -98,11 +99,19 @@ test('buildCrmRiskSql usa as mesmas constantes da regra em JS', () => {
 });
 
 // A janela antiga so tinha piso: "ultimos 30 dias" deixava passar todo o futuro junto.
-test('buildCrmPeriodSql fecha a janela dos dois lados e usa UTC', () => {
+//
+// Este teste ja exigiu UTC_TIMESTAMP() cru, apoiado num comentario que afirmava que a.inicio
+// era gravado em UTC. Foi MEDIDO que nao e: a coluna guarda hora local de parede, e o teto em
+// UTC deixava entrar as proximas 3h de agenda dentro do periodo — o KPI do dia subia de manha
+// sem ninguem ter sido atendido. O teste agora fixa o contrario, para nao ser "consertado" de
+// volta. Ver SQL_NOW_LOCAL em lib/datetime_tz.js.
+test('buildCrmPeriodSql fecha a janela dos dois lados no relogio LOCAL', () => {
   const sql = buildCrmPeriodSql(30);
-  assert.match(sql, /a\.inicio >= DATE_SUB\(UTC_TIMESTAMP\(\), INTERVAL 30 DAY\)/);
-  assert.match(sql, /a\.inicio <= UTC_TIMESTAMP\(\)/);
-  assert.ok(!/\bNOW\(\)/.test(sql), 'nao usa NOW() (fuso do MySQL)');
+  assert.equal(
+    sql,
+    `(a.inicio >= DATE_SUB(${SQL_NOW_LOCAL}, INTERVAL 30 DAY) AND a.inicio <= ${SQL_NOW_LOCAL})`
+  );
+  assert.ok(!/\bNOW\(\)/.test(sql), 'nao usa NOW() (depende do fuso da sessao)');
 });
 
 test('buildCrmPeriodSql vira no-op quando nao ha periodo', () => {
@@ -141,9 +150,13 @@ test('buildCrmRelationshipSql cobre a mesma cascata do classifyRelationship', ()
 
 test('buildCrmPreviousPeriodSql desloca a janela sem sobrepor a atual', () => {
   const sql = buildCrmPreviousPeriodSql(30);
-  assert.match(sql, /a\.inicio >= DATE_SUB\(UTC_TIMESTAMP\(\), INTERVAL 60 DAY\)/);
-  // Estritamente MENOR que o inicio da janela atual: nenhum agendamento cai nas duas.
-  assert.match(sql, /a\.inicio < DATE_SUB\(UTC_TIMESTAMP\(\), INTERVAL 30 DAY\)/);
+  // Estritamente MENOR que o inicio da janela atual: nenhum agendamento cai nas duas. E o
+  // mesmo relogio LOCAL da janela atual — as duas tem de se deslocar juntas, senao os deltas
+  // dos KPIs comparariam periodos de tamanhos diferentes.
+  assert.equal(
+    sql,
+    `(a.inicio >= DATE_SUB(${SQL_NOW_LOCAL}, INTERVAL 60 DAY) AND a.inicio < DATE_SUB(${SQL_NOW_LOCAL}, INTERVAL 30 DAY))`
+  );
   // period=all nao tem "anterior": o predicado precisa ser sempre falso, nao sempre verdadeiro.
   assert.equal(buildCrmPreviousPeriodSql(null), '1=0');
 });

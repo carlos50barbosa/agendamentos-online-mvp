@@ -1,3 +1,5 @@
+import { SQL_NOW_LOCAL } from './datetime_tz.js';
+
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 export const CRM_DEFAULT_DORMANT_DAYS = 45;
@@ -118,21 +120,26 @@ export function buildCrmRiskSql(alias = 'base') {
 }
 
 // Janela FECHADA. A cláusula antiga só tinha piso (`a.inicio >= agora-30d`), então
-// "últimos 30 dias" deixava passar todo o futuro junto. E o fuso: a.inicio é gravado em
-// UTC, NOW() segue o fuso do MySQL.
+// "últimos 30 dias" deixava passar todo o futuro junto.
+//
+// O fuso: `a.inicio` guarda HORA LOCAL DE PAREDE, não UTC (ver SQL_NOW_LOCAL em
+// lib/datetime_tz.js — medido). O comentário que estava aqui afirmava o contrário, e era a
+// origem documental do defeito: com UTC_TIMESTAMP() o teto "fechado" deixava entrar tudo que
+// ainda vai acontecer nas próximas 3h, então o KPI do dia subia de manhã sem ninguém ter
+// sido atendido.
 // periodDays vem de um mapa congelado (7/30/90) — nunca do usuário —, então entra como
 // literal e o predicado pode ser repetido na agregação condicional sem embaralhar params.
 export function buildCrmPeriodSql(periodDays) {
   const days = Number(periodDays);
   if (!Number.isInteger(days) || days <= 0) return '1=1';
-  return `(a.inicio >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL ${days} DAY) AND a.inicio <= UTC_TIMESTAMP())`;
+  return `(a.inicio >= DATE_SUB(${SQL_NOW_LOCAL}, INTERVAL ${days} DAY) AND a.inicio <= ${SQL_NOW_LOCAL})`;
 }
 
 // A janela ANTERIOR, do mesmo tamanho e imediatamente antes — a régua dos deltas dos KPIs.
 export function buildCrmPreviousPeriodSql(periodDays) {
   const days = Number(periodDays);
   if (!Number.isInteger(days) || days <= 0) return '1=0'; // sem período, não há anterior
-  return `(a.inicio >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL ${days * 2} DAY) AND a.inicio < DATE_SUB(UTC_TIMESTAMP(), INTERVAL ${days} DAY))`;
+  return `(a.inicio >= DATE_SUB(${SQL_NOW_LOCAL}, INTERVAL ${days * 2} DAY) AND a.inicio < DATE_SUB(${SQL_NOW_LOCAL}, INTERVAL ${days} DAY))`;
 }
 
 // A MESMA cascata de classifyRelationship, em SQL. Serve tanto para filtrar um segmento

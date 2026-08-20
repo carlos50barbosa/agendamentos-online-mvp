@@ -2,7 +2,12 @@ import { Router } from 'express';
 import { pool } from '../lib/db.js';
 import { auth as authRequired, isEstabelecimento } from '../middleware/auth.js';
 import { getPlanContext, isDelinquentStatus } from '../lib/plans.js';
-import { EST_TZ_OFFSET_MIN, makeUtcFromLocalYMDHM } from '../lib/datetime_tz.js';
+import {
+  EST_TZ_OFFSET_MIN,
+  SQL_NOW_LOCAL,
+  formatLocalSqlDateTime,
+  makeUtcFromLocalYMDHM,
+} from '../lib/datetime_tz.js';
 import {
   csvLine,
   formatCsvBoolean,
@@ -36,24 +41,16 @@ const TZ_OFFSET_MIN = EST_TZ_OFFSET_MIN;
 
 const STATUS_CONFIRMED_SQL = "a.status IN ('confirmado','concluido')";
 const STATUS_PLANNED_SQL = "a.status IN ('confirmado','pendente','concluido')";
-// a.inicio/a.fim são gravados em UTC (ver EST_TZ_OFFSET_MIN); NOW() seguiria o fuso do MySQL.
-const STATUS_CONCLUDED_SQL = "(a.status='concluido' OR (a.status='confirmado' AND a.fim < UTC_TIMESTAMP()))";
+// a.fim guarda HORA LOCAL DE PAREDE (ver SQL_NOW_LOCAL em lib/datetime_tz.js). Comparar com
+// UTC_TIMESTAMP() dava o dia por concluido 3h antes: o salao que fecha as 19h aparecia
+// inteiro como concluido as 16h, com a receita das 3h que faltavam ja faturada.
+const STATUS_CONCLUDED_SQL = `(a.status='concluido' OR (a.status='confirmado' AND a.fim < ${SQL_NOW_LOCAL}))`;
 const STATUS_CANCELED_SQL = "a.status='cancelado'";
 const STATUS_PENDING_SQL = "a.status='pendente'";
 const STATUS_AWAITING_DEPOSIT_SQL = "a.status='pendente_pagamento'";
 const NO_SHOW_SQL = 'COALESCE(a.no_show,0)=1';
 const NOT_NO_SHOW_SQL = 'COALESCE(a.no_show,0)=0';
 
-const pad2 = (value) => String(value).padStart(2, '0');
-
-function formatDateTimeUtc(date) {
-  if (!(date instanceof Date)) return null;
-  if (Number.isNaN(date.getTime())) return null;
-  return [
-    `${date.getUTCFullYear()}-${pad2(date.getUTCMonth() + 1)}-${pad2(date.getUTCDate())}`,
-    `${pad2(date.getUTCHours())}:${pad2(date.getUTCMinutes())}:${pad2(date.getUTCSeconds())}`,
-  ].join(' ');
-}
 
 function parseServiceIds(raw) {
   if (!raw) return [];
@@ -116,8 +113,11 @@ function toUtcBounds(startLocal, endLocal, tzOffsetMin) {
     endLocal,
     startUtcDate,
     endUtcDate,
-    startUtc: formatDateTimeUtc(startUtcDate),
-    endUtc: formatDateTimeUtc(endUtcDate),
+    // Os limites vao como parametro contra a.inicio, que guarda hora LOCAL. Formatar em UTC
+    // aqui cortava o dia as 03:00 em vez de 00:00: todo relatorio perdia a madrugada do
+    // primeiro dia e engolia a do dia seguinte ao ultimo.
+    startUtc: formatLocalSqlDateTime(startUtcDate),
+    endUtc: formatLocalSqlDateTime(endUtcDate),
   };
 }
 
@@ -365,7 +365,7 @@ async function handleOverview(req, res) {
 
     const dailySql = `
       SELECT
-        DATE_FORMAT(DATE_ADD(a.inicio, INTERVAL ? MINUTE), '%Y-%m-%d') AS dia,
+        DATE_FORMAT(a.inicio, '%Y-%m-%d') AS dia,
         COUNT(DISTINCT CASE WHEN ${STATUS_CONFIRMED_SQL} THEN a.id END) AS confirmados,
         COUNT(DISTINCT CASE WHEN ${STATUS_CANCELED_SQL} THEN a.id END) AS cancelados,
         COUNT(DISTINCT CASE WHEN ${STATUS_CONCLUDED_SQL} AND ${NOT_NO_SHOW_SQL} THEN a.id END) AS concluidos,
@@ -418,7 +418,7 @@ async function handleOverview(req, res) {
 
     const dowSql = `
       SELECT
-        MOD(WEEKDAY(DATE_ADD(a.inicio, INTERVAL ? MINUTE)) + 1, 7) AS dow,
+        MOD(WEEKDAY(a.inicio) + 1, 7) AS dow,
         COUNT(DISTINCT a.id) AS total,
         COALESCE(SUM(CASE WHEN ${STATUS_PLANNED_SQL} AND ${NOT_NO_SHOW_SQL} THEN ai.preco_snapshot ELSE 0 END), 0) AS receita_prevista,
         COALESCE(SUM(CASE WHEN ${STATUS_CONCLUDED_SQL} AND ${NOT_NO_SHOW_SQL} THEN ai.preco_snapshot ELSE 0 END), 0) AS receita_concluida
@@ -492,9 +492,9 @@ async function handleOverview(req, res) {
         buildTotalsSql(itemJoin.sql, previousFilters.whereClause),
         [...itemJoin.params, ...previousFilters.params]
       ),
-      pool.query(dailySql, [TZ_OFFSET_MIN, ...itemJoin.params, ...baseFilters.params]),
+      pool.query(dailySql, [...itemJoin.params, ...baseFilters.params]),
       pool.query(servicesSql, serviceParams),
-      pool.query(dowSql, [TZ_OFFSET_MIN, ...itemJoin.params, ...baseFilters.params]),
+      pool.query(dowSql, [...itemJoin.params, ...baseFilters.params]),
       pool.query(leadSql, baseFilters.params),
       pool.query(customerMixQuery.sql, customerMixQuery.params),
       originsFilters ? pool.query(originsSql, originsFilters.params) : Promise.resolve([[]]),
@@ -761,20 +761,19 @@ router.get('/estabelecimento/export.csv', authRequired, isEstabelecimento, async
     });
 
     const itemJoin = buildServiceItemJoin(serviceIds);
-    const tzParams = [TZ_OFFSET_MIN, TZ_OFFSET_MIN, TZ_OFFSET_MIN, TZ_OFFSET_MIN];
     const exportSql = `
       SELECT
-        DATE_FORMAT(DATE_ADD(a.inicio, INTERVAL ? MINUTE), '%Y-%m-%d') AS data,
+        DATE_FORMAT(a.inicio, '%Y-%m-%d') AS data,
         c.nome AS cliente,
         COALESCE(GROUP_CONCAT(DISTINCT s.nome ORDER BY ai.ordem SEPARATOR ' + '), '') AS servico,
         p.nome AS profissional,
-        DATE_FORMAT(DATE_ADD(a.inicio, INTERVAL ? MINUTE), '%Y-%m-%d %H:%i') AS inicio,
-        DATE_FORMAT(DATE_ADD(a.fim, INTERVAL ? MINUTE), '%Y-%m-%d %H:%i') AS fim,
+        DATE_FORMAT(a.inicio, '%Y-%m-%d %H:%i') AS inicio,
+        DATE_FORMAT(a.fim, '%Y-%m-%d %H:%i') AS fim,
         a.status,
         COALESCE(a.no_show, 0) AS no_show,
         COALESCE(SUM(ai.preco_snapshot), 0) AS valor_centavos,
         COALESCE(NULLIF(a.origem,''), 'desconhecido') AS origem,
-        DATE_FORMAT(DATE_ADD(a.criado_em, INTERVAL ? MINUTE), '%Y-%m-%d %H:%i') AS criado_em
+        DATE_FORMAT(a.criado_em, '%Y-%m-%d %H:%i') AS criado_em
       FROM agendamentos a
       JOIN usuarios c ON c.id = a.cliente_id
       LEFT JOIN profissionais p ON p.id = a.profissional_id
@@ -784,7 +783,7 @@ router.get('/estabelecimento/export.csv', authRequired, isEstabelecimento, async
       GROUP BY a.id, c.nome, p.nome, a.inicio, a.fim, a.status, a.no_show, a.origem, a.criado_em
       ORDER BY a.inicio ASC`;
     // Ordem dos '?': SELECT (4x TZ), join de itens, WHERE.
-    const exportParams = [...tzParams, ...itemJoin.params, ...baseFilters.params];
+    const exportParams = [...itemJoin.params, ...baseFilters.params];
 
     const filenameBase = sanitizeFilenameSegment(
       `relatorio-${formatLocalDate(startLocal)}-a-${formatLocalDate(endLocal)}`

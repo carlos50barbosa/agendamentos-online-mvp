@@ -6,6 +6,7 @@ import {
 } from '../lib/plans.js';
 import { saveServiceImageFromDataUrl, removeServiceImageFile } from '../lib/service_images.js';
 import { ensureSubscriptionOperationalAccess } from '../middleware/billing.js';
+import { SQL_NOW_LOCAL } from '../lib/datetime_tz.js';
 import { normalizeServiceSlotCapacity } from '../lib/service_capacity.js';
 import { setAudit, diffFields } from '../lib/audit.js';
 
@@ -106,7 +107,7 @@ async function fetchBookingCounts(establishmentId) {
           WHERE a.estabelecimento_id=?
             AND a.status IN ('confirmado','concluido')
             AND COALESCE(a.no_show,0)=0
-            AND a.inicio >= (UTC_TIMESTAMP() - INTERVAL ? DAY)
+            AND a.inicio >= (${SQL_NOW_LOCAL} - INTERVAL ? DAY)
          UNION ALL
          SELECT a.servico_id AS servico_id
            FROM agendamentos a
@@ -115,7 +116,7 @@ async function fetchBookingCounts(establishmentId) {
             AND a.estabelecimento_id=?
             AND a.status IN ('confirmado','concluido')
             AND COALESCE(a.no_show,0)=0
-            AND a.inicio >= (UTC_TIMESTAMP() - INTERVAL ? DAY)
+            AND a.inicio >= (${SQL_NOW_LOCAL} - INTERVAL ? DAY)
        ) t
       WHERE servico_id IS NOT NULL
       GROUP BY servico_id`,
