@@ -82,9 +82,21 @@ test('número nunca visto: NÃO tem consentimento', { skip }, async () => {
 });
 
 test('aceite → tem consentimento, e a PROVA fica gravada (texto, versão, origem)', { skip }, async () => {
+  // `establishmentName` e NÃO `estabelecimentoId`. Desde que o consentimento ganhou escopo
+  // (fd08add), `estabelecimentoId` deixou de ser "de quem é o contexto deste aceite" e passou a
+  // ser "em qual escopo ele vale": preenchê-lo grava a autorização no escopo do SALÃO, que só é
+  // lido quando a mensagem sai do número próprio dele.
+  //
+  // Os dois caminhos que gravam aceite em produção (auth.js:321, no cadastro, e optInConfirm.js:178,
+  // no AUTORIZO) mandam pelo número da PLATAFORMA e não passam `estabelecimentoId` — logo gravam no
+  // escopo de plataforma, que é o mesmo que o outbox lê quando o salão não tem WABA própria.
+  // Passar o id aqui fazia o teste gravar num escopo e conferir noutro.
+  //
+  // O nome do salão continua no texto (é o que vale como prova), só que pelo parâmetro que existe
+  // para isso e que não mexe em escopo nenhum.
   await consent.grantWhatsAppConsent({
     phone: TEL_CLIENTE,
-    estabelecimentoId: ESTAB_ID,
+    establishmentName: 'Studio Optin',
     origem: consent.OPTIN_SOURCES.PUBLIC_BOOKING,
   });
   assert.equal(await consent.hasWhatsAppConsent(TEL_CLIENTE), true);
@@ -104,7 +116,7 @@ test('aceitar de novo NÃO cria linha nova (senão a prova some num log de cliqu
     'SELECT COUNT(*) AS n FROM whatsapp_optins WHERE telefone_e164=?', [TEL_CLIENTE]
   );
   await consent.grantWhatsAppConsent({
-    phone: TEL_CLIENTE, estabelecimentoId: ESTAB_ID, origem: consent.OPTIN_SOURCES.CLIENT_BOOKING,
+    phone: TEL_CLIENTE, establishmentName: 'Studio Optin', origem: consent.OPTIN_SOURCES.CLIENT_BOOKING,
   });
   const [[depois]] = await db.query(
     'SELECT COUNT(*) AS n FROM whatsapp_optins WHERE telefone_e164=?', [TEL_CLIENTE]
@@ -124,7 +136,7 @@ test('PARAR → revoga; e dá para voltar depois', { skip }, async () => {
   assert.equal(await consent.hasWhatsAppConsent(TEL_CLIENTE), false);
 
   await consent.grantWhatsAppConsent({
-    phone: TEL_CLIENTE, estabelecimentoId: ESTAB_ID, origem: consent.OPTIN_SOURCES.CLIENT_PANEL,
+    phone: TEL_CLIENTE, establishmentName: 'Studio Optin', origem: consent.OPTIN_SOURCES.CLIENT_PANEL,
   });
   assert.equal(await consent.hasWhatsAppConsent(TEL_CLIENTE), true);
 
@@ -134,6 +146,55 @@ test('PARAR → revoga; e dá para voltar depois', { skip }, async () => {
     'SELECT evento FROM whatsapp_optins WHERE telefone_e164=? ORDER BY id', [TEL_CLIENTE]
   );
   assert.deepEqual(rows.map((r) => r.evento), ['granted', 'revoked', 'granted']);
+});
+
+// --- O ESCOPO, contra o banco -------------------------------------------------------------------
+//
+// Estes dois testes existem porque a ausência deles deixou cinco outros quebrados por meses sem
+// ninguém entender por quê. `decideConsent` é testado puro em whatsapp-consent.test.js, mas a
+// regra só vale se a ESCRITA e a LEITURA caírem no mesmo escopo — e isso depende de uma coluna do
+// banco, que teste puro não vê.
+//
+// A assimetria testada aqui é a do desenho: autorização é estreita, revogação é ampla.
+
+test('escopo: aceite dado ao SALÃO não libera o número da plataforma', { skip }, async () => {
+  const tel = '5512900003333';
+  await db.query('DELETE FROM whatsapp_optins WHERE telefone_e164=?', [tel]);
+
+  await consent.grantWhatsAppConsent({
+    phone: tel,
+    estabelecimentoId: ESTAB_ID,          // escopo do salão, de propósito
+    origem: consent.OPTIN_SOURCES.PUBLIC_BOOKING,
+  });
+
+  // Sai do número do salão: autorizado.
+  assert.equal(await consent.hasWhatsAppConsent(tel, { estabelecimentoId: ESTAB_ID }), true);
+  // Sai do número da plataforma: remetente diferente, autorização diferente. NÃO herda.
+  assert.equal(
+    await consent.hasWhatsAppConsent(tel),
+    false,
+    'aceite de um salão não pode virar autorização para o número global'
+  );
+});
+
+test('escopo: PARAR na plataforma cala TAMBÉM o número do salão', { skip }, async () => {
+  const tel = '5512900004444';
+  await db.query('DELETE FROM whatsapp_optins WHERE telefone_e164=?', [tel]);
+
+  await consent.grantWhatsAppConsent({
+    phone: tel, estabelecimentoId: ESTAB_ID, origem: consent.OPTIN_SOURCES.PUBLIC_BOOKING,
+  });
+  assert.equal(await consent.hasWhatsAppConsent(tel, { estabelecimentoId: ESTAB_ID }), true);
+
+  // Revogação SEM estabelecimento = "não quero mais nada, de ninguém".
+  await consent.revokeWhatsAppConsent({ phone: tel, origem: consent.OPTIN_SOURCES.WHATSAPP_STOP });
+
+  assert.equal(await consent.hasWhatsAppConsent(tel), false);
+  assert.equal(
+    await consent.hasWhatsAppConsent(tel, { estabelecimentoId: ESTAB_ID }),
+    false,
+    'quem pediu para sair pediu para sair — errar aqui é a denúncia que derruba a WABA'
+  );
 });
 
 // --- O bloqueio no envio (o coração) ------------------------------------------------------------
@@ -286,9 +347,14 @@ test('número IMPOSSÍVEL não sai — nem com aceite registrado', { skip }, asy
   // caixa; o próximo cadastro falso marca. Aceite não faz um número inexistente existir — e uma
   // taxa alta de destinatário inexistente é a assinatura de lista raspada, que é o que a Meta caça.
   const impossivel = '5519812345678';
+  // Limpeza local, como os outros testes com número próprio fazem. Sem ela o teste só é honesto
+  // no primeiro `node --test`: `grantWhatsAppConsent` vê o `granted` que sobrou da execução
+  // anterior, devolve `unchanged` e NÃO grava — e a montagem do cenário falha em vez do que se
+  // queria medir. Num banco novo (o CI) passava; na máquina de quem estava depurando, não.
+  await db.query('DELETE FROM whatsapp_optins WHERE telefone_e164=?', [impossivel]);
   await consent.grantWhatsAppConsent({
     phone: impossivel,
-    estabelecimentoId: ESTAB_ID,
+    establishmentName: 'Studio Optin',
     origem: consent.OPTIN_SOURCES.PUBLIC_BOOKING,
   });
   assert.equal(await consent.hasWhatsAppConsent(impossivel), true, 'o aceite existe...');
