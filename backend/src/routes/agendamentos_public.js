@@ -53,6 +53,7 @@ import {
   MENSAGEM_SOBREPOSICAO,
   checkServicoRepetidoNoDiaTx,
   checkSobreposicaoClienteTx,
+  fetchRegrasClienteConfig,
 } from '../lib/conflito_cliente.js';
 import { getClientIp } from '../lib/client_ip.js';
 import {
@@ -1216,6 +1217,7 @@ router.post('/', ensureSubscriptionOperationalAccess({
     // lock e ficava cega para combos concorrentes. Ver o comentario extenso em
     // lib/conflito_cliente.js (buildItensSql).
     const limiteDiarioConfig = await fetchLimiteDiarioConfig(pool, estabelecimento_id);
+    const regrasClienteConfig = await fetchRegrasClienteConfig(pool, estabelecimento_id);
 
     conn = await pool.getConnection();
     await conn.beginTransaction();
@@ -1282,6 +1284,7 @@ router.post('/', ensureSubscriptionOperationalAccess({
       clienteId: userId,
       inicioDate,
       serviceIds: summary.serviceIds,
+      config: regrasClienteConfig,
     });
     if (!servicoRepetido.ok) {
       if (txStarted && conn) {

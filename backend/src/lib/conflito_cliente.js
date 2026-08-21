@@ -8,20 +8,20 @@
 //             que sejam com profissionais diferentes. Ninguem esta em dois lugares ao mesmo
 //             tempo.
 //
-// ─── Por que estas NAO sao opcionais, e a trava diaria e ─────────────────────────────────────
+// ─── Quem tem chave e quem nao tem ───────────────────────────────────────────────────────────
 //
-// O teto por dia e preferencia de negocio ("quantos horarios do dia uma pessoa pode ocupar"), e
-// a resposta muda por salao — por isso ele nasce desligado e tem liga/desliga.
+// REGRA A TEM chave por estabelecimento (`permite_servico_repetido_dia`), porque existe negocio
+// em que repetir o servico no dia e rotina. Ela nasce VALENDO (a coluna e 0 = nao permite), ao
+// contrario da trava diaria, que nasce desligada: repetir servico no mesmo dia e quase sempre
+// engano de quem agenda, entao o padrao seguro e recusar e deixar a liberacao a um clique.
 //
-// Estas duas descrevem o mundo fisico, nao a preferencia do dono. Marcar o mesmo servico duas
-// vezes no dia, ou estar em duas cadeiras ao mesmo tempo, nao e uma politica que alguem escolhe:
-// e um dado impossivel entrando na agenda. Por isso valem sempre, nos caminhos em que quem marca
-// e o CLIENTE.
+// REGRA B NAO tem chave, e nao e esquecimento. Dois horarios do mesmo cliente que se cruzam sao
+// impossiveis de cumprir com qualquer profissional; nao ha negocio em que isso seja desejado. O
+// caso que parece contra-exemplo — a mae agendando para a filha na propria conta — nao e uma
+// excecao a regra, e um cadastro que representa duas pessoas; e para ele a saida ja existe.
 //
-// A valvula de escape existe e foi pedida explicitamente: quando o cliente PRECISA repetir o
-// servico no mesmo dia, o estabelecimento marca pelo painel, que e isento das duas regras. O dono
-// e a camada de julgamento humano — ele sabe quando o "mesmo cliente" na verdade e a mae
-// agendando para a filha na propria conta.
+// A valvula de escape, para as duas, e o painel: o estabelecimento marca e nao passa por regra
+// nenhuma. O dono e a camada de julgamento humano.
 //
 // ─── Por que a REGRA B e escopada a UM estabelecimento ───────────────────────────────────────
 //
@@ -37,6 +37,35 @@ import { formatLocalSqlDateTime } from './datetime_tz.js';
 
 export const ERRO_SERVICO_REPETIDO = 'servico_repetido_no_dia';
 export const ERRO_SOBREPOSICAO = 'sobreposicao_cliente';
+
+/**
+ * Config da REGRA A. Linha ausente, coluna ausente ou valor estranho significam "a regra VALE" —
+ * o oposto do criterio da trava diaria, e de proposito.
+ *
+ * Ali, dado corrompido nao pode LIGAR uma trava que o dono nunca pediu. Aqui, dado corrompido nao
+ * pode DESLIGAR uma protecao que o dono nunca abriu mao. Nos dois casos o desconhecido cai no
+ * lado que nao surpreende ninguem.
+ */
+export function normalizeRegrasClienteConfig(row) {
+  return { permiteServicoRepetido: Number(row?.permite_servico_repetido_dia) === 1 };
+}
+
+/** Config do estabelecimento. Sem linha em establishment_settings = a regra vale. */
+export async function fetchRegrasClienteConfig(db, estabelecimentoId) {
+  const id = Number(estabelecimentoId);
+  if (!Number.isFinite(id) || id <= 0) return normalizeRegrasClienteConfig(null);
+  try {
+    const [rows] = await db.query(
+      `SELECT permite_servico_repetido_dia
+         FROM establishment_settings WHERE estabelecimento_id=? LIMIT 1`,
+      [id]
+    );
+    return normalizeRegrasClienteConfig(rows?.[0] || null);
+  } catch {
+    // Coluna ainda nao migrada: a regra vale, que e o comportamento de antes desta chave existir.
+    return normalizeRegrasClienteConfig(null);
+  }
+}
 
 /**
  * ETAPA 1 da REGRA A: os agendamentos vivos do cliente naquele dia, travados.
@@ -145,7 +174,13 @@ export async function checkServicoRepetidoNoDiaTx({
   inicioDate,
   serviceIds,
   excludeAppointmentId = null,
+  config = null,
 }) {
+  // A config vem PRONTA das rotas, lida fora da transacao. Ver o aviso em buildItensSql: um
+  // SELECT sem lock aqui dentro abriria o read view cedo demais e cegaria a propria regra.
+  const cfg = config || (await fetchRegrasClienteConfig(db, estabelecimentoId));
+  if (cfg.permiteServicoRepetido) return { ok: true, ativo: false };
+
   const cliente = Number(clienteId);
   const pedidos = idsUnicos(serviceIds);
   if (!Number.isFinite(cliente) || cliente <= 0 || !pedidos.length) return { ok: true };

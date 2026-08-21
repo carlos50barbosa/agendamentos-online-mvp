@@ -39,6 +39,7 @@ const {
   checkSobreposicaoClienteTx,
   checkSobreposicaoNoRemarcarTx,
   intervalosSeCruzam,
+  normalizeRegrasClienteConfig,
 } = await import('../src/lib/conflito_cliente.js');
 const { EST_TZ_OFFSET_MIN, makeUtcFromLocalYMDHM } = await import('../src/lib/datetime_tz.js');
 
@@ -55,6 +56,10 @@ const fakeDb = (respostas = []) => {
   return {
     log,
     async query(sql, params) {
+      // A leitura da config nao entra na fila nem no log: ela e' respondida VAZIA de proposito,
+      // para os testes exercitarem o padrao (sem linha em establishment_settings = a REGRA A
+      // vale). Quem quiser testar a chave ligada passa `config` direto no guard.
+      if (/FROM establishment_settings/i.test(sql)) return [[]];
       log.push({ sql, params });
       return [fila.shift() ?? []];
     },
@@ -310,6 +315,57 @@ test('remarcar: o proprio agendamento nunca conta contra si mesmo', async () => 
     assert.ok(/id <> \?/.test(chamada.sql));
     assert.equal(chamada.params[chamada.params.length - 1], 999);
   }
+});
+
+// ─── A chave da REGRA A ────────────────────────────────────────────────────────────────────
+
+test('sem config, a REGRA A VALE — dado desconhecido nao desliga protecao', () => {
+  // Oposto do criterio da trava diaria de proposito: la o desconhecido nao pode LIGAR uma trava
+  // que ninguem pediu; aqui nao pode DESLIGAR uma que ninguem abriu mao.
+  for (const row of [null, undefined, {}, { permite_servico_repetido_dia: 'lixo' }, { permite_servico_repetido_dia: 0 }]) {
+    assert.equal(normalizeRegrasClienteConfig(row).permiteServicoRepetido, false, `row=${JSON.stringify(row)}`);
+  }
+  assert.equal(normalizeRegrasClienteConfig({ permite_servico_repetido_dia: 1 }).permiteServicoRepetido, true);
+});
+
+test('com a chave ligada, a REGRA A nem consulta o banco', async () => {
+  const db = fakeDb([[{ id: 500, servico_id: 7 }], [{ agendamento_id: 500, servico_id: 7 }]]);
+  const r = await checkServicoRepetidoNoDiaTx({
+    db,
+    estabelecimentoId: 194,
+    clienteId: 264,
+    inicioDate: local(2026, 8, 20, 16),
+    serviceIds: [7],
+    config: { permiteServicoRepetido: true },
+  });
+  assert.equal(r.ok, true);
+  assert.equal(db.log.length, 0, 'liberado significa nem perguntar');
+});
+
+test('com a chave desligada, a REGRA A continua barrando', async () => {
+  const db = fakeDb([[{ id: 500, servico_id: 7 }], [{ agendamento_id: 500, servico_id: 7 }]]);
+  const r = await checkServicoRepetidoNoDiaTx({
+    db,
+    estabelecimentoId: 194,
+    clienteId: 264,
+    inicioDate: local(2026, 8, 20, 16),
+    serviceIds: [7],
+    config: { permiteServicoRepetido: false },
+  });
+  assert.equal(r.ok, false);
+});
+
+test('a chave NAO afeta a sobreposicao — ela nao tem chave', async () => {
+  const db = fakeDb([[{ id: 700, inicio: '2026-08-20 10:00:00', fim: '2026-08-20 11:00:00' }]]);
+  const r = await checkSobreposicaoClienteTx({
+    db,
+    estabelecimentoId: 194,
+    clienteId: 264,
+    inicioDate: local(2026, 8, 20, 10, 30),
+    fimDate: local(2026, 8, 20, 11, 30),
+    config: { permiteServicoRepetido: true },
+  });
+  assert.equal(r.ok, false, 'liberar servico repetido nao pode liberar horario impossivel');
 });
 
 // ─── Codigos de erro ───────────────────────────────────────────────────────────────────────

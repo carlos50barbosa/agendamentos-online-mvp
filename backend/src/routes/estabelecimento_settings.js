@@ -27,6 +27,8 @@ import {
   fetchLimiteDiarioConfig,
 } from '../lib/limite_diario_cliente.js';
 
+import { fetchRegrasClienteConfig } from '../lib/conflito_cliente.js';
+
 const router = Router();
 const DEFAULT_DEPOSIT_HOLD_MINUTES = 15;
 // Teto igual ao da lib. Aqui a violação vira 400 em vez de cair no default: no PUT vindo da
@@ -175,6 +177,7 @@ router.get('/settings', auth, isEstabelecimento, async (req, res) => {
     const allowed = planAllowsDeposit(planContext.plan);
     const janelaConfig = await fetchJanelaConfig(pool, estId);
     const limiteDiarioConfig = await fetchLimiteDiarioConfig(pool, estId);
+    const regrasCliente = await fetchRegrasClienteConfig(pool, estId);
     return res.json({
       deposit: serializeDeposit(settings, allowed),
       // Sem gate de plano: limitar o horizonte da própria agenda é ajuste de operação, não
@@ -183,6 +186,12 @@ router.get('/settings', auth, isEstabelecimento, async (req, res) => {
       // Mesmo raciocínio da janela, e por isso fora de `features`: quantos horários o mesmo
       // cliente pode ocupar num dia é regra de operação da casa, não recurso vendido.
       limite_diario: serializeLimiteDiario(limiteDiarioConfig),
+      // Regras de conflito do cliente. Bloco separado do `limite_diario` porque respondem a
+      // perguntas diferentes: aquele e "quantos horarios", este e "o que conflita com o que".
+      // Só a do mesmo serviço tem chave; a de sobreposição vale sempre (impossibilidade física).
+      regras_cliente: {
+        permite_servico_repetido: regrasCliente.permiteServicoRepetido,
+      },
       provider: resolveDepositProvider(),
       features: { deposit: allowed },
     });
@@ -506,6 +515,60 @@ router.put('/settings/limite-diario', auth, isEstabelecimento, async (req, res) 
     return res.json({ ok: true, limite_diario: serializeLimiteDiario(saved) });
   } catch (err) {
     console.error('PUT /estabelecimento/settings/limite-diario', err?.stack || err);
+    return res.status(500).json({ error: 'settings_save_failed' });
+  }
+});
+
+router.put('/settings/regras-cliente', auth, isEstabelecimento, async (req, res) => {
+  try {
+    const estId = Number(req.user?.id);
+    if (!Number.isFinite(estId) || estId <= 0) {
+      return res.status(400).json({ error: 'missing_estabelecimento_id' });
+    }
+    const planContext = await getPlanContext(estId);
+    if (!planContext) {
+      return res.status(404).json({ error: 'estabelecimento_inexistente' });
+    }
+
+    const current = await fetchRegrasClienteConfig(pool, estId);
+    const body = req.body || {};
+    const has = (key) => Object.prototype.hasOwnProperty.call(body, key);
+
+    // PUT parcial, como os irmãos: campo omitido preserva o que estava.
+    let permite = current.permiteServicoRepetido;
+    if (has('permiteServicoRepetido')) {
+      if (typeof body.permiteServicoRepetido !== 'boolean') {
+        return res.status(400).json({ error: 'invalid_permite', message: 'Informe verdadeiro ou falso.' });
+      }
+      permite = body.permiteServicoRepetido;
+    }
+
+    await pool.query(
+      `INSERT INTO establishment_settings
+         (estabelecimento_id, permite_servico_repetido_dia)
+       VALUES (?,?)
+       ON DUPLICATE KEY UPDATE
+         permite_servico_repetido_dia=VALUES(permite_servico_repetido_dia)`,
+      [estId, permite ? 1 : 0]
+    );
+
+    const saved = await fetchRegrasClienteConfig(pool, estId);
+    const diff = diffFields(current, saved, ['permiteServicoRepetido']);
+    setAudit(req, {
+      acao: 'config.regras_cliente',
+      entidade: 'configuracao',
+      entidade_id: estId,
+      estabelecimento_id: estId,
+      dados_antes: diff?.antes || null,
+      dados_depois: diff?.depois || null,
+    });
+
+    return res.json({
+      ok: true,
+      regras_cliente: { permite_servico_repetido: saved.permiteServicoRepetido },
+    });
+  } catch (err) {
+    console.error('PUT /estabelecimento/settings/regras-cliente', err?.stack || err);
     return res.status(500).json({ error: 'settings_save_failed' });
   }
 });

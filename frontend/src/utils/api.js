@@ -402,6 +402,9 @@ export const Api = {
   // payload: { ativo?: boolean, max?: 1..20 }
   updateEstablishmentDailyLimit: (payload) =>
     req('/estabelecimento/settings/limite-diario', { method: 'PUT', body: JSON.stringify(payload) }),
+  // Regras de conflito do cliente. payload: { permiteServicoRepetido?: boolean }
+  updateEstablishmentClientRules: (payload) =>
+    req('/estabelecimento/settings/regras-cliente', { method: 'PUT', body: JSON.stringify(payload) }),
   // Subconta Asaas: a plataforma abre a conta de recebimento pelo estabelecimento.
   getAsaasSubaccount: () => req('/estabelecimento/asaas/subconta'),
   createAsaasSubaccount: (payload) =>

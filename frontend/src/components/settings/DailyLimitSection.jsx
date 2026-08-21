@@ -21,7 +21,7 @@ const MAX_PADRAO = 1;
 
 export default function DailyLimitSection() {
   const [status, setStatus] = useState('loading');
-  const [form, setForm] = useState({ ativo: false, max: MAX_PADRAO });
+  const [form, setForm] = useState({ ativo: false, max: MAX_PADRAO, permiteServicoRepetido: false });
   // Config como está NO BANCO, para saber se o formulário divergiu.
   const [salvo, setSalvo] = useState(null);
   const [teto, setTeto] = useState(20);
@@ -38,9 +38,11 @@ export default function DailyLimitSection() {
         const data = await Api.getEstablishmentSettings();
         if (!alive) return;
         const limite = data?.limite_diario || {};
+        const regras = data?.regras_cliente || {};
         const config = {
           ativo: Boolean(limite.ativo),
           max: Number(limite.max) > 0 ? Number(limite.max) : MAX_PADRAO,
+          permiteServicoRepetido: Boolean(regras.permite_servico_repetido),
         };
         setForm(config);
         setSalvo(config);
@@ -51,7 +53,11 @@ export default function DailyLimitSection() {
     return () => { alive = false; };
   }, []);
 
-  const alterado = salvo && (form.ativo !== salvo.ativo || form.max !== salvo.max);
+  const alterado = salvo && (
+    form.ativo !== salvo.ativo ||
+    form.max !== salvo.max ||
+    form.permiteServicoRepetido !== salvo.permiteServicoRepetido
+  );
 
   const onSave = async (e) => {
     e.preventDefault();
@@ -67,19 +73,26 @@ export default function DailyLimitSection() {
       // desmonta e leva a validacao junto.
       const payload = form.ativo ? { ativo: true, max: form.max } : { ativo: false };
       const resp = await Api.updateEstablishmentDailyLimit(payload);
+      // Dois endpoints porque são duas perguntas diferentes ("quantos horários" e "o que conflita
+      // com o quê"), e a tela junta as duas por serem o mesmo assunto para quem configura.
+      const respRegras = await Api.updateEstablishmentClientRules({
+        permiteServicoRepetido: form.permiteServicoRepetido,
+      });
       const limite = resp?.limite_diario || {};
+      const regras = respRegras?.regras_cliente || {};
       // Espelha o que o backend confirmou, não o que o formulário tinha.
       const config = {
         ativo: Boolean(limite.ativo),
         max: Number(limite.max) > 0 ? Number(limite.max) : MAX_PADRAO,
+        permiteServicoRepetido: Boolean(regras.permite_servico_repetido),
       };
       setForm(config);
       setSalvo(config);
       setFeedback({
         type: 'success',
         message: config.ativo
-          ? `Trava ativada: no máximo ${config.max} por cliente a cada dia.`
-          : 'Trava desativada. O cliente pode marcar quantos horários quiser no mesmo dia.',
+          ? `Salvo: no máximo ${config.max} agendamento(s) por cliente a cada dia.`
+          : 'Salvo. Sem teto de agendamentos por dia.',
       });
     } catch (err) {
       setFeedback({ type: 'error', message: err?.data?.message || 'Não foi possível salvar.' });
@@ -132,6 +145,32 @@ export default function DailyLimitSection() {
             </span>
           </label>
         )}
+
+        <hr style={{ margin: '18px 0', border: 0, borderTop: '1px solid var(--brand-border, #E7E5F5)' }} />
+
+        <div className="set-block__head">
+          <h4 className="set-block__title" style={{ fontSize: 15 }}>Mesmo serviço no mesmo dia</h4>
+          <p className="set-block__sub">
+            Por padrão o cliente não consegue marcar duas vezes o mesmo serviço para o mesmo dia —
+            quase sempre é engano de quem agenda. Marque abaixo se no seu negócio isso é normal.
+          </p>
+        </div>
+
+        <label className="label" style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+          <input
+            type="checkbox"
+            checked={form.permiteServicoRepetido}
+            onChange={(e) => setForm((p) => ({ ...p, permiteServicoRepetido: e.target.checked }))}
+          />
+          <span>Permitir o mesmo serviço mais de uma vez no mesmo dia</span>
+        </label>
+
+        {/* O que NENHUMA das opções desliga. Melhor dizer aqui do que o dono procurar o botão. */}
+        <p className="muted" style={{ marginTop: 12, fontSize: 13 }}>
+          Horários que se sobrepõem são sempre recusados para o cliente, mesmo com profissionais
+          diferentes — ninguém está em dois lugares ao mesmo tempo. Você continua marcando
+          qualquer combinação pelo painel.
+        </p>
 
         {alterado && (
           <p className="muted" style={{ marginTop: 12, fontSize: 13 }}>Salve para aplicar.</p>

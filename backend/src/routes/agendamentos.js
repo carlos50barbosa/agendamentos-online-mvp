@@ -43,6 +43,7 @@ import {
   checkServicoRepetidoNoDiaTx,
   checkSobreposicaoClienteTx,
   checkSobreposicaoNoRemarcarTx,
+  fetchRegrasClienteConfig,
 } from '../lib/conflito_cliente.js';
 import { setAudit } from '../lib/audit.js';
 import { normalizePhoneBR, toDigits } from '../lib/phone_br.js';
@@ -914,6 +915,7 @@ router.post('/', authRequired, isCliente, ensureSubscriptionOperationalAccess({
     // lock e ficava cega para combos concorrentes. Ver o comentario extenso em
     // lib/conflito_cliente.js (buildItensSql).
     const limiteDiarioConfig = await fetchLimiteDiarioConfig(pool, estabelecimento_id);
+    const regrasClienteConfig = await fetchRegrasClienteConfig(pool, estabelecimento_id);
 
     // 3) transacao + checagem de conflito
     conn = await pool.getConnection();
@@ -974,6 +976,7 @@ router.post('/', authRequired, isCliente, ensureSubscriptionOperationalAccess({
       clienteId: req.user.id,
       inicioDate,
       serviceIds: summary.serviceIds,
+      config: regrasClienteConfig,
     });
     if (!servicoRepetido.ok) {
       if (txStarted && conn) {
@@ -2098,6 +2101,10 @@ router.put('/:id/reschedule-estab', authRequired, isEstabelecimento, ensureSubsc
       return res.status(400).json({ error: 'past_datetime', message: 'Não é possível reagendar no passado.' });
     }
 
+    // Config lida FORA da transacao, pelo mesmo motivo das rotas de criacao (ver o aviso em
+    // lib/conflito_cliente.js, buildItensSql): SELECT sem lock la dentro abre o read view cedo.
+    const regrasClienteConfig = await fetchRegrasClienteConfig(pool, estId);
+
     conn = await pool.getConnection();
     await conn.beginTransaction();
     txStarted = true;
@@ -2305,6 +2312,7 @@ router.put('/:id/reschedule-estab', authRequired, isEstabelecimento, ensureSubsc
         inicioDate,
         serviceIds,
         excludeAppointmentId: ag.id,
+        config: regrasClienteConfig,
       });
       if (!servicoRepetido.ok) {
         if (txStarted && conn) {
