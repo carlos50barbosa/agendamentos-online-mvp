@@ -14,6 +14,7 @@ import {
   releaseWaPhoneNumberFromAccount,
   upsertWaAccount,
 } from './waTenant.js';
+import { buildTenantOptInLink } from '../lib/wa_optin_link.js';
 import { provisionTenantTemplates } from './waTenantTemplates.js';
 import { notifyTemplatesUnderReview } from './waTemplateNotifier.js';
 import { ensureTenantBotSilentByDefault } from '../bot/storage/settingsStore.js';
@@ -192,6 +193,10 @@ function serializeAccount(account) {
       metadata?.graph?.businessName ||
       null,
     onboarding_source: metadata?.onboarding?.source || null,
+    // O convite que o dono manda para a base dele. Só existe conectado: enquanto ele fala pelo
+    // número da plataforma, quem colhe o aceite é a plataforma, e este link apontaria para um
+    // remetente que ainda não é o dele.
+    optin_link: connected ? buildTenantOptInLink(account.display_phone_number) : null,
   };
 
   return {

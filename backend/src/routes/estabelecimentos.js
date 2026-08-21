@@ -60,6 +60,8 @@ import {
 
 } from "../lib/plans.js";
 import { getLatestSubscriptionForEstabelecimento } from "../lib/subscriptions.js";
+import { getWaAccountByEstabelecimentoId } from "../services/waTenant.js";
+import { buildTenantOptInLink } from "../lib/wa_optin_link.js";
 import { setAudit } from "../lib/audit.js";
 import { computeSubscriptionState } from "../lib/subscription_state.js";
 
@@ -1248,6 +1250,33 @@ router.get('/:idOrSlug', async (req, res) => {
       : (Number.isFinite(depositPercent) && depositPercent > 0);
     const depositEnabled = Boolean(depositAllowed && Number(depositRow?.deposit_enabled || 0) && depositHasValue);
 
+    // ── O WhatsApp do PRÓPRIO salão, quando ele já tem um ─────────────────────────────────────────
+    //
+    // A tela pública oferece "Ativar lembretes no WhatsApp", e esse convite tem de apontar para o
+    // remetente que vai de fato mandar a mensagem. Quando o salão fala pelo número dele, o aceite
+    // dado à PLATAFORMA não vale (`decideConsent`, em lib/whatsapp_consent.js): é remetente novo.
+    // Sem isto, a cliente autorizaria o número errado e continuaria sem receber nada do salão.
+    //
+    // Sem conta conectada — o caso da imensa maioria — o valor é null e a tela cai no número da
+    // plataforma, exatamente como antes. E a consulta é tolerante a falha de propósito: esta é a
+    // página que vende, e ela não pode cair por causa de um enfeite de notificação.
+    let waPublico = null;
+    try {
+      const contaWa = await getWaAccountByEstabelecimentoId(est.id);
+      const conectada = contaWa
+        && String(contaWa.status || '').toLowerCase() === 'connected'
+        && contaWa.phone_number_id;
+      const link = conectada ? buildTenantOptInLink(contaWa.display_phone_number) : null;
+      if (link) {
+        waPublico = {
+          number: String(contaWa.display_phone_number || '').replace(/\D/g, ''),
+          optin_link: link,
+        };
+      }
+    } catch (err) {
+      console.warn('GET /establishments/:id whatsapp do salao', err?.message || err);
+    }
+
     const payload = {
 
       ...est,
@@ -1269,6 +1298,8 @@ router.get('/:idOrSlug', async (req, res) => {
       gallery: galleryImages,
 
       gallery_limit: resolveGalleryLimit(planContext),
+
+      whatsapp: waPublico,
 
     };
 

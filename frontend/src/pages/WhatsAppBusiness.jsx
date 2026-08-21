@@ -46,6 +46,68 @@ function formatConnectionDate(value) {
   });
 }
 
+/**
+ * O CONVITE que reconstrói o consentimento no número do salão.
+ *
+ * Por que existe: ao passar a falar pelo número dele, o salão vira um remetente NOVO. O aceite que
+ * a cliente deu à plataforma não vale para ele — e está certo que não valha: ninguém autorizou
+ * receber de um número que nunca viu. A consequência prática é dura, porém: sem um AUTORIZO novo,
+ * TODA mensagem para as clientes deste salão é bloqueada por `no_optin`, em silêncio, sem erro na
+ * tela de ninguém.
+ *
+ * Por que AQUI: é o único momento em que o dono está olhando para este assunto e com a base inteira
+ * no celular. Escondido em ajustes, o convite não acontece — e o canal que ele acabou de conectar
+ * nasce mudo.
+ */
+function ConviteOptIn({ link }) {
+  const [copiado, setCopiado] = React.useState(false);
+  if (!link) return null;
+
+  const copiar = async () => {
+    try {
+      await navigator.clipboard.writeText(link);
+      setCopiado(true);
+      setTimeout(() => setCopiado(false), 2500);
+    } catch {
+      // Sem permissão de área de transferência (ou fora de https) o link continua à vista no campo
+      // abaixo, para selecionar e copiar à mão. O botão falhar não pode esconder o convite.
+      setCopiado(false);
+    }
+  };
+
+  return (
+    <div className="notice notice--warn" style={{ display: 'grid', gap: 8 }}>
+      <strong>Peça autorização às suas clientes — sem isso, nada sai deste número</strong>
+      <div style={{ fontSize: 14 }}>
+        Quem já recebia avisos autorizou o <b>número da plataforma</b>, não o seu. Para receber do
+        seu número, cada cliente precisa mandar <b>AUTORIZO</b> para ele — uma vez só. Envie o link
+        abaixo para a sua base pelo próprio WhatsApp: ela toca, envia, e está ativado.
+      </div>
+      <input
+        readOnly
+        value={link}
+        onFocus={(e) => e.target.select()}
+        className="input"
+        style={{ fontSize: 13 }}
+        aria-label="Link de autorização das suas clientes"
+      />
+      <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+        <button type="button" className="btn btn--outline" onClick={copiar}>
+          {copiado ? 'Link copiado' : 'Copiar link'}
+        </button>
+        <a className="btn btn--outline" href={link} target="_blank" rel="noopener noreferrer">
+          Testar no meu WhatsApp
+        </a>
+      </div>
+      <div className="muted" style={{ fontSize: 12 }}>
+        Mande de pessoa para pessoa, pelo aplicativo. Não dispare por lista de transmissão nem peça
+        pelo sistema: pedir autorização por mensagem automática é, ela mesma, uma mensagem não
+        autorizada — foi o que derrubou a conta em julho.
+      </div>
+    </div>
+  );
+}
+
 export default function WhatsAppBusiness() {
   const {
     isEstablishment,
@@ -267,6 +329,8 @@ export default function WhatsAppBusiness() {
                 </ul>
               </div>
             ) : null}
+            {whatsappConnected ? <ConviteOptIn link={account?.optin_link} /> : null}
+
             {!whatsapp.loading && !whatsappConnected ? (
               <div className="notice notice--warn">Nenhuma conta própria conectada. Enquanto isso, o sistema pode continuar usando o número global do `.env`.</div>
             ) : null}

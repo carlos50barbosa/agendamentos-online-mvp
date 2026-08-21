@@ -167,6 +167,11 @@ export default function BookingWizard({
   // liga quando a pessoa envia "AUTORIZO" do próprio número (botão na tela de sucesso).
   const [wantsNotify, setWantsNotify] = useState(false);
   const { available: waAvailable, number: waNumber } = useWhatsAppConfig();
+  // O convite tem de apontar para QUEM vai mandar a mensagem. Quando o salão já fala pelo número
+  // dele, a autorização dada ao número da plataforma não libera o dele — é remetente novo, e o
+  // backend recusa (`decideConsent`). Apontar para o global aqui colheria um aceite que não
+  // destrava nada e a cliente seguiria sem lembrete, achando que ativou.
+  const waLinkDoSalao = establishment?.whatsapp?.optin_link || null;
 
   const days = useMemo(() => daysProp || buildDayRange(new Date(), 14), [daysProp]);
 
@@ -570,7 +575,7 @@ export default function BookingWizard({
                 </p>
                 {/* O WhatsApp só liga aqui: a pessoa clica, o WhatsApp dela abre com "AUTORIZO"
                     pronto, e ela envia. É a prova de posse do número que não dá para forjar. */}
-                <AutorizoWhatsApp number={waNumber} available={waAvailable} />
+                <AutorizoWhatsApp number={waNumber} available={waAvailable} link={waLinkDoSalao} />
                 <MeusAgendamentosLink appointmentId={pix?.appointmentId} accessToken={pix?.accessToken} />
                 {/* Volta para a página do estabelecimento. Âncora normal (recarrega a página fresca),
                     e não navegação SPA: garante o retorno mesmo quando a URL de origem é a mesma. */}
@@ -599,7 +604,7 @@ export default function BookingWizard({
                     aviso de "assim que for confirmado" some, porque já foi. */}
                 {pix?.status === 'paid' ? (
                   <div className="tw-mx-auto tw-flex tw-w-full tw-max-w-sm tw-flex-col tw-items-center tw-text-center">
-                    <AutorizoWhatsApp number={waNumber} available={waAvailable} />
+                    <AutorizoWhatsApp number={waNumber} available={waAvailable} link={waLinkDoSalao} />
                     <MeusAgendamentosLink appointmentId={pix?.appointmentId} accessToken={pix?.accessToken} />
                   </div>
                 ) : (
@@ -757,9 +762,12 @@ function MeusAgendamentosLink({ appointmentId, accessToken }) {
  * em toda a história da base. A instrução ("toque e ENVIE") vive dentro do componente porque o
  * clique sozinho não autoriza nada — sem ela o botão promete algo que ele não faz.
  */
-function AutorizoWhatsApp({ number, available }) {
-  if (!available || !number) return null;
-  const link = `https://wa.me/${number}?text=${encodeURIComponent('AUTORIZO')}`;
+function AutorizoWhatsApp({ number, available, link: linkDoSalao = null }) {
+  // `linkDoSalao` ganha do número global: se o salão tem WhatsApp próprio, é DELE que a mensagem
+  // vai sair, e é ele que precisa ser autorizado.
+  const link = linkDoSalao
+    || (number ? `https://wa.me/${number}?text=${encodeURIComponent('AUTORIZO')}` : null);
+  if (!available || !link) return null;
   return (
     <>
       <a

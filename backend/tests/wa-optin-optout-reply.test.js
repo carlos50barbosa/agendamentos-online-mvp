@@ -81,10 +81,12 @@ function createSpy(overrides = {}) {
       sent.push(payload);
       return { ok: true };
     },
-    getWhatsAppConsent: async () => {
+    hasWhatsAppConsent: async () => {
       calls.push('read-consent');
-      return null;
+      return false;
     },
+    // Número da PLATAFORMA por padrão: sem conta de tenant, o escopo do aceite é o global.
+    getWaAccountByPhoneNumberId: async () => null,
     grantWhatsAppConsent: async () => {
       calls.push('grant');
       return { ok: true };
@@ -174,9 +176,9 @@ test('AUTORIZO de cliente recebe o texto de cliente e não mexe na preferência 
 
 test('AUTORIZO de quem já autorizou confirma sem regravar', async () => {
   const { calls, sent, deps } = createSpy({
-    getWhatsAppConsent: async () => {
+    hasWhatsAppConsent: async () => {
       calls.push('read-consent');
-      return { evento: 'granted' };
+      return true;
     },
   });
 

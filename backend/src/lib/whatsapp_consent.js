@@ -255,8 +255,17 @@ export async function grantWhatsAppConsent({
   const e164 = normalizePhoneBR(phone);
   if (!e164) return { ok: false, error: 'telefone_invalido' };
 
-  const current = await getWhatsAppConsent(e164);
-  if (current?.evento === EVENT_GRANTED) {
+  // "Já autorizou?" é pergunta POR ESCOPO, e ler o último evento de qualquer escopo respondia
+  // errado exatamente no caso que interessa: quem já autorizou a PLATAFORMA — quase toda a base —
+  // receberia `unchanged` ao autorizar o número do SALÃO, e a linha do salão nunca nasceria. O
+  // aceite pareceria colhido (a pessoa até recebe "pronto!") e o envio seguiria bloqueado por
+  // `no_optin`, que é o pior dos dois mundos: consentimento na mão e canal mudo.
+  const escopo = Number(estabelecimentoId) || null;
+  const executar = (sql, params) => pool.query(sql, params);
+  const atualNoEscopo = escopo
+    ? await getConsentDoSalao(e164, escopo, executar)
+    : await getConsentDaPlataforma(e164, executar);
+  if (atualNoEscopo === EVENT_GRANTED) {
     return { ok: true, phone: e164, evento: EVENT_GRANTED, unchanged: true };
   }
 

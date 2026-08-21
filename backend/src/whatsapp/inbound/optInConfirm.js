@@ -32,10 +32,11 @@ import { sendWhatsAppSmart } from '../../lib/notifications.js';
 import { normalizeInboundMessage } from './normalize.js';
 import {
   grantWhatsAppConsent,
-  getWhatsAppConsent,
+  hasWhatsAppConsent,
   OPTIN_SOURCES,
   CONSENT_AUDIENCE,
 } from '../../lib/whatsapp_consent.js';
+import { getWaAccountByPhoneNumberId } from '../../services/waTenant.js';
 import { normalizePhoneBR, phoneVariantsBR } from '../../lib/phone_br.js';
 import { recordWhatsAppInbound } from '../../lib/whatsapp_contacts.js';
 
@@ -118,7 +119,8 @@ export async function handleInboundOptInConfirm({ phoneNumberId, value, message,
   const normalizeMessage = deps.normalizeInboundMessage || normalizeInboundMessage;
   const recordInbound = deps.recordWhatsAppInbound || recordWhatsAppInbound;
   const sendReply = deps.sendWhatsAppSmart || sendWhatsAppSmart;
-  const readConsent = deps.getWhatsAppConsent || getWhatsAppConsent;
+  const consentiu = deps.hasWhatsAppConsent || hasWhatsAppConsent;
+  const buscarConta = deps.getWaAccountByPhoneNumberId || getWaAccountByPhoneNumberId;
   const grantConsent = deps.grantWhatsAppConsent || grantWhatsAppConsent;
   const findTitular = deps.resolveTitular || resolveTitular;
   const db = deps.pool || pool;
@@ -131,6 +133,28 @@ export async function handleInboundOptInConfirm({ phoneNumberId, value, message,
 
   const e164 = normalizePhoneBR(normalized.fromPhone);
   if (!e164) return { handled: false };
+
+  // ── De quem é este aceite: da plataforma ou do salão? ──────────────────────────────────────────
+  //
+  // Consentimento é sobre QUEM manda, e quem manda é o número que RECEBEU esta mensagem. AUTORIZO
+  // que chega no número do salão autoriza o salão — gravar isso no escopo da plataforma daria à
+  // plataforma uma permissão que ninguém deu a ela E deixaria o salão bloqueado, porque
+  // `decideConsent` não aceita aceite de plataforma para remetente novo.
+  //
+  // Fail-closed: sem saber de quem é o número, não grava. Escopo errado é pior que escopo nenhum —
+  // um lado ganha permissão que não recebeu e o outro segue mudo, os dois em silêncio.
+  let contaDoNumero = null;
+  try {
+    contaDoNumero = await buscarConta(phoneNumberId);
+  } catch (err) {
+    logger.error('[wa/optin-confirm] falha ao resolver o dono do numero', err?.message || err);
+    return { handled: false };
+  }
+  const escopoEstab = contaDoNumero
+    && String(contaDoNumero.status || '').toLowerCase() === 'connected'
+    && contaDoNumero.estabelecimento_id
+    ? Number(contaDoNumero.estabelecimento_id)
+    : null;
 
   // A janela de 24h está aberta — ela acabou de escrever. Mas quem GRAVA isso é o fluxo principal
   // do webhook, e este handler roda antes dele e devolve handled:true, cortando o resto. Sem este
@@ -157,8 +181,10 @@ export async function handleInboundOptInConfirm({ phoneNumberId, value, message,
     }
   };
 
-  const atual = await readConsent(e164).catch(() => null);
-  if (atual?.evento === 'granted') {
+  // A pergunta é "já autorizou ESTE remetente?" — quem autorizou a plataforma não autorizou o
+  // salão, e responder JA_AUTORIZADO aqui devolveria "está tudo certo" para quem continuaria mudo.
+  const jaAutorizado = await consentiu(e164, { estabelecimentoId: escopoEstab });
+  if (jaAutorizado) {
     await responder(JA_AUTORIZADO);
     return { handled: true };
   }
@@ -172,12 +198,18 @@ export async function handleInboundOptInConfirm({ phoneNumberId, value, message,
     return { handled: true };
   }
 
-  const ehEstab = titular.tipo === 'estabelecimento';
+  // No número do salão a audiência é sempre CLIENTE, mesmo que quem escreveu seja o dono: o número
+  // do salão só fala com clientes. Os avisos do DONO saem do número global (`forceGlobal`), no
+  // escopo da plataforma — tratá-lo como estabelecimento aqui gravaria o aceite no lugar que não
+  // atende esses avisos e ainda responderia "seus avisos de agenda estão ativos", o que seria
+  // mentira.
+  const ehEstab = !escopoEstab && titular.tipo === 'estabelecimento';
 
   try {
     await grantConsent({
       phone: e164,
       usuarioId: titular.id,
+      estabelecimentoId: escopoEstab,
       origem: OPTIN_SOURCES.WHATSAPP_AUTORIZO,
       audience: ehEstab ? CONSENT_AUDIENCE.ESTABLISHMENT : CONSENT_AUDIENCE.CLIENT,
       // A prova. O wamid é o identificador que a MEta emitiu para a mensagem que ELE mandou — não
@@ -186,6 +218,9 @@ export async function handleInboundOptInConfirm({ phoneNumberId, value, message,
         prova: 'inbound_autorizo',
         wamid: normalized.messageId || null,
         texto_recebido: String(normalized.text || '').slice(0, 64),
+        // Em QUAL número ela caiu. É o que sustenta o escopo gravado: sem isso, uma linha de salão
+        // e uma de plataforma ficam indistinguíveis na hora de defender o aceite.
+        recebido_em: phoneNumberId ? String(phoneNumberId) : null,
       },
     });
   } catch (err) {
