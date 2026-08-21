@@ -6,6 +6,7 @@ import { ArrowDown, ArrowUp, ArrowUpDown } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Api } from '../utils/api';
 import { getUser } from '../utils/auth';
+import { isPlaceholderGuestEmail } from '../utils/guestEmail';
 import { IconSearch } from '../components/Icons.jsx';
 import Drawer from '../components/Drawer.jsx';
 import Popover from '../components/Popover.jsx';
@@ -1352,7 +1353,10 @@ export default function Clientes() {
             <div className="crm-drawer__grid" style={{ marginTop: 16 }}>
               <div className="crm-drawer__section">
                 <strong>Dados do cliente</strong>
-                <div>{detailData?.cliente?.email || '-'}</div>
+                {/* Cliente sem e-mail carrega o placeholder `guest-<telefone>@sem-email...`
+                    (ver utils/guestEmail.js). Ele NAO e um endereco: mostrado cru aqui, o dono
+                    le como se fosse o e-mail da pessoa. Vira o mesmo '-' de quem nao tem. */}
+                <div>{isPlaceholderGuestEmail(detailData?.cliente?.email) ? '-' : (detailData?.cliente?.email || '-')}</div>
                 <div>{formatPhone(detailData?.cliente?.telefone) || '-'}</div>
                 <div>{formatAddress(detailData?.cliente)}</div>
                 <div>Nascimento: {formatDateOnly(detailData?.cliente?.data_nascimento)}</div>

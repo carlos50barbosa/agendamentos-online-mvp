@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Api, resolveAssetUrl } from '../utils/api'
 import { getUser, USER_EVENT } from '../utils/auth'
+import { isPlaceholderGuestEmail } from '../utils/guestEmail'
 import Modal from '../components/Modal.jsx'
 import CockpitOverview from '../components/estab/CockpitOverview.jsx'
 import WhatsAppOptInBanner from '../components/estab/WhatsAppOptInBanner.jsx'
@@ -2599,7 +2600,10 @@ function ProfessionalAgendaView({
     prefillHandledRef.current = prefillKey
     handleOpenSelfBooking()
     setSelfBookingName(prefill.nome || '')
-    setSelfBookingEmail(prefill.email || '')
+    // Cliente que nasceu sem e-mail carrega o placeholder `guest-<telefone>@sem-email...`, que
+    // é a AUSÊNCIA de um endereço, não um endereço. Jogado no campo, ele se apresenta ao dono
+    // como se fosse o e-mail da pessoa — e o dono confirmaria isso sem pensar duas vezes.
+    setSelfBookingEmail(isPlaceholderGuestEmail(prefill.email) ? '' : (prefill.email || ''))
     setSelfBookingPhone(normalizePhoneDigits(prefill.telefone || ''))
     if (prefill.data_nascimento) {
       setSelfBookingBirthdate(String(prefill.data_nascimento).slice(0, 10))
@@ -2654,17 +2658,22 @@ function ProfessionalAgendaView({
 
     }
 
-    if (!nome || !email || !telefone) {
+    if (!nome || !telefone) {
 
-      setSelfBookingError('Informe nome, e-mail e telefone.')
+      setSelfBookingError('Informe nome e telefone.')
 
       return
 
     }
 
-    if (!isValidEmail(email)) {
+    // E-mail OPCIONAL, espelhando o link público. Quem marca pelo balcão tem o cliente na
+    // frente e quase nunca o e-mail dele na mão — exigir o campo não produzia e-mail, produzia
+    // e-mail inventado só para o formulário fechar, e no banco esse chute vira a identidade do
+    // cliente (usuarios.email é UNIQUE). Preenchido, continua tendo que ser um endereço válido:
+    // aceitar torto é pior que aceitar vazio, porque promete uma confirmação que não chega.
+    if (email && !isValidEmail(email)) {
 
-      setSelfBookingError('Informe um e-mail válido.')
+      setSelfBookingError('Informe um e-mail válido ou deixe o campo em branco.')
 
       return
 
@@ -2739,8 +2748,11 @@ function ProfessionalAgendaView({
       servico_ids: [servicoIdNum],
       inicio: localDateTime.toISOString(),
       nome,
-      email,
       telefone,
+      // Só vai quando informado, igual ao /agendar público. O backend também trata '' como
+      // "sem e-mail", então omitir é redundância de propósito: o payload passa a dizer o que
+      // aconteceu (não informou) em vez de deixar isso dependendo de como o outro lado lê ''.
+      ...(email ? { email } : {}),
 
       ...(profId ? { profissional_id: profId } : {}),
 
@@ -2832,7 +2844,7 @@ function ProfessionalAgendaView({
 
         cliente_whatsapp: telefone,
 
-        cliente_email: email,
+        cliente_email: email || null,
 
       }
 
@@ -3278,11 +3290,13 @@ function ProfessionalAgendaView({
 
                 <label className="label">
 
-                  <span>E-mail</span>
+                  <span>E-mail (opcional)</span>
 
                   <input
 
                     type="email"
+
+                    placeholder="Deixe em branco se não tiver"
 
                     className="input"
 

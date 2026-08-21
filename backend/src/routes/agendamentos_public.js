@@ -8,6 +8,7 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { notifyEmail } from '../lib/notifications.js';
 import { buildPlaceholderGuestEmail, isPlaceholderGuestEmail } from '../lib/guest_placeholder_email.js';
+import { isValidEmailFormat } from '../lib/email_format.js';
 import { sendPushToUser } from '../lib/web_push.js';
 import { sendAppointmentWhatsApp, WA_AUDIENCE_ESTABLISHMENT } from '../lib/whatsapp_outbox.js';
 import { buildConfirmacaoAgendamentoV2Components, isConfirmacaoAgendamentoV2 } from '../lib/whatsapp_templates.js';
@@ -88,7 +89,9 @@ const DEFAULT_DEPOSIT_HOLD_MINUTES = 15;
 // preserva a unicidade sem inventar um endereço que possa colidir com o de outra pessoa. Nunca é
 // um e-mail real, e quem garante que nada sai para ele é o `notifyEmail`, que recusa o domínio na
 // entrada (ver lib/guest_placeholder_email.js).
-const isValidEmailFormat = (value) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || '').trim());
+//
+// A mesma política vale no painel do dono (POST /agendamentos/estabelecimento) — é de lá que veio
+// a mudança do `isValidEmailFormat` de const local para lib/email_format.js, compartilhado.
 
 const safeJson = (payload) => {
   try {

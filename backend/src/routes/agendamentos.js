@@ -47,6 +47,8 @@ import {
 } from '../lib/conflito_cliente.js';
 import { setAudit } from '../lib/audit.js';
 import { normalizePhoneBR, toDigits } from '../lib/phone_br.js';
+import { buildPlaceholderGuestEmail, isPlaceholderGuestEmail } from '../lib/guest_placeholder_email.js';
+import { isValidEmailFormat } from '../lib/email_format.js';
 
 const router = Router();
 
@@ -1579,10 +1581,47 @@ router.post('/estabelecimento', authRequired, isEstabelecimento, ensureSubscript
       return res.status(400).json({ error: 'profissional_invalido', message: 'Profissional inválido.' });
     }
 
-    if (!serviceIds.length || !inicio || !nome || !email || !telefone) {
+    if (!serviceIds.length || !inicio || !nome || !telefone) {
       return res.status(400).json({
         error: 'invalid_payload',
-        message: 'Campos obrigatórios: servico_ids, inicio, nome, e-mail, telefone.'
+        message: 'Campos obrigatórios: servico_ids, inicio, nome, telefone.'
+      });
+    }
+
+    // E-mail OPCIONAL, igual à rota pública (POST /public/agendamentos).
+    //
+    // Aqui a exigência era pior do que lá: quem marca pelo balcão tem o cliente na frente e quase
+    // nunca o e-mail dele na mão. Um campo obrigatório nessa situação não produz e-mail — produz
+    // e-mail INVENTADO, digitado só para o formulário fechar. E endereço inventado não fica
+    // guardado num canto inofensivo: `usuarios.email` é UNIQUE e é por ele que este handler
+    // reencontra o cadastro, então o chute de hoje vira a identidade de amanhã, e um chute que por
+    // azar exista é a caixa de um terceiro recebendo confirmação de agendamento alheio.
+    //
+    // Sem e-mail, `usuarios.email` (NOT NULL UNIQUE) recebe o placeholder determinístico por
+    // telefone — mesmo mecanismo da rota pública, ver lib/guest_placeholder_email.js.
+    const emailInput = String(email ?? '').trim().toLowerCase();
+    if (emailInput && !isValidEmailFormat(emailInput)) {
+      return res.status(400).json({ error: 'email_invalido', message: 'Informe um e-mail válido ou deixe o campo em branco.' });
+    }
+    const emailProvided = emailInput.length > 0;
+    // emailNorm = e-mail real e contactável, ou null quando não veio. Tudo que lê daqui para baixo
+    // trata null como "sem e-mail" — inclusive o `notifyEmail`, que recusa o placeholder na entrada.
+    const emailNorm = emailProvided ? emailInput : null;
+    const telDigits = toDigits(telefone);
+    const telNorm = normalizePhoneBR(telefone);
+    // Sem e-mail, o telefone deixa de ser só contato: vira a CHAVE do placeholder
+    // (`guest-<telefone>@…`). Telefone que não normaliza geraria `guest-@…` para todo mundo, e a
+    // UNIQUE(email) então costuraria clientes DIFERENTES no mesmo cadastro — o oposto do que o
+    // placeholder existe para fazer. Por isso a régua aparece só quando o e-mail falta: com e-mail
+    // informado a chave é o e-mail, e o dono segue livre para anotar um fixo, ou telefone nenhum.
+    //
+    // Nota: é `normalizePhoneBR` e não `isValidMobileBR` (a régua da rota pública) de propósito.
+    // Lá o celular é obrigatório porque, sem e-mail, ele é o ÚNICO jeito de alcançar alguém que
+    // agendou sozinho pela internet. Aqui o cliente está no balcão, com o dono, que é o canal.
+    if (!emailProvided && !telNorm) {
+      return res.status(400).json({
+        error: 'telefone_invalido',
+        message: 'Sem e-mail, informe um telefone válido com DDD.',
       });
     }
 
@@ -1702,14 +1741,10 @@ router.post('/estabelecimento', authRequired, isEstabelecimento, ensureSubscript
       });
     }
 
-    const emailNorm = String(email).trim().toLowerCase();
-    const telDigits = toDigits(telefone);
-    const telNorm = normalizePhoneBR(telefone);
-
     let userId = null;
     let userByEmail = null;
     let userByPhone = null;
-    {
+    if (emailProvided) {
       const [urows] = await pool.query(
         'SELECT id, nome, email, telefone FROM usuarios WHERE LOWER(email)=? LIMIT 1',
         [emailNorm]
@@ -1741,7 +1776,13 @@ router.post('/estabelecimento', authRequired, isEstabelecimento, ensureSubscript
     if (existingUser) {
       const existingEmail = existingUser.email ? String(existingUser.email).trim().toLowerCase() : '';
       const existingPhone = existingUser.telefone ? normalizePhoneBR(existingUser.telefone) : '';
-      const emailMismatch = existingEmail && emailNorm && existingEmail !== emailNorm;
+      // Placeholder não é "outro e-mail": é a ausência de um. Quem chegou pelo link público sem
+      // e-mail carrega `guest-<telefone>@…`, e comparar isso com o endereço real que o dono acabou
+      // de anotar devolvia 409 "já existe cliente com este e-mail ou telefone" — para a MESMA
+      // pessoa, encontrada pelo telefone dela. Tratado como vazio aqui; o UPDATE abaixo aproveita
+      // a passagem e promove o endereço de verdade por cima do placeholder.
+      const existingEmailReal = isPlaceholderGuestEmail(existingEmail) ? '' : existingEmail;
+      const emailMismatch = existingEmailReal && emailNorm && existingEmailReal !== emailNorm;
       const phoneMismatch = existingPhone && telNorm && existingPhone !== telNorm;
       if (emailMismatch || phoneMismatch) {
         return res.status(409).json({
@@ -1753,11 +1794,13 @@ router.post('/estabelecimento', authRequired, isEstabelecimento, ensureSubscript
     }
     if (!userId) {
       const hash = await bcrypt.hash(Math.random().toString(36), 10);
+      // Sem e-mail informado, grava um placeholder único por telefone (email é NOT NULL UNIQUE).
+      const emailForRecord = emailNorm || buildPlaceholderGuestEmail(telNorm);
       const [r] = await pool.query(
         "INSERT INTO usuarios (nome, email, telefone, data_nascimento, cep, endereco, numero, complemento, bairro, cidade, estado, senha_hash, tipo) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'cliente')",
         [
           String(nome).slice(0,120),
-          emailNorm,
+          emailForRecord,
           telNorm || null,
           dataNascimentoValue,
           cepDigits || null,
@@ -1775,6 +1818,13 @@ router.post('/estabelecimento', authRequired, isEstabelecimento, ensureSubscript
       try {
         const updates = ['nome=COALESCE(nome,?)'];
         const params = [String(nome).slice(0,120)];
+        // Cliente que existia só com telefone (e-mail placeholder) e agora ganhou um e-mail real
+        // pelas mãos do dono: captura o endereço. O lookup por e-mail acima voltou vazio
+        // (!userByEmail), então ele não pertence a outra pessoa — sem risco na UNIQUE(email).
+        if (emailProvided && !userByEmail && isPlaceholderGuestEmail(existingUser.email)) {
+          updates.push('email=?');
+          params.push(emailNorm);
+        }
         if (telNorm) {
           updates.push('telefone=?');
           params.push(telNorm);
