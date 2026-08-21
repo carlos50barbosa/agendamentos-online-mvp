@@ -43,6 +43,11 @@ function mapBookingError(e) {
       return 'Esse horário está fora do funcionamento. Escolha outro.';
     case 'plan_limit_agendamentos':
       return 'O estabelecimento atingiu o limite de agendamentos do plano.';
+    case 'servico_repetido_no_dia':
+    case 'sobreposicao_cliente':
+      // As frases vem do backend (lib/conflito_cliente.js) para nao divergirem entre os canais —
+      // a mesma recusa chega ao cliente pelo site, pelo painel e pelo bot do WhatsApp.
+      return msg || 'Este horário conflita com outro agendamento seu. Escolha outro.';
     case 'limite_diario_cliente':
       // O backend manda a frase pronta (lib/limite_diario_cliente.js), porque ela varia com o
       // limite que o estabelecimento configurou. Duplicar o texto aqui faria as duas divergirem

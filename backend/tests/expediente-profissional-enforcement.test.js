@@ -138,13 +138,19 @@ function installPoolMock({ salao, profissional }) {
       return [[{ horarios_json: salao }], []];
     }
     // --- 9. o agendamento a remarcar (agendamentos.js:1997) ---
-    if (/^select id, cliente_id, servico_id, profissional_id, status, inicio from agendamentos/i.test(statement)) {
+    // `, fim` opcional no padrao: a coluna entrou no SELECT quando a checagem DIFERENCIAL de
+    // sobreposicao passou a precisar do intervalo antigo inteiro (lib/conflito_cliente.js).
+    // Sem o opcional, este mock deixa de casar e a rota morre com 404 antes do gate de
+    // expediente — que e o que este arquivo mede.
+    if (/^select id, cliente_id, servico_id, profissional_id, status, inicio(, fim)? from agendamentos/i.test(statement)) {
+      const inicioAtual = new Date(Date.now() + 48 * 3600 * 1000);
       return [[{
         id: AGENDAMENTO_ID, cliente_id: CLIENTE_ID, servico_id: SERVICO_ID,
         // Aqui o profissional vem do BANCO, nao do corpo: e este valor que a Fase 2 precisa
         // normalizar (NULL -> null; numero -> Number). Uma string faz getExpediente lancar.
         profissional_id: PROF_ID, status: 'confirmado',
-        inicio: new Date(Date.now() + 48 * 3600 * 1000),
+        inicio: inicioAtual,
+        fim: new Date(inicioAtual.getTime() + 30 * 60_000),
       }], []];
     }
     if (/from\s+agendamento_itens ai/i.test(statement)) {

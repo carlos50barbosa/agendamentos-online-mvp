@@ -43,8 +43,17 @@ import { checkAppointmentSlotCapacityTx, normalizeServiceSlotCapacity } from '..
 import { normalizePhoneBR, toDigits, isValidMobileBR } from '../lib/phone_br.js';
 import {
   checkLimiteDiarioClienteTx,
+  fetchLimiteDiarioConfig,
   mensagemLimiteDiario,
 } from '../lib/limite_diario_cliente.js';
+import {
+  ERRO_SERVICO_REPETIDO,
+  ERRO_SOBREPOSICAO,
+  MENSAGEM_SERVICO_REPETIDO,
+  MENSAGEM_SOBREPOSICAO,
+  checkServicoRepetidoNoDiaTx,
+  checkSobreposicaoClienteTx,
+} from '../lib/conflito_cliente.js';
 import { getClientIp } from '../lib/client_ip.js';
 import {
   buildRateLimitBody,
@@ -1199,6 +1208,15 @@ router.post('/', ensureSubscriptionOperationalAccess({
       depositExpiresAt = null;
     }
 
+    // A config da trava diaria e lida AQUI, FORA da transacao, e passada pronta ao guard.
+    //
+    // Nao e micro-otimizacao: era o unico SELECT sem lock que rodava dentro da transacao antes da
+    // REGRA A, e sob REPEATABLE READ e a PRIMEIRA leitura nao-locking que fixa o read view. Com
+    // ela la dentro, a leitura de agendamento_itens do guard herdava um retrato anterior ao gap
+    // lock e ficava cega para combos concorrentes. Ver o comentario extenso em
+    // lib/conflito_cliente.js (buildItensSql).
+    const limiteDiarioConfig = await fetchLimiteDiarioConfig(pool, estabelecimento_id);
+
     conn = await pool.getConnection();
     await conn.beginTransaction();
     txStarted = true;
@@ -1241,6 +1259,7 @@ router.post('/', ensureSubscriptionOperationalAccess({
       estabelecimentoId: estabelecimento_id,
       clienteId: userId,
       inicioDate,
+      config: limiteDiarioConfig,
     });
     if (!limiteDiario.ok) {
       if (txStarted && conn) {
@@ -1251,6 +1270,49 @@ router.post('/', ensureSubscriptionOperationalAccess({
         error: 'limite_diario_cliente',
         message: mensagemLimiteDiario(limiteDiario.max),
         limite_diario: { max: limiteDiario.max, usados: limiteDiario.usados, dia: limiteDiario.dia },
+      });
+    }
+
+    // REGRA A — o mesmo servico ja marcado neste dia. Sempre ligada: repetir o mesmo servico no
+    // mesmo dia nao e preferencia de negocio, e pedido que nao se cumpre. Quando o cliente
+    // PRECISA repetir, o estabelecimento marca pelo painel, que e isento.
+    const servicoRepetido = await checkServicoRepetidoNoDiaTx({
+      db: conn,
+      estabelecimentoId: estabelecimento_id,
+      clienteId: userId,
+      inicioDate,
+      serviceIds: summary.serviceIds,
+    });
+    if (!servicoRepetido.ok) {
+      if (txStarted && conn) {
+        await conn.rollback();
+      }
+      conn.release();
+      return res.status(409).json({
+        error: ERRO_SERVICO_REPETIDO,
+        message: MENSAGEM_SERVICO_REPETIDO,
+      });
+    }
+
+    // REGRA B — sobreposicao com outro agendamento do mesmo cliente, inclusive com profissional
+    // diferente. A checagem de capacidade vizinha NAO cobre isto: ela pergunta se a PROFISSIONAL
+    // esta livre, nunca se o CLIENTE esta — por isso 10:00 com a Ana e 10:00 com a Bia sempre
+    // passou, e e uma marcacao que ninguem consegue cumprir.
+    const sobreposicao = await checkSobreposicaoClienteTx({
+      db: conn,
+      estabelecimentoId: estabelecimento_id,
+      clienteId: userId,
+      inicioDate,
+      fimDate,
+    });
+    if (!sobreposicao.ok) {
+      if (txStarted && conn) {
+        await conn.rollback();
+      }
+      conn.release();
+      return res.status(409).json({
+        error: ERRO_SOBREPOSICAO,
+        message: MENSAGEM_SOBREPOSICAO,
       });
     }
 

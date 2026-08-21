@@ -78,9 +78,11 @@ export function diaLocalRange(inicioDate, tzOffsetMin = EST_TZ_OFFSET_MIN) {
 }
 
 /**
- * O SQL da contagem, exposto como funcao pura para o teste poder inspecionar o texto sem banco.
+ * Quais status OCUPAM a agenda do cliente. Exportado porque `lib/conflito_cliente.js` responde a
+ * perguntas irmas (mesmo servico no dia, sobreposicao) e as tres tem de concordar sobre o que
+ * conta — se divergirem, uma regra barra e a outra libera o mesmo agendamento.
  *
- * ─── Por que este predicado de status NAO e o activeAppointmentStatusWhere() ──────────────────
+ * ─── Por que este predicado NAO e o activeAppointmentStatusWhere() ────────────────────────────
  *
  * Sao perguntas diferentes, e unificar os dois reabre um furo real.
  *
@@ -98,13 +100,16 @@ export function diaLocalRange(inicioDate, tzOffsetMin = EST_TZ_OFFSET_MIN) {
  * Por isso: conta tudo que nao esta `cancelado`. `concluido` conta tambem — a pessoa ja ocupou um
  * horario naquele dia, que e exatamente o que a trava limita.
  */
+export const SQL_STATUS_QUE_OCUPAM = `status IN ('confirmado','pendente','pendente_pagamento','concluido')`;
+
+/** O SQL da contagem, funcao pura para o teste inspecionar o texto sem banco. */
 export function buildContagemSql({ excludeAppointmentId = null } = {}) {
   return `SELECT id FROM agendamentos
      WHERE estabelecimento_id = ?
        AND cliente_id = ?
        AND inicio >= ?
        AND inicio < ?
-       AND status IN ('confirmado','pendente','pendente_pagamento','concluido')${
+       AND ${SQL_STATUS_QUE_OCUPAM}${
          excludeAppointmentId ? '\n       AND id <> ?' : ''
        }
      FOR UPDATE`;

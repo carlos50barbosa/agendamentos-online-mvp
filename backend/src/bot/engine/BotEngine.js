@@ -64,6 +64,17 @@ function summarizeError(data, fallback) {
 // ('slot_ocupado') ou o dono bloqueou a faixa ('slot_bloqueado'). Nos dois casos a saida e a
 // mesma — reofertar os horarios. Sem 'slot_bloqueado' aqui o cliente recebe uma mensagem
 // generica e fica preso no estado de confirmacao, sem lista nova para escolher.
+//
+// ⚠️ NAO acrescente aqui as recusas por conflito com a agenda do PROPRIO cliente
+// ('sobreposicao_cliente', 'servico_repetido_no_dia'). Duas razoes, as duas medidas:
+//
+//   1. entrar nesta lista APAGA a explicacao. `use(...)` sobrescreve replyText inteiro com o
+//      texto de showHours, e `summarizeError` (acima) ja devolve `data.message` primeiro — ou
+//      seja, FORA da lista o cliente recebe a frase especifica do backend, que e o que se quer;
+//   2. a lista reofertada nao muda. `showHours` consulta a disponibilidade PUBLICA, que responde
+//      por profissional e nao conhece o cliente, entao o horario recusado volta na lista e o
+//      cliente e mandado tentar de novo exatamente o que sera recusado igual. Com 'slot_ocupado'
+//      isso nao acontece: ali o slot realmente sumiu da grade.
 const SLOT_CONFLICT_ERRORS = new Set(['slot_ocupado', 'slot_bloqueado']);
 
 const isSlotConflict = (data) =>

@@ -32,8 +32,18 @@ import { checkAppointmentSlotCapacityTx, normalizeServiceSlotCapacity } from '..
 import {
   checkLimiteDiarioClienteTx,
   diaLocalRange,
+  fetchLimiteDiarioConfig,
   mensagemLimiteDiario,
 } from '../lib/limite_diario_cliente.js';
+import {
+  ERRO_SERVICO_REPETIDO,
+  ERRO_SOBREPOSICAO,
+  MENSAGEM_SERVICO_REPETIDO,
+  MENSAGEM_SOBREPOSICAO,
+  checkServicoRepetidoNoDiaTx,
+  checkSobreposicaoClienteTx,
+  checkSobreposicaoNoRemarcarTx,
+} from '../lib/conflito_cliente.js';
 import { setAudit } from '../lib/audit.js';
 import { normalizePhoneBR, toDigits } from '../lib/phone_br.js';
 
@@ -896,6 +906,15 @@ router.post('/', authRequired, isCliente, ensureSubscriptionOperationalAccess({
     );
     const origem = 'cliente_app';
 
+    // A config da trava diaria e lida AQUI, FORA da transacao, e passada pronta ao guard.
+    //
+    // Nao e micro-otimizacao: era o unico SELECT sem lock que rodava dentro da transacao antes da
+    // REGRA A, e sob REPEATABLE READ e a PRIMEIRA leitura nao-locking que fixa o read view. Com
+    // ela la dentro, a leitura de agendamento_itens do guard herdava um retrato anterior ao gap
+    // lock e ficava cega para combos concorrentes. Ver o comentario extenso em
+    // lib/conflito_cliente.js (buildItensSql).
+    const limiteDiarioConfig = await fetchLimiteDiarioConfig(pool, estabelecimento_id);
+
     // 3) transacao + checagem de conflito
     conn = await pool.getConnection();
     await conn.beginTransaction();
@@ -932,6 +951,7 @@ router.post('/', authRequired, isCliente, ensureSubscriptionOperationalAccess({
       estabelecimentoId: estabelecimento_id,
       clienteId: req.user.id,
       inicioDate,
+      config: limiteDiarioConfig,
     });
     if (!limiteDiario.ok) {
       if (txStarted && conn) {
@@ -943,6 +963,39 @@ router.post('/', authRequired, isCliente, ensureSubscriptionOperationalAccess({
         message: mensagemLimiteDiario(limiteDiario.max),
         limite_diario: { max: limiteDiario.max, usados: limiteDiario.usados, dia: limiteDiario.dia },
       });
+    }
+
+    // REGRAS A e B — mesmo servico no dia, e sobreposicao com outro agendamento do proprio
+    // cliente. Valem aqui pelo mesmo motivo da trava diaria: e o mesmo ator (o cliente), so' que
+    // com conta. Ver os comentarios extensos em lib/conflito_cliente.js.
+    const servicoRepetido = await checkServicoRepetidoNoDiaTx({
+      db: conn,
+      estabelecimentoId: estabelecimento_id,
+      clienteId: req.user.id,
+      inicioDate,
+      serviceIds: summary.serviceIds,
+    });
+    if (!servicoRepetido.ok) {
+      if (txStarted && conn) {
+        await conn.rollback();
+      }
+      conn.release();
+      return res.status(409).json({ error: ERRO_SERVICO_REPETIDO, message: MENSAGEM_SERVICO_REPETIDO });
+    }
+
+    const sobreposicao = await checkSobreposicaoClienteTx({
+      db: conn,
+      estabelecimentoId: estabelecimento_id,
+      clienteId: req.user.id,
+      inicioDate,
+      fimDate,
+    });
+    if (!sobreposicao.ok) {
+      if (txStarted && conn) {
+        await conn.rollback();
+      }
+      conn.release();
+      return res.status(409).json({ error: ERRO_SOBREPOSICAO, message: MENSAGEM_SOBREPOSICAO });
     }
 
     const loyaltyApplication = await applyClientLoyaltyBenefitsTx({
@@ -1777,14 +1830,22 @@ router.post('/estabelecimento', authRequired, isEstabelecimento, ensureSubscript
     await conn.beginTransaction();
     txStarted = true;
 
-    // SEM a trava de agendamentos por cliente/dia aqui, de propósito — e este é o único lugar
-    // isento. O horizonte da janela de agendamento já segue a mesma regra: o limite existe para
-    // conter o CLIENTE, não o dono. Quem liga o telefone pedindo encaixe no mesmo dia continua
-    // sendo encaixado pelo balcão, que é o motivo de o dono ter um painel.
+    // SEM nenhuma das três regras de cliente aqui, de propósito — e este é o único lugar isento
+    // das três. O horizonte da janela de agendamento já segue a mesma lógica: elas existem para
+    // conter o CLIENTE, não o dono.
     //
-    // A rota irmã que MOVE um agendamento (PUT /:id/reschedule-estab) NÃO é isenta quando o dia
-    // muda — senão a trava seria contornável marcando no dia A e remarcando para o dia B. As
-    // duas decisões são a mesma regra vista de dois lados; ver o comentário lá.
+    //   1. teto por dia (lib/limite_diario_cliente.js) — quem liga pedindo encaixe no mesmo dia
+    //      continua sendo encaixado pelo balcão, que é o motivo de o dono ter um painel;
+    //   2. mesmo serviço no mesmo dia (REGRA A) — esta isenção É a válvula de escape pedida:
+    //      "há casos em que o cliente terá que fazer o mesmo serviço no mesmo dia, mas aí terá
+    //      que ser agendado pelo estabelecimento";
+    //   3. sobreposição (REGRA B) — isenta porque o dono é a camada de julgamento humano. Para o
+    //      sistema, mãe e filha que compartilham um cadastro são "o mesmo cliente" em dois
+    //      horários simultâneos; só quem está no balcão sabe que são duas pessoas.
+    //
+    // A rota irmã que MOVE um agendamento (PUT /:id/reschedule-estab) NÃO é isenta: senão as
+    // regras seriam contornáveis marcando no dia A e remarcando para o dia B. Lá a sobreposição
+    // é checada de forma DIFERENCIAL, para não imobilizar pares que já nasciam sobrepostos.
     const capacityCheck = await checkAppointmentSlotCapacityTx({
       db: conn,
       estabelecimentoId: estabelecimento_id,
@@ -2042,7 +2103,9 @@ router.put('/:id/reschedule-estab', authRequired, isEstabelecimento, ensureSubsc
     txStarted = true;
 
     const [[ag]] = await conn.query(
-      `SELECT id, cliente_id, servico_id, profissional_id, status, inicio
+      // `fim` entra junto de `inicio`: o diferencial da REGRA B precisa do intervalo ANTIGO
+      // inteiro para saber com quem este agendamento JA cruzava antes de ser movido.
+      `SELECT id, cliente_id, servico_id, profissional_id, status, inicio, fim
          FROM agendamentos
         WHERE id=? AND estabelecimento_id=?
         FOR UPDATE`,
@@ -2230,6 +2293,54 @@ router.put('/:id/reschedule-estab', authRequired, isEstabelecimento, ensureSubsc
           limite_diario: { max: limiteDiario.max, usados: limiteDiario.usados, dia: limiteDiario.dia },
         });
       }
+    }
+
+    // REGRA A herda a MESMA condicao do limite diario: so faz sentido quando o dia muda. Mover
+    // dentro do proprio dia nao altera quais servicos o cliente tem naquele dia.
+    if (diaAtual && diaDestino && diaAtual !== diaDestino) {
+      const servicoRepetido = await checkServicoRepetidoNoDiaTx({
+        db: conn,
+        estabelecimentoId: estId,
+        clienteId: ag.cliente_id,
+        inicioDate,
+        serviceIds,
+        excludeAppointmentId: ag.id,
+      });
+      if (!servicoRepetido.ok) {
+        if (txStarted && conn) {
+          await conn.rollback();
+        }
+        conn.release();
+        conn = null;
+        return res.status(409).json({ error: ERRO_SERVICO_REPETIDO, message: MENSAGEM_SERVICO_REPETIDO });
+      }
+    }
+
+    // REGRA B fica FORA do gate de mudanca de dia, e essa e a diferenca que importa: arrastar um
+    // agendamento algumas horas DENTRO do mesmo dia e justamente o movimento que cria
+    // sobreposicao com outro horario do mesmo cliente.
+    //
+    // E DIFERENCIAL, nao absoluta — recusa so o cruzamento que ainda nao existia. Ver o comentario
+    // em lib/conflito_cliente.js: a agenda de hoje ja contem pares sobrepostos que o proprio
+    // sistema produziu, e uma checagem absoluta os deixaria imoveis, sem valvula de escape (o
+    // painel isenta a CRIACAO, nao esta rota).
+    const sobreposicao = await checkSobreposicaoNoRemarcarTx({
+      db: conn,
+      estabelecimentoId: estId,
+      clienteId: ag.cliente_id,
+      inicioAtual: ag.inicio,
+      fimAtual: ag.fim,
+      inicioNovo: inicioDate,
+      fimNovo: fimDate,
+      excludeAppointmentId: ag.id,
+    });
+    if (!sobreposicao.ok) {
+      if (txStarted && conn) {
+        await conn.rollback();
+      }
+      conn.release();
+      conn = null;
+      return res.status(409).json({ error: ERRO_SOBREPOSICAO, message: MENSAGEM_SOBREPOSICAO });
     }
 
     await conn.query(

@@ -5721,6 +5721,19 @@ useEffect(() => {
 
         showToast('error', message);
 
+      } else if (
+        e?.data?.error === 'servico_repetido_no_dia' ||
+        e?.data?.error === 'sobreposicao_cliente' ||
+        e?.data?.error === 'limite_diario_cliente'
+      ) {
+        // Conflito com a agenda do PRÓPRIO cliente. Tratado antes do 409 genérico de propósito:
+        // aquele ramo chama verifyBookingCreated e, se achar um agendamento do usuário, conclui
+        // "seu agendamento já existia e foi confirmado". Aqui o agendamento que conflita está em
+        // OUTRO horário, então essa leitura seria falsa — e o cliente sairia achando que marcou.
+        //
+        // A frase vem do backend (lib/conflito_cliente.js e lib/limite_diario_cliente.js) para
+        // não divergir entre o site, o painel e o bot do WhatsApp.
+        showToast('error', e?.data?.message || 'Este horário conflita com outro agendamento seu.');
       } else {
 
         const code =
