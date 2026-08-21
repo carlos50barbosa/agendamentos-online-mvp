@@ -297,7 +297,7 @@ router.get('/connect/callback', async (_req, res) => {
  * Business não existe: o frontend usa essa resposta para simplesmente não mostrar o botão, em vez
  * de exibir um caminho que quebra ao ser clicado.
  */
-router.get('/embedded-signup/config', auth, isEstabelecimento, (_req, res) => {
+router.get('/embedded-signup/config', auth, isEstabelecimento, (req, res) => {
   if (!isWhatsAppConnectEnabled(req.user?.id)) {
     return sendFeatureDisabled(res, req.user?.id);
   }
