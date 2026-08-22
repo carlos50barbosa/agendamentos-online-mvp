@@ -249,6 +249,22 @@
 .segBtn:hover { color: var(--c-ink); }
 .segActive, .segActive:hover { background: var(--c-surface); color: var(--c-brand); box-shadow: var(--c-shadow); }
 
+/* Orientação da régua (Horizontal / Vertical). Reaproveita .seg/.segBtn: é o mesmo gesto
+   do Dia/Semana/Mês ao lado. O que separa os dois é o rótulo "Horas" — sem ele o
+   par vira uma quarta e quinta visão aos olhos de quem chega. */
+.orientWrap { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.orientLabel {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--c-faint);
+  white-space: nowrap;
+}
+.orientBtn { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; }
+.orientBtn svg { display: block; flex: none; }
+.orientTxt { line-height: 1; }
+
 /* ---------- Linha do tempo (assinatura) ---------- */
 .tlScroll {
   overflow-x: auto;
@@ -513,6 +529,172 @@
   z-index: 4;
 }
 .tlEmpty { padding: 26px 8px; color: var(--c-muted); font-size: 13px; text-align: center; }
+
+/* ---------- Linha do tempo VERTICAL (orientação opcional) ----------
+   Mesmos tokens, mesmos status, mesma janela de horas da horizontal: o que muda é qual
+   eixo recebe o tempo. A hora desce pela coluna da esquerda e cada lane vira coluna.
+
+   Por que DUAS LINHAS FLEX e não um grid de 2x(N+1): o retângulo que prende um
+   `position: sticky` é o bloco que o contém, e num grid isso é a CÉLULA do item —
+   um cabeçalho no topo da própria célula não tem para onde deslizar. Sendo item de
+   uma linha flex larga, o retângulo passa a ser a linha inteira, e aí gruda de
+   verdade. A largura da linha vem do minWidth calculado em JS (não de max-content):
+   assim um nome comprido de profissional não infla a coluna de todo mundo. */
+.vScroll {
+  overflow: auto;
+  max-width: 100%;
+  max-height: min(620px, 72vh);
+  padding: 2px 2px 4px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--c-line-strong) transparent;
+  overscroll-behavior: contain;
+}
+.vScroll::-webkit-scrollbar { width: 8px; height: 8px; }
+.vScroll::-webkit-scrollbar-thumb { background: var(--c-line-strong); border-radius: 99px; }
+.vInner { position: relative; }
+
+.vHeadRow {
+  display: flex;
+  position: sticky;
+  top: 0;
+  z-index: 6;
+  background: var(--c-surface);
+  border-bottom: 1px solid var(--c-line);
+}
+/* O canto é o cruzamento das duas fixações: gruda nos dois eixos e fica acima das duas. */
+.vCorner {
+  flex: 0 0 46px;
+  position: sticky;
+  left: 0;
+  z-index: 7;
+  background: var(--c-surface);
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
+  padding: 8px 8px 7px;
+  font-size: 10.5px;
+  font-weight: 650;
+  color: var(--c-muted);
+  letter-spacing: 0.04em;
+}
+.vHead {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-left: 1px solid var(--c-line);
+}
+.vHeadToday { background: var(--c-brand-tint); border-radius: 8px 8px 0 0; }
+
+.vBody { display: flex; position: relative; }
+.vHours {
+  flex: 0 0 46px;
+  position: sticky;
+  left: 0;
+  z-index: 5;
+  background: var(--c-surface);
+  box-shadow: 8px 0 8px -6px rgba(30, 27, 75, 0.1);
+}
+.vHourMark {
+  position: absolute;
+  right: 8px;
+  font-size: 11px;
+  color: var(--c-faint);
+  white-space: nowrap;
+}
+.vCol {
+  flex: 1 1 0;
+  min-width: 0;
+  position: relative;
+  border-left: 1px solid var(--c-line);
+  background: rgba(80, 73, 229, 0.03);
+}
+.vColToday { background: rgba(80, 73, 229, 0.07); }
+/* A régua horizontal marca a hora só no topo; na vertical a linha atravessa a coluna, então
+   ela é quem substitui a marcação. A meia hora fica tracejada e mais apagada: ajuda a
+   ler "10:30" sem competir com a hora cheia. */
+.vRule {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border-top: 1px solid rgba(80, 73, 229, 0.1);
+  pointer-events: none;
+}
+.vRuleHalf { border-top-style: dashed; opacity: 0.6; }
+
+/* .appt fixa altura de 40px e min-width de 48px para a régua horizontal. Na vertical a altura
+   é a DURAÇÃO (inline) e a largura é a fatia do cluster — os dois precisam cair. A
+   dupla classe garante isso sem depender da ordem das regras no arquivo. */
+.appt.apptV {
+  height: auto;
+  min-width: 0;
+  /* Piso = uma linha de texto INTEIRA: 15px de line box (12px x 1.25) + 4px de padding
+     + 2px de borda. Com 16px o nome da cliente de um serviço de 15min saía decepado na
+     linha de base — o card tinha altura da duração (13px), não do que precisa mostrar. */
+  min-height: 21px;
+  padding: 2px 7px;
+  /* Ancorado no topo, não centralizado: num card de 2h o nome centralizado flutuaria
+     longe do horário de início, que é onde o olho procura. */
+  justify-content: flex-start;
+  line-height: 1.25;
+}
+
+.blk.blkV {
+  top: auto;
+  bottom: auto;
+  align-items: flex-start;
+  padding: 4px 7px;
+  min-width: 0;
+  min-height: 10px;
+}
+/* Semana vertical: o mesmo contraste da .blkPartial horizontal, girado 90 graus. Lá é uma
+   tira BAIXA embaixo dos cards; aqui, uma tira ESTREITA na borda direita da coluna.
+   Coluna cheia = salão fechado; tira fina = um profissional parado. O nome desce na
+   vertical porque é o único jeito de ele caber em 21px de largura — e sem o nome a
+   tira não diz de quem é, que era o ponto todo dela existir. */
+.blk.blkPartialV {
+  padding: 5px 1px;
+  border-radius: 6px;
+  justify-content: center;
+  z-index: 2;
+  background-image: repeating-linear-gradient(45deg, transparent 0 4px, rgba(51, 65, 85, 0.08) 4px 8px);
+}
+.blkPartialV .blkLabel {
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  font-size: 9.5px;
+  max-height: 100%;
+}
+
+/* "AGORA" na vertical: a linha é horizontal e vive DENTRO da coluna (uma por lane), em
+   vez do overlay único da horizontal — assim ela não precisa saber onde a coluna de horas
+   termina. O rótulo fica na RÉGUA (.vNowMark), não na coluna: dentro dela ele cairia
+   em cima de um card. */
+.vNow {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: #16a34a;
+  box-shadow: 0 0 10px 1px rgba(22, 163, 74, 0.4);
+  z-index: 4;
+  pointer-events: none;
+}
+.vNowMark {
+  position: absolute;
+  right: 4px;
+  transform: translateY(-50%);
+  z-index: 2;
+  background: #16a34a;
+  color: #fff;
+  font-size: 9.5px;
+  font-weight: 700;
+  padding: 2px 5px;
+  border-radius: 6px;
+  white-space: nowrap;
+}
 
 /* ---------- Visão Semana: chip de dia + destaque de hoje ---------- */
 .laneToday { background: rgba(80, 73, 229, 0.05); border-radius: 10px; }
@@ -962,6 +1144,14 @@
   .laneAv { width: 26px; height: 26px; font-size: 10px; }
   .laneName { font-size: 11.5px; }
   .tlHoursLabel { font-size: 10px; }
+  /* Na vertical o gargalo é a ALTURA, não a largura: a régua já encolheu para 52px/hora
+     no JS. Aqui só o cabeçalho aperta e o rótulo "Horas" sai — o par de botões continua
+     legível por conta do texto (Horizontal / Vertical), que fica. */
+  .vScroll { max-height: min(460px, 62vh); }
+  .vHead { padding: 7px 8px; gap: 6px; }
+  .vHourMark { font-size: 10px; right: 6px; }
+  .vNowMark { font-size: 9px; padding: 2px 4px; right: 3px; }
+  .orientLabel { display: none; }
 }
 @media (min-width: 641px) {
   .hello { font-size: 22px; }

@@ -38,6 +38,56 @@ const ROW_STEP = 46
 // profissional só (16px de tira + 3px de respiro). Ver .blkPartial no CSS.
 const BLK_STRIP = 19
 
+/* ---- Orientação da linha do tempo (horizontal = padrão histórico, vertical = opção) ----
+ * Na vertical o eixo troca de lugar: a hora desce pela lateral e cada lane vira COLUNA.
+ * Os dados são os mesmos — muda só qual eixo recebe o tempo. Por isso as constantes
+ * abaixo espelham as de cima, giradas 90°:
+ *   ROW_STEP (altura da row)  -> a largura da coluna, dividida entre os sobrepostos
+ *   BLK_STRIP (tira embaixo)  -> BLK_STRIP_V (tira na LATERAL direita da coluna)
+ * -------------------------------------------------------------------------- */
+
+// Altura de uma hora de régua, em px. Mais apertado no celular pelo mesmo motivo que a
+// régua horizontal encolhe lá: sem isso o dono vê meia manhã por vez.
+const PX_HOUR_V = 64
+const PX_HOUR_V_MOBILE = 52
+// Largura reservada, à direita da coluna, para CADA tira de bloqueio parcial (Semana vertical).
+const BLK_STRIP_V = 25
+// Abaixo desta altura (px) o card vertical só cabe o nome do cliente; a partir dela entra
+// a segunda linha (serviço, ou profissional na Semana).
+const V_CARD_SVC_MIN = 42
+// Largura da coluna das horas e largura mínima de uma lane, na vertical.
+const V_GUTTER = 46
+const V_COL_MIN = { dia: 164, diaMobile: 132, semana: 128, semanaMobile: 104 }
+// Largura mínima de uma FATIA (um card quando há sobreposição). É o que impede a
+// coluna de fatiar até o ilegível: a Semana de um salão com 3 profissionais atendendo
+// às 9h dividiria os 128px do dia em três tiras de 40px, onde não cabe nem o primeiro
+// nome. A coluna então cresce em largura — o mesmo que a régua horizontal já faz no outro
+// eixo, onde a lane CRESCE EM ALTURA (rowCount * ROW_STEP) para caber os sobrepostos.
+//
+// A regra é "nenhuma fatia menor que isto", e não "alargue a cada simultâneo": quando a
+// largura base já dá conta (o Dia com duas sobrepostas dá ~79px por card), a coluna não
+// mexe — alargar ali só empurraria para a rolagem lateral um Dia que cabia na tela. O
+// teto de 3 existe porque, daí para cima, o preço (rolar a semana inteira de lado) fica
+// maior que o ganho.
+const V_SLICE_MIN = { desktop: 76, mobile: 62, maxFatias: 3 }
+
+const ORIENT_STORE_PREFIX = 'ao:cockpit:tlOrient:'
+// A preferência é de QUEM OLHA, não do estabelecimento: a recepcionista e a dona usam
+// o mesmo login em telas diferentes. Por isso localStorage (por navegador) e não uma
+// coluna no banco. A chave leva o id do estabelecimento porque quem administra dois
+// salões pode querer orientações diferentes em cada um.
+const readOrient = (estId) => {
+  try {
+    const raw = window.localStorage.getItem(`${ORIENT_STORE_PREFIX}${estId ?? 'anon'}`)
+    return raw === 'v' ? 'v' : 'h'
+  } catch { return 'h' }
+}
+const writeOrient = (estId, value) => {
+  // localStorage bloqueado (aba anônima, cookies de terceiros) não pode derrubar o clique:
+  // a orientação continua valendo na sessão, só não sobrevive ao reload.
+  try { window.localStorage.setItem(`${ORIENT_STORE_PREFIX}${estId ?? 'anon'}`, value) } catch { /* ignora */ }
+}
+
 const parseDate = (value) => {
   if (!value) return null
   const d = new Date(value)
@@ -141,6 +191,9 @@ const ICONS = {
   plus: <path d="M12 5v14M5 12h14" />,
   check: <path d="M20 6 9 17l-5-5" />,
   lock: <><rect x="4" y="10.5" width="16" height="9.5" rx="2" /><path d="M8 10.5V7a4 4 0 0 1 8 0v3.5" /></>,
+  // Régua + duas lanes: o traço cheio é o eixo do tempo, os retângulos são as lanes.
+  tlH: <><path d="M3 6h18" /><rect x="3" y="11" width="10" height="3" rx="1.5" /><rect x="3" y="17" width="14" height="3" rx="1.5" /></>,
+  tlV: <><path d="M6 3v18" /><rect x="11" y="3" width="3" height="10" rx="1.5" /><rect x="17" y="3" width="3" height="14" rx="1.5" /></>,
 }
 
 const Icon = ({ path, width = 16, strokeWidth = 1.8 }) => (
@@ -396,7 +449,16 @@ export default function CockpitOverview({ establishmentId, currentUser, professi
   const [view, setView] = useState('dia')
   const [anchor, setAnchor] = useState(null)
   const refDate = anchor || now
-  // Scroll horizontal da linha do tempo: centraliza no "agora" ao entrar/trocar de visão.
+  // Orientação da régua: 'h' (horizontal, o padrão de sempre) ou 'v' (vertical). Lida
+  // do localStorage já no primeiro render — abrir na horizontal e "pular" para a vertical
+  // depois seria pior do que não ter a opção.
+  const [orient, setOrient] = useState(() => readOrient(establishmentId))
+  useEffect(() => { setOrient(readOrient(establishmentId)) }, [establishmentId])
+  const changeOrient = (next) => { setOrient(next); writeOrient(establishmentId, next) }
+  // O mês é um calendário, não tem eixo de horas: a orientação não se aplica a ele.
+  const vertical = orient === 'v' && view !== 'mes'
+  // Scroll da linha do tempo: centraliza no "agora" ao entrar/trocar de visão (na
+  // na horizontal é scrollLeft; na vertical, scrollTop).
   const tlScrollRef = useRef(null)
   const centeredViewRef = useRef(null)
   // Modal de detalhes do agendamento (ao clicar num card da linha do tempo).
@@ -855,6 +917,45 @@ export default function CockpitOverview({ establishmentId, currentUser, professi
         ev._row = row
       })
       lane.rowCount = Math.max(1, rowsEnd.length)
+
+      // Mesma sobreposição, resolvida no outro eixo para a régua VERTICAL: em vez de
+      // descer uma row (que na vertical significaria descer no tempo, um erro), o
+      // card divide a LARGURA da coluna. A divisão é por cluster de sobreposição, e
+      // não por lane: se só as 14h têm duas clientes, apenas esses dois cards ficam
+      // pela metade — os outros seguem ocupando a coluna inteira. Dividir a lane
+      // toda por `rowCount` deixaria um dia inteiro de cards estreitos por causa de
+      // um único encaixe.
+      //
+      // Aqui a duração é a REAL (sem o MIN_VISUAL_MIN das rows). Em pé um serviço de
+      // 15min também tem um piso visual (V_CARD_MIN_H, para o nome caber inteiro), mas
+      // ele é pequeno: o card passa ~6px do próprio slot e o seguinte cobre essa sobra,
+      // que é a borda de baixo — o texto, ancorado no topo, continua inteiro. Usar o
+      // piso aqui obrigaria dois atendimentos consecutivos de 15min a dividir a largura
+      // da coluna, o que custa muito mais do que os 6px que ele resolve.
+      let cluster = []
+      let clusterEnd = -Infinity
+      const closeCluster = () => {
+        if (!cluster.length) return
+        const colsEnd = []
+        cluster.forEach((ev) => {
+          const s = minutesOfDay(ev.start)
+          const e = s + Math.max(1, Math.round((ev.end - ev.start) / 60000))
+          let col = colsEnd.findIndex((end) => end <= s)
+          if (col === -1) { col = colsEnd.length; colsEnd.push(e) }
+          else colsEnd[col] = e
+          ev._col = col
+        })
+        cluster.forEach((ev) => { ev._cols = colsEnd.length })
+        cluster = []
+        clusterEnd = -Infinity
+      }
+      lane.events.forEach((ev) => {
+        const s = minutesOfDay(ev.start)
+        if (cluster.length && s >= clusterEnd) closeCluster()
+        cluster.push(ev)
+        clusterEnd = Math.max(clusterEnd, s + Math.max(1, Math.round((ev.end - ev.start) / 60000)))
+      })
+      closeCluster()
     })
 
     // Linha "AGORA": só quando a visão inclui o dia de hoje.
@@ -866,7 +967,18 @@ export default function CockpitOverview({ establishmentId, currentUser, professi
 
     const hasBlocks = lanes.some((lane) => lane.blockSegs.length > 0)
 
-    return { mode: view, lo, hi, span, hours, lanes, nowLeft, hasBlocks }
+    // Os dois números que a régua vertical usa para dimensionar a COLUNA. Valem para
+    // TODAS as lanes (semana com colunas de larguras diferentes seria lida como grade
+    // quebrada), e por isso são o máximo, não o de cada uma.
+    //   maxCluster = atendimentos simultâneos -> quantas fatias a coluna divide
+    //   maxStrip   = bloqueios parciais simultâneos -> quanto a borda direita reserva
+    const maxCluster = lanes.reduce(
+      (mx, lane) => lane.events.reduce((m, ev) => Math.max(m, ev._cols || 1), mx),
+      1,
+    )
+    const maxStrip = lanes.reduce((mx, lane) => Math.max(mx, lane.stripCount || 0), 0)
+
+    return { mode: view, lo, hi, span, hours, lanes, nowLeft, hasBlocks, maxCluster, maxStrip }
   }, [dedupedAll, blocks, memberMeta, now, view, refDate])
 
   // Centraliza a linha do tempo no "agora" ao entrar no cockpit e ao trocar de
@@ -880,14 +992,57 @@ export default function CockpitOverview({ establishmentId, currentUser, professi
     if (!scroller) return
     const nowEl = scroller.querySelector('[data-nowline]')
     if (!nowEl) return
-    if (centeredViewRef.current === view) return
-    centeredViewRef.current = view
+    // A orientação entra na chave junto com a visão: trocar de horizontal para vertical
+    // recomeça a régua no topo (00 min do dia), e sem recentralizar o dono cairia
+    // longe do "agora" que ele estava olhando um segundo antes.
+    const key = `${view}:${vertical ? 'v' : 'h'}`
+    if (centeredViewRef.current === key) return
+    centeredViewRef.current = key
     const scRect = scroller.getBoundingClientRect()
     const nowRect = nowEl.getBoundingClientRect()
+    if (vertical) {
+      // O eixo do TEMPO (vertical) centraliza no "agora", como a régua deitada faz na
+      // horizontal. Mas em pé as lanes viraram o eixo LATERAL, e na Semana elas são os
+      // dias: com 7 colunas a régua transborda o painel, e sem centralizar também de
+      // lado o dono abria a semana olhando o domingo. `[data-nowline]` só existe na
+      // coluna de hoje (na Semana), então o mesmo rect resolve os dois eixos; no Dia
+      // ele cai na 1ª coluna e o Math.max deixa o scrollLeft em 0, como era.
+      const centroY = (nowRect.top - scRect.top) + scroller.scrollTop
+      const centroX = (nowRect.left - scRect.left) + scroller.scrollLeft + nowRect.width / 2
+      scroller.scrollTo({
+        top: Math.max(0, centroY - scroller.clientHeight / 2),
+        // A coluna de horas é grudada e cobre a borda esquerda: descontá-la evita
+        // centralizar o dia debaixo dela.
+        left: Math.max(0, centroX - (scroller.clientWidth + V_GUTTER) / 2),
+      })
+      return
+    }
     const nowCenter = (nowRect.left - scRect.left) + scroller.scrollLeft
     const target = Math.max(0, nowCenter - scroller.clientWidth / 2)
     scroller.scrollTo({ left: target })
-  }, [view, timeline])
+  }, [view, vertical, timeline])
+
+  // Geometria da régua vertical. A altura do corpo sai da MESMA janela de horas que a
+  // horizontal usa (timeline.lo/hi), então as duas mostram exatamente o mesmo recorte
+  // do dia — trocar de orientação não some com nem revela atendimento nenhum.
+  const vPxHour = isMobile ? PX_HOUR_V_MOBILE : PX_HOUR_V
+  const vBodyH = Math.round((timeline.span || 60) / 60 * vPxHour)
+  const vColBase = view === 'semana'
+    ? (isMobile ? V_COL_MIN.semanaMobile : V_COL_MIN.semana)
+    : (isMobile ? V_COL_MIN.diaMobile : V_COL_MIN.dia)
+  const vFatias = Math.min(timeline.maxCluster || 1, V_SLICE_MIN.maxFatias)
+  // A reserva das tiras de bloqueio parcial SOMA na largura, não sai do bolso dos cards.
+  // Sem isto a coluna ficava presa no mínimo enquanto `reserve` crescia 25px por tira, e
+  // a largura útil ia a zero: numa semana de férias com 5 profissionais bloqueados os
+  // atendimentos de quem ficou atendendo viravam tiras de 16px com o nome cortado, e a
+  // 6ª tira nascia com a borda esquerda FORA da coluna, desenhada por cima do dia
+  // vizinho — um "Só Ana" na terça sendo que o bloqueio era da quarta. É o mesmo que a
+  // régua horizontal já faz no outro eixo, onde a track cresce
+  // `rowCount * ROW_STEP + stripCount * BLK_STRIP`.
+  const vColMin = Math.max(
+    vColBase,
+    vFatias * (isMobile ? V_SLICE_MIN.mobile : V_SLICE_MIN.desktop),
+  ) + (timeline.maxStrip || 0) * BLK_STRIP_V
 
   const agora = useMemo(() => {
     const t = now.getTime()
@@ -1132,6 +1287,34 @@ export default function CockpitOverview({ establishmentId, currentUser, professi
                 </button>
               ))}
             </div>
+            {/* Orientação da régua. Só aparece onde existe eixo de horas: no mês sumir é
+                melhor do que desabilitar — lá não há o que orientar, e um botão apagado
+                só faria o dono procurar o que ele faria. O rótulo "Horas" separa isto do
+                segmentado ao lado, senão vira leitura de "quarta visão". */}
+            {view !== 'mes' && (
+              <div className={styles.orientWrap}>
+                <span className={styles.orientLabel} aria-hidden="true">Horas</span>
+                <div className={styles.seg} role="group" aria-label="Orientação da linha do tempo">
+                  {[
+                    ['h', 'Horizontal', ICONS.tlH, 'Horas na régua de cima'],
+                    ['v', 'Vertical', ICONS.tlV, 'Horas na coluna da esquerda'],
+                  ].map(([o, label, icon, hint]) => (
+                    <button
+                      key={o}
+                      type="button"
+                      className={`${styles.segBtn} ${styles.orientBtn} ${orient === o ? styles.segActive : ''}`}
+                      aria-pressed={orient === o}
+                      aria-label={`Linha do tempo ${label.toLowerCase()}`}
+                      title={hint}
+                      onClick={() => changeOrient(o)}
+                    >
+                      <Icon path={icon} width={14} strokeWidth={1.7} />
+                      <span className={styles.orientTxt}>{label}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Aviso, não interdição: os agendamentos vieram e continuam válidos, só a lista
@@ -1181,6 +1364,185 @@ export default function CockpitOverview({ establishmentId, currentUser, professi
           ) : (timeline.lanes.every((l) => l.events.length === 0) && !timeline.hasBlocks) ? (
             <div className={styles.tlEmpty}>
               Nenhum atendimento {view === 'semana' ? 'nesta semana' : 'neste dia'}.
+            </div>
+          ) : vertical ? (
+            /* ---- Régua VERTICAL -------------------------------------------------
+               Mesmos dados, mesma janela de horas, mesmo clique: só o eixo do tempo
+               muda de lugar. A hora desce pela coluna da esquerda (grudada, para
+               sobreviver à rolagem lateral da Semana) e cada lane vira uma COLUNA
+               com o cabeçalho grudado no topo. Duas linhas flex (cabeçalhos e corpo)
+               em vez de um grid: num grid o retângulo que prende um `position: sticky`
+               é a própria célula, então nem o cabeçalho nem a coluna de horas teriam
+               para onde grudar. */
+            <div className={styles.vScroll} ref={tlScrollRef}>
+              {/* A largura mínima é calculada aqui, como na régua horizontal: as colunas
+                  dividem o que sobra, mas nunca encolhem abaixo do mínimo (com 7 dias
+                  no celular, a rolagem lateral é o preço certo por manter o dia legível).
+                  Ela também é o que dá às linhas flex a largura REAL do conteúdo — sem
+                  isso o cabeçalho e a coluna de horas grudariam só até a borda visível. */}
+              <div className={styles.vInner} style={{ minWidth: V_GUTTER + timeline.lanes.length * vColMin }}>
+                <div className={styles.vHeadRow}>
+                  <div className={styles.vCorner}>h</div>
+                  {timeline.lanes.map((lane, laneIndex) => {
+                    const isGeneric = String(lane.id) === 'sem-id'
+                    const palette = paletteFor(lane.id, laneIndex)
+                    return (
+                      <div
+                        key={`hd-${lane.id}`}
+                        className={`${styles.vHead} ${lane.kind === 'day' && lane.isToday ? styles.vHeadToday : ''}`}
+                      >
+                        {lane.kind === 'day' ? (
+                          <span className={`${styles.laneDayChip} ${lane.isToday ? styles.laneDayChipToday : ''}`}>{lane.name}</span>
+                        ) : (
+                          <>
+                            <span className={styles.laneAv} style={{ background: palette.g }}>
+                              {isGeneric ? '•' : initials(lane.name)}
+                            </span>
+                            <span className={styles.laneName}>
+                              {isGeneric ? 'Atendimentos' : (isMobile ? firstName(lane.name) : lane.name)}
+                            </span>
+                          </>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+
+                <div className={styles.vBody}>
+                  <div className={styles.vHours} style={{ height: vBodyH }}>
+                    {timeline.hours.map((h, i) => {
+                      const top = timeline.span > 0 ? ((h * 60 - timeline.lo) / timeline.span) * 100 : 0
+                      // Mesmo ajuste das pontas da régua horizontal: o primeiro e o último
+                      // rótulo encostam na borda em vez de vazar metade para fora.
+                      const ty = i === 0 ? '0' : i === timeline.hours.length - 1 ? '-100%' : '-50%'
+                      return (
+                        <span key={h} className={styles.vHourMark} style={{ top: `${top}%`, transform: `translateY(${ty})` }}>
+                          {pad2(h % 24)}
+                        </span>
+                      )
+                    })}
+                    {/* O "agora" marca a RÉGUA, não a coluna: dentro dela a pílula caía
+                        em cima de um card (na Semana cheia, sempre). Aqui ela mora onde
+                        o horário já é o assunto, e mostra a hora em vez da palavra —
+                        cabe nos 46px e diz mais. A linha verde continua cruzando as
+                        colunas, só que sem rótulo. */}
+                    {timeline.nowLeft != null && (
+                      <span className={styles.vNowMark} style={{ top: `${timeline.nowLeft}%` }}>
+                        {pad2(now.getHours())}:{pad2(now.getMinutes())}
+                      </span>
+                    )}
+                  </div>
+
+                  {timeline.lanes.map((lane, laneIndex) => {
+                    // Semana: a largura que as tiras de bloqueio parcial reservam na borda
+                    // direita. Os cards param antes dela, como na horizontal eles param antes
+                    // da faixa reservada embaixo.
+                    const reserve = (lane.stripCount || 0) * BLK_STRIP_V
+                    const usable = `(100% - ${reserve}px)`
+                    return (
+                      <div
+                        key={lane.id}
+                        className={`${styles.vCol} ${lane.kind === 'day' && lane.isToday ? styles.vColToday : ''}`}
+                        style={{ height: vBodyH }}
+                      >
+                        {timeline.hours.map((h, i) => {
+                          const top = timeline.span > 0 ? ((h * 60 - timeline.lo) / timeline.span) * 100 : 0
+                          const halfMin = h * 60 + 30
+                          return (
+                            <React.Fragment key={h}>
+                              {i > 0 && <div className={styles.vRule} style={{ top: `${top}%` }} aria-hidden="true" />}
+                              {halfMin < timeline.hi && (
+                                <div
+                                  className={`${styles.vRule} ${styles.vRuleHalf}`}
+                                  style={{ top: `${((halfMin - timeline.lo) / timeline.span) * 100}%` }}
+                                  aria-hidden="true"
+                                />
+                              )}
+                            </React.Fragment>
+                          )
+                        })}
+
+                        {lane.blockSegs.map((seg) => {
+                          const top = clampPct(((seg.startMin - timeline.lo) / timeline.span) * 100)
+                          const bottom = clampPct(((seg.endMin - timeline.lo) / timeline.span) * 100)
+                          const height = bottom - top
+                          if (height <= 0) return null
+                          const quando = seg.coversDay ? 'dia inteiro' : blockRangeText(seg.blk)
+                          // Semana: bloqueio de UM profissional não fecha o dia, então não pode
+                          // ocupar a coluna inteira (seria lido como "salão fechado"). Na horizontal
+                          // ele vira uma tira BAIXA embaixo dos cards; na vertical, o mesmo contraste
+                          // girado: uma tira ESTREITA na borda direita, com o nome escrito na
+                          // vertical. Coluna cheia = fechado, tira fina = um profissional parado
+                          // — a diferença sobrevive no celular, sem hover.
+                          const parcial = seg.strip != null
+                          const pos = parcial
+                            ? { top: `${top}%`, height: `${height}%`, right: 3 + seg.strip * BLK_STRIP_V, width: BLK_STRIP_V - 4 }
+                            : { top: `${top}%`, height: `${height}%`, left: 3, right: 3 }
+                          return (
+                            <button
+                              type="button"
+                              key={`${lane.id}-${seg.blk.key}`}
+                              className={`${styles.blk} ${styles.blkV} ${parcial ? styles.blkPartialV : ''}`}
+                              style={pos}
+                              onClick={() => { setSelectedEvent(null); setBlkDetailError(''); setSelectedBlock(seg.blk) }}
+                              title={`Bloqueado · ${blockLabel(seg.blk)} · ${quando} · ${blockScopeLabel(seg.blk)}`}
+                              aria-label={`Bloqueio: ${blockLabel(seg.blk)}, ${quando}, ${blockScopeLabel(seg.blk)}. Abrir para remover.`}
+                            >
+                              <span className={styles.blkLabel}>{blockTrackLabel(seg.blk, lane.kind)}</span>
+                            </button>
+                          )
+                        })}
+
+                        {lane.events.map((ev) => {
+                          const startM = minutesOfDay(ev.start)
+                          const durMin = Math.max(1, Math.round((ev.end - ev.start) / 60000))
+                          const top = clampPct(((startM - timeline.lo) / timeline.span) * 100)
+                          const height = clampPct((durMin / timeline.span) * 100)
+                          const past = ev.end.getTime() < now.getTime() && ev.norm !== 'cancelado'
+                          const s = ev.start.getMinutes()
+                            ? `${pad2(ev.start.getHours())}:${pad2(ev.start.getMinutes())}`
+                            : `${pad2(ev.start.getHours())}h`
+                          const e = ev.end.getMinutes()
+                            ? `${pad2(ev.end.getHours())}:${pad2(ev.end.getMinutes())}`
+                            : `${pad2(ev.end.getHours())}h`
+                          // Sobreposição divide a LARGURA do cluster (ver _col/_cols no memo).
+                          // Sempre ancora pelo TOPO: o começo do card é a posição real do
+                          // horário na régua.
+                          const cols = ev._cols || 1
+                          const col = ev._col || 0
+                          const pos = {
+                            top: `calc(${top}% + 1px)`,
+                            height: `calc(${height}% - 3px)`,
+                            left: `calc(${usable} * ${col / cols} + 3px)`,
+                            width: `calc(${usable} / ${cols} - 6px)`,
+                          }
+                          // Card curto (30min no celular ≈ 26px) só cabe o nome; o resto vive
+                          // no tooltip e no modal, como na horizontal.
+                          const alturaPx = (durMin / 60) * vPxHour
+                          const sub = lane.kind === 'day' ? firstName(ev.resourceName) : ev.service
+                          return (
+                            <button
+                              type="button"
+                              key={ev.id}
+                              className={`${styles.appt} ${styles.apptV} ${apptVariant(ev.norm, Boolean(ev.confirmedAt))} ${past ? styles.isPast : ''}`}
+                              style={pos}
+                              onClick={() => setSelectedEvent(ev)}
+                              title={`${ev.client} · ${ev.service} · ${s}–${e}${lane.kind === 'day' ? ' · ' + ev.resourceName : ''} · ${statusShort(ev.norm, ev.confirmedAt)}`}
+                            >
+                              <b className={styles.apptClient}>{firstName(ev.client)}</b>
+                              {alturaPx >= V_CARD_SVC_MIN && <span className={styles.apptSvc}>{sub}</span>}
+                            </button>
+                          )
+                        })}
+
+                        {timeline.nowLeft != null && (lane.kind === 'pro' || lane.isToday) && (
+                          <div className={styles.vNow} style={{ top: `${timeline.nowLeft}%` }} data-nowline aria-hidden="true" />
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
             </div>
           ) : (
             <div className={styles.tlScroll} ref={tlScrollRef}>
